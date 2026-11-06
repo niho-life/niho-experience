@@ -20,7 +20,6 @@ describe("notification definitions", () => {
   it("lists host notifications in order, with their words, and only three can be stopped", () => {
     expect(NOTIFICATIONS.map(({ key, label, when, stoppable }) => [key, label, when, stoppable])).toEqual([
       ["NEW_BOOKING", "新しい予約・申込", "承認待ちの申込と予約の確定 · すぐに", false],
-      ["APPROVAL_DEADLINE", "承認の期限が近い", "期限の 6 時間前と 1 時間前", false],
       ["CANCELLATION", "予約の取消", "予約者の取消・取消の依頼・期限切れ", false],
       ["GUEST_MESSAGE", "予約前の質問・予約者からの連絡", "日本語訳つきで届きます", true],
       ["DAY_BEFORE_SUMMARY", "前日の参加者のまとめ", "毎日 18:00 · 翌日に確定の予約があるときだけ", true],
@@ -37,7 +36,6 @@ describe("notificationRows", () => {
     const rows = notificationRows(AS_NIHO_ANSWERS.map((item) => (item.key === "NEW_REVIEW" ? { ...item, enabled: false } : item)));
     expect(rows.map(({ key, enabled, locked }) => [key, enabled, locked])).toEqual([
       ["NEW_BOOKING", true, true],
-      ["APPROVAL_DEADLINE", true, true],
       ["CANCELLATION", true, true],
       ["GUEST_MESSAGE", true, false],
       ["DAY_BEFORE_SUMMARY", true, false],
@@ -56,7 +54,6 @@ describe("notificationRows", () => {
     expect(rows.map((row) => row.key)).toEqual(NOTIFICATIONS.map((definition) => definition.key));
     expect(rows.map(({ key, enabled, locked }) => [key, enabled, locked])).toEqual([
       ["NEW_BOOKING", true, true],
-      ["APPROVAL_DEADLINE", true, true],
       ["CANCELLATION", true, true],
       ["GUEST_MESSAGE", false, false],
       ["DAY_BEFORE_SUMMARY", true, false],

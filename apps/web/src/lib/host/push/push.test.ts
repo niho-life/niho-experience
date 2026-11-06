@@ -79,7 +79,7 @@ describe("hostPushPayload: what a lock screen may show (#177 P2)", () => {
   it("leaves out what it does not know, and has a title for every kind", () => {
     expect(JSON.parse(hostPushPayload({ providerId: "p", kind: "LISTING_SUSPENSION", url: "/host/experiences", tag: "listing-1" })).body).toBe("");
     expect(JSON.parse(hostPushPayload({ ...event, startsAt: "not a date", seats: 0 })).body).toBe("Kamakura Community Dinner with Locals");
-    expect(Object.keys(HOST_PUSH_TITLES)).toEqual(["NEW_BOOKING", "APPROVAL_DEADLINE", "CANCELLATION", "GUEST_MESSAGE", "DAY_BEFORE_SUMMARY", "NEW_REVIEW", "EMAIL_DELIVERY_FAILED", "LISTING_SUSPENSION", "GOOGLE_CALENDAR_ATTENTION"]);
+    expect(Object.keys(HOST_PUSH_TITLES)).toEqual(["NEW_BOOKING", "CANCELLATION", "GUEST_MESSAGE", "DAY_BEFORE_SUMMARY", "NEW_REVIEW", "EMAIL_DELIVERY_FAILED", "LISTING_SUSPENSION", "GOOGLE_CALENDAR_ATTENTION"]);
   });
 
   it("says that operations stopped a listing, or cleared it and the OWNER still resumes it, never why (#109)", () => {
@@ -136,9 +136,8 @@ describe("hostPushPayload: what a lock screen may show (#177 P2)", () => {
     expect(Buffer.byteLength(hostPushPayload({ ...event, experienceTitle: "体".repeat(500) }))).toBeLessThanOrEqual(3 * 1024);
   });
 
-  it("sends time-critical kinds at once and lets deadlines expire", () => {
+  it("sends time-critical kinds at once and lets a summary expire", () => {
     expect(hostPushDelivery("NEW_BOOKING")).toEqual({ urgency: "high", ttlSeconds: 86_400 });
-    expect(hostPushDelivery("APPROVAL_DEADLINE")).toEqual({ urgency: "high", ttlSeconds: 3_600 });
     expect(hostPushDelivery("GUEST_MESSAGE").urgency).toBe("high");
     expect(hostPushDelivery("CANCELLATION").urgency).toBe("high");
     expect(hostPushDelivery("DAY_BEFORE_SUMMARY")).toEqual({ urgency: "normal", ttlSeconds: 43_200 });

@@ -28,8 +28,9 @@ describe("PostgreSQL provider notification settings (#109)", { skip: databaseUrl
       // Nothing saved yet: all notification keys, in order, all on; only the three stoppable ones unlocked.
       const initial = await settings.get(ownerA);
       assert.deepEqual(initial.map((item) => item.key), [...HOST_NOTIFICATION_KEYS]);
-      assert.equal(initial.length, 8);
+      assert.equal(initial.length, 7);
       assert.equal(initial.at(-1)?.key, "LISTING_SUSPENSION");
+      assert.ok(!initial.some((item) => item.key === ("APPROVAL_DEADLINE" as string)), "no approval-deadline notification: the host approves nothing here");
       assert.ok(initial.every((item) => item.enabled));
       assert.deepEqual(initial.filter((item) => !item.locked).map((item) => item.key), ["GUEST_MESSAGE", "DAY_BEFORE_SUMMARY", "NEW_REVIEW"]);
 
@@ -65,6 +66,7 @@ describe("PostgreSQL provider notification settings (#109)", { skip: databaseUrl
       await assert.rejects(() => settings.update(ownerA, { NEW_BOOKING: false } as never), StoreValidationError);
       await assert.rejects(() => settings.update(ownerA, { LISTING_SUSPENSION: false } as never), StoreValidationError);
       await assert.rejects(() => settings.update(ownerA, { LISTING_REVIEW: false } as never), StoreValidationError);
+      await assert.rejects(() => settings.update(ownerA, { APPROVAL_DEADLINE: false } as never), StoreValidationError);
       await assert.rejects(() => settings.update(ownerA, { SOMETHING: false } as never), StoreValidationError);
       await assert.rejects(() => settings.update(ownerA, {}), StoreValidationError);
       await assert.rejects(() => settings.update(ownerA, { GUEST_MESSAGE: "no" } as never), StoreValidationError);

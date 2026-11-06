@@ -12,14 +12,14 @@ import { hostPushPayload, type HostPushEvent } from "./payload";
 /** The notification job (#177 P2) against a fake outbox and a fake sender; all data is synthetic. */
 const NOW = Date.parse("2026-11-01T00:00:00.000Z");
 const MINUTE = 60_000;
-const APPROVAL = "host.notify.approval_deadline";
+// The approval-deadline topic is gone (#109): bookings are confirmed on payment and the host approves nothing.
+const REMOVED_APPROVAL_TOPIC = "host.notify.approval_deadline";
 const MESSAGE = "host.notify.guest_message";
 const QUESTION = "host.notify.guest_question";
 const NEW_BOOKING = "host.notify.new_booking";
 const BOOKING_MESSAGE = "host.notify.booking_message";
 const THREAD = "00000000-0000-4000-8000-0000000000aa";
 const BOOKING = "0f8fad5b-d9cb-469f-a165-708677289501";
-const approvalPayload = { v: 1, bookingId: "bk-1", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 2, approvalDeadlineAt: "2026-11-01T01:00:00.000Z" };
 const messagePayload = { v: 1, bookingId: "bk-2", messageId: "msg-1", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 3 };
 const questionPayload = { v: 1, threadId: THREAD, messageId: "00000000-0000-4000-8000-000000000101", experienceTitle: "Synthetic Tea Ceremony" };
 const bookingMessagePayload = { v: 1, threadId: THREAD, messageId: "00000000-0000-4000-8000-000000000201", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 3 };
@@ -105,22 +105,9 @@ describe("hostPushEventFromOutbox", () => {
       .toEqual({ ok: false, reason: "stale" });
   });
 
-  it("turns an approval reminder into a deadline push that opens the booking", () => {
-    const parsed = hostPushEventFromOutbox(row(APPROVAL, approvalPayload), NOW);
-    expect(parsed).toEqual({
-      ok: true,
-      event: {
-        providerId: "provider-a",
-        kind: "APPROVAL_DEADLINE",
-        experienceTitle: "Synthetic Tea Ceremony",
-        startsAt: "2026-11-20T01:00:00.000Z",
-        seats: 2,
-        url: "/host/bookings?booking=bk-1&providerId=provider-a",
-        tag: "approval-bk-1",
-      },
-    });
-    // Both reminders of a booking share the tag, so the 1-hour one replaces the 6-hour one.
-    if (parsed.ok) expect(JSON.parse(hostPushPayload(parsed.event))).toMatchObject({ title: "承認の期限が近づいています", url: "/host/bookings?booking=bk-1&providerId=provider-a", tag: "approval-bk-1" });
+  it("sends no push for the removed approval-deadline topic, even from a row of the old shape", () => {
+    const old = { v: 1, bookingId: "bk-1", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 2, approvalDeadlineAt: "2026-11-02T00:00:00.000Z" };
+    expect(hostPushEventFromOutbox(row(REMOVED_APPROVAL_TOPIC, old), NOW)).toEqual({ ok: false, reason: "invalid" });
   });
 
   it("turns a guest message into a push that opens the conversation", () => {
@@ -337,8 +324,7 @@ describe("hostPushEventFromOutbox", () => {
     ]) expect(hostPushEventFromOutbox(message, NOW)).toEqual({ ok: false, reason: "invalid" });
   });
 
-  it("drops a passed deadline and a message older than a day", () => {
-    expect(hostPushEventFromOutbox(row(APPROVAL, { ...approvalPayload, approvalDeadlineAt: new Date(NOW).toISOString() }), NOW)).toEqual({ ok: false, reason: "expired" });
+  it("drops a message older than a day", () => {
     expect(hostPushEventFromOutbox(row(MESSAGE, messagePayload, { createdAt: new Date(NOW - 24 * 60 * MINUTE - 1).toISOString() }), NOW)).toEqual({ ok: false, reason: "stale" });
     expect(hostPushEventFromOutbox(row(MESSAGE, messagePayload, { createdAt: new Date(NOW - 24 * 60 * MINUTE).toISOString() }), NOW).ok).toBe(true);
   });
@@ -346,20 +332,20 @@ describe("hostPushEventFromOutbox", () => {
   it("refuses another topic, an unknown key and a wrong type", () => {
     for (const message of [
       row("booking.confirmed", { publicBookingId: "bk-1", providerId: "provider-a", outcome: "CONFIRMED" }),
-      row(APPROVAL, messagePayload),
-      row(MESSAGE, approvalPayload),
-      row(APPROVAL, { ...approvalPayload, guestName: "合成 予約者" }),
+      row(REMOVED_APPROVAL_TOPIC, messagePayload),
+      row(MESSAGE, { ...messagePayload, approvalDeadlineAt: "2026-11-02T00:00:00.000Z" }),
+      row(MESSAGE, { ...messagePayload, guestName: "合成 予約者" }),
       row(MESSAGE, { ...messagePayload, text: "synthetic message text" }),
       row(MESSAGE, { ...messagePayload, amount: 12000 }),
       row(MESSAGE, { ...messagePayload, seats: "3" }),
-      row(APPROVAL, { ...approvalPayload, bookingId: "../admin" }),
+      row(MESSAGE, { ...messagePayload, bookingId: "../admin" }),
       row(MESSAGE, null),
       row(MESSAGE, messagePayload, { createdAt: "not a time" }),
     ]) expect(hostPushEventFromOutbox(message, NOW)).toEqual({ ok: false, reason: "invalid" });
   });
 
   it("never builds an event with more than the allowed fields", () => {
-    for (const message of [row(APPROVAL, approvalPayload), row(MESSAGE, messagePayload), row(QUESTION, questionPayload), row(NEW_BOOKING, newBookingPayload)]) {
+    for (const message of [row(MESSAGE, messagePayload), row(QUESTION, questionPayload), row(NEW_BOOKING, newBookingPayload)]) {
       const parsed = hostPushEventFromOutbox(message, NOW);
       expect(parsed.ok).toBe(true);
       if (parsed.ok) {
@@ -373,7 +359,7 @@ describe("hostPushEventFromOutbox", () => {
 describe("hostNotificationAllowed", () => {
   it("always sends the locked kinds without reading the settings", async () => {
     const settings = vi.fn();
-    expect(await hostNotificationAllowed("provider-a", "APPROVAL_DEADLINE", settings)).toBe(true);
+    expect(await hostNotificationAllowed("provider-a", "CANCELLATION", settings)).toBe(true);
     expect(await hostNotificationAllowed("provider-a", "NEW_BOOKING", settings)).toBe(true);
     expect(settings).not.toHaveBeenCalled();
   });
@@ -398,7 +384,7 @@ describe("hostNotificationAllowed", () => {
 
 describe("drainHostNotifications", () => {
   it("claims up to 50 rows one at a time, each for a minute, and completes each sent row, devices or not", async () => {
-    const messages = [row(APPROVAL, approvalPayload), row(MESSAGE, messagePayload)];
+    const messages = [row(NEW_BOOKING, newBookingPayload), row(MESSAGE, messagePayload)];
     const notify = vi.fn(async (event: HostPushEvent) => report(event.kind === "GUEST_MESSAGE" ? 0 : 3));
     const { outbox, allowed, log, result } = run(messages, { notify });
     const counts = await result;
@@ -406,7 +392,7 @@ describe("drainHostNotifications", () => {
     expect(outbox.claimDue.mock.calls).toEqual([[1, 60_000], [1, 60_000], [1, 60_000]]);
     expect(outbox.complete.mock.calls).toEqual([["1", 1], ["2", 1]]);
     expect(outbox.retryAt).not.toHaveBeenCalled();
-    expect(allowed.mock.calls).toEqual([["provider-a", "APPROVAL_DEADLINE"], ["provider-a", "GUEST_MESSAGE"]]);
+    expect(allowed.mock.calls).toEqual([["provider-a", "NEW_BOOKING"], ["provider-a", "GUEST_MESSAGE"]]);
     expect(notify).toHaveBeenCalledTimes(2);
     expect(log).toHaveBeenCalledExactlyOnceWith(counts);
   });
@@ -423,17 +409,17 @@ describe("drainHostNotifications", () => {
 
   it("passes the event and fresh push dependencies to the sender", async () => {
     const pushDepsFactory = vi.fn(() => pushDeps);
-    const { notify, result } = run([row(APPROVAL, approvalPayload)], { pushDeps: pushDepsFactory, limit: 10, leaseMs: 30_000 });
+    const { notify, result } = run([row(NEW_BOOKING, newBookingPayload)], { pushDeps: pushDepsFactory, limit: 10, leaseMs: 30_000 });
     await result;
     expect(pushDepsFactory).toHaveBeenCalledOnce();
-    expect(notify.mock.calls[0]![0]).toMatchObject({ kind: "APPROVAL_DEADLINE", tag: "approval-bk-1" });
+    expect(notify.mock.calls[0]![0]).toMatchObject({ kind: "NEW_BOOKING", tag: `booking-${BOOKING}` });
     expect(notify.mock.calls[0]![1]).toBe(pushDeps);
   });
 
-  it("completes invalid, expired and stale rows without asking or sending", async () => {
+  it("completes invalid and stale rows without asking or sending", async () => {
     const messages = [
-      row(APPROVAL, { ...approvalPayload, extra: true }),
-      row(APPROVAL, { ...approvalPayload, approvalDeadlineAt: "2026-10-31T23:00:00.000Z" }),
+      row(MESSAGE, { ...messagePayload, extra: true }),
+      row(MESSAGE, { ...messagePayload, seats: 0 }),
       row(MESSAGE, messagePayload, { createdAt: "2026-10-30T00:00:00.000Z" }),
     ];
     const { outbox, notify, allowed, result } = run(messages);
@@ -467,7 +453,7 @@ describe("drainHostNotifications", () => {
 
   it("retries a failed send 1, 5, 15 and 60 minutes later, then gives up at the fifth attempt", async () => {
     const failing = vi.fn(async () => { throw new Error("recipients unavailable"); });
-    const messages = [1, 2, 3, 4, 5].map((attempts) => row(APPROVAL, approvalPayload, { attempts }));
+    const messages = [1, 2, 3, 4, 5].map((attempts) => row(MESSAGE, messagePayload, { attempts }));
     const { outbox, result } = run(messages, { notify: failing });
     expect(await result).toEqual({ claimed: 5, delivered: 0, devicesSent: 0, skipped: 0, dropped: 1, retried: 4 });
     expect(outbox.retryAt.mock.calls).toEqual([
@@ -489,11 +475,11 @@ describe("drainHostNotifications", () => {
   });
 
   it("gives up on a row claimed more often than maxAttempts without sending it", async () => {
-    const { outbox, notify, result } = run([row(APPROVAL, approvalPayload, { attempts: 6 })]);
+    const { outbox, notify, result } = run([row(MESSAGE, messagePayload, { attempts: 6 })]);
     expect(await result).toMatchObject({ claimed: 1, dropped: 1, delivered: 0 });
     expect(notify).not.toHaveBeenCalled();
     expect(outbox.complete).toHaveBeenCalledWith("1", 6);
-    const custom = run([row(APPROVAL, approvalPayload, { id: "9", attempts: 6 })], { maxAttempts: 8, notify: async () => { throw new Error("down"); } });
+    const custom = run([row(MESSAGE, messagePayload, { id: "9", attempts: 6 })], { maxAttempts: 8, notify: async () => { throw new Error("down"); } });
     await custom.result;
     // Past the table, the backoff stays at an hour.
     expect(custom.outbox.retryAt).toHaveBeenCalledWith("9", new Date(NOW + 60 * MINUTE), 6);
@@ -503,7 +489,7 @@ describe("drainHostNotifications", () => {
     const empty = run([]);
     expect(await empty.result).toEqual({ claimed: 0, delivered: 0, devicesSent: 0, skipped: 0, dropped: 0, retried: 0 });
     expect(empty.notify).not.toHaveBeenCalled();
-    const outbox = fakeOutbox([row(APPROVAL, approvalPayload)]);
+    const outbox = fakeOutbox([row(MESSAGE, messagePayload)]);
     outbox.complete.mockRejectedValueOnce(new Error("db down"));
     await expect(drainHostNotifications({ outbox, pushDeps: () => pushDeps, allowed: async () => true, now: () => NOW, notify: async () => report(1) })).rejects.toThrow();
     expect(outbox.retryAt).not.toHaveBeenCalled();

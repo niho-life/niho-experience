@@ -100,7 +100,6 @@ export interface HostPushMessage {
 
 export const HOST_PUSH_TITLES: Record<HostPushKind, string> = {
   NEW_BOOKING: "新しい予約・申込",
-  APPROVAL_DEADLINE: "承認の期限が近づいています",
   CANCELLATION: "予約が取り消されました",
   GUEST_MESSAGE: "予約者から連絡があります",
   DAY_BEFORE_SUMMARY: "明日の参加者のまとめ",
@@ -229,12 +228,12 @@ export function hostPushTestPayload(origin?: string): string {
   return JSON.stringify(pushMessage({ title: "テスト通知", body: "この端末に NIHO 体験ホストの通知が届きます。", url: "/host/settings#settings-device", tag: "host-push-test" }, origin));
 }
 
-/** Time-critical kinds go out at once; a deadline or a summary is useless once it has passed. */
+/** Time-critical kinds go out at once; a summary is useless once it has passed. */
 export function hostPushDelivery(kind: HostPushKind): { urgency: "high" | "normal"; ttlSeconds: number } {
   // A calendar that cannot be read keeps new bookings closed until the host acts.
-  const urgent = kind === "NEW_BOOKING" || kind === "APPROVAL_DEADLINE" || kind === "GUEST_MESSAGE" || kind === "CANCELLATION"
+  const urgent = kind === "NEW_BOOKING" || kind === "GUEST_MESSAGE" || kind === "CANCELLATION"
     || kind === "GOOGLE_CALENDAR_ATTENTION";
-  const ttlSeconds = kind === "APPROVAL_DEADLINE" ? 60 * 60 : kind === "DAY_BEFORE_SUMMARY" ? 12 * 60 * 60 : 24 * 60 * 60;
+  const ttlSeconds = kind === "DAY_BEFORE_SUMMARY" ? 12 * 60 * 60 : 24 * 60 * 60;
   return { urgency: urgent ? "high" : "normal", ttlSeconds };
 }
 

@@ -80,8 +80,6 @@ export type { CreatedProductOperatorInvitation, CreateProductOperatorInvitationI
 export type { InventoryAvailability, InventoryEvaluationRequest, InventoryOccupancySnapshot } from "./inventory.ts";
 export { HostPushSubscriptions } from "./push-subscriptions.ts";
 export {
-  cancelApprovalDeadlineReminders,
-  enqueueApprovalDeadlineReminders,
   enqueueBookingMessageNotification,
   enqueueGuestMessageNotification,
   enqueueGuestQuestionNotification,
@@ -96,7 +94,6 @@ export {
   LISTING_SUSPENSION_CHANGES,
   HostNotificationOutbox,
   OTA_BOOKING_CHANGES,
-  parseApprovalDeadlinePayload,
   parseBookingMessagePayload,
   parseCancellationPayload,
   parseGoogleCalendarAttentionPayload,
@@ -109,7 +106,6 @@ export {
   parseListingSuspensionPayload,
 } from "./host-notification-outbox.ts";
 export type {
-  ApprovalDeadlinePayload,
   BookingMessagePayload,
   CancellationPayload,
   ClaimedHostNotification,
