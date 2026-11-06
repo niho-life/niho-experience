@@ -7,6 +7,7 @@ const occurrence = (overrides: Partial<Occurrence>): Occurrence => ({
   date: "2026-10-24",
   startAt: "2026-10-24T09:00:00.000Z",
   endAt: "2026-10-24T11:00:00.000Z",
+  bookingClosesAt: null,
   seatsLeft: 4,
   bookable: true,
   reason: null,

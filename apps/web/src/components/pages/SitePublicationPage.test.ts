@@ -1,10 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { JourneyReviews } from "@niho-experience/api-client";
+import type { JourneyReviews, Occurrence } from "@niho-experience/api-client";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import { SAMPLE_TERMS } from "@/lib/testing/guest-booking-fixtures";
 
-const state = vi.hoisted(() => ({ reviews: null as JourneyReviews | null }));
+const state = vi.hoisted(() => ({ reviews: null as JourneyReviews | null, nextDates: [] as unknown[] }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: {
   siteUrl: "https://experience.example.test",
@@ -14,12 +14,15 @@ vi.mock("@/lib/config", () => ({ config: {
   guestBookingEnabled: true,
 } }));
 vi.mock("@/lib/journey", () => ({ getLiveReviews: vi.fn(async () => state.reviews) }));
+vi.mock("@/lib/guest-booking-source", () => ({ siteNextDates: vi.fn(async () => state.nextDates) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/Analytics", () => ({ TrackView: () => null }));
 vi.mock("@/components/DetailGallery", () => ({ DesktopGallery: () => null, MobileGallery: () => null }));
 vi.mock("@/components/Photo", () => ({ Photo: () => null }));
 
 import { getLiveReviews } from "@/lib/journey";
+import { siteNextDates } from "@/lib/guest-booking-source";
+import { config } from "@/lib/config";
 import { SitePublicationPage } from "./SitePublicationPage";
 
 const saleTerms = {
@@ -108,5 +111,58 @@ describe("native publication reviews", () => {
       expect(JSON.stringify(node.review)).toContain("</script><script>alert(1)</script>");
       expect(JSON.stringify(node)).not.toMatch(/providerId|productId|bookingId|noteToHost|bodyJa/);
     }
+  });
+});
+
+describe("native publication next dates and booking deadline (#146)", () => {
+  // The real config is read-only; this test's mock is not.
+  const flags = config as { bookingsEnabled: boolean; guestBookingEnabled: boolean };
+  const next: Occurrence = {
+    offerId: "offer-a", date: "2026-11-20", startAt: "2026-11-20T01:00:00.000Z", endAt: "2026-11-20T02:30:00.000Z",
+    bookingClosesAt: "2026-11-19T09:00:00.000Z", seatsLeft: 4, bookable: true, reason: null,
+  };
+  const page = async (locale: "en" | "ja" = "en", withItem: SitePublicExperience = item) => {
+    state.reviews = null;
+    return renderToStaticMarkup(await SitePublicationPage({ item: withItem, locale }));
+  };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    state.nextDates = [next];
+    flags.bookingsEnabled = true;
+    flags.guestBookingEnabled = true;
+  });
+
+  it("puts the next dates and when the next one closes under the facts, linked to the booking page", async () => {
+    const html = await page();
+    expect(siteNextDates).toHaveBeenCalledWith("native-review-page");
+    expect(html).toContain("data-next-date-band");
+    expect(html).toContain("Next date");
+    expect(html).toContain("Book by");
+    expect(html).toContain("6:00 PM JST");
+    // The band comes after the facts header and before the first section.
+    expect(html.indexOf("data-next-date-band")).toBeGreaterThan(html.indexOf("<h1"));
+    expect(html.indexOf("data-next-date-band")).toBeLessThan(html.indexOf("What you’ll do"));
+    expect(html).toContain('href="/experiences/native-review-page/book"');
+    expect(html).not.toContain('href="#book"');
+  });
+
+  it("is shown without a deadline when the source says none", async () => {
+    state.nextDates = [{ ...next, bookingClosesAt: next.startAt }];
+    const html = await page();
+    expect(html).toContain("Next date");
+    expect(html).not.toContain("Book by");
+  });
+
+  it("shows no band where nothing can be booked: bookings off, no offers, or no dates", async () => {
+    flags.bookingsEnabled = false;
+    expect(await page()).not.toContain("data-next-date-band");
+    expect(siteNextDates).not.toHaveBeenCalled();
+    flags.bookingsEnabled = true;
+    flags.guestBookingEnabled = false;
+    expect(await page()).not.toContain("data-next-date-band");
+    flags.guestBookingEnabled = true;
+    expect(await page("en", { ...item, saleTerms: null } as SitePublicExperience)).not.toContain("data-next-date-band");
+    state.nextDates = [];
+    expect(await page()).not.toContain("data-next-date-band");
   });
 });

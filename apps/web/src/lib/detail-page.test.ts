@@ -7,6 +7,7 @@ const occurrence = (date: string, startAt: string, bookable = true): Occurrence 
   date,
   startAt,
   endAt: new Date(Date.parse(startAt) + 60 * 60_000).toISOString(),
+  bookingClosesAt: null,
   seatsLeft: bookable ? 4 : 0,
   bookable,
   reason: bookable ? null : "FULL",

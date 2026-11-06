@@ -18,7 +18,7 @@ import { config, isPreview } from "@/lib/config";
 import { childParticipationCopy, hostBio, imageAlt } from "@/lib/experience-copy";
 import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experience-types";
 import type { SearchParams } from "@/lib/filters";
-import { formatDuration, formatExperiencePriceYen, formatTime } from "@/lib/format";
+import { formatDuration, formatExperiencePriceYen } from "@/lib/format";
 import { safeHttpsUrl } from "@/lib/safe-url";
 import { addMinutesToClock, formatClock, scheduleLine, scheduleSummary } from "@/lib/schedule";
 import { seoDescription } from "@/lib/seo-description";
@@ -30,6 +30,7 @@ import { experienceAlternates } from "@/lib/locale-metadata";
 import { assertSameJapaneseRelease, getJapaneseCopy, getJapaneseDetail, getPreparedJapaneseStaticRelease, type SiteLocale } from "@/lib/localized-content";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { LocalizedLink as Link } from "@/components/LocalizedLink";
+import { NextDateBand } from "@/components/NextDateBand";
 import { AskHost } from "@/components/AskHost";
 import { ReviewsSection } from "@/components/ReviewsSection";
 import { NO_JOURNEY_EXTRAS, type Occurrence } from "@niho-experience/api-client";
@@ -42,7 +43,6 @@ import { relatedExperienceCards } from "@/lib/experience-cards";
 import { guidesAboutExperience } from "@/lib/guide-registry";
 import { videoForExperience } from "@/lib/videos";
 import { YouTubeVideo } from "@/components/YouTubeVideo";
-import { dayOption } from "@/lib/date-filter";
 import { detailFromTokyoLine, detailGuideHeading, detailNextDates } from "@/lib/detail-page";
 import { bookingSourceOf, detailForSale, detailWithSiteSellerDisplayName, guestBookingSale, japaneseBookingOpen, siteNextDates, type GuestBookingSale } from "@/lib/guest-booking-source";
 
@@ -571,7 +571,7 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       reviewHeadline: reviewHeadline(reviewDisplay(journey.reviews), locale) ?? undefined,
       reviews: journey.reviews ? { title: locale === "ja" ? "レビュー" : "Reviews", content: <ReviewsSection slug={e.slug} reviews={journey.reviews} preview={isPreview} nihoWebOrigin={config.nihoWebOrigin} locale={locale} /> } : undefined,
       faq: journey.faq.length ? { title: "Questions before you book", items: journey.faq } : undefined,
-      // Same no-store public availability as the booking controls. The API has no bookingClosesAt, so the band shows no cutoff or seat count.
+      // Same no-store public availability as the booking controls. The band shows the next one's booking cutoff when the source says it (bookingClosesAt), never a seat count.
       upcoming: upcomingDates.length ? <NextDateBand dates={upcomingDates} locale={locale} bookingHref={bookingHref} /> : undefined,
       video: video && e.cover ? <YouTubeVideo video={video} poster={e.cover.url} title={e.title} /> : undefined,
       relatedGuides: relatedGuides.guides.length ? {
@@ -626,30 +626,6 @@ function SiteCheckoutCancelled({ bookingHref }: { bookingHref: string }) {
 /** Japanese booking of an experience sold here (or that may be) waits for #285 slice 10; the English page takes bookings. */
 function EnglishPageLink({ slug }: { slug: string }) {
   return <NextLink href={`/experiences/${slug}`} hrefLang="en" lang="en" className="font-bold text-moss underline underline-offset-4">View the English page</NextLink>;
-}
-
-function NextDateBand({ dates, locale, bookingHref }: { dates: readonly Occurrence[]; locale: SiteLocale; bookingHref: string }) {
-  const [next, ...later] = dates;
-  if (!next) return null;
-  const label = locale === "ja"
-    ? { next: "次回", more: "ほかの日程", all: "すべての日程" }
-    : { next: "Next date", more: "More dates", all: "All dates" };
-  return (
-    <div data-next-date-band className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[18px] bg-leaf-pale px-4 py-3 text-[0.875rem] sm:px-5">
-      <p className="font-extrabold text-moss">
-        <span className="mr-2 text-[0.75rem] tracking-[0.08em] uppercase">{label.next}</span>
-        <time dateTime={next.startAt}>{dayOption(next.date, locale).label} · {formatTime(next.startAt, locale)} JST</time>
-      </p>
-      {later.length ? (
-        <p className="flex flex-wrap items-center gap-1.5 text-ink-soft">
-          <span className="sr-only">{label.more}: </span>
-          {later.map((occurrence) => <time key={`${occurrence.offerId}-${occurrence.date}`} dateTime={occurrence.startAt} className="rounded-full bg-white/75 px-2.5 py-1 font-bold">{dayOption(occurrence.date, locale).label}</time>)}
-        </p>
-      ) : null}
-      <a href="#book" className="link-leaf ml-auto hidden shrink-0 lg:inline">{label.all}</a>
-      <Link href={bookingHref} className="link-leaf ml-auto shrink-0 lg:hidden">{label.all}</Link>
-    </div>
-  );
 }
 
 function Fact({ icon, label, main, sub = null }: { icon: HandIconName; label: string; main: string; sub?: string | null }) {
