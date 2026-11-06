@@ -57,7 +57,7 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 
 - `SITE_INDEXING=allow` **かつ** `EXPERIENCE_API_MODE=http` の時だけindexを許可する。それ以外（プレビュー・合成データ）は全ページ `noindex, nofollow`、robots.txtは全体を拒否、sitemapは空。
 - 値はリクエスト時に読むので、同じイメージのまま環境変数だけで切り替えられる。
-- 本番はオーナー決定（2026-11-07）で、販売開始（#15）より先に有効にした。`deploy-production.yml` が `SITE_INDEXING=allow` と `BOOKINGS_ENABLED=false` を設定し、候補と昇格の前に robots.txt（全体拒否が無い・sitemapの告知・非公開パスの除外）、sitemap、トップに `noindex` が無いことを確かめる。止める時は `block` に戻すPRを配備するか、直前の revision へ traffic を戻す。
+- 本番はオーナー決定（2026-11-07）で、販売開始（#15）より先に有効にした。`deploy-production.yml` が `SITE_INDEXING=allow` と `BOOKINGS_ENABLED=false` を設定し、候補と昇格の前に robots.txt（全体拒否が無い・sitemapの告知・非公開パスの除外）、sitemap、トップに `noindex` が無いことを確かめる。止める時は `block` に戻すPRを配備するか、直前の revision へ traffic を戻す。2026-11-07 の公開は、#410 の切替前の版のまま環境変数だけを変えた例外の revision で行った（[production-deploy.md](production-deploy.md#個別ゲートと切戻し)）。
 - 検索公開はサイト全体のスイッチで、掲載中の体験はすべて索引の対象になる。NIHO 側の掲載同意（`EXPERIENCE_SITE_LISTING_CONSENT_VERSION`）は掲載だけが対象で、検索登録は別に同意を得る決まり（NIHO の体験サイト連携 runbook §3）。2026-11-07 時点の掲載は NIHO kamakura 拠点の体験だけで、検索登録はコンテンツの所有者であるオーナーの決定で同意済みとする。外部提供者の掲載を承認する時は、承認の前に検索登録の同意を得る。
 - 体験詳細の canonical は API（今は NIHO の公開API）が返す正規URLに従う。NIHO 側の `EXPERIENCE_SITE_PUBLIC_ORIGIN` が未設定の間は NIHO の企画ページ（`noindex`）を指すため、体験詳細はこのサイトの URL では索引に載らない想定。載せるには NIHO 側の切替が要る（[production-deploy.md](production-deploy.md#niho-の実apiとの整合)）。
 

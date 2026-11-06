@@ -107,7 +107,7 @@ const nextConfig: NextConfig = {
       // explicit so changes in path-pattern handling cannot accidentally leave /admin public.
       { source: "/admin", headers: hostConsoleHeaders },
       { source: "/admin/:path+", headers: hostConsoleHeaders },
-      // The editor is private even while its rollout flag keeps every route at 404.
+      // The retired /editor (a redirect to /write and 410s, src/app/editor) stays private and uncached.
       { source: "/editor", headers: hostConsoleHeaders },
       { source: "/editor/:path+", headers: hostConsoleHeaders },
     ];

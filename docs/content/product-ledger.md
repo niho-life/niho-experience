@@ -5,6 +5,8 @@
 
 **オーナーの決定（2026-11-05）**：初回のExperienceでは実装の簡単さを優先し、Community Dinner／Tea timeを既存実装の即時確定で受け付ける。新サイトの予約前の説明・Checkout・確認メールを即時確定に揃える。以下に残す掲載元の「24時間以内に承認後決済」は既存チャネルの記録であり、Experienceの受付方式ではない。既存チャネルの設定・成立済み予約を変更する決定ではなく、本番販売の受入条件は引き続き満たす必要がある。
 
+**オーナーの決定（2026-11-07・[#13](https://github.com/niho-life/niho-experience/issues/13)）**：P-01の試験販売の対象は **Community Dinner だけ**にし、Tea time は含めない。試験販売で公開・販売するのは Dinner の1 offer だけで、Tea time の料金単位・子ども料金・開催枠は、Tea time を販売に加えると決めるまで確定を要しない。stg に置いた Tea time の仮値と商品行は検証用の仮置きで、販売に使わない。上の2026-11-05の即時確定は Dinner に適用する。他の決定（販売者、受取先、既存チャネルの扱い、本番販売の受入条件）は変えない。
+
 **オーナーの決定（2026-10-19）**：P-01〜P-05の各事業者から掲載の許可を得ている。テストサイトに組み込んでよい。原稿・提供者の紹介・価格・日程は担当3の推奨値としてテスト設定に仮置きし、後でオーナーがまとめて修正する。事業者への連絡とSNS等への投稿は、本番運用の開始後にオーナーが行う。
 
 **オーナーの決定（2026-10-26・[#146](https://github.com/niho-life/niho-experience/issues/146)）**：P-01〜P-05 の題名を、検索語（[seo-content-policy.md](../growth/seo-content-policy.md) の体験別の語）を入れた案に替える。テストサイトの pilot fixture は替えた。本番の正本（NIHO 側の原稿）は別に直す。
@@ -16,9 +18,9 @@
 **オーナーの決定（2026-11-07・[#13](https://github.com/niho-life/niho-experience/issues/13)・[#141](https://github.com/niho-life/niho-experience/issues/141)）**：P-01のコンテンツの所有者はNIHO kamakura拠点で、掲載に出す3名（Takuya・Hasami・わか）は拠点の運営スタッフ。売上はNIHO kamakuraのStripe Connect口座で受け取る。これに合わせて次の形にする。
 
 - 提供者（主催・提供者表示・売上の受取先）はNIHO kamakura拠点の1つだけ。3名を個別の提供者・販売者にしない。法的販売者は上の決定どおり。
-- 3名は体験のホスト（`hosts`）として表示名と写真を掲載する。提供者名は「NIHO kamakura」。
+- 掲載に出すホストの顔は1人分でよい（オーナー 2026-11-07）。experience の公開版（#410）の作りどおり、提供者の写真と提供者名「NIHO kamakura」を出し、3名を並べる表示は作らない。3名は運営チーム（下）として扱う。
 - 管理の権限は、NIHO kamakuraの運営チームとして拠点の責任者1名をOWNER、ほかをCOHOSTにし、各自のNIHOアカウントで入る。ログインを共有しない。OWNERの人選は未定。
-- 公開する掲載は1件。`/experiences/community-dinner-with-locals`（提供者NIHO kamakura・ホスト3名）を残し、別の提供者として登録された同じ体験の掲載（`/experiences/nihokamakura-community-dinner`、ホスト無し）は非公開にする。
+- 公開する掲載は1件。`/experiences/community-dinner-with-locals` を残し、別の提供者として登録された同じ体験の掲載（`/experiences/nihokamakura-community-dinner`）は非公開にする（2026-11-07 にNIHO管理画面で掲載停止済み）。`community-dinner-with-locals` は2026-11-07から検索公開の sitemap に載っているので、experience 側で登録し直す時もこの slug を使う。変える場合は旧URLからのリダイレクトを用意する。
 - 提供者と受取口座が同じ拠点で、ホストは拠点のスタッフなので、「既存拠点口座を共有する別同意」（下の確認待ち1）は不要。本番のConnect口座がNIHO kamakuraの受取先であることの照合は残る。
 - experience側で商品を新しく登録する時（[#285](https://github.com/niho-life/niho-experience/issues/285)の切替）もこの形で登録する。
 
@@ -75,7 +77,7 @@
 ### 確認待ち（オーナー）
 
 1. 法的販売者・主催者表示・受取先の方針はオーナー確認済み。Express test account はstg用として決済・送金可能だが、production Connect口座がNIHO kamakura拠点の正しい受取先であること、法的口座名義・Stripe契約・本人確認・銀行口座の本番状態を確認する。既存拠点口座を共有する別同意（返金・紛争・手数料の負担と購入者情報へのアクセス範囲）は、提供者と受取口座が同じ拠点でホストが拠点の運営スタッフのため不要（オーナー決定 2026-11-07）
-2. tea timeの選択後の料金内訳・子ども料金、OTA価格との関係（価格を揃える義務の有無を含む）。stgでは下記の仮値を使うが、実際の単位・料金は本番登録前に確認する
+2. tea timeの選択後の料金内訳・子ども料金、OTA価格との関係（価格を揃える義務の有無を含む）。試験販売はDinnerだけ（2026-11-07オーナー決定）なので、Tea timeを販売に加えると決めるまで確認を要しない。Dinnerについても、OTA価格との関係は本番登録前に確認する。stgでは下記の仮値を使う
 3. 実際に開催できる曜日と頻度、最少催行人数、受付締切。stgでは下記の仮値を使うが、提供者が開催できる日と担当者を本番登録前に確定する
 4. 開始時刻をチャネル間で統一するか
 5. ウェルカムドリンクにアルコールを含むか。stgではノンアルコールのみの仮値を使う。含む場合の20歳未満への対応は本番前に確認する

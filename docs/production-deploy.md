@@ -163,6 +163,8 @@ Admin代理公開は、NIHO本番の `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN=https:
 | ホストの画面 | NIHO 側の接続（niho-app #19282、#19283）の本番配備と [#92](https://github.com/niho-life/niho-experience/issues/92) の受入の後にだけ `enable_host_calendar=true` の候補を昇格する |
 | 計測 | NIHOのプライバシーポリシーに Umami Cloud の送信内容・目的・保存期間を追記し、同意方針の確認後だけ `UMAMI_WEBSITE_ID` を設定。previewには設定しない |
 
+**検索公開の例外配備（2026-11-07、オーナー承認）**：この時点の `main` は #410（公開カタログ・詳細の読み元を Experience publication へ切替、旧NIHO商品へ fallback しない）を含み、本番は `PROD_PUBLICATIONS_ENABLED` が未設定のため、workflow で配備すると一覧が空になる。そのため、稼働中の revision `niho-experience-00023-res`（commit `fa26a76e291f`、実行用 digest `sha256:8e8d503a8e0dffbab0b52ec44648769b99bf909e35e754827c3e2afa11b0d5b1`）と同じイメージ・同じ設定で、`SITE_INDEXING=allow` だけを変えた revision `niho-experience-00025-lav`（tag `search-fa26a76e`、label `change=search-indexing`）を `gcloud run services update --no-traffic` で作り、robots.txt・sitemap・各ページの `robots`・2件目の詳細の404を候補URLで確かめてから100%へ昇格した。切り戻しは `00023-res` へ traffic を戻す。次の workflow 配備（#410 の受入後に `PUBLICATIONS_ENABLED` を開く時）は、workflow の `SITE_INDEXING=allow` を引き継ぐ。
+
 緊急停止はまず NIHO の掲載/受付を止め、サイト側も `BOOKINGS_ENABLED=false` の安全revisionへ戻す。サイトのtrafficを直前revisionへ戻しても、成立済み予約・返金は NIHO の予約一覧と台帳で追う。Cloud Run trafficの変更後に revision、100% の配分、トップ/詳細/予約停止、NIHO側の予約一覧・返金導線をreadbackする。停止・切戻し・再開の日時とSHAを #15 に残す。
 
 
