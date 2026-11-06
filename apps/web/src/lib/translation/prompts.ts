@@ -21,6 +21,12 @@ export const TRANSLATION_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 const MAX_TOKENS = 16_000;
 /** guest_question_messages.body_ja and the host's English (MESSAGE_TEXT_LIMIT) are both at most 4000. */
 export const TRANSLATION_MAX_LENGTH = 4000;
+/**
+ * The whole JSON of an experience manuscript is not a message: its fields are checked one by one afterwards
+ * (publicationFaqIssue, validPublicationLocaleManuscript), and with a FAQ it passes 4000 characters while every
+ * field is within its limit. This bound only keeps an absurd response out; MAX_TOKENS is what really ends a long one.
+ */
+export const EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH = 64_000;
 
 const RULES = [
   "Translate faithfully and completely: do not add, leave out, summarize, soften or answer anything.",
@@ -107,13 +113,13 @@ const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
  * The translation in a response, or why there is none: declined (by the model and its fallback), cut off
  * at the token limit, empty, too long or holding control characters.
  */
-export function translationFromMessage(message: Pick<BetaMessage, "content" | "stop_reason">): TranslationResult {
+export function translationFromMessage(message: Pick<BetaMessage, "content" | "stop_reason">, maxLength: number = TRANSLATION_MAX_LENGTH): TranslationResult {
   if (message.stop_reason === "refusal") return { ok: false, failure: "refused" };
   if (message.stop_reason !== "end_turn") return { ok: false, failure: "unusable" };
   const text = message.content
     .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .join("")
     .trim();
-  if (!text || text.length > TRANSLATION_MAX_LENGTH || CONTROL.test(text)) return { ok: false, failure: "unusable" };
+  if (!text || text.length > maxLength || CONTROL.test(text)) return { ok: false, failure: "unusable" };
   return { ok: true, text };
 }

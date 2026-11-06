@@ -421,6 +421,17 @@ describe("Experience owner product API", () => {
       expect((await empty.json()).sourceFingerprint).toBe(publicationManuscriptFingerprint(japanese));
     });
 
+    it("asks the translator for a manuscript-sized answer: a FAQ makes the JSON longer than a message may be (#146)", async () => {
+      const longFaq = Array.from({ length: 4 }, (_, index) => ({ question: `Q${index}?`, answer: "a".repeat(1_000) }));
+      const source = { ...japanese, faq: longFaq.map(({ question }) => ({ question, answer: "こ".repeat(1_000) })) };
+      const english = { ...japanese, title: "Synthetic dinner", lead: "Lead", description: "Description", language: "English", faq: longFaq };
+      expect(JSON.stringify(english).length).toBeGreaterThan(4_000);
+      mocks.translator.mockResolvedValueOnce({ ok: true, text: JSON.stringify(english) });
+      const translated = await translateProduct(request(`/host/api/products/${product.id}/translation`, "POST", { japanese: source }), context);
+      expect(translated.status).toBe(200);
+      expect(mocks.translator).toHaveBeenLastCalledWith(expect.anything(), { maxLength: 64_000 });
+    });
+
     it("rejects an incomplete Japanese FAQ or an unknown manuscript key before calling the translator", async () => {
       for (const source of [{ ...japanese, faq: [{ question: "質問", answer: "" }] }, { ...japanese, notes: "x" }]) {
         const response = await translateProduct(request(`/host/api/products/${product.id}/translation`, "POST", { japanese: source }), context);

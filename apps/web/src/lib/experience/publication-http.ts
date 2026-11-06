@@ -34,7 +34,7 @@ import {
 import { experiencePublicMediaStorage } from "./public-media-storage";
 import { GuideCoverImageError, processGuideCoverImage, readGuideCoverInput } from "@/lib/editor/guide-cover-image";
 import { anthropicTranslator } from "@/lib/translation/anthropic";
-import { experienceManuscriptToEnglish } from "@/lib/translation/prompts";
+import { EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH, experienceManuscriptToEnglish } from "@/lib/translation/prompts";
 
 export type PublicationProductContext = { params: Promise<{ productId: string }> };
 type RecordValue = Record<string, unknown>;
@@ -639,7 +639,7 @@ export async function publicationTranslationRequest(request: Request, context: P
   try { await prepared.repository.getProduct(prepared.context.actor, productId); }
   catch (error) { return mapStoreError(error); }
   const sourceFingerprint = publicationManuscriptFingerprint(japanese);
-  const translated = await translator(experienceManuscriptToEnglish(japanese));
+  const translated = await translator(experienceManuscriptToEnglish(japanese), { maxLength: EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH });
   if (!translated.ok) return responseError("TRANSLATION_UNAVAILABLE", 503);
   let english: unknown;
   try { english = JSON.parse(translated.text); } catch { return responseError("TRANSLATION_UNAVAILABLE", 503); }

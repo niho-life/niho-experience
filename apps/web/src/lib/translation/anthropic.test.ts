@@ -48,6 +48,15 @@ describe("anthropicTranslator", () => {
     expect(mocks.create).toHaveBeenCalledExactlyOnceWith(request, { timeout: 15_000, maxRetries: 0 });
   });
 
+  it("reads the answer against the limit the caller gives (a manuscript is longer than a message), 4000 by default", async () => {
+    const long = { stop_reason: "end_turn" as const, content: [{ type: "text" as const, text: "a".repeat(5_000), citations: null }] };
+    mocks.create.mockResolvedValue(long);
+    const translate = anthropicTranslator({ timeoutMs: 15_000 })!;
+    expect(await translate(request)).toEqual({ ok: false, failure: "unusable" });
+    expect(await translate(request, { maxLength: 64_000 })).toEqual({ ok: true, text: "a".repeat(5_000) });
+    mocks.create.mockReset();
+  });
+
   it("is null while translation is off or the key is missing, and builds no client", () => {
     mocks.config.translationEnabled = false;
     expect(anthropicTranslator({ timeoutMs: 15_000 })).toBeNull();
