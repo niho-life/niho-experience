@@ -25,13 +25,14 @@ import {
   type ProductSaleTermsInput,
   type ProviderSaleSettings,
 } from "./guest-bookings.ts";
+import { grantProviderOwnerIn, isHostAccountId } from "./host-accounts.ts";
 import { hasExperienceActorShape, isHostSellerRef } from "./host-sellers.ts";
 import { PRODUCT_COLUMNS } from "./repository.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import { productFromRow, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { MembershipRole, ProductRecord, ProductStatus } from "./types.ts";
-import { assertMoney, assertNonEmptyText, assertStoreIdentifier } from "./validation.ts";
+import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier } from "./validation.ts";
 
 /*
  * Operator registration for legacy site-sale cutover and seller bootstrap. Every method here is called only by
@@ -383,18 +384,33 @@ export class SiteSaleRegistration {
    * host accounts. The account is not checked with Stripe here: it does not change, and every publication checks it.
    *
    * Under the provider's inventory lock (publishing and creating products take it too), the provider's products move to
-   * the new reference with their version raised (a draft open elsewhere reads it again); published versions keep theirs,
-   * as history and for the sales they made. The old NIHO OWNER membership stays as it is; a host account's OWNER is
-   * granted separately (HostAccounts.grantProviderOwner), and the host-account OWNER consents to the account again.
+   * the new reference with their version raised (a draft open elsewhere reads it again). Published versions are
+   * immutable and keep theirs, so a provider whose listing (live or stopped) still stands on a version published under
+   * the NIHO seller is refused: its public seller and host pages would no longer find their seller. The old NIHO OWNER
+   * membership stays as it is. The host account `ownerHostAccountId` becomes the OWNER in the same transaction
+   * (grantProviderOwnerIn): when it cannot (suspended, another role here, the OWNER of another provider, another host
+   * OWNER already), nothing is written, so a failed run never leaves a moved seller without its OWNER. That OWNER
+   * consents to the account again.
    *
-   * UNCHANGED when the seller already moved with this account. StoreConflictError when the provider has no seller, or its
-   * seller uses another Stripe account than `stripeConnectAccountRef` (the reviewed seller-change process changes that).
+   * UNCHANGED (and the OWNER granted or already there) when the seller already moved with this account. StoreConflictError
+   * when the provider has no seller, its seller uses another Stripe account than `stripeConnectAccountRef` (the reviewed
+   * seller-change process changes that), a listing stands on a NIHO-era version, or the OWNER cannot be granted.
    */
-  async convertNihoSellerToHostAccounts(input: { readonly providerId: string; readonly stripeConnectAccountRef: string }): Promise<{ readonly outcome: "CONVERTED" | "UNCHANGED"; readonly productsUpdated: number }> {
+  async convertNihoSellerToHostAccounts(input: { readonly providerId: string; readonly stripeConnectAccountRef: string; readonly ownerHostAccountId: string; readonly nowUtc: string }): Promise<{ readonly outcome: "CONVERTED" | "UNCHANGED"; readonly productsUpdated: number; readonly owner: "granted" | "already-owner" }> {
     assertStoreIdentifier(input?.providerId, "providerId");
     if (typeof input.stripeConnectAccountRef !== "string" || !/^acct_[A-Za-z0-9]{8,250}$/.test(input.stripeConnectAccountRef)) {
       throw new StoreValidationError("stripeConnectAccountRef must be a Stripe connected account ID.");
     }
+    if (!isHostAccountId(input.ownerHostAccountId)) throw new StoreValidationError("ownerHostAccountId must be a host account ID.");
+    if (typeof input.nowUtc !== "string") throw new StoreValidationError("nowUtc must be a canonical UTC instant.");
+    assertCanonicalInstant(input.nowUtc, "nowUtc");
+    const grantOwner = async (client: PoolClient) => {
+      const granted = await grantProviderOwnerIn(client, { providerId: input.providerId, hostAccountId: input.ownerHostAccountId, nowUtc: input.nowUtc });
+      if (granted.kind !== "granted" && granted.kind !== "already-owner") {
+        throw new StoreConflictError(`The host account cannot become the provider's OWNER (${granted.kind}); nothing was moved.`);
+      }
+      return granted.kind;
+    };
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, input.providerId);
       const existing = await client.query<DbRow>(
@@ -407,8 +423,19 @@ export class SiteSaleRegistration {
       if (String(row.stripe_connect_account_ref) !== input.stripeConnectAccountRef) {
         throw new StoreConflictError("The provider's seller uses another Stripe account; use the reviewed seller-change process.");
       }
-      if (row.legacy_provider_id === null && isHostSellerRef(row.seller_niho_account_ref)) return { outcome: "UNCHANGED" as const, productsUpdated: 0 };
+      if (row.legacy_provider_id === null && isHostSellerRef(row.seller_niho_account_ref)) {
+        return { outcome: "UNCHANGED" as const, productsUpdated: 0, owner: await grantOwner(client) };
+      }
       const previousRef = String(row.seller_niho_account_ref);
+      const standing = await client.query(
+        `SELECT 1 FROM experience_product_publication_states state
+           JOIN experience_product_publications publication ON publication.id=state.current_publication_id
+          WHERE state.provider_id=$1 AND publication.seller_niho_account_ref=$2 LIMIT 1`,
+        [input.providerId, previousRef],
+      );
+      if ((standing.rowCount ?? 0) > 0) {
+        throw new StoreConflictError("A listing of the provider stands on a version published under the NIHO seller; it is not moved here.");
+      }
       const sellerRef = `sel_${randomBytes(16).toString("hex")}`;
       await client.query(
         `UPDATE experience_host_seller_profiles
@@ -421,7 +448,7 @@ export class SiteSaleRegistration {
           WHERE provider_id=$1 AND seller_niho_account_ref=$2`,
         [input.providerId, previousRef, sellerRef],
       );
-      return { outcome: "CONVERTED" as const, productsUpdated: products.rowCount ?? 0 };
+      return { outcome: "CONVERTED" as const, productsUpdated: products.rowCount ?? 0, owner: await grantOwner(client) };
     });
   }
 

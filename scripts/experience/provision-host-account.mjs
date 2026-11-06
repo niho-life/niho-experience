@@ -8,9 +8,10 @@
 //
 // A provider whose seller is mapped to NIHO (the NIHO login era) moves onto host accounts with
 // `"seller": { "convertFromNiho": true, "stripeConnectAccountRef": "acct_..." }`: the same account and names, a new `sel_`
-// seller reference, and the provider's products following it (SiteSaleRegistration.convertNihoSellerToHostAccounts). The
-// account must be the one already registered; it is not checked with Stripe here (it does not change, and every
-// publication checks it), so no Stripe key is needed for this.
+// seller reference, the provider's drafts following it, and the address's host account made its OWNER, all in one
+// transaction (SiteSaleRegistration.convertNihoSellerToHostAccounts): when the OWNER cannot be granted, or a listing stands
+// on a version published under the NIHO seller, nothing moves. The account must be the one already registered; it is not
+// checked with Stripe here (it does not change, and every publication checks it), so no Stripe key is needed for this.
 //
 //   node scripts/experience/provision-host-account.mjs [plan|register] <input.json> [--yes]
 //
@@ -178,8 +179,15 @@ async function run(command, input, yes, pool, stripeKey) {
         return EXIT.failed;
       }
       if (input.seller.convertFromNiho) {
-        const moved = await registration.convertNihoSellerToHostAccounts({ providerId: input.providerId, stripeConnectAccountRef: input.seller.stripeConnectAccountRef });
-        out(`Registered: seller moved from NIHO=${moved.outcome}, products following the new seller reference=${moved.productsUpdated}.`);
+        // The account first (harmless alone), then the move and its OWNER in one transaction: a refused OWNER moves nothing.
+        const nowUtc = new Date().toISOString();
+        const provisioned = await accounts.provisionHostAccount({ email: input.email, nowUtc });
+        const moved = await registration.convertNihoSellerToHostAccounts({
+          providerId: input.providerId, stripeConnectAccountRef: input.seller.stripeConnectAccountRef, ownerHostAccountId: provisioned.hostAccountId, nowUtc,
+        });
+        out(`Registered: host account=${provisioned.hostAccountId} (${provisioned.created ? "created" : "existing"}), seller moved from NIHO=${moved.outcome}, products following the new seller reference=${moved.productsUpdated}, OWNER=${moved.owner}.`);
+        out("Next: the OWNER signs in at /host with an emailed link, consents to the payout account in 設定 › 受取口座, then publishes.");
+        return EXIT.ok;
       } else if (sellerPlan !== "unchanged") {
         if (!stripeKey) {
           out("Refused: EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY is not set (the Stripe account is verified first). Nothing was written.");
@@ -193,10 +201,8 @@ async function run(command, input, yes, pool, stripeKey) {
           return EXIT.failed;
         }
       }
-      if (!input.seller.convertFromNiho) {
-        const seller = await registration.provisionHostAccountSeller({ providerId: input.providerId, ...input.seller });
-        out(`Registered: provider=${seller.provider}, seller for host accounts=${seller.sellerProfile}.`);
-      }
+      const seller = await registration.provisionHostAccountSeller({ providerId: input.providerId, ...input.seller });
+      out(`Registered: provider=${seller.provider}, seller for host accounts=${seller.sellerProfile}.`);
     }
     const nowUtc = new Date().toISOString();
     const provisioned = await accounts.provisionHostAccount({ email: input.email, nowUtc });

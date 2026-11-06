@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { StoreError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { isHostEmail } from "./host-mail-shared.ts";
 import { isoValue, type DbRow } from "./rows.ts";
@@ -547,40 +547,50 @@ export class HostAccounts {
     assertStoreIdentifier(input.providerId, "providerId");
     const account = hostAccountId(input.hostAccountId);
     const at = now(input.nowUtc);
-    const providerId = input.providerId;
-    return withTransaction(this.#pool, async (client) => {
-      // The same key as ensureMappedOwnerMembership's: one identity's OWNER bindings take turns, whatever path writes them.
-      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${OWNER_LOCK_SEED}))`, [`experience-host-owner:${account}`]);
-      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${PROVIDER_HOST_OWNER_LOCK_SEED}))`, [`experience-provider-host-owner:${providerId}`]);
-      const provider = await client.query("SELECT 1 FROM experience_providers WHERE id = $1", [providerId]);
-      if ((provider.rowCount ?? 0) === 0) return { kind: "provider-not-found" } as const;
-      const host = await client.query<DbRow>("SELECT status FROM host_accounts WHERE id = $1 FOR SHARE", [account]);
-      if (host.rows[0]?.status !== "ACTIVE") return { kind: "host-account-not-active" } as const;
-      const existing = await client.query<DbRow>(
-        "SELECT role, active FROM provider_memberships WHERE provider_id = $1 AND niho_user_id = $2 FOR UPDATE",
-        [providerId, account],
-      );
-      if (existing.rows[0]) {
-        return existing.rows[0].role === "OWNER" && existing.rows[0].active === true
-          ? { kind: "already-owner" } as const
-          : { kind: "membership-conflict" } as const;
-      }
-      const elsewhere = await client.query(
-        "SELECT 1 FROM provider_memberships WHERE niho_user_id = $1 AND active AND role = 'OWNER' LIMIT 1",
-        [account],
-      );
-      if ((elsewhere.rowCount ?? 0) > 0) return { kind: "owner-of-another-provider" } as const;
-      const hostOwner = await client.query(
-        "SELECT 1 FROM provider_memberships WHERE provider_id = $1 AND active AND role = 'OWNER' AND niho_user_id ~ '^hst_[0-9a-f]{32}$' LIMIT 1",
-        [providerId],
-      );
-      if ((hostOwner.rowCount ?? 0) > 0) return { kind: "provider-has-host-owner" } as const;
-      await client.query(
-        `INSERT INTO provider_memberships (provider_id, niho_user_id, role, active, created_at, updated_at)
-         VALUES ($1, $2, 'OWNER', true, $3::timestamptz, $3::timestamptz)`,
-        [providerId, account, at],
-      );
-      return { kind: "granted" } as const;
-    });
+    return withTransaction(this.#pool, (client) => grantProviderOwnerIn(client, { providerId: input.providerId, hostAccountId: account, nowUtc: at }));
   }
+}
+
+/**
+ * HostAccounts.grantProviderOwner inside the caller's transaction (inputs already validated), so that another write of the
+ * same transaction (moving a seller from NIHO, SiteSaleRegistration.convertNihoSellerToHostAccounts) commits only with
+ * the OWNER it needs. The same locks, in the same order, and the same outcomes.
+ */
+export async function grantProviderOwnerIn(
+  client: PoolClient,
+  input: { readonly providerId: string; readonly hostAccountId: string; readonly nowUtc: string },
+): Promise<GrantProviderOwnerResult> {
+  const { providerId, hostAccountId: account, nowUtc: at } = input;
+  // The same key as ensureMappedOwnerMembership's: one identity's OWNER bindings take turns, whatever path writes them.
+  await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${OWNER_LOCK_SEED}))`, [`experience-host-owner:${account}`]);
+  await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${PROVIDER_HOST_OWNER_LOCK_SEED}))`, [`experience-provider-host-owner:${providerId}`]);
+  const provider = await client.query("SELECT 1 FROM experience_providers WHERE id = $1", [providerId]);
+  if ((provider.rowCount ?? 0) === 0) return { kind: "provider-not-found" } as const;
+  const host = await client.query<DbRow>("SELECT status FROM host_accounts WHERE id = $1 FOR SHARE", [account]);
+  if (host.rows[0]?.status !== "ACTIVE") return { kind: "host-account-not-active" } as const;
+  const existing = await client.query<DbRow>(
+    "SELECT role, active FROM provider_memberships WHERE provider_id = $1 AND niho_user_id = $2 FOR UPDATE",
+    [providerId, account],
+  );
+  if (existing.rows[0]) {
+    return existing.rows[0].role === "OWNER" && existing.rows[0].active === true
+      ? { kind: "already-owner" } as const
+      : { kind: "membership-conflict" } as const;
+  }
+  const elsewhere = await client.query(
+    "SELECT 1 FROM provider_memberships WHERE niho_user_id = $1 AND active AND role = 'OWNER' LIMIT 1",
+    [account],
+  );
+  if ((elsewhere.rowCount ?? 0) > 0) return { kind: "owner-of-another-provider" } as const;
+  const hostOwner = await client.query(
+    "SELECT 1 FROM provider_memberships WHERE provider_id = $1 AND active AND role = 'OWNER' AND niho_user_id ~ '^hst_[0-9a-f]{32}$' LIMIT 1",
+    [providerId],
+  );
+  if ((hostOwner.rowCount ?? 0) > 0) return { kind: "provider-has-host-owner" } as const;
+  await client.query(
+    `INSERT INTO provider_memberships (provider_id, niho_user_id, role, active, created_at, updated_at)
+     VALUES ($1, $2, 'OWNER', true, $3::timestamptz, $3::timestamptz)`,
+    [providerId, account, at],
+  );
+  return { kind: "granted" } as const;
 }
