@@ -240,6 +240,10 @@ export const FLAGS = Object.freeze([
   // ホストへのメール (#194): the sign-in's verified address, the host's choice in 設定 › 通知, and booking emails to hosts,
   // all sent by the mail job.
   { env: "EXPERIENCE_HOST_MAIL_ENABLED", variable: "HOST_MAIL_ENABLED", needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_GUEST_MAIL_ENABLED"] },
+  // 日本語サイト (#59): /ja の detail・sitemap・hreflang。公開サイト側の機能だが、flag は host console を配線する経路の
+  // revision にだけ渡るので HOST_CONSOLE を要する。NIHO の日本語 release の実配備と実機確認が済むまで ON にしない
+  // （docs/localization-consumer.md「有効化の前に確かめること」）。
+  { env: "EXPERIENCE_JAPANESE_SITE_ENABLED", variable: "JAPANESE_SITE_ENABLED", needs: ["HOST_CONSOLE"] },
 ]);
 
 const PROD_SECRET_REF = /^[A-Za-z0-9_-]+:[1-9][0-9]*$/;
