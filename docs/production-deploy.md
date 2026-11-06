@@ -82,9 +82,11 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_OTA_GUEST_DETAILS_ENABLED` | `OTA_GUEST_DETAILS_ENABLED` | DB、メール（1 年後の消去） | — | — | — |
 | `EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED` | `OTA_BOOKING_NOTIFICATIONS_ENABLED` | push・DB | — | — | — |
 | `EXPERIENCE_HOST_MAIL_ENABLED` | `HOST_MAIL_ENABLED` | ホストの画面・DB、メール | — | — | — |
+| `EXPERIENCE_JAPANESE_SITE_ENABLED` | `JAPANESE_SITE_ENABLED` | ホストの画面・DB（配線のため。機能は公開サイト） | — | — | — |
 
 - OTA の 2 つ（#194）は、OTA の予約の取込みそのものは開かない（取込みは channel runtime の設定のまま）。`0036` を先に適用する。[外部予約台帳](ota-external-reservations.md)の「予約者の情報（#194）」「ホストへの通知（#194）」。
 - ホストへのメール（#194、オーナー決定 2026-11-01）：ログインのときに NIHO の確認済みのメールを写し、設定 › 通知で宛先を変えられ、新しい予約・取消・日時変更をメールでも知らせる。メールはメール job が送るので、メール（`EXPERIENCE_GUEST_MAIL_ENABLED`）が要る。新しい Secret・Scheduler・サービスアカウントは無い。**`0038` を新しいコードより先に適用する**（予約の確定・取消と OTA の台帳の transaction が、宛先の表を読んで行を積むため。フラグが off でも読む。off の間は宛先が 1 件も無いので行は積まれない）。[guest-booking.md](guest-booking.md) の「ホストへの通知」。
+- 日本語サイト（#59）の `JAPANESE_SITE_ENABLED` は、公式配備の表に載せただけで、既定は OFF（`STG_` / `PROD_` とも未設定）。ON にするのは、日本語の文言（このリポの `ja-static-copy.ts`。`EXPERIENCE_PUBLICATIONS_ENABLED` の環境では NIHO の release は使わない）をオーナーが確認し、実機確認が済んでから、専用の変更で行う（[localization-consumer.md](localization-consumer.md)「有効化の前に確かめること」）。
 - 「ホストの画面・DB」は本番では `enable_host_calendar=true`（と `PROD_HOST_CALENDAR_READY=true`）。サイトの URL は `https://experience.niho.life`、`<project>` は `niho-app-prd`。
 - `PROVIDER_PAGES_API_ENABLED` はlegacy NIHO provider-pages consumerのflagで、Experience商品・原稿・写真・公開には使用しない。新しい販売フローではOFFを維持する。
 - `PROVIDER_OPERATIONS_API_ENABLED` は旧NIHO予約の一覧・詳細・承認/辞退/取消／返金・メッセージなど、NIHOが引き続き所有する予約運営業務の限定APIだけを扱う。NIHO本番に `APP_CONNECT_WEB_ORIGINS` と許可されたservice identityを設定し、契約と旧予約権限をstgで受け入れてから開く。Experienceの商品・原稿・写真・公開は `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` が使うExperience BFFだけで行う。NIHOのtokenはExperience serverだけで扱う。旧 `niho.life/experiences/provider` 転送はNIHO Web側の別配備。
@@ -125,6 +127,8 @@ ALB/DNSは、この文書の設定とGoogle Cloudの[Cloud Run custom domain手�
 連携Aの [#19137](https://github.com/niho-coliving/niho-app/pull/19137) を merge・stg配備し、契約 [#26](https://github.com/niho-life/niho-experience/pull/26) を取り込んでから、`npm -C packages/api-client run verify:live -- --origin https://app-stg.niho.life` を実行する。検証環境に公開した合成商品と開催枠がない場合、空一覧は契約不一致ではなくfixture不足として記録する。
 
 NIHOapp側の変更は連携Aの担当へ集約する。stg Web の `EXPERIENCE_SITE_ALLOWED_ORIGINS` は検証用サイトの exact origin、本番 Web は `https://experience.niho.life` の exact origin に限定する。GET availability と POST checkout の path/method だけ CORS を許し、ワイルドカードや資格情報付きCORSを使わない。`EXPERIENCE_SITE_PUBLIC_ORIGIN` は、承認済み原稿が本番ホストで表示されるまで**未設定**とする。この変数を入れると NIHO側の canonical・sitemap・中断時の戻り先が新サイトへ切り替わるため、両側を同時にreadbackする。env の反映は [NIHO連携runbook](https://github.com/niho-coliving/niho-app/blob/main/ops/runbooks/experience-site/experience-site-integration.md) と Cloud Run manifest の経路を使う。
+
+Admin代理公開は、NIHO本番の `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN=https://experience.niho.life` を正規配備経路で反映し、現在のNIHO Admin session検証とExperience migration `0058`・`0061`、runtime grantsを受け入れてから `ADMIN_SUPPORT_CONSOLE_ENABLED`、`PUBLICATIONS_ENABLED`、`HOST_PUBLICATION_API_ENABLED` を有効化する。販売者の現在OWNER/Connect readiness、口頭または書面での確認、掲載同意version、写真権利を本番候補で確認する。Adminは販売者のHost sessionを更新できないため、公開直前に販売者がHost画面を開いて作成した5分以内のreadiness snapshotが必要。合成受入とmigration/readbackが済む前にAdminまたは公開APIのflagを開かない。
 
 ## 個別ゲートと切戻し
 

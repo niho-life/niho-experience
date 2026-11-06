@@ -9,16 +9,18 @@
 - 事務局は現在のNIHO Admin専用ログインで`/admin/products`を開き、提供者名・販売者名から対象を選ぶ。DTOと画面にはNIHO user ID、Connect参照、DB接続、JSON入力を出さない。
 - 固定BFFは`/admin/api/product-workspaces*`である。全requestで現在の`AdminHttpSession`とADMINを再検証し、serverで得たactor、選択したExperience provider、商品を境界検証する。mutationはsame-origin、bounded/closed JSON、private/no-storeで扱う。
 - 事務局はホストと同じ商品フォーム・写真処理・料金/取消条件・calendar処理を使い、未公開かつ一度も公開されていない下書きだけを作成・更新する。操作actorはOWNERへ置き換えず、同じtransactionの`admin_product_draft_audit_events`へ記録する。
-- 事務局にはpublish、stop、販売者変更、Connect/本人状態の変更、提供者共通写真・ロゴの変更を提供しない。事務局の保存を掲載同意、英語原稿の本人確認、販売準備完了として記録しない。
-- OWNERは本人の初回Experienceログイン時に従来どおりmembershipを得る。`/host/experiences`で同じ下書き・写真・価格・取消条件・開催枠を確認し、既存のreadinessと本人同意の検証を通って自分で公開する。公開後のpublic SSR、availability、checkoutは通常経路を使う。
-- 開閉条件は既存のAdmin console、Experience host publication、DB接続だけで、新しいflagはない。migration `0058_admin_product_drafts.sql`とruntime grantの適用、およびseller profileの運営provisioningは配備前提である。
+- オーナー決定（2026-11-05）により、事務局は販売者へ口頭または書面・メッセージで確認した後、Admin準備の一度も公開されていないDRAFTだけを事務局判断で代理公開できる。stop・再開、販売者変更、Connect/本人状態の変更、提供者共通写真・ロゴの変更は提供しない。
+- 代理公開は現在Admin session、same-origin、現行DRAFT/販売条件revision、現在の掲載同意version、確認方法、写真掲載権利確認を固定BFFで再検証する。Host公開と同じserver blockerを通し、readinessが不明・期限切れなら閉じる。Admin actorは実際のverified NIHO user IDを`ADMIN_PROXY` publisherとimmutable監査へ記録し、OWNER membershipや販売者OWNERとして保存しない。
+- 手入力の日英原稿は、OWNER本人確認とは別のAdmin reviewとして日英fingerprintとactorをimmutable記録する。公開時に現行revision/fingerprintとの一致を再検証し、写真はupload時のserver権利確認に加えて代理公開時にも明示確認を必須とする。自由記入やPIIは監査へ保存しない。
+- OWNERは本人の初回Experienceログイン時に従来どおりmembershipを得る。代理公開しない場合は`/host/experiences`で同じ下書きを確認して通常公開できる。代理公開後のpublic SSR、availability、checkoutも通常経路を使う。
+- 開閉条件は既存のAdmin console、Experience host publication、DB接続だけで、新しいflagはない。migration `0058_admin_product_drafts.sql`と`0061_admin_proxy_publication.sql`、runtime grant、seller profileの運営provisioning、現在OWNER/Connect readiness、承認済み掲載同意versionの適用・受入が配備前提である。いずれかのflag・Admin secret・現在ADMIN検証が欠ける場合、固定BFFは404または認証失敗で閉じる。
 
 この通常フローは、保存済みの`/admin/preparations`案件、旧API、previewを商品IDとして解釈せず、削除もしない。本人未登録の匿名確認から本人受入へ進む流れ、既存mappingがない提供者、COHOST追加はまだこのExperience正本の下書きへ接続していないため、Issue #169全体の完了条件には含めない。
 
 
 ## 旧準備案件・匿名確認の設計と保存済みデータ
 
-以下は従来の準備案件APIと匿名確認の設計・実装記録である。保存済みデータとpreviewは保持するが、現行のExperience商品へは未接続。商品の公開操作・権限の正本は上記の通常フローとADR 0002を優先し、旧審査や事務局による販売開始を新商品へ適用しない。
+以下は従来の準備案件APIと匿名確認の設計・実装記録である。保存済みデータとpreviewは保持するが、現行のExperience商品へは未接続。商品の公開操作・権限の正本は上記の通常フローとADR 0002を優先し、旧審査を新商品へ適用しない。旧準備案件の「事務局による販売開始」は、上記のAdmin準備DRAFT限定代理公開とは別物である。
 
 ## 店舗の利用の流れ
 

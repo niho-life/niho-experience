@@ -9,6 +9,7 @@ import {
   type ScheduleRule,
 } from "@niho-experience/experience-domain";
 import {
+  ExperiencePublicationBlockedError,
   StoreAccessDeniedError,
   StoreConflictError,
   StoreNotFoundError,
@@ -20,7 +21,6 @@ import {
   type ExperiencePublicationDraftInput,
   type JsonValue,
   type ProductSaleTermsInput,
-  type ProductRecord,
   type PublicationAdminDraftActor,
 } from "@niho-experience/experience-store";
 import { GuideCoverImageError, processGuideCoverImage, readGuideCoverInput } from "@/lib/editor/guide-cover-image";
@@ -37,7 +37,7 @@ import {
 } from "./server";
 
 type RecordValue = Record<string, unknown>;
-type Revision = { readonly draft: number; readonly saleTerms: number | null };
+type Revision = { readonly draft: number; readonly state: number | null; readonly saleTerms: number | null };
 type ProductContext = { params: Promise<{ providerId: string; productId: string }> };
 type ProviderContext = { params: Promise<{ providerId: string }> };
 type AssetContext = { params: Promise<{ providerId: string; productId: string; assetId: string }> };
@@ -102,7 +102,7 @@ function validSaleTermsShape(value: unknown): value is ProductSaleTermsInput {
 }
 
 function encodeRevision(value: Revision): string {
-  return Buffer.from(`1:${value.draft}:0:${value.saleTerms ?? 0}`).toString("base64url");
+  return Buffer.from(`1:${value.draft}:${value.state ?? 0}:${value.saleTerms ?? 0}`).toString("base64url");
 }
 
 function decodeRevision(value: unknown): Revision | null {
@@ -111,11 +111,12 @@ function decodeRevision(value: unknown): Revision | null {
     const decoded = Buffer.from(value, "base64url").toString("utf8");
     if (Buffer.from(decoded).toString("base64url") !== value) return null;
     const parts = decoded.split(":");
-    if (parts.length !== 4 || parts[0] !== "1" || parts[2] !== "0" || !parts.slice(1).every((part) => /^(?:0|[1-9][0-9]{0,14})$/.test(part))) return null;
+    if (parts.length !== 4 || parts[0] !== "1" || !parts.slice(1).every((part) => /^(?:0|[1-9][0-9]{0,14})$/.test(part))) return null;
     const draft = Number(parts[1]);
+    const state = Number(parts[2]);
     const saleTerms = Number(parts[3]);
-    if (!Number.isSafeInteger(draft) || draft < 1 || !Number.isSafeInteger(saleTerms)) return null;
-    return { draft, saleTerms: saleTerms === 0 ? null : saleTerms };
+    if (!Number.isSafeInteger(draft) || draft < 1 || !Number.isSafeInteger(state) || !Number.isSafeInteger(saleTerms)) return null;
+    return { draft, state: state === 0 ? null : state, saleTerms: saleTerms === 0 ? null : saleTerms };
   } catch { return null; }
 }
 
@@ -139,6 +140,7 @@ async function parseJson(request: Request): Promise<RecordValue | Response> {
 }
 
 function mapStoreError(error: unknown): Response {
+  if (error instanceof ExperiencePublicationBlockedError) return adminJson({ error: { code: "PUBLICATION_BLOCKED", blockers: error.blockers } }, 422);
   if (error instanceof DomainValidationError) return adminJson({ error: { code: "INVALID_INPUT" } }, 400);
   if (error instanceof StoreAccessDeniedError) return adminJson({ error: { code: "FORBIDDEN" } }, 403);
   if (error instanceof StoreNotFoundError) return adminJson({ error: { code: "NOT_FOUND" } }, 404);
@@ -166,44 +168,30 @@ async function authorize(request: Request, mutation = false): Promise<
 async function productDto(actor: PublicationAdminDraftActor, providerId: string, productId: string) {
   const repository = experiencePublicationRepository();
   if (!repository) throw new Error("store unavailable");
-  const [product, terms, media, offers] = await Promise.all([
+  const [product, terms, media, offers, publication] = await Promise.all([
     repository.getAdminDraftProduct(actor, providerId, productId),
     repository.getAdminDraftSaleTerms(actor, providerId, productId),
     repository.listAdminDraftMedia(actor, providerId, productId),
     repository.listAdminDraftSaleOffers(actor, providerId, productId),
+    repository.getAdminDraftPublicationStatus(actor, providerId, productId, config.experiencePublicationConsentVersion),
   ]);
+  if (product.version !== publication.draftVersion
+    || terms.draftVersion !== publication.draftVersion
+    || (terms.saleTerms?.version ?? null) !== publication.saleTermsVersion) {
+    throw new StoreConflictError("Product changed while preparing the Admin publication workspace.");
+  }
   return {
     id: product.id,
-    version: encodeRevision({ draft: product.version, saleTerms: terms.saleTerms?.version ?? null }),
+    version: encodeRevision({ draft: publication.draftVersion, state: publication.stateVersion, saleTerms: publication.saleTermsVersion }),
     status: "DRAFT" as const,
     publicationNeedsUpdate: false,
-    publicationBlockers: [] as string[],
+    publicationBlockers: publication.blockers,
+    adminEnglishReview: publication.englishReview,
     draft: { slug: product.slug, publicTitle: product.publicTitle, content: product.content, currency: product.currency, unitAmount: product.unitAmount },
     sellerDisplayName: product.sellerDisplayName,
     saleTerms: terms.saleTerms,
     offers,
     media: media.map((asset) => ({ ...asset, previewUrl: `/admin/api/product-workspaces/${encodeURIComponent(providerId)}/products/${encodeURIComponent(productId)}/media/${encodeURIComponent(asset.id)}` })),
-  };
-}
-
-function productListDto(product: ProductRecord) {
-  return {
-    id: product.id,
-    version: encodeRevision({ draft: product.version, saleTerms: null }),
-    status: "DRAFT" as const,
-    publicationNeedsUpdate: false,
-    publicationBlockers: [] as string[],
-    draft: {
-      slug: product.slug,
-      publicTitle: product.publicTitle,
-      content: product.content,
-      currency: product.currency,
-      unitAmount: product.unitAmount,
-    },
-    sellerDisplayName: product.sellerDisplayName,
-    saleTerms: null,
-    offers: [] as const,
-    media: [] as const,
   };
 }
 
@@ -227,12 +215,15 @@ export async function adminDraftProductCollection(request: Request, context: Pro
   try {
     if (request.method === "GET") {
       const products = await repository.listAdminDraftProducts(auth.actor, providerId);
-      return adminJson({ products: products.map(productListDto) });
+      return adminJson({
+        products: await Promise.all(products.map((product) => productDto(auth.actor, providerId, product.id))),
+        publicationConsentVersion: config.experiencePublicationConsentVersion,
+      });
     }
     const body = await parseJson(request);
     if (body instanceof Response || !validDraft(body)) return body instanceof Response ? body : adminJson({ error: { code: "INVALID_INPUT" } }, 400);
     const created = await repository.createDraftAsAdmin(auth.actor, providerId, body as ExperiencePublicationDraftCreateInput);
-    return adminJson({ product: await productDto(auth.actor, providerId, created.id) }, 201);
+    return adminJson({ product: await productDto(auth.actor, providerId, created.id), publicationConsentVersion: config.experiencePublicationConsentVersion }, 201);
   } catch (error) { return mapStoreError(error); }
 }
 
@@ -244,7 +235,7 @@ export async function adminDraftProductRequest(request: Request, context: Produc
   const repository = experiencePublicationRepository();
   if (!repository) return adminJson({ error: { code: "UNAVAILABLE" } }, 503);
   try {
-    if (request.method === "GET") return adminJson({ product: await productDto(auth.actor, providerId, productId) });
+    if (request.method === "GET") return adminJson({ product: await productDto(auth.actor, providerId, productId), publicationConsentVersion: config.experiencePublicationConsentVersion });
     const body = await parseJson(request);
     if (body instanceof Response || !exactKeys(body, ["version", "draft"]) || !validDraft(body.draft)) return body instanceof Response ? body : adminJson({ error: { code: "INVALID_INPUT" } }, 400);
     const revision = decodeRevision(body.version);
@@ -254,7 +245,62 @@ export async function adminDraftProductRequest(request: Request, context: Produc
     await repository.saveDraftAsAdmin(auth.actor, providerId, {
       id: productId, ...draft, content: draft.content, cancellationTermsRef: current.cancellationTermsRef,
     } as ExperiencePublicationDraftInput, revision.draft);
-    return adminJson({ product: await productDto(auth.actor, providerId, productId), publicationUpdated: false });
+    return adminJson({ product: await productDto(auth.actor, providerId, productId), publicationUpdated: false, publicationConsentVersion: config.experiencePublicationConsentVersion });
+  } catch (error) { return mapStoreError(error); }
+}
+
+export async function adminDraftEnglishReviewRequest(request: Request, context: ProductContext): Promise<Response> {
+  const auth = await authorize(request, true);
+  if (!auth.ok) return auth.response;
+  const { providerId, productId } = await context.params;
+  if (!ID.test(providerId) || !ID.test(productId) || new URL(request.url).search || request.method !== "POST") return adminJson({ error: { code: "NOT_FOUND" } }, 404);
+  const body = await parseJson(request);
+  if (body instanceof Response || !exactKeys(body, ["version", "reviewed"]) || body.reviewed !== true) {
+    return body instanceof Response ? body : adminJson({ error: { code: "INVALID_INPUT" } }, 400);
+  }
+  const revision = decodeRevision(body.version);
+  if (!revision) return adminJson({ error: { code: "INVALID_INPUT" } }, 400);
+  const repository = experiencePublicationRepository();
+  if (!repository) return adminJson({ error: { code: "UNAVAILABLE" } }, 503);
+  try {
+    await repository.reviewAdminDraftEnglish(auth.actor, providerId, productId, revision.draft);
+    return adminJson({
+      product: await productDto(auth.actor, providerId, productId),
+      publicationConsentVersion: config.experiencePublicationConsentVersion,
+    });
+  } catch (error) { return mapStoreError(error); }
+}
+
+export async function adminDraftPublishRequest(request: Request, context: ProductContext): Promise<Response> {
+  const auth = await authorize(request, true);
+  if (!auth.ok) return auth.response;
+  const { providerId, productId } = await context.params;
+  if (!ID.test(providerId) || !ID.test(productId) || new URL(request.url).search || request.method !== "POST") return adminJson({ error: { code: "NOT_FOUND" } }, 404);
+  const body = await parseJson(request);
+  if (body instanceof Response || !exactKeys(body, ["version", "accepted", "sellerConfirmationMethod", "photoRightsConfirmed", "consentVersion"])
+    || body.accepted !== true || body.photoRightsConfirmed !== true
+    || (body.sellerConfirmationMethod !== "VERBAL" && body.sellerConfirmationMethod !== "WRITTEN")
+    || typeof body.consentVersion !== "string" || body.consentVersion.length < 1 || body.consentVersion.length > 160) {
+    return body instanceof Response ? body : adminJson({ error: { code: "INVALID_INPUT" } }, 400);
+  }
+  if (body.consentVersion !== config.experiencePublicationConsentVersion) {
+    return adminJson({ error: { code: "PUBLICATION_BLOCKED", blockers: ["CONSENT_OUTDATED"] } }, 422);
+  }
+  const revision = decodeRevision(body.version);
+  if (!revision) return adminJson({ error: { code: "INVALID_INPUT" } }, 400);
+  const repository = experiencePublicationRepository();
+  if (!repository) return adminJson({ error: { code: "UNAVAILABLE" } }, 503);
+  try {
+    const state = await repository.publishAdminDraft(auth.actor, providerId, productId, {
+      expectedDraftVersion: revision.draft,
+      expectedStateVersion: revision.state,
+      expectedSaleTermsVersion: revision.saleTerms,
+      consentVersion: body.consentVersion,
+      accepted: true,
+      sellerConfirmationMethod: body.sellerConfirmationMethod,
+      photoRightsConfirmed: true,
+    });
+    return adminJson({ publication: { status: "PUBLISHED", version: state.version } });
   } catch (error) { return mapStoreError(error); }
 }
 
@@ -275,7 +321,7 @@ export async function adminDraftSaleTermsRequest(request: Request, context: Prod
       expectedDraftVersion: revision.draft, expectedSaleTermsVersion: revision.saleTerms,
       saleTerms: body.saleTerms as ProductSaleTermsInput,
     });
-    return adminJson({ product: await productDto(auth.actor, providerId, productId), publicationUpdated: false });
+    return adminJson({ product: await productDto(auth.actor, providerId, productId), publicationUpdated: false, publicationConsentVersion: config.experiencePublicationConsentVersion });
   } catch (error) { return mapStoreError(error); }
 }
 
@@ -300,7 +346,7 @@ export async function adminDraftMediaRequest(request: Request, context: ProductC
     }
     try {
       await repository.saveMediaSelectionAsAdmin(auth.actor, providerId, productId, revision.draft, media);
-      return adminJson({ product: await productDto(auth.actor, providerId, productId) });
+      return adminJson({ product: await productDto(auth.actor, providerId, productId), publicationConsentVersion: config.experiencePublicationConsentVersion });
     } catch (error) { return mapStoreError(error); }
   }
   if (request.headers.get("x-experience-photo-rights-confirmed") !== "true") return adminJson({ error: { code: "PHOTO_RIGHTS_CONFIRMATION_REQUIRED" } }, 422);
@@ -334,7 +380,7 @@ export async function adminDraftMediaRequest(request: Request, context: ProductC
       altText, altTextJa, publicCredit,
     };
     await repository.addMediaAsAdmin(auth.actor, providerId, productId, asset); registered = true;
-    return adminJson({ product: await productDto(auth.actor, providerId, productId) }, 201);
+    return adminJson({ product: await productDto(auth.actor, providerId, productId), publicationConsentVersion: config.experiencePublicationConsentVersion }, 201);
   } catch (error) {
     if (stored && !registered) await storage.remove(objectKey).catch(() => undefined);
     return mapStoreError(error);

@@ -1,10 +1,10 @@
 # 構成とデータ境界
 
-> **現行方針（2026-11-04）**: niho-experienceが商品・公開版・開催枠・Experience予約・取引の正本を持つ。本人が商品を作り、公開・停止・再開する。新しいExperience販売に旧NIHO商品の移行や同一開催回の二重販売を持ち込まない。既存の旧NIHO予約照会・履行・取消／返金はNIHO側の責任に残す。現在のNIHO認証本人と同じ販売者のConnect口座だけをサーバー契約で参照する。コミュニティディナーは販売者・受取先ともPanasonicで、NIHOkamakuraはStripe表示名。Checkoutは有効なExperience公開版だけを対象にする。[ADR 0002](adr/0002-experience-domain-ownership.md) と [NIHO Host v1 consumer contract](host-niho-v1-consumer.md) を優先する。
+> **現行方針（2026-11-05）**: niho-experienceが商品・公開版・開催枠・Experience予約・取引の正本を持つ。通常は本人が商品を作り、公開・停止・再開する。販売者へ確認した後、現在のNIHO Adminが未公開DRAFTを事務局判断で代理公開する例外を追加した。AdminをOWNERとして扱わず、同じ公開条件・実Admin actor・確認方法を監査する。新しいExperience販売に旧NIHO商品の移行や同一開催回の二重販売を持ち込まない。既存の旧NIHO予約照会・履行・取消／返金はNIHO側の責任に残す。現在のNIHO認証本人と同じ販売者のConnect口座だけをサーバー契約で参照する。コミュニティディナーは販売者・受取先ともPanasonicで、NIHOkamakuraはStripe表示名。Checkoutは有効なExperience公開版だけを対象にする。[ADR 0002](adr/0002-experience-domain-ownership.md) と [NIHO Host v1 consumer contract](host-niho-v1-consumer.md) を優先する。
 
 決定日：2026-10-19。画面の独立開発と、NIHOアカウント・販売者口座・売上管理の共通利用を両立する。
 
-2026-11-03 のオーナー決定で、提供者の登録審査・体験ごとの掲載承認・通常保存時の再審査は廃止する。必要条件を満たした OWNER が同意して公開・停止・再開し、運営による規約違反等の停止は独立して残す。目標仕様と現行 HTTP 版の移行境界は [ホスト自身による体験の公開](host-publication.md)（#369）を正とする。以下の NIHO の「掲載審査」は切替前の現状を説明する。
+2026-11-03 のオーナー決定で、提供者の登録審査・体験ごとの掲載承認・通常保存時の再審査は廃止する。必要条件を満たした OWNER が同意して公開・停止・再開し、運営による規約違反等の停止は独立して残す。2026-11-05 の例外では、事務局が準備した未公開商品だけを、販売者確認と同じ公開条件・immutable監査の後に代理公開できる。目標仕様と現行 HTTP 版の移行境界は [ホスト自身による体験の公開](host-publication.md)（#369）と [事務局の代理登録](assisted-launch.md) を正とする。以下の NIHO の「掲載審査」は切替前の現状を説明する。
 
 ## 責務
 
@@ -20,20 +20,21 @@
 ```mermaid
 flowchart LR
   G[旅行者] --> W[niho-experience]
-  W -->|公開カタログ・SSR| API[NIHO共通API]
+  W -->|公開カタログ・SSR| API[Experience API]
   G -->|画面から限定ゲストAPIへ予約入力を送信| API
   H[ホスト] --> HC[niho-experience /host]
   HC -->|ログイン| N[NIHOの確認画面]
   N -->|一度きりのコード| HC
-  HC -->|Bearer・サーバーから| API
-  API --> DB[商品・予約・売上台帳]
+  HC -->|本人の操作| API
+  API -->|現在本人・Connect口座の限定読取| NAPI[NIHO共通API]
+  API --> DB[Experience商品・予約・売上台帳]
   API --> S[販売者口座のStripe Direct Checkout]
   S -->|署名済みイベント| API
 ```
 
 ## 旅行者と提供者
 
-旅行者は英語のページで体験を探し、日時・人数・料金・販売者・キャンセル条件を確認する。会員登録を求めず、必要最小限の連絡先をゲストAPIへ送信し、StripeのCheckoutに移る。価格、在庫、販売者、決済口座は共通APIが決定する。v1の予約確認は既存NIHO側を使い、決済の成立はwebhookを正とする。
+旅行者は英語のページで体験を探し、日時・人数・料金・販売者・キャンセル条件を確認する。会員登録を求めず、必要最小限の連絡先をExperienceのゲストAPIへ送信し、有料予約はStripeのCheckoutに移る。価格、在庫、販売者、決済口座はExperienceの公開版と取引処理が決定する。予約確認・取消／返金もExperienceが扱い、決済の成立は署名を検証したwebhookを正とする。
 
 提供者（ホスト）は `/host` へNIHOでログインする。Experience serverが一度きりのコードをNIHO専用Web access tokenへ交換し、tokenはsealed server-side sessionだけに保持する。NIHO cookieは共有せず、ブラウザーへtokenを渡さない。現在のNIHO Host v1.0.0は本人IDとACTIVE状態、明示指定したlegacy Connect readだけを提供し、provider一覧・登録・更新・Connect変更やExperience商品APIは持たない。契約のsource SHA、認証headers、response schema、配備条件は[NIHO Host v1 consumer contract](host-niho-v1-consumer.md)を参照する。
 

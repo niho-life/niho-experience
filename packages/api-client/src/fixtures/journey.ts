@@ -171,7 +171,7 @@ const FAQ: Readonly<Record<string, readonly ExperienceFaqItem[]>> = {
     { question: "Who will I meet?", answer: "The community members who join vary by date, so we can't guarantee who you will meet. You may meet longtime residents, people working in arts and culture, or international neighbors who have made Kamakura home." },
     { question: "How do I find NIHO?", answer: NIHO_DIRECTIONS },
     { question: "Is it wheelchair accessible?", answer: "No. The living room is on the second floor." },
-    { question: "How do I pay?", answer: PAY_ON_APPROVAL },
+    { question: "How do I pay?", answer: PAY_INSTANT },
     { question: "What is the cancellation policy?", answer: freeCancellation(24) },
   ],
   "kamakura-coffee-roasting": [

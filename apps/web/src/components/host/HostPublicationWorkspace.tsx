@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HOST_SURFACE, consoleButtonClass } from "./host-ui";
 import { HostPageBody, PageHead } from "./ui";
+import { HostSharedPhotoOffer } from "./HostSharedPhoto";
 import {
   asPublicationPrice,
   publicationTermsForm,
@@ -16,6 +17,7 @@ import { publicationCanPublish, publicationNextAction } from "./publication-work
 import { canonicalPublicationJson as canonicalJson, confirmPublicationEnglish, englishPublicationManuscript } from "./publication-confirmation";
 import { photoRightsConfirmed, type PhotoRightsConfirmation } from "./photo-rights";
 import { reapplyProviderMediaEdits } from "./publication-conflict";
+import { PUBLICATION_FAQ_LIMITS, publicationContentFaqProblem, publicationFaqProblem, publicationFaqRows, withPublicationFaq, type PublicationFaqRow } from "./publication-faq";
 
 type Status = "DRAFT" | "PUBLISHED" | "STOPPED" | "RESTART_REQUIRED" | "SUSPENDED";
 type SaleTerms = {
@@ -41,6 +43,13 @@ type Product = {
   status: Status;
   publicationNeedsUpdate: boolean;
   publicationBlockers: string[];
+  adminEnglishReview?: {
+    reviewed: boolean;
+    reviewedAtUtc: string | null;
+    contentFingerprint: string;
+    japaneseFingerprint: string | null;
+    englishFingerprint: string | null;
+  };
   draft: { slug: string; publicTitle: string; content: Record<string, unknown>; currency: "JPY"; unitAmount: number };
   sellerDisplayName: string;
   saleTerms: SaleTerms | null;
@@ -49,11 +58,12 @@ type Product = {
 };
 type ProductResponse = { product: Product; publicationConsentVersion?: string };
 type TimelineItem = { time: string; title: string; text: string; photoIndex: number | null };
-type LocaleManuscript = { title: string; lead: string; description: string; language: string; highlights: string[]; included: string[]; notIncluded: string[]; knowBeforeYouGo: string[]; notSuitableFor: string[]; timeline: TimelineItem[] };
+type LocaleManuscript = { title: string; lead: string; description: string; language: string; highlights: string[]; included: string[]; notIncluded: string[]; knowBeforeYouGo: string[]; notSuitableFor: string[]; timeline: TimelineItem[]; faq?: PublicationFaqRow[] };
 type Props = {
   productId?: string;
   create?: boolean;
   bookingGuideHref?: string;
+  paymentConsentHref?: string;
   mode?: "host" | "admin-draft";
   apiBase?: string;
   experiencesBase?: string;
@@ -95,8 +105,8 @@ const BLOCKER_COPY: Record<string, string> = {
   PHOTOS_REQUIRED: "商品写真を追加し、日本語と英語の説明を入力してください。",
   PRICE_REQUIRED: "有効な商品価格を入力してください。",
   PUBLIC_CONTENT_INVALID: "公開原稿の入力内容を確認してください。",
-  READINESS_EXPIRED: "販売者と受取口座の確認が期限切れです。再読み込みしてください。",
-  READINESS_MISSING: "販売者の設定を読み込めませんでした。再読み込みしてください。",
+  READINESS_EXPIRED: "販売者と受取口座の確認が期限切れです。販売者本人がHost画面で最新状態を確認した後、再度読み込んでください。",
+  READINESS_MISSING: "販売者の最新状態を確認できません。販売者本人がHost画面で最新状態を確認した後、再度読み込んでください。",
   SCHEDULE_REQUIRED: "販売できる開催枠をカレンダーに追加してください。",
   SELLER_MISMATCH: "販売者情報をNIHOの本人情報と確認できません。",
   SLUG_IN_USE: "この公開URLはすでに使われています。別のURLを入力してください。",
@@ -129,7 +139,10 @@ function isRecord(value: unknown): value is Record<string, unknown> { return typ
 function lines(value: unknown): string { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").join("\n") : ""; }
 function japaneseManuscript(content: Record<string, unknown>): LocaleManuscript {
   const source = isRecord(content.ja) ? content.ja : {};
+  // FAQ is optional: no key unless rows exist, so a pre-FAQ manuscript keeps its exact shape and fingerprint.
+  const faq = publicationFaqRows(source.faq);
   return {
+    ...(faq.length ? { faq } : {}),
     title: typeof source.title === "string" ? source.title : "", lead: typeof source.lead === "string" ? source.lead : "",
     description: typeof source.description === "string" ? source.description : "", language: typeof source.language === "string" ? source.language : "",
     highlights: Array.isArray(source.highlights) ? source.highlights.filter((item): item is string => typeof item === "string") : [],
@@ -211,6 +224,7 @@ export function HostPublicationWorkspace({
   productId,
   create = false,
   bookingGuideHref,
+  paymentConsentHref,
   mode = "host",
   apiBase = "/host/api/products",
   experiencesBase = "/host/experiences",
@@ -242,15 +256,21 @@ export function HostPublicationWorkspace({
   const [providerMediaBaseline, setProviderMediaBaseline] = useState("");
   const [photoRights, setPhotoRights] = useState<PhotoRightsConfirmation<File> | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
+  // The photo came from Android's share sheet (#177 P3): the file input cannot show it, so its name is shown beside it.
+  const [sharedPhotoName, setSharedPhotoName] = useState<string | null>(null);
   const rightsConfirmed = photoRightsConfirmed(photoRights, selectedPhoto, product?.id ?? null, photoPlacement);
   const [translationBusy, setTranslationBusy] = useState(false);
+  const [sellerConfirmationMethod, setSellerConfirmationMethod] = useState<"" | "VERBAL" | "WRITTEN">("");
+  const [sellerConfirmed, setSellerConfirmed] = useState(false);
+  const [publicationPhotoRightsConfirmed, setPublicationPhotoRightsConfirmed] = useState(false);
   const [createDraftRestored, setCreateDraftRestored] = useState(false);
   const japaneseSourceRef = useRef<LocaleManuscript>(blankJapanese);
   const englishDraftRef = useRef<{ title: string; content: Record<string, unknown> }>({ title: "", content: blankContent });
 
   const baselineForm = useMemo(() => parseBaseline(baseline), [baseline]);
-  const draftFormJson = useMemo(() => JSON.stringify({ slug, title, unitAmount, content }), [slug, title, unitAmount, content]);
-  const baselineDraftJson = baselineForm ? JSON.stringify({ slug: baselineForm.slug, title: baselineForm.title, unitAmount: baselineForm.unitAmount, content: baselineForm.content }) : "";
+  // jsonb may return object keys in a different order; only content changes are unsaved.
+  const draftFormJson = useMemo(() => canonicalJson({ slug, title, unitAmount, content }), [slug, title, unitAmount, content]);
+  const baselineDraftJson = baselineForm ? canonicalJson({ slug: baselineForm.slug, title: baselineForm.title, unitAmount: baselineForm.unitAmount, content: baselineForm.content }) : "";
   const draftDirty = !!product && (!baselineForm || draftFormJson !== baselineDraftJson);
   const termsDirty = !!product && (!baselineForm || JSON.stringify(terms) !== JSON.stringify(baselineForm.terms));
   const mediaDirty = !!product && (!baselineForm || JSON.stringify(mediaForm(mediaDraft)) !== JSON.stringify(baselineForm.media));
@@ -262,6 +282,17 @@ export function HostPublicationWorkspace({
     const next = { ...japaneseSourceRef.current, [key]: value } as LocaleManuscript;
     japaneseSourceRef.current = next;
     setContent((current) => ({ ...current, ja: next, translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } }));
+  }
+
+  function updateFaq(locale: "en" | "ja", rows: PublicationFaqRow[]) {
+    if (locale === "ja") {
+      const next = withPublicationFaq(japaneseSourceRef.current, rows);
+      japaneseSourceRef.current = next;
+      setContent((current) => ({ ...current, ja: next, translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } }));
+      return;
+    }
+    englishDraftRef.current = { ...englishDraftRef.current, content: withPublicationFaq(englishDraftRef.current.content, rows) };
+    setContent((current) => withPublicationFaq({ ...current, translation: { ...(isRecord(current.translation) ? current.translation : {}), confirmedSourceFingerprint: null, confirmedEnglishFingerprint: null } }, rows));
   }
 
   function updateEnglishTitle(value: string) {
@@ -321,6 +352,11 @@ export function HostPublicationWorkspace({
       providerVersion = providerBody.providerMedia.version as number;
     }
     setProduct(current); setConsentVersion(result.publicationConsentVersion ?? "");
+    if (adminDraft) {
+      setSellerConfirmed(false);
+      setSellerConfirmationMethod("");
+      setPublicationPhotoRightsConfirmed(false);
+    }
     setProviderMediaVersion(providerVersion);
     const restored = (() => { try { const saved = window.sessionStorage.getItem(`${storageNamespace}:${current.id}`); return saved ? JSON.parse(saved) as Record<string, unknown> : null; } catch { return null; } })();
     const nextContent = contentFrom(current);
@@ -330,10 +366,13 @@ export function HostPublicationWorkspace({
     const serverForm = { slug: current.draft.slug, title: current.draft.publicTitle, unitAmount: String(current.draft.unitAmount), content: nextContent, terms: nextTerms, media: mediaForm(current.media), providerMedia: providerMediaForm(currentProviderMedia) };
     if (restoreLocal && restored && isRecord(restored) && typeof restored.slug === "string" && typeof restored.title === "string" && isRecord(restored.content) && isRecord(restored.terms)) {
       const restoredProviderMedia = storedProviderMedia(restored.providerMedia, currentProviderMedia);
-      setSlug(restored.slug); setTitle(restored.title); setUnitAmount(String(restored.unitAmount ?? "")); setContent(restored.content); setTerms(storedTerms(restored.terms, nextTerms)); setMediaDraft(storedMedia(restored.media, current.media)); setProviderMediaDraft(restoredProviderMedia);
+      const restoredTerms = storedTerms(restored.terms, nextTerms);
+      const restoredMedia = storedMedia(restored.media, current.media);
+      const restoredForm = { slug: restored.slug, title: restored.title, unitAmount: String(restored.unitAmount ?? ""), content: restored.content, terms: restoredTerms, media: mediaForm(restoredMedia), providerMedia: providerMediaForm(restoredProviderMedia) };
+      setSlug(restoredForm.slug); setTitle(restoredForm.title); setUnitAmount(restoredForm.unitAmount); setContent(restoredForm.content); setTerms(restoredTerms); setMediaDraft(restoredMedia); setProviderMediaDraft(restoredProviderMedia);
       setBaseline(JSON.stringify(serverForm));
       setProviderMediaBaseline(JSON.stringify(providerMediaForm(currentProviderMedia)));
-      if (JSON.stringify(restored) !== JSON.stringify(serverForm)) setNotice("保存していない入力を復元しました。");
+      if (canonicalJson(restoredForm) !== canonicalJson(serverForm)) setNotice("保存していない入力を復元しました。");
       japaneseSourceRef.current = japaneseManuscript(restored.content);
       englishDraftRef.current = { title: restored.title, content: restored.content };
     } else {
@@ -421,6 +460,8 @@ export function HostPublicationWorkspace({
 
   async function createProduct(event: React.FormEvent) {
     event.preventDefault(); if (busy || !slug.trim() || !title.trim() || asPublicationPrice(unitAmount) === null) return;
+    const faqProblem = publicationContentFaqProblem(content);
+    if (faqProblem) { setError(faqProblem); return; }
     setBusy(true); setError(""); setNotice("");
     const draftContent = { ...blankContent, ...content };
     try {
@@ -454,10 +495,17 @@ export function HostPublicationWorkspace({
     const amount = asPublicationPrice(unitAmount);
     const saleTerms = publicationTermsPayload(terms, product.saleTerms);
     if (draftDirty && amount === null) { setError("料金は無料なら0円、有料なら50円以上の整数で入力してください。"); return; }
+    const faqProblem = draftDirty ? publicationContentFaqProblem(content) : null;
+    if (faqProblem) { setError(`${faqProblem}入力はこのブラウザーに保持しています。`); return; }
     if (!draftDirty && !mediaDirty && !termsDirty && !providerMediaDirty) return;
     if (termsDirty && !saleTerms && !draftDirty && !mediaDirty && !providerMediaDirty) {
       setError("料金・取消条件はまだ保存できません。人数と、確定した取消期限・返金割合を入力してください。入力はこのブラウザーに保持しています。");
       return;
+    }
+    if (adminDraft) {
+      setSellerConfirmed(false);
+      setSellerConfirmationMethod("");
+      setPublicationPhotoRightsConfirmed(false);
     }
     setBusy(true); setError(""); setNotice("");
     let shouldReconcile = false;
@@ -599,7 +647,7 @@ export function HostPublicationWorkspace({
       setProviderMediaDraft(retainedProviderMedia);
       setProviderMediaBaseline(JSON.stringify(latestProviderMediaForm));
       setBaseline(JSON.stringify(latestBaseline));
-      if (JSON.stringify(localComparable) === JSON.stringify(latestBaseline)) clearLocal(storageNamespace, latest.id);
+      if (canonicalJson(localComparable) === canonicalJson(latestBaseline)) clearLocal(storageNamespace, latest.id);
       else saveLocal(storageNamespace, latest.id, localDraft);
       setConflictProduct(null);
       setNotice("最新の保存状態を基準に、入力を保持しました。保存すると競合した項目をこの入力で更新します。");
@@ -630,14 +678,29 @@ export function HostPublicationWorkspace({
       setError("保存済みの内容に未完了の公開条件があります。「次にすること」を確認してください。");
       return;
     }
-    if (action === "publish" && !window.confirm("掲載条件を確認し、この商品を公開します。公開内容と販売条件に同意しますか？")) return;
+    if (action === "publish" && adminDraft && (!sellerConfirmed || !publicationPhotoRightsConfirmed || !sellerConfirmationMethod)) {
+      setError("販売者への確認方法、販売者確認済み、写真掲載権利確認済みをすべて確認してください。");
+      return;
+    }
+    if (action === "publish" && !window.confirm(adminDraft
+      ? "販売者への確認と公開条件を記録し、事務局の代理公開として公開しますか？"
+      : "掲載条件を確認し、この商品を公開します。公開内容と販売条件に同意しますか？")) return;
     if (action === "stop" && !window.confirm("この商品の新しい予約を停止しますか？")) return;
     setBusy(true); setError(""); setNotice("");
     try {
-      if (adminDraft) throw new Error("公開・停止はOWNER本人の画面で行ってください。");
-      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/${action}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(action === "publish" ? { version: product.version, consentVersion, accepted: true } : { version: product.version }) });
+      if (adminDraft && action === "stop") throw new Error("事務局は公開済み商品の停止を操作できません。");
+      const publishBody = adminDraft
+        ? { version: product.version, accepted: true, sellerConfirmationMethod, photoRightsConfirmed: true, consentVersion }
+        : { version: product.version, consentVersion, accepted: true };
+      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/${action}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(action === "publish" ? publishBody : { version: product.version }) });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
+      if (adminDraft) {
+        setNotice("事務局の代理公開として公開しました。");
+        router.push(experiencesBase);
+        router.refresh();
+        return;
+      }
       const saved = (body as ProductResponse).product;
       setProduct(saved); setNotice(action === "publish" ? "公開しました。" : "販売を停止しました。");
       await refresh();
@@ -647,15 +710,38 @@ export function HostPublicationWorkspace({
     } finally { setBusy(false); }
   }
 
+  async function confirmAdminEnglish() {
+    if (!adminDraft || !product || dirty || busy || translationBusy) {
+      if (dirty) setError("英語原稿の確認前に入力を保存してください。");
+      return;
+    }
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/english-review`, {
+        method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: product.version, reviewed: true }),
+      });
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
+      if (!isRecord(body) || !isRecord(body.product)) throw new Error("英語原稿の確認結果を読み取れませんでした。");
+      setProduct((body as ProductResponse).product);
+      setNotice("現在の日英原稿を事務局レビューとして確認しました。");
+      await refresh(false);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "英語原稿を確認できませんでした。"); }
+    finally { setBusy(false); }
+  }
+
   async function generateEnglish() {
     if (!product || translationBusy || busy) return;
     const japanese = japaneseSourceRef.current;
     if (!japanese.title.trim() || !japanese.lead.trim() || !japanese.description.trim()) { setError("日本語の商品名・紹介文・説明を入力してください。"); return; }
+    const faqProblem = publicationFaqProblem(publicationFaqRows(japanese.faq), "日本語");
+    if (faqProblem) { setError(faqProblem); return; }
     const snapshot = canonicalJson(japanese);
     const englishSnapshot = canonicalJson(englishDraftRef.current);
     setTranslationBusy(true); setError(""); setNotice("");
     try {
-      if (adminDraft) throw new Error("英語案は手入力し、OWNER本人が通常画面で確認してください。");
+      if (adminDraft) throw new Error("代理登録では英語原稿を手入力し、事務局レビューとして確認してください。");
       const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/translation`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ japanese }) });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
@@ -664,12 +750,13 @@ export function HostPublicationWorkspace({
       if (canonicalJson(englishDraftRef.current) !== englishSnapshot) { setNotice("翻訳中に英語原稿が編集されたため、結果を破棄しました。入力した英語は保持しています。"); return; }
       if (typeof result.sourceFingerprint !== "string" || !isRecord(result.english)) throw new Error("翻訳結果を確認できませんでした。原稿は変更していません。");
       const english = result.english as unknown as LocaleManuscript;
-      const nextContent = {
+      // The translation keeps the Japanese FAQ rows (the server checks the count); none removes the English FAQ.
+      const nextContent = withPublicationFaq({
         ...englishDraftRef.current.content, lead: english.lead, description: english.description, facts: { language: english.language },
         highlights: english.highlights, included: english.included, notIncluded: english.notIncluded,
         knowBeforeYouGo: english.knowBeforeYouGo, notSuitableFor: english.notSuitableFor, timeline: english.timeline,
         translation: { sourceFingerprint: result.sourceFingerprint, confirmedSourceFingerprint: null, confirmedEnglishFingerprint: null },
-      };
+      }, publicationFaqRows(english.faq));
       englishDraftRef.current = { title: english.title, content: nextContent };
       setTitle(english.title);
       setContent(nextContent);
@@ -712,7 +799,7 @@ export function HostPublicationWorkspace({
         setProduct(next); setMediaDraft(next.media);
         setNotice("体験写真を追加しました。保存すると公開中の商品にも反映されます。");
       }
-      setSelectedPhoto(null); setPhotoRights(null); setPhotoAlt(""); setPhotoAltJa(""); setPhotoCredit("");
+      setSelectedPhoto(null); setSharedPhotoName(null); setPhotoRights(null); setPhotoAlt(""); setPhotoAltJa(""); setPhotoCredit("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "写真を追加できませんでした。選択した写真と入力を保持しています。"); }
     finally { setBusy(false); }
   }
@@ -740,7 +827,7 @@ export function HostPublicationWorkspace({
   }
 
   if (create) return <HostPageBody><PageHead title={adminDraft ? "商品の代理登録" : "体験を作成"} /><form onSubmit={createProduct} className={`${HOST_SURFACE} space-y-5 p-4 md:p-6`}>
-    <p className="text-sm text-ink-soft">{adminDraft ? "選択した運営登録済み販売者へ、非公開の下書きだけを作成します。公開はOWNER本人が通常のホスト画面で行います。" : "新しい商品をExperienceに下書き保存します。公開前の入力は公開されません。"}</p>
+    <p className="text-sm text-ink-soft">{adminDraft ? "選択した運営登録済み販売者へ、非公開の商品下書きを作成します。販売者へ確認後、通常公開と同じ条件を満たす未公開draftだけを事務局判断で代理公開できます。" : "新しい商品をExperienceに下書き保存します。公開前の入力は公開されません。"}</p>
     {error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : null}
     <Field label="公開URL用の英数字slug" value={slug} onChange={setSlug} placeholder="kamakura-community-dinner" />
     <Field label="商品名（公開用）" value={title} onChange={setTitle} />
@@ -750,7 +837,7 @@ export function HostPublicationWorkspace({
   </form></HostPageBody>;
 
   if (!productId) return <HostPageBody><PageHead title={adminDraft ? "代理登録の商品" : "体験"}>{bookingGuideHref ? <Link className={consoleButtonClass("secondary")} href={bookingGuideHref}>予約後の集合案内</Link> : null}</PageHead><section className={`${HOST_SURFACE} p-4 md:p-6`}>
-    <div className="mb-4 flex items-center justify-between gap-3"><p className="text-ink-soft">{adminDraft ? "事務局が準備中の非公開下書き" : "あなたが販売する体験"}</p><Link className={consoleButtonClass("primary")} href={createHref}>{adminDraft ? "商品を代理登録" : "体験を作成"}</Link></div>
+    <div className="mb-4 flex items-center justify-between gap-3"><p className="text-ink-soft">{adminDraft ? "事務局が作成した、一度も公開していない下書き" : "あなたが販売する体験"}</p><Link className={consoleButtonClass("primary")} href={createHref}>{adminDraft ? "商品を代理登録" : "体験を作成"}</Link></div>
     {error ? <p role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : null}
     {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={`${experiencesBase}/${encodeURIComponent(item.id)}`}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p></div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}
   </section></HostPageBody>;
@@ -767,7 +854,10 @@ export function HostPublicationWorkspace({
   // A pending draft may have a different slug from the current publication.
   const publicHref = product.status === "PUBLISHED" && !product.publicationNeedsUpdate ? `/experiences/${encodeURIComponent(product.draft.slug)}` : null;
   const nextActionControl = adminDraft
-    ? (dirty ? <button type="button" disabled={busy || !!conflictProduct} className={consoleButtonClass("primary")} onClick={() => void saveAll()}>入力を保存</button> : <Link className={consoleButtonClass("primary")} href={calendarHref}>開催枠を確認</Link>)
+    ? (dirty ? <button type="button" disabled={busy || !!conflictProduct} className={consoleButtonClass("primary")} onClick={() => void saveAll()}>入力を保存</button>
+      : !product.adminEnglishReview?.reviewed ? <button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void confirmAdminEnglish()}>事務局として英語原稿を確認</button>
+        : savedBlockers.length === 0 ? <button type="button" disabled={busy || !canPublish || !sellerConfirmed || !publicationPhotoRightsConfirmed || !sellerConfirmationMethod} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>事務局として代理公開</button>
+          : <Link className={consoleButtonClass("primary")} href={calendarHref}>開催枠を確認</Link>)
     : nextAction === "SAVE"
     ? <button type="button" disabled={busy || !!conflictProduct} className={consoleButtonClass("primary")} onClick={() => void saveAll()}>入力を保存</button>
     : nextAction === "SCHEDULE"
@@ -780,19 +870,22 @@ export function HostPublicationWorkspace({
             ? <a className={consoleButtonClass("primary")} href="#product-editor">写真を追加</a>
             : nextAction === "SUPPORT"
               ? <Link className={consoleButtonClass("primary")} href="/host/settings#settings-support">サポート・手数料の条件を確認</Link>
+            : nextAction === "PAYMENT_CONSENT" && paymentConsentHref
+              ? <a className={consoleButtonClass("primary")} href={paymentConsentHref} referrerPolicy="no-referrer">NIHOで受取口座を確認</a>
             : nextAction === "PUBLISH"
               ? <button type="button" disabled={busy || !canPublish} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>同意して公開</button>
               : nextAction === "LIVE" && publicHref
                 ? <Link className={consoleButtonClass("primary")} href={publicHref}>公開ページを見る</Link>
                 : null;
   const nextActionText = conflictProduct ? "競合を解消してから保存・公開できます。現在の入力は保持しています。"
-    : adminDraft ? (dirty ? "代理登録中の入力を保存してください。" : "下書きはOWNER本人のホスト画面へ引き継がれます。公開同意と公開操作は本人だけが行います。")
+    : adminDraft ? (dirty ? "代理登録中の入力を保存してください。" : !product.adminEnglishReview?.reviewed ? "現在の日英原稿を事務局レビューとして確認してください。" : savedBlockers.length ? "通常公開と同じ未完了条件を解消してください。" : "販売者への確認方法と写真掲載権利を記録すると、事務局として代理公開できます。")
     : nextAction === "SAVE" ? "まず、現在の入力を保存してください。公開可否は保存済みの内容で判定します。"
     : nextAction === "SCHEDULE" ? "次に、旅行者が選べる開催枠をこの商品へ追加してください。"
       : nextAction === "PRICING" ? "開催枠を確認したうえで、基本料金または枠別料金、人数、取消条件を保存してください。"
         : nextAction === "MANUSCRIPT" ? "日本語と英語の公開原稿を完成し、英語原稿を確認してください。"
           : nextAction === "PHOTOS" ? "掲載許諾を確認した商品写真と、日本語・英語の説明を追加してください。"
             : nextAction === "SUPPORT" ? "予約受付の前に、NIHOサポートの利用範囲と合計手数料の条件を確認してください。"
+            : nextAction === "PAYMENT_CONSENT" ? "現在の受取口座をExperienceで利用する同意を、NIHOで確認してください。"
             : nextAction === "EXTERNAL" ? "本人・受取口座・手数料・掲載条件の確認が必要です。下の未完了項目を確認してください。"
               : nextAction === "PUBLISH" ? "保存済みの公開内容と販売条件を確認し、掲載条件に同意して公開できます。"
                 : "公開中です。旅行者の詳細ページと予約画面を確認できます。";
@@ -807,6 +900,26 @@ export function HostPublicationWorkspace({
     </div>)}
     {!items.length ? <p className="text-sm text-muted">当日の流れを表示する場合は項目を追加してください。</p> : null}
   </section>;
+  const faqSection = (locale: "en" | "ja") => {
+    const rows = publicationFaqRows(locale === "ja" ? (isRecord(content.ja) ? content.ja.faq : undefined) : content.faq);
+    const language = locale === "ja" ? "日本語" : "英語";
+    const problem = publicationFaqProblem(rows, language);
+    const full = rows.length >= PUBLICATION_FAQ_LIMITS.maxItems;
+    const change = (index: number, key: keyof PublicationFaqRow, value: string) => updateFaq(locale, rows.map((row, at) => at === index ? { ...row, [key]: value } : row));
+    return <section className="space-y-3 rounded-xl border border-line p-3" aria-labelledby={`publication-faq-${locale}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h3 id={`publication-faq-${locale}`} className="font-bold">よくある質問（{language}・任意）</h3><button type="button" disabled={busy || full} className={consoleButtonClass("secondary", "md", "min-h-11")} onClick={() => updateFaq(locale, [...rows, { question: "", answer: "" }])}>質問を追加</button></div>
+      <p className="text-xs text-muted">{locale === "ja" ? "予約前によく聞かれることを質問と答えの組で書きます。書かなければ公開ページに表示しません。" : "英語ページに表示する質問と答えです。日本語から英語案を作成すると翻訳案が入ります。"}最大{PUBLICATION_FAQ_LIMITS.maxItems}件、質問{PUBLICATION_FAQ_LIMITS.questionMaxLength}文字・答え{PUBLICATION_FAQ_LIMITS.answerMaxLength}文字まで。</p>
+      {rows.map((row, index) => <div key={`${locale}-faq-${index}`} className="grid gap-2 rounded-xl bg-sand/40 p-3">
+        <Field label={`質問${index + 1}（${language}）`} value={row.question} onChange={(next) => change(index, "question", next)} />
+        <p className={`text-right text-xs ${row.question.length > PUBLICATION_FAQ_LIMITS.questionMaxLength ? "font-bold text-danger" : "text-muted"}`}>{row.question.length}/{PUBLICATION_FAQ_LIMITS.questionMaxLength}文字</p>
+        <Field label={`答え${index + 1}（${language}）`} value={row.answer} multiline rows={3} onChange={(next) => change(index, "answer", next)} />
+        <p className={`text-right text-xs ${row.answer.length > PUBLICATION_FAQ_LIMITS.answerMaxLength ? "font-bold text-danger" : "text-muted"}`}>{row.answer.length}/{PUBLICATION_FAQ_LIMITS.answerMaxLength}文字</p>
+        <button type="button" disabled={busy} className={`${consoleButtonClass("ghost", "md", "min-h-11")} justify-self-start`} onClick={() => updateFaq(locale, rows.filter((_, at) => at !== index))}>この質問を削除</button>
+      </div>)}
+      {full ? <p className="text-sm text-muted">質問は{PUBLICATION_FAQ_LIMITS.maxItems}件まで追加できます。</p> : null}
+      <p aria-live="polite" className="text-sm font-bold text-danger">{problem ?? ""}</p>
+    </section>;
+  };
   const updatePhoto = (id: string, patch: Partial<Pick<Media, "altText" | "altTextJa" | "publicCredit">>) => setMediaDraft((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
   const updateProviderPhoto = (id: string, patch: Partial<Pick<ProviderMedia, "altText" | "altTextJa" | "publicCredit">>) => setProviderMediaDraft((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
   const movePhoto = (id: string, direction: -1 | 1) => setMediaDraft((current) => {
@@ -830,13 +943,29 @@ export function HostPublicationWorkspace({
   };
   return <HostPageBody>
     <PageHead title={title || "体験を編集"} />
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[product.status]}</span><div className="flex flex-wrap gap-2"><Link className={consoleButtonClass("secondary")} href={calendarHref}>開催日程を設定</Link>{!adminDraft && publicHref ? <Link className={consoleButtonClass("secondary")} href={publicHref}>公開ページを見る</Link> : null}<button type="button" disabled={busy || !dirty || !!conflictProduct} className={consoleButtonClass("secondary")} onClick={() => void saveAll()}>下書きを保存</button>{!adminDraft && (product.status !== "PUBLISHED" || product.publicationNeedsUpdate) ? <button type="button" disabled={busy || !canPublish} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>{product.status === "PUBLISHED" ? "変更を公開" : "公開・再開"}</button> : null}{!adminDraft && product.status === "PUBLISHED" ? <button type="button" disabled={busy || dirty || !!conflictProduct} className={consoleButtonClass("secondary")} onClick={() => void changeState("stop")}>販売を停止</button> : null}</div></div>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[product.status]}</span><div className="flex flex-wrap gap-2"><Link className={consoleButtonClass("secondary")} href={calendarHref}>開催日程を設定</Link>{!adminDraft && publicHref ? <Link className={consoleButtonClass("secondary")} href={publicHref}>公開ページを見る</Link> : null}<button type="button" disabled={busy || !dirty || !!conflictProduct} className={consoleButtonClass("secondary")} onClick={() => void saveAll()}>下書きを保存</button>{adminDraft ? <button type="button" disabled={busy || !canPublish || !product.adminEnglishReview?.reviewed || !sellerConfirmed || !publicationPhotoRightsConfirmed || !sellerConfirmationMethod} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>事務局として代理公開</button> : null}{!adminDraft && (product.status !== "PUBLISHED" || product.publicationNeedsUpdate) ? <button type="button" disabled={busy || !canPublish} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>{product.status === "PUBLISHED" ? "変更を公開" : "公開・再開"}</button> : null}{!adminDraft && product.status === "PUBLISHED" ? <button type="button" disabled={busy || dirty || !!conflictProduct} className={consoleButtonClass("secondary")} onClick={() => void changeState("stop")}>販売を停止</button> : null}</div></div>
     <section className={`${HOST_SURFACE} mb-4 p-4 md:p-5`} aria-labelledby="next-action-title">
       <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-extrabold text-muted">次にすること</p><h2 id="next-action-title" className="mt-1 font-extrabold">{nextActionText}</h2></div>{nextActionControl}</div>
-      {!adminDraft && !dirty && savedBlockers.length ? <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-soft">{savedBlockers.map((blocker) => <li key={blocker}>{BLOCKER_COPY[blocker] ?? "公開条件を確認してください。"}</li>)}</ul> : null}
-      {!adminDraft && !dirty && savedBlockers.length === 0 ? <p className="mt-2 text-sm font-bold text-moss">保存済みの内容は公開条件を満たしています。</p> : null}
-      {adminDraft ? <p className="mt-2 text-sm text-ink-soft">事務局の保存は掲載同意を代替しません。販売者・Connect口座・公開状態はここでは変更できません。</p> : null}
+      {!dirty && savedBlockers.length ? <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-soft">{savedBlockers.map((blocker) => <li key={blocker}>{BLOCKER_COPY[blocker] ?? "公開条件を確認してください。"}</li>)}</ul> : null}
+      {!dirty && savedBlockers.length === 0 ? <p className="mt-2 text-sm font-bold text-moss">保存済みの内容は公開条件を満たしています。</p> : null}
+      {adminDraft ? <p className="mt-2 text-sm text-ink-soft">事務局は販売者本人を装わず、販売者・Connect口座・OWNER権限を変更しません。代理公開後の停止・再開もこの画面ではできません。</p> : null}
     </section>
+    {adminDraft ? <section className={`${HOST_SURFACE} mb-4 space-y-3 p-4 md:p-5`} aria-labelledby="admin-proxy-publication-title">
+      <h2 id="admin-proxy-publication-title" className="font-extrabold">販売者確認と代理公開</h2>
+      <p className="text-sm text-ink-soft">現在の保存版・販売条件・掲載同意版・事務局担当者・確認方法を公開と同じtransactionで監査記録します。自由記入欄や個人情報は記録しません。</p>
+      <div className="rounded-xl border border-line bg-sand/40 p-3 text-xs text-ink-soft">
+        <p className="font-bold text-ink">事務局の英語原稿レビュー</p>
+        <p className="mt-1">{product.adminEnglishReview?.reviewed ? "現在の保存版を確認済みです。" : "英語文面を読み、日本語原稿との対応を確認してください。"}</p>
+        <dl className="mt-2 grid gap-1 break-all font-mono">
+          <div><dt className="inline font-sans font-bold">Content: </dt><dd className="inline">{product.adminEnglishReview?.contentFingerprint ?? "unavailable"}</dd></div>
+          <div><dt className="inline font-sans font-bold">Japanese: </dt><dd className="inline">{product.adminEnglishReview?.japaneseFingerprint ?? "incomplete"}</dd></div>
+          <div><dt className="inline font-sans font-bold">English: </dt><dd className="inline">{product.adminEnglishReview?.englishFingerprint ?? "incomplete"}</dd></div>
+        </dl>
+      </div>
+      <label className="block text-sm font-bold text-ink-soft">販売者への確認方法<select value={sellerConfirmationMethod} onChange={(event) => setSellerConfirmationMethod(event.target.value as "" | "VERBAL" | "WRITTEN")} className="mt-1 block w-full rounded-xl border border-line bg-white px-3 py-2 font-normal"><option value="">選択してください</option><option value="VERBAL">口頭</option><option value="WRITTEN">書面・メッセージ</option></select></label>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={sellerConfirmed} onChange={(event) => setSellerConfirmed(event.target.checked)} className="mt-1" /><span>販売者へ現在の公開内容・販売条件・掲載条件を確認済みです。</span></label>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={publicationPhotoRightsConfirmed} onChange={(event) => setPublicationPhotoRightsConfirmed(event.target.checked)} className="mt-1" /><span>公開対象の写真について掲載権利を確認済みです。</span></label>
+    </section> : null}
     {dirty ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">未保存の変更があります。公開・停止は保存後に実行できます。</p> : null}
     {product.publicationNeedsUpdate ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">現在の掲載版を維持しています。公開条件を満たす変更を反映すると、確認後に新しい掲載版へ切り替わります。</p> : null}
     {error || conflictProduct ? <div role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error ? <p>{error}</p> : null}{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
@@ -844,7 +973,7 @@ export function HostPublicationWorkspace({
     {product.status === "SUSPENDED" ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950">運営停止中です。入力と下書きは保存できますが、再開は運営の停止解除後に行えます。</p> : null}
     <form id="product-editor" aria-busy={busy} onSubmit={(event) => void saveAll(event)} className="scroll-mt-24 space-y-4">
       <fieldset disabled={busy} className="space-y-4 border-0 p-0">
-      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`}><h2 className="text-base font-extrabold">商品情報・英語原稿</h2><Field label="公開URL用slug" value={slug} onChange={setSlug} /><Field label="商品名（英語・公開用）" value={title} onChange={updateEnglishTitle} /><Field label="大人1人の基本料金（税込・円）" value={unitAmount} onChange={setUnitAmount} /><p className="text-sm text-muted">販売者表示: {product.sellerDisplayName || "未設定"}</p>{textField("lead", "紹介文（英語）", typeof content.lead === "string" ? content.lead : "", 2)}{textField("description", "体験の説明（英語）", typeof content.description === "string" ? content.description : "", 7)}<Field label="当日の言語（英語）" value={isRecord(content.facts) && typeof content.facts.language === "string" ? content.facts.language : ""} onChange={(next) => updateEnglishContent("facts", { ...(isRecord(content.facts) ? content.facts : {}), language: next })} />{listField("highlights", "体験の特徴（英語・1行ごと）")}{listField("included", "料金に含まれるもの（英語・1行ごと）")}{listField("notIncluded", "料金に含まれないもの（英語・1行ごと）")}{listField("knowBeforeYouGo", "参加前に知っておくこと（英語・1行ごと）")}{listField("notSuitableFor", "参加に向かない条件（英語・1行ごと）")}<div className="rounded-xl border border-line bg-sand/40 p-4"><h3 className="font-extrabold">日本語原稿・英語翻訳</h3><p className="mt-1 text-sm text-ink-soft">{adminDraft ? "日本語と英語の原稿を準備できます。英語原稿の最終確認はOWNER本人が通常画面で行います。" : "英語は手入力でも翻訳案からでも準備できます。日英の内容を照合し、英語原稿を確認してから保存してください。"}</p><div className="mt-4 space-y-4"><Field label="商品名（日本語）" value={japaneseManuscript(content).title} onChange={(next) => updateJapanese("title", next)} /><Field label="紹介文（日本語）" value={japaneseManuscript(content).lead} multiline rows={2} onChange={(next) => updateJapanese("lead", next)} /><Field label="体験の説明（日本語）" value={japaneseManuscript(content).description} multiline rows={5} onChange={(next) => updateJapanese("description", next)} /><Field label="当日の言語（日本語）" value={japaneseManuscript(content).language} onChange={(next) => updateJapanese("language", next)} /><Field label="特徴（日本語・1行ごと）" value={japaneseManuscript(content).highlights.join("\n")} multiline rows={3} onChange={(next) => updateJapanese("highlights", next.split("\n").filter(Boolean))} /><Field label="含まれるもの（日本語・1行ごと）" value={japaneseManuscript(content).included.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("included", next.split("\n").filter(Boolean))} /><Field label="含まれないもの（日本語・1行ごと）" value={japaneseManuscript(content).notIncluded.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("notIncluded", next.split("\n").filter(Boolean))} /><Field label="参加前の注意（日本語・1行ごと）" value={japaneseManuscript(content).knowBeforeYouGo.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("knowBeforeYouGo", next.split("\n").filter(Boolean))} /><Field label="参加に向かない条件（日本語・1行ごと）" value={japaneseManuscript(content).notSuitableFor.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("notSuitableFor", next.split("\n").filter(Boolean))} />{!adminDraft ? <><div className="flex flex-wrap gap-2"><button type="button" disabled={translationBusy || busy} className={consoleButtonClass("secondary")} onClick={() => void generateEnglish()}>{translationBusy ? "翻訳中…" : "日本語から英語案を作成"}</button><button type="button" disabled={translationBusy || busy || (isRecord(content.translation) && typeof content.translation.sourceFingerprint === "string" && content.translation.confirmedSourceFingerprint === content.translation.sourceFingerprint)} className={consoleButtonClass("secondary")} onClick={confirmEnglish}>英語原稿を確認</button></div><p className="text-xs text-muted">{isRecord(content.translation) && content.translation.confirmedSourceFingerprint === content.translation.sourceFingerprint && typeof content.translation.sourceFingerprint === "string" ? "英語原稿を確認済み" : "未確認の英語原稿は公開できません。日本語を編集すると確認状態が解除されます。"}</p></> : <p className="text-xs text-muted">代理登録では掲載同意・英語確認済み状態を記録しません。</p>}</div></div><Field label="集合場所の公開区分" value={String(content.meetingPointDisclosure ?? "AFTER_BOOKING")} onChange={(next) => setContent((current) => ({ ...current, meetingPointDisclosure: next === "PUBLIC" ? "PUBLIC" : "AFTER_BOOKING" }))} /><Field label="予約前に公開する集合概要" value={typeof content.meetingOverview === "string" ? content.meetingOverview : ""} multiline rows={3} onChange={(next) => updateContent("meetingOverview", next || null)} /></section>
+      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`}><h2 className="text-base font-extrabold">商品情報・英語原稿</h2><Field label="公開URL用slug" value={slug} onChange={setSlug} /><Field label="商品名（英語・公開用）" value={title} onChange={updateEnglishTitle} /><Field label="大人1人の基本料金（税込・円）" value={unitAmount} onChange={setUnitAmount} /><p className="text-sm text-muted">販売者表示: {product.sellerDisplayName || "未設定"}</p>{textField("lead", "紹介文（英語）", typeof content.lead === "string" ? content.lead : "", 2)}{textField("description", "体験の説明（英語）", typeof content.description === "string" ? content.description : "", 7)}<Field label="当日の言語（英語）" value={isRecord(content.facts) && typeof content.facts.language === "string" ? content.facts.language : ""} onChange={(next) => updateEnglishContent("facts", { ...(isRecord(content.facts) ? content.facts : {}), language: next })} />{listField("highlights", "体験の特徴（英語・1行ごと）")}{listField("included", "料金に含まれるもの（英語・1行ごと）")}{listField("notIncluded", "料金に含まれないもの（英語・1行ごと）")}{listField("knowBeforeYouGo", "参加前に知っておくこと（英語・1行ごと）")}{listField("notSuitableFor", "参加に向かない条件（英語・1行ごと）")}<div className="rounded-xl border border-line bg-sand/40 p-4"><h3 className="font-extrabold">日本語原稿・英語翻訳</h3><p className="mt-1 text-sm text-ink-soft">{adminDraft ? "日本語と手入力の英語原稿を照合し、OWNER本人の確認とは区別された事務局レビューとして確定します。" : "英語は手入力でも翻訳案からでも準備できます。日英の内容を照合し、英語原稿を確認してから保存してください。"}</p><div className="mt-4 space-y-4"><Field label="商品名（日本語）" value={japaneseManuscript(content).title} onChange={(next) => updateJapanese("title", next)} /><Field label="紹介文（日本語）" value={japaneseManuscript(content).lead} multiline rows={2} onChange={(next) => updateJapanese("lead", next)} /><Field label="体験の説明（日本語）" value={japaneseManuscript(content).description} multiline rows={5} onChange={(next) => updateJapanese("description", next)} /><Field label="当日の言語（日本語）" value={japaneseManuscript(content).language} onChange={(next) => updateJapanese("language", next)} /><Field label="特徴（日本語・1行ごと）" value={japaneseManuscript(content).highlights.join("\n")} multiline rows={3} onChange={(next) => updateJapanese("highlights", next.split("\n").filter(Boolean))} /><Field label="含まれるもの（日本語・1行ごと）" value={japaneseManuscript(content).included.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("included", next.split("\n").filter(Boolean))} /><Field label="含まれないもの（日本語・1行ごと）" value={japaneseManuscript(content).notIncluded.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("notIncluded", next.split("\n").filter(Boolean))} /><Field label="参加前の注意（日本語・1行ごと）" value={japaneseManuscript(content).knowBeforeYouGo.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("knowBeforeYouGo", next.split("\n").filter(Boolean))} /><Field label="参加に向かない条件（日本語・1行ごと）" value={japaneseManuscript(content).notSuitableFor.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("notSuitableFor", next.split("\n").filter(Boolean))} />{!adminDraft ? <><div className="flex flex-wrap gap-2"><button type="button" disabled={translationBusy || busy} className={consoleButtonClass("secondary")} onClick={() => void generateEnglish()}>{translationBusy ? "翻訳中…" : "日本語から英語案を作成"}</button><button type="button" disabled={translationBusy || busy || (isRecord(content.translation) && typeof content.translation.sourceFingerprint === "string" && content.translation.confirmedSourceFingerprint === content.translation.sourceFingerprint)} className={consoleButtonClass("secondary")} onClick={confirmEnglish}>英語原稿を確認</button></div><p className="text-xs text-muted">{isRecord(content.translation) && content.translation.confirmedSourceFingerprint === content.translation.sourceFingerprint && typeof content.translation.sourceFingerprint === "string" ? "英語原稿を確認済み" : "未確認の英語原稿は公開できません。日本語を編集すると確認状態が解除されます。"}</p></> : <><button type="button" disabled={busy || dirty || product.adminEnglishReview?.reviewed === true} className={consoleButtonClass("secondary")} onClick={() => void confirmAdminEnglish()}>事務局として英語原稿を確認</button><p className="text-xs text-muted">{product.adminEnglishReview?.reviewed ? "現在の保存版の日英fingerprintを事務局レビューとして記録済みです。" : "保存後、事務局担当者が日英原稿を照合して確認してください。OWNER本人の確認としては記録されません。"}</p></>}</div></div><Field label="集合場所の公開区分" value={String(content.meetingPointDisclosure ?? "AFTER_BOOKING")} onChange={(next) => setContent((current) => ({ ...current, meetingPointDisclosure: next === "PUBLIC" ? "PUBLIC" : "AFTER_BOOKING" }))} /><Field label="予約前に公開する集合概要" value={typeof content.meetingOverview === "string" ? content.meetingOverview : ""} multiline rows={3} onChange={(next) => updateContent("meetingOverview", next || null)} /></section>
       <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`}>
         <h2 className="text-base font-extrabold">料金・販売条件</h2>
         <div className="rounded-xl bg-sand/40 p-3">
@@ -911,7 +1040,9 @@ export function HostPublicationWorkspace({
         <label className="block text-sm font-bold text-ink-soft">写真の説明（英語）<input value={photoAlt} onChange={(event) => setPhotoAlt(event.target.value)} className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 font-normal" /></label>
         <label className="block text-sm font-bold text-ink-soft">写真の説明（日本語）<input value={photoAltJa} onChange={(event) => setPhotoAltJa(event.target.value)} className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 font-normal" /></label>
         <Field label="写真クレジット（任意）" value={photoCredit} onChange={setPhotoCredit} />
-        <label className="block text-sm"><input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => { setSelectedPhoto(event.target.files?.[0] ?? null); setPhotoRights(null); }} className="block" /></label>
+        {!adminDraft ? <HostSharedPhotoOffer disabled={busy || !!conflictProduct} onUse={(photo) => { setSelectedPhoto(photo); setSharedPhotoName(photo.name); setPhotoRights(null); }} /> : null}
+        <label className="block text-sm"><input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => { setSelectedPhoto(event.target.files?.[0] ?? null); setSharedPhotoName(null); setPhotoRights(null); }} className="block" /></label>
+        {sharedPhotoName && selectedPhoto ? <p className="text-sm text-ink-soft">共有された写真を選択中: <span className="[overflow-wrap:anywhere]">{sharedPhotoName}</span>。写真の説明と権利の確認はこの下の入力で行います。</p> : null}
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={rightsConfirmed} disabled={busy || !selectedPhoto} onChange={(event) => setPhotoRights(event.target.checked && selectedPhoto ? { file: selectedPhoto, productId: product.id, placement: photoPlacement } : null)} /><span>この写真を「{photoPlacement === "GALLERY" ? "この体験の写真" : photoPlacement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}」として{photoPlacement === "GALLERY" ? "この商品" : "販売者のすべての商品"}に公開する権利があり、権利者と写っている方から明示的な許諾を得ています。</span></label>
         <button type="button" disabled={busy || !!conflictProduct || !selectedPhoto || !rightsConfirmed || !photoAlt.trim() || !photoAltJa.trim()} className={consoleButtonClass("secondary")} onClick={() => void uploadPhoto()}>写真を追加・差し替え</button>
       </section>
@@ -922,6 +1053,8 @@ export function HostPublicationWorkspace({
       <h2 className="font-extrabold">当日の流れ</h2>
       {timelineSection("en", timelineItems(content.timeline))}
       {timelineSection("ja", japaneseManuscript(content).timeline)}
+      {faqSection("en")}
+      {faqSection("ja")}
     </section>
     </fieldset>
     <section className={`${HOST_SURFACE} mt-4 p-4 md:p-6`}><h2 className="font-extrabold">開催日程</h2><p className="mt-1 text-sm text-ink-soft">日程と定員はカレンダーで登録します。商品を保存してから開催枠を追加してください。</p><Link className={`${consoleButtonClass("secondary")} mt-3 inline-flex`} href={calendarHref}>カレンダーを開く</Link></section>

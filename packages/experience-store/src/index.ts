@@ -11,7 +11,7 @@ export {
 } from "./errors.ts";
 export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOccurrenceReason } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
-export { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "./experience-publication.ts";
+export { ExperiencePublicationBlockedError, ExperiencePublicationRepository, publicationManuscriptReview } from "./experience-publication.ts";
 export { ProviderSellerDisclosureRepository, validateSellerDisclosureInput } from "./provider-seller-disclosures.ts";
 export { ProviderMediaCleanupRepository } from "./public-media-cleanup.ts";
 export type { ClaimedProviderMediaCleanup } from "./public-media-cleanup.ts";
@@ -28,6 +28,13 @@ export type {
   WithdrawSellerDisclosureCommand,
 } from "./provider-seller-disclosures.ts";
 export { projectPublicExperiencePublicationManuscript } from "./experience-publication-projection.ts";
+export {
+  EXPERIENCE_PUBLICATION_FAQ_LIMITS,
+  publicationFaqIssue,
+  publicationManuscriptFingerprint,
+  validPublicationLocaleManuscript,
+} from "./experience-publication-manuscript.ts";
+export type { ExperiencePublicationFaqItem } from "./experience-publication-manuscript.ts";
 export type {
   ExperienceHostSaleTerms,
   ExperienceHostSaleOffer,
@@ -35,6 +42,11 @@ export type {
   ExperienceHostSaleTermsSaveResult,
   ExperienceHostSaleTermsState,
   ExperienceAdminDraftSeller,
+  ExperienceAdminEnglishReview,
+  ExperienceAdminPublicationStatus,
+  ExperienceAdminReviewFingerprints,
+  ExperiencePublicationManuscriptReview,
+  AdminSellerConfirmationMethod,
   ExperiencePublicationBlocker,
   ExperiencePublicationContentChecks,
   ExperienceHostSellerProfile,

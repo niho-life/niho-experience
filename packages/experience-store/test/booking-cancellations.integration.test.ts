@@ -5,12 +5,14 @@ import { describe, it } from "node:test";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
 import { GuestBookingAccess } from "../src/booking-access.ts";
+import { GuestBookingMessages } from "../src/booking-messages.ts";
 import { BOOKING_CANCELLATION_LIMITS, BookingCancellations, GUEST_NOTICE_TOPICS, type RefundSubmission } from "../src/booking-cancellations.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository, type GuestBookingStart, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import { GuestMailOutbox } from "../src/guest-mail-outbox.ts";
 import { HOST_NOTIFICATION_TOPICS } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { ExperienceSupportRepository } from "../src/support-settlement.ts";
 import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
 
 /** 取消と返金 (#285 slice 7) against a real schema, synthetic data only. */
@@ -897,6 +899,235 @@ describe("PostgreSQL booking cancellations and refunds (#285 slice 7)", { skip: 
       await setSendState(pool, refund.refundId, 0, null);
       assert.deepEqual(await cancellations.claimRefundsToSend(AUTO), []);
       assert.deepEqual((await cancellations.retryRefund(support, refund.refundId, { commandId: randomUUID() })).outcome, "NOT_CANCELLABLE");
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+});
+
+/* ---------- the Admin's in-app notices (#121, migration 0052 triggers) ---------- */
+
+const byRow = (left: string[], right: string[]): number => {
+  const a = left.join("\u0000");
+  const b = right.join("\u0000");
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+const sorted = (rows: string[][]): string[][] => [...rows].sort(byRow);
+
+/** [topic, key, public booking id] of the notices, in an order that does not depend on the database collation. */
+async function notices(pool: Pool, topic?: string): Promise<string[][]> {
+  const found = await pool.query(
+    `SELECT n.topic, n.dedupe_key, b.public_booking_id::text AS public_booking_id
+       FROM experience_support_admin_notifications n JOIN bookings b ON b.provider_id=n.provider_id AND b.id=n.booking_id
+      WHERE ($1::text IS NULL OR n.topic=$1)`,
+    [topic ?? null],
+  );
+  return sorted(found.rows.map((row) => [String(row.topic), String(row.dedupe_key), String(row.public_booking_id)]));
+}
+
+const FREE_TERMS = {
+  childPricing: { priceYen: 0, minAge: 4, maxAge: 12, adultRequired: false }, minimumParticipants: 1, maxPartySize: 6,
+  cancellationPolicy: "FREE_UNTIL_48H", bookingQuestions: [], conditionsVersion: null,
+} as const;
+
+/*
+ * The notices are written by the triggers of migration 0052, in the transaction of the event itself. Nothing here
+ * reads application code: each case runs the real flow and looks at the rows.
+ */
+describe("PostgreSQL Admin notices from the booking events (#121)", { skip: databaseUrl === undefined }, () => {
+  it("writes BOOKING_RECEIVED when a payment confirms the booking, and a repeated Stripe event leaves one", async () => {
+    await withSchema(async (context) => {
+      const { pool, store } = context;
+      const made = await paid(context);
+      assert.deepEqual(await notices(pool), [["BOOKING_RECEIVED", `booking-confirmed:${made.publicBookingId}`, made.publicBookingId]]);
+      const repeated = await store.confirmBookingPayment({ providerId: "provider-a" }, {
+        publicBookingId: made.publicBookingId, connectedAccountId: ACCOUNT, stripePaymentRef: `pi_sample_${events}`,
+        stripeEventId: `evt_sample_${events}`, stripeEventType: "checkout.session.completed", eventOccurredAtUtc: new Date().toISOString(),
+        amount: made.totalAmount, currency: "JPY",
+      });
+      assert.equal(repeated.duplicateEvent, true);
+      assert.equal((await notices(pool)).length, 1);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("writes BOOKING_RECEIVED for a free booking, which is confirmed without a payment event", async () => {
+    await withSchema(async (context) => {
+      const { pool, guests } = context;
+      await pool.query("UPDATE experience_products SET unit_amount=0 WHERE provider_id='provider-a' AND id='walk'");
+      await guests.setSaleTerms(ownerA, "walk", FREE_TERMS, 1);
+      await seedTestPublications(pool);
+      const made = await guests.startGuestBooking(request({ adultCount: 1, childCount: 1, expectedTotalYen: 0 }));
+      assert.equal(made.status, "CONFIRMED");
+      assert.deepEqual(await notices(pool), [["BOOKING_RECEIVED", `booking-confirmed:${made.publicBookingId}`, made.publicBookingId]]);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("writes PAYMENT_REVIEW for a payment that needs review, instead of BOOKING_RECEIVED", async () => {
+    await withSchema(async (context) => {
+      const late = await paid(context, { guestEmail: "late@example.com" }, 100);
+      assert.deepEqual(await notices(context.pool), [["PAYMENT_REVIEW", `payment-review:${late.publicBookingId}`, late.publicBookingId]]);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("writes BOOKING_CANCELLED once for a cancellation by the guest, the host or the Admin, and a replayed command adds none", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const byGuest = await paid(context, { guestEmail: "guest@example.com" });
+      const start = await startsIn(pool, byGuest.publicBookingId, 49 * HOUR_MS);
+      const session = await sessionFor(context, byGuest.publicBookingId);
+      const input = { commandId: randomUUID(), choice: "FULL_REFUND", shownDeadlineUtc: deadline48(start) } as const;
+      assert.equal((await cancellations.cancelAsGuest(session, byGuest.publicBookingId, input))?.outcome, "CANCELLED");
+      assert.equal((await cancellations.cancelAsGuest(session, byGuest.publicBookingId, input))?.repeated, true);
+      const byHost = await paid(context, { guestEmail: "host@example.com" });
+      await cancellations.cancelAsHost(ownerA, byHost.publicBookingId, { commandId: randomUUID(), reason: "WEATHER" });
+      const bySupport = await paid(context, { guestEmail: "support@example.com" });
+      await cancellations.cancelAsSupport(support, bySupport.publicBookingId, { commandId: randomUUID(), reason: "OTHER", refund: { kind: "FULL" } });
+      assert.deepEqual(await notices(pool, "BOOKING_CANCELLED"), sorted([byGuest, byHost, bySupport].map((made) => ["BOOKING_CANCELLED", `booking-cancelled:${made.publicBookingId}`, made.publicBookingId])));
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("writes CANCELLATION_REQUEST once for a guest's request, and asking again adds none", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const made = await paid(context);
+      const session = await sessionFor(context, made.publicBookingId);
+      const start = await startsIn(pool, made.publicBookingId, 3 * HOUR_MS);
+      const ask = () => cancellations.cancelAsGuest(session, made.publicBookingId, { commandId: randomUUID(), choice: "REQUEST", shownDeadlineUtc: deadline48(start) });
+      assert.equal((await ask())?.outcome, "REQUESTED");
+      assert.equal((await ask())?.outcome, "REQUESTED");
+      const requests = await notices(pool, "CANCELLATION_REQUEST");
+      assert.equal(requests.length, 1);
+      assert.match(requests[0]![1]!, /^cancellation-request:[0-9a-f-]{36}$/);
+      assert.equal(requests[0]![2], made.publicBookingId);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("writes REFUND_UPDATED once per refund status, and a repeated Stripe event adds none", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const made = await paid(context);
+      const refund = (await cancellations.cancelAsHost(ownerA, made.publicBookingId, { commandId: randomUUID(), reason: "WEATHER" })).refunds[0]!;
+      const key = (status: string) => ["REFUND_UPDATED", `refund:${refund.refundId}:${status}`, made.publicBookingId];
+      assert.deepEqual(await notices(pool, "REFUND_UPDATED"), [key("REQUESTED")]);
+      await cancellations.applyRefundEvent(refundEvent(refund, "pending"));
+      const succeeded = refundEvent(refund, "succeeded");
+      assert.equal((await cancellations.applyRefundEvent(succeeded)).duplicateEvent, false);
+      assert.equal((await cancellations.applyRefundEvent(succeeded)).duplicateEvent, true);
+      assert.deepEqual(await notices(pool, "REFUND_UPDATED"), sorted([key("REQUESTED"), key("PENDING"), key("SUCCEEDED")]));
+      // A refund can fail after it succeeded: that is a new status, so a new notice.
+      await cancellations.applyRefundEvent(refundEvent(refund, "failed"));
+      assert.deepEqual(await notices(pool, "REFUND_UPDATED"), sorted([key("REQUESTED"), key("PENDING"), key("SUCCEEDED"), key("FAILED")]));
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("writes GUEST_MESSAGE for each message the guest sends, and none for the Admin's reply", async () => {
+    await withSchema(async (context) => {
+      const { pool } = context;
+      const messages = new GuestBookingMessages(pool);
+      const made = await paid(context);
+      const session = await sessionFor(context, made.publicBookingId);
+      const key = randomUUID();
+      await messages.sendMessage(session, made.publicBookingId, { message: "Is there parking nearby?", clientRequestKey: key });
+      assert.equal((await messages.sendMessage(session, made.publicBookingId, { message: "Is there parking nearby?", clientRequestKey: key }))?.repeated, true);
+      assert.equal((await notices(pool, "GUEST_MESSAGE")).length, 1);
+      await messages.sendMessage(session, made.publicBookingId, { message: "One more thing", clientRequestKey: randomUUID() });
+      const sent = await notices(pool, "GUEST_MESSAGE");
+      assert.equal(sent.length, 2);
+      assert.ok(sent.every((notice) => /^guest-message:[0-9a-f-]{36}$/.test(notice[1]!) && notice[2] === made.publicBookingId));
+      await messages.sendSupportMessage(support, made.publicBookingId, { commandId: randomUUID(), message: "We can help with that." });
+      assert.equal((await notices(pool, "GUEST_MESSAGE")).length, 2);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("writes no GUEST_MESSAGE for a booking accepted with support OFF", async () => {
+    await withSchema(async (context) => {
+      const { pool } = context;
+      const made = await paid(context);
+      const session = await sessionFor(context, made.publicBookingId);
+      await new GuestBookingMessages(pool).sendMessage(session, made.publicBookingId, { message: "Hello", clientRequestKey: randomUUID() });
+      assert.deepEqual(await notices(pool, "GUEST_MESSAGE"), []);
+    });
+  });
+
+  it("is what the Admin's list reads, with the read state kept per Admin", async () => {
+    await withSchema(async (context) => {
+      const { pool } = context;
+      const made = await paid(context);
+      const session = await sessionFor(context, made.publicBookingId);
+      await new GuestBookingMessages(pool).sendMessage(session, made.publicBookingId, { message: "Hello", clientRequestKey: randomUUID() });
+      const reader = new ExperienceSupportRepository(pool);
+      const first = { nihoUserId: "admin-1" };
+      const second = { nihoUserId: "admin-2" };
+      const listed = await reader.listNotifications(first);
+      assert.deepEqual(listed.map((notice) => notice.topic).sort(), ["BOOKING_RECEIVED", "GUEST_MESSAGE"]);
+      assert.ok(listed.every((notice) => notice.publicBookingId === made.publicBookingId && notice.read === false));
+      await reader.markNotificationRead(first, listed[0]!.id);
+      await reader.markNotificationRead(first, listed[0]!.id);
+      assert.equal((await reader.listNotifications(first, { unreadOnly: true })).length, 1);
+      assert.equal((await reader.listNotifications(second, { unreadOnly: true })).length, 2);
+      await assert.rejects(reader.markNotificationRead(first, randomUUID()), StoreNotFoundError);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+});
+
+/* ---------- the case timeline an Admin sees again after the screen was opened anew ---------- */
+
+describe("PostgreSQL Admin case timeline: what survives a reload", { skip: databaseUrl === undefined }, () => {
+  it("carries the command and the email's delivery state of a contact, and never the words", async () => {
+    await withSchema(async (context) => {
+      const { pool } = context;
+      const made = await paid(context);
+      const messages = new GuestBookingMessages(pool);
+      const reader = new ExperienceSupportRepository(pool);
+      const commandId = randomUUID();
+      const words = "We can refund you on Friday.";
+      await messages.sendSupportMessage(support, made.publicBookingId, { commandId, message: words });
+
+      const contactOf = async () => (await reader.getCase(support, made.publicBookingId))!.events.filter((event) => event.type === "GUEST_CONTACT_SENT");
+      const [queued] = await contactOf();
+      assert.deepEqual([queued?.commandId, queued?.delivery, queued?.actorAdminUserId], [commandId, "PENDING", support.nihoUserId]);
+
+      // The mail job moves the message on; the same read shows where it is.
+      await pool.query("UPDATE guest_question_messages SET delivery_status='SENT', delivered_at=clock_timestamp(), lease_until=NULL WHERE command_id=$1::uuid", [commandId]);
+      assert.equal((await contactOf())[0]?.delivery, "SENT");
+      await pool.query("UPDATE guest_question_messages SET delivery_status='FAILED', delivered_at=NULL, lease_until=NULL WHERE command_id=$1::uuid", [commandId]);
+      assert.equal((await contactOf())[0]?.delivery, "FAILED");
+
+      // The same command again is the same contact: one event, and the words are not in anything the Admin is sent.
+      assert.equal((await messages.sendSupportMessage(support, made.publicBookingId, { commandId, message: words })).repeated, true);
+      assert.equal((await contactOf()).length, 1);
+      assert.equal(JSON.stringify(await reader.getCase(support, made.publicBookingId)).includes(words), false);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("carries the command of an Admin's operation and of a change to the case, without a delivery state", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const made = await paid(context);
+      const reader = new ExperienceSupportRepository(pool);
+      const operation = randomUUID();
+      await cancellations.cancelAsSupport(support, made.publicBookingId, { commandId: operation, reason: "OTHER", refund: { kind: "FULL" } });
+      const change = randomUUID();
+      const changed = await reader.updateCase(support, made.publicBookingId, { commandId: change, expectedRevision: 1, assignedAdminUserId: null, internalMemo: "Called the host." });
+
+      // The answer to a change and a plain read are the same timeline.
+      const read = await reader.getCase(support, made.publicBookingId);
+      assert.deepEqual(changed.events, read!.events);
+      const action = read!.events.find((event) => event.type === "SUPPORT_ACTION");
+      assert.deepEqual([action?.commandId, action?.delivery, action?.outcome], [operation, null, "CANCELLED"]);
+      const memo = read!.events.find((event) => event.type === "INTERNAL_MEMO_CHANGED");
+      assert.deepEqual([memo?.commandId, memo?.delivery], [change, null]);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("shows no delivery state when the message is gone, instead of failing the read", async () => {
+    await withSchema(async (context) => {
+      const { pool } = context;
+      const made = await paid(context);
+      const reader = new ExperienceSupportRepository(pool);
+      const commandId = randomUUID();
+      await new GuestBookingMessages(pool).sendSupportMessage(support, made.publicBookingId, { commandId, message: "Hello again." });
+      await pool.query("DELETE FROM guest_question_messages WHERE command_id=$1::uuid", [commandId]);
+      const [event] = (await reader.getCase(support, made.publicBookingId))!.events.filter((item) => item.type === "GUEST_CONTACT_SENT");
+      assert.deepEqual([event?.commandId, event?.delivery], [commandId, null]);
     }, "FREE_UNTIL_48H", undefined, true);
   });
 });

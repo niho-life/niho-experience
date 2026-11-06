@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
   GUEST_BOOKING_LIMITS,
@@ -28,6 +28,12 @@ import { PRODUCT_COLUMNS, requireMembership } from "./repository.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import { CLAIMED_PUBLICATION_SLUGS_CTE, VISIBLE_PUBLICATIONS_CTE } from "./public-publication-scope.ts";
 import { withTransaction } from "./transaction.ts";
+import {
+  englishPublicationManuscriptOf,
+  publicationFaqIssue,
+  publicationManuscriptFingerprint,
+  validPublicationLocaleManuscript,
+} from "./experience-publication-manuscript.ts";
 import type { HostActor, JsonValue, ProductRecord, PublicationAdminDraftActor } from "./types.ts";
 import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier, normalizeCurrency } from "./validation.ts";
 
@@ -69,6 +75,40 @@ export class ExperiencePublicationBlockedError extends StoreValidationError {
 export interface ExperiencePublicationContentChecks {
   readonly manuscriptReady: boolean;
   readonly photosReady: boolean;
+  /** Present only when an immutable Admin review matches this exact saved manuscript. */
+  readonly adminReview?: ExperienceAdminReviewFingerprints;
+}
+
+export type AdminSellerConfirmationMethod = "VERBAL" | "WRITTEN";
+
+export interface ExperienceAdminReviewFingerprints {
+  readonly contentFingerprint: string;
+  readonly japaneseFingerprint: string;
+  readonly englishFingerprint: string;
+}
+
+export interface ExperienceAdminEnglishReview {
+  readonly reviewed: boolean;
+  readonly reviewedAtUtc: string | null;
+  readonly contentFingerprint: string;
+  readonly japaneseFingerprint: string | null;
+  readonly englishFingerprint: string | null;
+}
+
+export interface ExperienceAdminPublicationStatus {
+  readonly draftVersion: number;
+  readonly stateVersion: number | null;
+  readonly saleTermsVersion: number | null;
+  readonly blockers: readonly ExperiencePublicationBlocker[];
+  readonly englishReview: ExperienceAdminEnglishReview;
+}
+
+export interface ExperiencePublicationManuscriptReview {
+  readonly publicContentReady: boolean;
+  readonly ownerConfirmed: boolean;
+  readonly contentFingerprint: string;
+  readonly japaneseFingerprint: string | null;
+  readonly englishFingerprint: string | null;
 }
 
 /** Current schedule rules the OWNER may price. Provider and inventory identifiers stay server-side. */
@@ -277,6 +317,7 @@ const SALE_TERMS_COLUMNS = `provider_id,product_id,child_price_amount,child_min_
   booking_questions_fingerprint,conditions_version,version,updated_at`;
 
 const PUBLIC_READER_COLUMNS = `
+  draft_version,publisher_kind,admin_proxy_review,
   slug,public_title,content,currency,unit_amount,seller_display_name,published_at,
   COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
@@ -375,6 +416,63 @@ function validateChecks(checks: ExperiencePublicationContentChecks): void {
   if (typeof checks.manuscriptReady !== "boolean" || typeof checks.photosReady !== "boolean") {
     throw new StoreValidationError("Publication content checks must be booleans established by the server validator.");
   }
+  if (checks.adminReview !== undefined && (!/^[0-9a-f]{64}$/.test(checks.adminReview.contentFingerprint)
+    || !/^[0-9a-f]{64}$/.test(checks.adminReview.japaneseFingerprint)
+    || !/^[0-9a-f]{64}$/.test(checks.adminReview.englishFingerprint))) {
+    throw new StoreValidationError("Admin publication review fingerprints are invalid.");
+  }
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (isJsonRecord(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new StoreValidationError("Publication content must be JSON serializable.");
+  return serialized;
+}
+
+const fingerprint = (value: unknown): string => createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
+
+/** Shared server-side content/fingerprint review. ADMIN review never writes OWNER confirmation into the draft. */
+export function publicationManuscriptReview(
+  content: Readonly<Record<string, unknown>>,
+  publicTitle: string,
+): ExperiencePublicationManuscriptReview {
+  const japanese = content.ja;
+  const english = englishPublicationManuscriptOf(publicTitle, content);
+  // An empty or absent FAQ is excluded from both fingerprints (byte-identical to pre-FAQ manuscripts).
+  const japaneseFingerprint = validPublicationLocaleManuscript(japanese) ? publicationManuscriptFingerprint(japanese) : null;
+  const englishFingerprint = validPublicationLocaleManuscript(english) ? publicationManuscriptFingerprint(english) : null;
+  const translation = content.translation;
+  const ownerConfirmed = japaneseFingerprint !== null && englishFingerprint !== null
+    && isJsonRecord(translation)
+    && translation.sourceFingerprint === japaneseFingerprint
+    && translation.confirmedSourceFingerprint === japaneseFingerprint
+    && translation.confirmedEnglishFingerprint === englishFingerprint;
+  const reviewableContent = japaneseFingerprint !== null && englishFingerprint !== null
+    ? {
+      ...content,
+      translation: {
+        sourceFingerprint: japaneseFingerprint,
+        confirmedSourceFingerprint: japaneseFingerprint,
+        confirmedEnglishFingerprint: englishFingerprint,
+      },
+    }
+    : content;
+  return {
+    // This temporary projection validates the allowlisted public fields without
+    // persisting or asserting OWNER confirmation for an Admin-authored review.
+    publicContentReady: projectPublicExperiencePublicationManuscript(reviewableContent as Readonly<Record<string, JsonValue>>) !== null
+      && japaneseFingerprint !== null && englishFingerprint !== null,
+    ownerConfirmed,
+    contentFingerprint: fingerprint(content),
+    japaneseFingerprint,
+    englishFingerprint,
+  };
 }
 
 function validateAdminDraftActor(actor: PublicationAdminDraftActor): void {
@@ -409,6 +507,11 @@ async function requireNeverPublishedAdminDraft(
   const result = await client.query<DbRow>(
     `SELECT ${PRODUCT_COLUMNS} FROM experience_products p
       WHERE p.provider_id=$1 AND p.id=$2 AND p.status='DRAFT'
+        AND EXISTS (
+          SELECT 1 FROM admin_product_draft_audit_events draft_audit
+           WHERE draft_audit.provider_id=p.provider_id AND draft_audit.product_id=p.id
+             AND draft_audit.action='DRAFT_CREATED'
+        )
         AND NOT EXISTS (
           SELECT 1 FROM experience_product_publications publication
            WHERE publication.provider_id=p.provider_id AND publication.product_id=p.id
@@ -417,6 +520,44 @@ async function requireNeverPublishedAdminDraft(
   );
   if (!result.rows[0]) throw new StoreAccessDeniedError();
   return productFromRow(result.rows[0]);
+}
+
+async function adminPhotosReady(client: PoolClient, providerId: string, productId: string): Promise<boolean> {
+  const result = await client.query<{ ready: boolean }>(
+    `SELECT COUNT(*) > 0
+            AND bool_and(asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL
+              AND btrim(selection.alt_text)<>'' AND btrim(selection.alt_text_ja)<>'') AS ready
+       FROM experience_product_media_selection selection
+       JOIN experience_product_media_assets asset
+         ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id AND asset.product_id=selection.product_id
+      WHERE selection.provider_id=$1 AND selection.product_id=$2 AND selection.placement='GALLERY'`,
+    [providerId, productId],
+  );
+  return result.rows[0]?.ready === true;
+}
+
+async function matchingAdminEnglishReview(
+  client: PoolClient,
+  actor: PublicationAdminDraftActor,
+  product: ProductRecord,
+): Promise<{ readonly reviewedAtUtc: string; readonly contentFingerprint: string; readonly japaneseFingerprint: string; readonly englishFingerprint: string } | null> {
+  const review = publicationManuscriptReview(product.content, product.publicTitle);
+  if (!review.publicContentReady || !review.japaneseFingerprint || !review.englishFingerprint) return null;
+  const result = await client.query<DbRow>(
+    `SELECT reviewed_at,content_fingerprint,japanese_fingerprint,english_fingerprint
+       FROM admin_product_english_reviews
+      WHERE provider_id=$1 AND product_id=$2 AND draft_version=$3 AND actor_niho_user_id=$4
+        AND content_fingerprint=$5 AND japanese_fingerprint=$6 AND english_fingerprint=$7
+      ORDER BY reviewed_at DESC,id DESC LIMIT 1`,
+    [product.providerId, product.id, product.version, actor.nihoUserId,
+      review.contentFingerprint, review.japaneseFingerprint, review.englishFingerprint],
+  );
+  return result.rows[0] ? {
+    reviewedAtUtc: iso(result.rows[0].reviewed_at, "reviewed_at"),
+    contentFingerprint: String(result.rows[0].content_fingerprint),
+    japaneseFingerprint: String(result.rows[0].japanese_fingerprint),
+    englishFingerprint: String(result.rows[0].english_fingerprint),
+  } : null;
 }
 
 async function auditAdminDraft(
@@ -467,6 +608,12 @@ function validateDraft(input: ExperiencePublicationDraftInput): ExperiencePublic
   }
   try { JSON.stringify(input.content); }
   catch (error) { throw new StoreValidationError("product.content must be JSON serializable.", { cause: error }); }
+  // FAQ is optional, but a written FAQ must be complete: nothing is dropped silently.
+  const faqIssue = input.content.faq === undefined ? null : publicationFaqIssue(input.content.faq);
+  if (faqIssue) throw new StoreValidationError(`product.content.${faqIssue}`);
+  const japanese = input.content.ja;
+  const japaneseFaqIssue = isJsonRecord(japanese) && japanese.faq !== undefined ? publicationFaqIssue(japanese.faq) : null;
+  if (japaneseFaqIssue) throw new StoreValidationError(`product.content.ja.${japaneseFaqIssue}`);
   return { ...input, currency: normalizeCurrency(input.currency) };
 }
 
@@ -504,11 +651,11 @@ function validateExpectedVersion(value: number | null, field: string): void {
   if (value !== null && (!Number.isSafeInteger(value) || value < 1)) throw new StoreValidationError(`${field} must be null or a positive integer.`);
 }
 
-async function lockedState(client: PoolClient, providerId: string, productId: string): Promise<ExperiencePublicationState | null> {
+async function lockedState(client: PoolClient, providerId: string, productId: string, lock = true): Promise<ExperiencePublicationState | null> {
   const result = await client.query<DbRow>(
     `SELECT provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
             operations_suspension_code,owner_resume_required,first_published_at,version,updated_at
-       FROM experience_product_publication_states WHERE provider_id=$1 AND product_id=$2 FOR UPDATE`,
+       FROM experience_product_publication_states WHERE provider_id=$1 AND product_id=$2${lock ? " FOR UPDATE" : ""}`,
     [providerId, productId],
   );
   return result.rows[0] ? stateFromRow(result.rows[0]) : null;
@@ -543,7 +690,23 @@ async function blockers(
 ): Promise<ExperiencePublicationBlocker[]> {
   const result: ExperiencePublicationBlocker[] = [];
   if (!checks.manuscriptReady) result.push("MANUSCRIPT_REQUIRED");
-  const manuscript = projectPublicExperiencePublicationManuscript(product.content);
+  const manuscriptReview = publicationManuscriptReview(product.content, product.publicTitle);
+  const matchesAdminReview = checks.adminReview !== undefined
+    && manuscriptReview.publicContentReady
+    && checks.adminReview.contentFingerprint === manuscriptReview.contentFingerprint
+    && checks.adminReview.japaneseFingerprint === manuscriptReview.japaneseFingerprint
+    && checks.adminReview.englishFingerprint === manuscriptReview.englishFingerprint;
+  const projectionContent = matchesAdminReview
+    ? {
+      ...product.content,
+      translation: {
+        sourceFingerprint: checks.adminReview!.japaneseFingerprint,
+        confirmedSourceFingerprint: checks.adminReview!.japaneseFingerprint,
+        confirmedEnglishFingerprint: checks.adminReview!.englishFingerprint,
+      },
+    }
+    : product.content;
+  const manuscript = projectPublicExperiencePublicationManuscript(projectionContent);
   if (manuscript === null) result.push("PUBLIC_CONTENT_INVALID");
   const photoIndices = manuscript === null ? [] : [
     ...manuscript.content.timeline.flatMap((item) => item.photoIndex === null ? [] : [item.photoIndex]),
@@ -620,6 +783,7 @@ async function insertOrFindPublication(
   product: ProductRecord,
   consentVersion: string,
   publishedBy: string,
+  publisherKind: "OWNER" | "ADMIN_PROXY" = "OWNER",
 ): Promise<number> {
   const terms = await readSaleTerms(client, product.providerId, product.id, true);
   if (!terms) throw new StoreConflictError("Sale terms changed while preparing the immutable publication.");
@@ -649,13 +813,15 @@ async function insertOrFindPublication(
     `INSERT INTO experience_product_publications
        (provider_id,product_id,draft_version,sale_terms_version,slug,public_title,content,currency,unit_amount,
         cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,
-        consent_version,published_by_niho_user_id,sale_terms_snapshot)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)
+        consent_version,published_by_niho_user_id,published_by_admin_niho_user_id,publisher_kind,sale_terms_snapshot)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb)
      RETURNING id`,
     [product.providerId, product.id, product.version, saleTermsVersion, product.slug, product.publicTitle,
       JSON.stringify(product.content), product.currency, product.unitAmount, product.cancellationTermsRef,
       product.sellerNihoAccountRef, product.stripeConnectAccountRef, product.sellerDisplayName, consentVersion,
-      publishedBy, JSON.stringify(saleTermsSnapshot)],
+      publisherKind === "OWNER" ? publishedBy : null,
+      publisherKind === "ADMIN_PROXY" ? publishedBy : null,
+      publisherKind, JSON.stringify(saleTermsSnapshot)],
   );
   const publicationId = safeInteger(inserted.rows[0]?.id, "publication id");
   const media = await client.query(
@@ -704,6 +870,11 @@ export class ExperiencePublicationRepository {
       const result = await client.query<DbRow>(
         `SELECT ${PRODUCT_COLUMNS} FROM experience_products p
           WHERE p.provider_id=$1 AND p.status='DRAFT'
+            AND EXISTS (
+              SELECT 1 FROM admin_product_draft_audit_events draft_audit
+               WHERE draft_audit.provider_id=p.provider_id AND draft_audit.product_id=p.id
+                 AND draft_audit.action='DRAFT_CREATED'
+            )
             AND NOT EXISTS (
               SELECT 1 FROM experience_product_publications publication
                WHERE publication.provider_id=p.provider_id AND publication.product_id=p.id
@@ -720,6 +891,174 @@ export class ExperiencePublicationRepository {
     return withTransaction(this.#pool, async (client) => {
       await adminDraftSeller(client, providerId);
       return requireNeverPublishedAdminDraft(client, providerId, productId);
+    });
+  }
+
+  async getAdminDraftPublicationStatus(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    productId: string,
+    consentVersion: string,
+  ): Promise<ExperienceAdminPublicationStatus> {
+    validateAdminDraftActor(actor);
+    assertNonEmptyText(consentVersion, "consentVersion", 160);
+    return withTransaction(this.#pool, async (client) => {
+      await adminDraftSeller(client, providerId);
+      const product = await requireNeverPublishedAdminDraft(client, providerId, productId);
+      const manuscript = publicationManuscriptReview(product.content, product.publicTitle);
+      const [state, terms, photosReady, review] = await Promise.all([
+        lockedState(client, providerId, productId, false),
+        readSaleTerms(client, providerId, productId),
+        adminPhotosReady(client, providerId, productId),
+        matchingAdminEnglishReview(client, actor, product),
+      ]);
+      return {
+        draftVersion: product.version,
+        stateVersion: state?.version ?? null,
+        saleTermsVersion: terms?.version ?? null,
+        blockers: await blockers(client, product, {
+          manuscriptReady: review !== null,
+          photosReady,
+          ...(review ? { adminReview: {
+            contentFingerprint: review.contentFingerprint,
+            japaneseFingerprint: review.japaneseFingerprint,
+            englishFingerprint: review.englishFingerprint,
+          } } : {}),
+        }, consentVersion, state),
+        englishReview: {
+          reviewed: review !== null,
+          reviewedAtUtc: review?.reviewedAtUtc ?? null,
+          contentFingerprint: manuscript.contentFingerprint,
+          japaneseFingerprint: manuscript.japaneseFingerprint,
+          englishFingerprint: manuscript.englishFingerprint,
+        },
+      };
+    });
+  }
+
+  async reviewAdminDraftEnglish(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    productId: string,
+    expectedDraftVersion: number,
+  ): Promise<ExperienceAdminEnglishReview> {
+    validateAdminDraftActor(actor);
+    validateExpectedVersion(expectedDraftVersion, "expectedDraftVersion");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await adminDraftSeller(client, providerId);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${providerId}:${productId}`]);
+      const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
+      if (product.version !== expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
+      const review = publicationManuscriptReview(product.content, product.publicTitle);
+      const reviewBlockers: ExperiencePublicationBlocker[] = [];
+      if (!review.publicContentReady) reviewBlockers.push("PUBLIC_CONTENT_INVALID");
+      if (!review.japaneseFingerprint || !review.englishFingerprint) reviewBlockers.push("MANUSCRIPT_REQUIRED");
+      if (reviewBlockers.length > 0) throw new ExperiencePublicationBlockedError([...new Set(reviewBlockers)]);
+      await client.query(
+        `INSERT INTO admin_product_english_reviews
+           (actor_niho_user_id,provider_id,product_id,draft_version,content_fingerprint,japanese_fingerprint,english_fingerprint)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+        [actor.nihoUserId, providerId, productId, product.version,
+          review.contentFingerprint, review.japaneseFingerprint, review.englishFingerprint],
+      );
+      const matched = await matchingAdminEnglishReview(client, actor, product);
+      if (!matched) throw new StoreConflictError("The reviewed manuscript changed before confirmation.");
+      return {
+        reviewed: true,
+        reviewedAtUtc: matched.reviewedAtUtc,
+        contentFingerprint: matched.contentFingerprint,
+        japaneseFingerprint: matched.japaneseFingerprint,
+        englishFingerprint: matched.englishFingerprint,
+      };
+    });
+  }
+
+  async publishAdminDraft(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    productId: string,
+    input: {
+      readonly expectedDraftVersion: number;
+      readonly expectedStateVersion: number | null;
+      readonly expectedSaleTermsVersion: number | null;
+      readonly consentVersion: string;
+      readonly accepted: true;
+      readonly sellerConfirmationMethod: AdminSellerConfirmationMethod;
+      readonly photoRightsConfirmed: true;
+    },
+  ): Promise<ExperiencePublicationState> {
+    validateAdminDraftActor(actor);
+    validateExpectedVersion(input.expectedDraftVersion, "expectedDraftVersion");
+    validateExpectedVersion(input.expectedStateVersion, "expectedStateVersion");
+    validateExpectedVersion(input.expectedSaleTermsVersion, "expectedSaleTermsVersion");
+    assertNonEmptyText(input.consentVersion, "consentVersion", 160);
+    if (input.accepted !== true || input.photoRightsConfirmed !== true
+      || (input.sellerConfirmationMethod !== "VERBAL" && input.sellerConfirmationMethod !== "WRITTEN")) {
+      throw new StoreValidationError("Admin proxy publication confirmation is invalid.");
+    }
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await adminDraftSeller(client, providerId);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${providerId}:${productId}`]);
+      const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
+      if (product.version !== input.expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
+      await lockPublicationSlugs(client, [product.slug]);
+      const state = await lockedState(client, providerId, productId);
+      if ((state?.version ?? null) !== input.expectedStateVersion) throw new StoreConflictError("Publication state version mismatch: read the state again.");
+      const terms = await readSaleTerms(client, providerId, productId, true);
+      if ((terms?.version ?? null) !== input.expectedSaleTermsVersion) throw new StoreConflictError("Sale terms version mismatch: read the terms again.");
+      const review = await matchingAdminEnglishReview(client, actor, product);
+      const photosReady = await adminPhotosReady(client, providerId, productId);
+      const blocked = await blockers(client, product, {
+        manuscriptReady: review !== null,
+        photosReady,
+        ...(review ? { adminReview: {
+          contentFingerprint: review.contentFingerprint,
+          japaneseFingerprint: review.japaneseFingerprint,
+          englishFingerprint: review.englishFingerprint,
+        } } : {}),
+      }, input.consentVersion, state);
+      if (blocked.length > 0) throw new ExperiencePublicationBlockedError(blocked);
+      if (!review || !terms) throw new StoreConflictError("Publication review or sale terms changed while publishing.");
+      const changed = await client.query(
+        "UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2 AND version=$3 AND status='DRAFT'",
+        [providerId, productId, product.version],
+      );
+      if (changed.rowCount !== 1) throw new StoreConflictError("Product changed while publishing.");
+      const publicationId = await insertOrFindPublication(client, product, input.consentVersion, actor.nihoUserId, "ADMIN_PROXY");
+      const published = state === null
+        ? await client.query<DbRow>(
+          `INSERT INTO experience_product_publication_states
+             (provider_id,product_id,current_publication_id,first_published_at)
+           SELECT $1,$2,$3,published_at FROM experience_product_publications WHERE id=$3
+           RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+             operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
+          [providerId, productId, publicationId],
+        )
+        : await client.query<DbRow>(
+          `UPDATE experience_product_publication_states
+              SET current_publication_id=$3,self_stopped_at=NULL,owner_resume_required=false,
+                  first_published_at=(SELECT published_at FROM experience_product_publications WHERE id=$3),
+                  version=version+1,updated_at=clock_timestamp()
+            WHERE provider_id=$1 AND product_id=$2 AND version=$4 AND current_publication_id IS NULL
+              AND first_published_at IS NULL AND operations_suspended_at IS NULL
+            RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+              operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
+          [providerId, productId, publicationId, state.version],
+        );
+      if (!published.rows[0]) throw new StoreConflictError("Publication state changed while publishing.");
+      await client.query(
+        `INSERT INTO admin_proxy_publication_audit_events
+           (publication_id,provider_id,product_id,draft_version,sale_terms_version,consent_version,
+            actor_niho_user_id,seller_confirmation_method,seller_confirmation_checked,photo_rights_confirmed,
+            content_fingerprint,japanese_fingerprint,english_fingerprint)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [publicationId, providerId, productId, product.version, terms.version, input.consentVersion,
+          actor.nihoUserId, input.sellerConfirmationMethod, input.accepted, input.photoRightsConfirmed,
+          review.contentFingerprint, review.japaneseFingerprint, review.englishFingerprint],
+      );
+      return stateFromRow(published.rows[0]);
     });
   }
 

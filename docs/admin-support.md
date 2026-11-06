@@ -58,6 +58,7 @@ read flagをONにしたHTTP画面は、予約一覧・deep link詳細・通知�
 - caseの各BFFも専用client・現在のADMIN・8時間期限を再検証する。401/403はcookieを消して401へ統一し、画面は予約一覧・詳細・検索語・case draft・担当候補を消去して再認証だけを案内する。
 - case PATCHはsame-origin、厳密なJSONとDTO、単一の予約ID segmentに限定する。検索語・内部メモ・担当表示をURL、storage、ログ、計測へ保存せず、上流エラー本文はブラウザへ渡さない。
 - operations POSTもsame-origin・厳密JSON・固定pathに限定する。本文、件名、宛先、返金payload、tokenをURL・storage・ログ・計測へ保存しない。通信失敗・503・invalid応答・abortは確実な失敗とみなさず、同じ予約ID・操作IDのGETで照合する。
+- 新しいExperience予約の案件履歴（`experience_support_case_events`）は、各行にそのコマンドID（`commandId`）を持ち、予約者への連絡では連絡メールの送信状態（`delivery`：送信待ち・送信中・送信済み・失敗）をメッセージ行から添える。本文は返さない。画面を開き直すと、操作中のコマンドと連絡文は画面のメモリごと失われるが（連絡文はURL・storage・ログへ置かない決まり）、履歴は残る。そのため、直近30分以内の自分の連絡で送信が確定していないものは、案件の画面が「受け付け済み」と送信状態を示し、同じ内容を重ねて送らないよう案内して「状態を更新」で読み直せる（`site-booking-contact-recovery.ts`）。取消・返金は期待スナップショットと予約の状態で守られる。
 - 401は一覧、詳細、検索、離脱待ち、case、担当候補、operations、入力本文をすべて消し、再認証だけを案内する。遅い別予約応答はrequest sequenceとAbortControllerで捨てる。
 - 未保存または通信中はAdmin内リンク、予約行、戻る、logout、browser back/forward、reload/tab closeから保護する。破棄移動できないのは実通信中だけとし、結果不明のcommand・本文は未保存変更として明示離脱を求める。離脱しても受付済み処理は取り消されず、同じUUIDまたは履歴から後で追跡できる。明示的な未受理409と結果不明ではdraftを保持する。
 - logoutは自分のNIHO接続の失効を試み、通信結果にかかわらずlocal cookieを消す。2xxまたは既に接続がない404だけを解除確認済みとし、401・その他の失敗・通信失敗では、端末からのlogout完了、NIHO側の解除未確認、接続が発行から最長8時間で失効することを表示する。

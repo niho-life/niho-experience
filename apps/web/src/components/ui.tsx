@@ -1,6 +1,7 @@
 import { LocalizedLink as Link } from "./LocalizedLink";
 import type { ComponentProps, ReactNode } from "react";
-import { NoticeV1, SectionHeadingV1, buttonClassV1, type ButtonVariantV1 } from "@niho/experience-presentation/v1";
+import { SectionHeadingV1, buttonClassV1, type NoticeV1, type ButtonVariantV1 } from "@niho/experience-presentation/v1";
+import { LocalizedNotice } from "./LocalizedNotice";
 
 export const buttonClass = (variant: ButtonVariantV1 = "primary", extra = "") => buttonClassV1(variant, extra);
 
@@ -9,7 +10,7 @@ export function ButtonLink({ variant = "primary", className = "", ...props }: Co
 }
 
 export function Notice(props: ComponentProps<typeof NoticeV1>) {
-  return <NoticeV1 {...props} />;
+  return <LocalizedNotice {...props} />;
 }
 
 export function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "warn" | "muted" }) {

@@ -72,8 +72,9 @@ describe("experience publication public projection", () => {
     }]);
     assert.deepEqual(Object.keys(projected?.content ?? {}), [
       "lead", "description", "facts", "highlights", "included", "notIncluded", "knowBeforeYouGo",
-      "notSuitableFor", "timeline",
+      "notSuitableFor", "timeline", "faq",
     ]);
+    assert.deepEqual(projected?.content.faq, []);
     const serialized = JSON.stringify(projected);
     for (const sentinel of [
       ADDRESS_SENTINEL, ACCESS_SENTINEL, ENTRANCE_SENTINEL, MAP_SENTINEL, STRIPE_SENTINEL,

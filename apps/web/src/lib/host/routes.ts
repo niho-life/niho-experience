@@ -19,6 +19,12 @@ export const HOST_LAUNCH_PATH = "/host/launch";
 export const HOST_APP_SCOPE = "/host/";
 export const HOST_MANIFEST_PATH = "/host/manifest.webmanifest";
 export const HOST_SW_PATH = "/host/sw.js";
+/**
+ * Android's share sheet posts a photo here (#177 P3, manifest `share_target`). The worker answers it and sends the
+ * host on to 体験 with `?shared=photo`; without a worker the route sends them there with `?shared=none`.
+ */
+export const HOST_SHARE_TARGET_PATH = "/host/share-target";
+export const HOST_SHARED_QUERY = "shared";
 /** Console sections (#84). HOST_NAV below lists the same paths for the menu. */
 export const HOST_EXPERIENCES_PATH = "/host/experiences";
 export const HOST_CALENDAR_PATH = "/host/calendar";

@@ -60,6 +60,20 @@ function stateLabel(active: boolean): ReactNode {
   </span>;
 }
 
+/**
+ * 回を開閉できても作れない掲載（既存の回の開閉だけに対応するサイト）。開く指示の前に、外部サイトへ開催枠が
+ * 作られている必要がある（#241）。ENSURE_OCCURRENCE が使えるのは「作成」と「開く」を持つ BROWSER 接続だけ。
+ * Google 予定への出力（GOOGLE）には回を作る概念が無いので対象外。運営の設定画面にだけ示す。
+ */
+export function listingNeedsAdvanceSlots(listing: Pick<ChannelListingDto, "connectionMode" | "capabilities">): boolean {
+  return listing.connectionMode !== "GOOGLE" && listing.capabilities.canOpen && !listing.capabilities.canCreate;
+}
+
+export function AdvanceSlotNote({ listing }: { readonly listing: Pick<ChannelListingDto, "connectionMode" | "capabilities"> }): ReactNode {
+  if (!listingNeedsAdvanceSlots(listing)) return null;
+  return <p className="text-xs font-bold text-warn">回の作成には未対応です。開く前に、外部サイトで開催枠を先に作っておく必要があります。</p>;
+}
+
 function accountState(account: ExternalAccountDto): ReactNode {
   if (account.revokedAtUtc) return <span className="inline-flex items-center gap-1.5 rounded-full bg-danger-pale px-2 py-0.5 text-xs font-extrabold text-danger"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current" />失効</span>;
   if (account.delegatedUntilUtc && Date.parse(account.delegatedUntilUtc) <= Date.now()) return <span className="text-xs font-extrabold text-warn">期限切れ</span>;
@@ -240,7 +254,7 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
         <ul className="divide-y divide-line">{listings.map((listing) => {
           const product = snapshot.products.find((item) => item.id === listing.productId);
           const account = accounts.find((item) => item.id === listing.accountId);
-          return <li key={listing.id} className="flex min-w-0 flex-wrap items-center gap-3 px-4 py-3"><div className="min-w-0 flex-1"><p className="font-extrabold [overflow-wrap:anywhere]">{product?.publicTitle ?? listing.productId}</p><p className="text-xs text-ink-soft">{account?.displayName ?? listing.accountId} · {listing.adapter}@{listing.adapterVersion} · {listing.connectionMode}</p></div>{stateLabel(listing.active)}<button type="button" disabled={locked} onClick={() => submit(CHANNEL_API, { action: "reconcile", listingId: listing.id }, "再照合を受け付けました。") } className={consoleButtonClass("secondary", "md", "min-h-11")}>再照合</button><button type="button" disabled={locked} onClick={() => setEditor({ kind: "listing", listing })} className={consoleButtonClass("secondary", "md", "min-h-11")}>設定</button></li>;
+          return <li key={listing.id} className="flex min-w-0 flex-wrap items-center gap-3 px-4 py-3"><div className="min-w-0 flex-1"><p className="font-extrabold [overflow-wrap:anywhere]">{product?.publicTitle ?? listing.productId}</p><p className="text-xs text-ink-soft">{account?.displayName ?? listing.accountId} · {listing.adapter}@{listing.adapterVersion} · {listing.connectionMode}</p><AdvanceSlotNote listing={listing} /></div>{stateLabel(listing.active)}<button type="button" disabled={locked} onClick={() => submit(CHANNEL_API, { action: "reconcile", listingId: listing.id }, "再照合を受け付けました。") } className={consoleButtonClass("secondary", "md", "min-h-11")}>再照合</button><button type="button" disabled={locked} onClick={() => setEditor({ kind: "listing", listing })} className={consoleButtonClass("secondary", "md", "min-h-11")}>設定</button></li>;
         })}{listings.length === 0 ? <li className="px-4 py-8 text-center text-ink-soft">掲載設定はありません</li> : null}</ul>
       </section>
 
@@ -276,7 +290,7 @@ export function AdminChannelWorkspace({ initialProviders }: { initialProviders: 
       <label className={LABEL}>外部option ID<input name="externalOptionId" maxLength={256} defaultValue={editor.listing?.externalOptionId ?? ""} className={FIELD} /></label>
       <div className="grid min-w-0 gap-3 sm:grid-cols-2"><label className={LABEL}>adapter<input name="adapter" required maxLength={120} defaultValue={editor.listing?.adapter ?? ""} className={FIELD} /></label><label className={LABEL}>版<input name="adapterVersion" required maxLength={80} defaultValue={editor.listing?.adapterVersion ?? ""} className={FIELD} /></label></div>
       <label className={LABEL}>接続方式<select name="connectionMode" defaultValue={editor.listing?.connectionMode ?? "BROWSER"} className={FIELD}><option>BROWSER</option><option>GOOGLE</option><option>API</option></select></label>
-      <fieldset><legend className="text-xs font-extrabold text-ink-soft">設定する能力</legend><div className="mt-1 grid grid-cols-2 gap-2">{(["canObserve", "canReadReservations", "canClose", "canOpen", "canCreate"] as const).map((capability) => <label key={capability} className="flex min-h-11 items-center gap-2"><input name={capability} type="checkbox" defaultChecked={editor.listing?.capabilities[capability] ?? false} />{{ canObserve: "確認", canReadReservations: "外部予約を読む", canClose: "閉じる", canOpen: "開く", canCreate: "作成" }[capability]}</label>)}</div></fieldset>
+      <fieldset><legend className="text-xs font-extrabold text-ink-soft">設定する能力</legend><div className="mt-1 grid grid-cols-2 gap-2">{(["canObserve", "canReadReservations", "canClose", "canOpen", "canCreate"] as const).map((capability) => <label key={capability} className="flex min-h-11 items-center gap-2"><input name={capability} type="checkbox" defaultChecked={editor.listing?.capabilities[capability] ?? false} />{{ canObserve: "確認", canReadReservations: "外部予約を読む", canClose: "閉じる", canOpen: "開く", canCreate: "作成" }[capability]}</label>)}</div><p className="mt-1 text-xs text-ink-soft">「作成」が使えるのは、回の作成に対応した adapter（接続方式 BROWSER）だけです。「開く」だけで「作成」が無い掲載は、外部サイトで開催枠を先に作っておく必要があります。</p></fieldset>
       {editor.listing ? <label className="flex min-h-11 items-center gap-2 font-bold"><input name="active" type="checkbox" defaultChecked={editor.listing.active} />有効にする</label> : <p className="text-xs text-ink-soft">停止で保存</p>}
     </WorkspaceDialog> : null}
 

@@ -21,6 +21,7 @@ import {
   type LockTransition,
   type SiteBookingOperationLock,
 } from "./site-booking-operation-lock";
+import { contactDeliveryText, unsettledOwnContact, withRefreshedEvents } from "./site-booking-contact-recovery";
 
 /*
  * サイト予約の取消・返金 (#285 slice 7, docs/guest-booking.md「取消と返金（第7段）」): what NIHO support has to look at
@@ -105,21 +106,35 @@ function SupportCasePanel({ booking, operationLock, onBeginContact, onContactUnk
   const [contactCommandState, setContactCommandState] = useState<ContactGuestCommand | null>(null);
   const contactCommandRef = useRef<ContactGuestCommand | null>(null);
   const [message, setMessage] = useState("");
+  // When the case was last read: the age of a contact is judged against this, not against a clock read while rendering.
+  const [loadedAtMs, setLoadedAtMs] = useState(0);
   const ownsContact = operationLock?.kind === "CONTACT" && operationLock.ownerId === ownerId
     && operationLock.commandId === contactCommandState?.commandId;
   const canSendContact = operationLock === null || (ownsContact && operationLock.phase === "UNKNOWN");
   const operationBlocked = operationLock !== null;
-  const load = useCallback(async () => {
+  const fetchCase = useCallback(async () => {
     const response = await fetch(`${API}/case?publicBookingId=${encodeURIComponent(booking.publicBookingId)}`, { cache: "no-store", credentials: "same-origin" });
     if (response.status === 401 || response.status === 403) { onSessionExpired(); throw new Error("session"); }
     if (!response.ok) throw new Error(String(response.status));
-    const result = await response.json() as { case: ExperienceSupportCase | null; currentAdminUserId: string };
+    return await response.json() as { case: ExperienceSupportCase | null; currentAdminUserId: string };
+  }, [booking.publicBookingId, onSessionExpired]);
+  const load = useCallback(async () => {
+    const result = await fetchCase();
     setCaseData(result.case ?? { publicBookingId: booking.publicBookingId, assignedAdminUserId: null, internalMemo: null, revision: 0, updatedBy: null, updatedAtUtc: new Date(0).toISOString(), events: [] });
     setCurrentAdmin(result.currentAdminUserId);
     setAssignee(result.case?.assignedAdminUserId ?? "");
     setMemo(result.case?.internalMemo ?? "");
     setLoaded(true);
-  }, [booking.publicBookingId, onSessionExpired]);
+    setLoadedAtMs(Date.now());
+  }, [booking.publicBookingId, fetchCase]);
+  // Only the history is read again: the assignee and the memo being typed, and the revision they will be saved against,
+  // stay as they are, so checking where an email is neither loses an edit nor hides another Admin's change from the save.
+  const refreshHistory = useCallback(async () => {
+    const result = await fetchCase();
+    setCaseData((current) => current === null ? current : withRefreshedEvents(current, result.case));
+    setCurrentAdmin(result.currentAdminUserId);
+    setLoadedAtMs(Date.now());
+  }, [fetchCase]);
   const loadRoster = useCallback(async () => {
     setRosterState("loading");
     const response = await fetch("/admin/api/support-admins", { cache: "no-store", credentials: "same-origin" });
@@ -218,6 +233,15 @@ function SupportCasePanel({ booking, operationLock, onBeginContact, onContactUnk
   const admins = roster?.admins ?? [];
   const retainedAssignee = caseData?.assignedAdminUserId;
   const retainedOutsideRoster = retainedAssignee !== null && retainedAssignee !== undefined && !admins.some((admin) => admin.id === retainedAssignee);
+  // Only while this screen holds no contact of its own: otherwise it is the screen that sent it, and says so itself.
+  // A screen opened anew has lost the command it kept in memory, so the case history is what remembers.
+  const unsettledContact = caseData !== null && contactCommandState === null ? unsettledOwnContact(caseData.events, currentAdmin, loadedAtMs) : null;
+  const refreshCase = () => {
+    if (busy) return;
+    setBusy(true);
+    setMessage("");
+    void refreshHistory().catch(() => setMessage("送信状態を読み込めません。通信状態と権限を確認して、もう一度お試しください。")).finally(() => setBusy(false));
+  };
   return <details className="mt-3 rounded-xl border border-line bg-sand/40 p-3" onToggle={(event: SyntheticEvent<HTMLDetailsElement>) => { if (event.currentTarget.open) openPanel(); }}>
     <summary className="cursor-pointer font-bold">Admin案件 · 担当・内部メモ・操作履歴</summary>
     {!loaded ? <p className="mt-2 text-sm text-muted">{message || (busy ? "案件を読み込んでいます…" : "開くと案件情報を読み込みます。")}</p> : caseData ? <div className="mt-3 grid gap-2">
@@ -239,8 +263,13 @@ function SupportCasePanel({ booking, operationLock, onBeginContact, onContactUnk
       </label>
       <button type="button" disabled={!(contactCommandState?.message ?? contactText.trim()) || busy || !canSendContact} className={`${BUTTON} justify-self-start`} onClick={() => void sendContact()}>{busy ? "送っています…" : contactCommandState ? "同じ連絡を再試行" : "NIHOサポートとして連絡"}</button>
       {operationLock !== null && !ownsContact ? <p role="status" className="text-sm text-warn">別の操作結果を先に確認してください。</p> : null}
+      {unsettledContact ? <div role="status" className="grid gap-1 rounded-lg bg-sand p-2 text-xs text-ink-soft">
+        <p className="font-bold">あなたの直前の連絡（{japanTime(unsettledContact.occurredAtUtc)}）は受け付け済みです。{contactDeliveryText(unsettledContact)}。</p>
+        <p>連絡文は画面に残していません。同じ内容を重ねて送らず、「状態を更新」で送信状態を確認してください。</p>
+        <button type="button" disabled={busy} className={`${BUTTON} justify-self-start`} onClick={refreshCase}>{busy ? "確認しています…" : "状態を更新"}</button>
+      </div> : null}
       {caseData.events.length ? <div><p className="text-xs font-bold text-muted">操作履歴（本文は記録しません）</p><ul className="mt-1 grid gap-1 text-xs text-muted">{caseData.events.map((event, index) => {
-        const eventLabel = event.type === "ASSIGNEE_CHANGED" ? "担当変更" : event.type === "GUEST_CONTACT_SENT" ? "予約者へ連絡" : event.type === "SUPPORT_ACTION"
+        const eventLabel = event.type === "ASSIGNEE_CHANGED" ? "担当変更" : event.type === "GUEST_CONTACT_SENT" ? `予約者へ連絡 · ${contactDeliveryText(event)}` : event.type === "SUPPORT_ACTION"
           ? `${SUPPORT_ACTION_LABEL[event.action ?? ""] ?? "支援操作"}${event.outcome ? ` · ${SUPPORT_OUTCOME_LABEL[event.outcome] ?? "結果を記録"}` : ""}`
           : "内部メモ変更";
         return <li key={`${event.revision}-${event.type}-${index}`}>{eventLabel} · {japanTime(event.occurredAtUtc)} · Admin {event.actorAdminUserId}</li>;

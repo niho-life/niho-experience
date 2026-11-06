@@ -28,6 +28,8 @@ http://localhost:3000 を開く。フッター最下部の1行「Preview with sa
 
 Claude Codeのクラウド環境のようにChromiumが入っている環境では、`PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium` を付けるとブラウザの取得を省ける。
 
+WebのVitestは `unit` と `integration` に分ける。DB統合テスト（`*.integration.test.ts`）は単体テストの後に最大2ファイルずつ実行し、各ケースの全migration適用を含めて30秒を上限とする。単体テストは既定の5秒を維持する。DB統合テストには合成データ専用の `TEST_DATABASE_URL` が必要で、対象だけなら `npm -C apps/web test -- --project integration <ファイル>` を使う。CIの全件検証には両projectを含める。
+
 ## コンテナ
 
 本番はCloud Run（入口はCloudflare）で動かす（[ADR 0001](adr/0001-web-stack.md)）。
@@ -152,5 +154,8 @@ CI を変えるとき（`.github/workflows/ci.yml`）：
 - 新しいチェックは `premerge-gate` の `needs` に足す。ruleset の必須チェックは増やさない。
 - `pull_request` のトリガーに `paths` / `paths-ignore` を付けない。パスで飛ばしたワークフローの必須チェックは「待機中」のまま止まる（[GitHub のドキュメント](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks)）。ジョブを飛ばすときは、`changes` ジョブの出力とジョブの `if` を使う（`if` で飛ばしたジョブは成功扱いになる）。
 - `premerge-gate` は `if: always()` を外さない。外すと、前のジョブが失敗した時にこのジョブが飛ばされ、成功扱いで通ってしまう。
+- テストは互いに独立したジョブに分ける（`static` / `store-tests` / `unit-tests` / `e2e`（2分割） / `e2e-provider-operations` / `e2e-misc`）。1つの `web` ジョブに直列で積んでいた頃は、PR の CI が 22〜28 分かかった（2026-11-06 実測。最も長かったのは `experience-store` のテスト約 5 分、e2e 約 9 分、重い e2e 3 本で計 約 7 分）。新しいテストは、一番遅いジョブを延ばさない場所に置く。ジョブを足したら `premerge-gate` の `needs` にも足す。
+- この組織は GitHub Free で、同時に走れるジョブは全 PR・全 workflow の合計で 20 まで。ジョブを細かく分けるほど、PR が重なったときに順番待ちが出る。分けるのは、最も遅いジョブの所要が減るときだけにする。
+- 共通の準備（Node と `npm ci`）は `.github/actions/setup-workspace` にある。`actions/checkout` の後で呼ぶ。
 
 マージキューについて：30日で `main` への push の CI は 67 回、失敗は 0 回（2026-10-26 時点）。並行マージの組み合わせで `main` が壊れるようになったら、ruleset にマージキューを足す。`ci.yml` は `merge_group` に対応済み。

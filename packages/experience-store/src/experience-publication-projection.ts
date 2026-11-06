@@ -1,4 +1,11 @@
-import { createHash } from "node:crypto";
+import {
+  englishPublicationManuscriptOf,
+  hasPublicationManuscriptKeys,
+  projectPublicationFaq,
+  publicationContentFingerprint,
+  publicationManuscriptFingerprint,
+  type ExperiencePublicationFaqItem,
+} from "./experience-publication-manuscript.ts";
 
 export interface PublicExperiencePublicationTimelineItem {
   readonly time: string;
@@ -25,6 +32,8 @@ export interface PublicExperiencePublicationContent {
   readonly knowBeforeYouGo: readonly string[];
   readonly notSuitableFor: readonly string[];
   readonly timeline: readonly PublicExperiencePublicationTimelineItem[];
+  /** Optional host FAQ (#146). Absent and empty manuscripts both project to []. */
+  readonly faq: readonly ExperiencePublicationFaqItem[];
 }
 
 export interface PublicExperiencePublication {
@@ -59,19 +68,40 @@ export interface PublicExperiencePublication {
     readonly knowBeforeYouGo: readonly string[];
     readonly notSuitableFor: readonly string[];
     readonly timeline: readonly PublicExperiencePublicationTimelineItem[];
+    readonly faq: readonly ExperiencePublicationFaqItem[];
   } | null;
   readonly publishedAtUtc: string;
 }
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const object = value as UnknownRecord;
-    return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
+/**
+ * An Admin publication may use its immutable review receipt as bilingual review
+ * evidence. This marker exists only in the in-memory projection; the draft and
+ * immutable publication content retain no OWNER confirmation fields.
+ */
+function reviewedAdminContent(row: UnknownRecord, content: UnknownRecord): UnknownRecord {
+  if (row.publisher_kind !== "ADMIN_PROXY") return content;
+  const review = record(row.admin_proxy_review);
+  const japanese = record(content.ja);
+  if (!review || !japanese || typeof review.contentFingerprint !== "string"
+    || typeof review.japaneseFingerprint !== "string" || typeof review.englishFingerprint !== "string") return content;
+  const english = englishPublicationManuscriptOf(row.public_title, content);
+  // Whole-content fingerprint: the stored snapshot exactly as reviewed (no FAQ normalisation).
+  const contentFingerprint = publicationContentFingerprint(content);
+  const japaneseFingerprint = publicationManuscriptFingerprint(japanese);
+  const englishFingerprint = publicationManuscriptFingerprint(english);
+  if (review.contentFingerprint !== contentFingerprint
+    || review.japaneseFingerprint !== japaneseFingerprint
+    || review.englishFingerprint !== englishFingerprint) return content;
+  return {
+    ...content,
+    translation: {
+      sourceFingerprint: japaneseFingerprint,
+      confirmedSourceFingerprint: japaneseFingerprint,
+      confirmedEnglishFingerprint: englishFingerprint,
+    },
+  };
 }
 
 const record = (value: unknown): UnknownRecord | null =>
@@ -189,8 +219,7 @@ function projectJapaneseManuscript(
   if (!japanese || !translation || typeof translation.sourceFingerprint !== "string"
       || translation.confirmedSourceFingerprint !== translation.sourceFingerprint
       || typeof translation.confirmedEnglishFingerprint !== "string") return null;
-  const sourceKeys = ["title", "lead", "description", "language", "highlights", "included", "notIncluded", "knowBeforeYouGo", "notSuitableFor", "timeline"];
-  if (Object.keys(japanese).length !== sourceKeys.length || sourceKeys.some((key) => !Object.hasOwn(japanese, key))) return null;
+  if (!hasPublicationManuscriptKeys(japanese)) return null;
   const title = text(japanese.title, false);
   const lead = text(japanese.lead, false);
   const description = text(japanese.description, false);
@@ -201,20 +230,10 @@ function projectJapaneseManuscript(
   const knowBeforeYouGo = stringList(japanese.knowBeforeYouGo);
   const notSuitableFor = stringList(japanese.notSuitableFor);
   const timeline = projectTimeline(japanese.timeline);
-  if (!title || !lead || !description || !language || !highlights || !included || !notIncluded || !knowBeforeYouGo || !notSuitableFor || !timeline) return null;
-  const sourceFingerprint = createHash("sha256").update(canonicalJson(japanese), "utf8").digest("hex");
-  const englishFingerprint = createHash("sha256").update(canonicalJson({
-    title: englishTitle,
-    lead: content.lead,
-    description: content.description,
-    language: record(content.facts)?.language ?? null,
-    highlights: content.highlights,
-    included: content.included,
-    notIncluded: content.notIncluded,
-    knowBeforeYouGo: content.knowBeforeYouGo,
-    notSuitableFor: content.notSuitableFor,
-    timeline: content.timeline,
-  }), "utf8").digest("hex");
+  const faq = projectPublicationFaq(japanese.faq);
+  if (!title || !lead || !description || !language || !highlights || !included || !notIncluded || !knowBeforeYouGo || !notSuitableFor || !timeline || !faq) return null;
+  const sourceFingerprint = publicationManuscriptFingerprint(japanese);
+  const englishFingerprint = publicationManuscriptFingerprint(englishPublicationManuscriptOf(englishTitle, content));
   if (sourceFingerprint !== translation.sourceFingerprint || englishFingerprint !== translation.confirmedEnglishFingerprint) return null;
   const localizedTimeline = timeline.map((item) => {
     if (item.photoIndex === null) return item;
@@ -225,6 +244,7 @@ function projectJapaneseManuscript(
   return {
     title, lead, description, language, highlights, included, notIncluded, knowBeforeYouGo, notSuitableFor,
     timeline: localizedTimeline as PublicExperiencePublicationTimelineItem[],
+    faq,
   };
 }
 
@@ -262,8 +282,9 @@ export function projectPublicExperiencePublicationContent(value: unknown): Publi
   const knowBeforeYouGo = stringList(content.knowBeforeYouGo);
   const notSuitableFor = stringList(content.notSuitableFor);
   const timeline = projectTimeline(content.timeline);
+  const faq = projectPublicationFaq(content.faq);
   if (lead === null || description === null || language === null || highlights === null || included === null
-      || notIncluded === null || knowBeforeYouGo === null || notSuitableFor === null || timeline === null) return null;
+      || notIncluded === null || knowBeforeYouGo === null || notSuitableFor === null || timeline === null || faq === null) return null;
 
   return {
     lead,
@@ -275,6 +296,7 @@ export function projectPublicExperiencePublicationContent(value: unknown): Publi
     knowBeforeYouGo,
     notSuitableFor,
     timeline,
+    faq,
   };
 }
 
@@ -313,7 +335,10 @@ const instant = (value: unknown): string | null => {
 export function projectPublicExperiencePublication(row: UnknownRecord): PublicExperiencePublication | null {
   const slug = text(row.slug, false);
   const publicTitle = text(row.public_title, false);
-  let manuscript = projectPublicExperiencePublicationManuscript(row.content);
+  const storedContent = record(row.content);
+  if (!storedContent) return null;
+  const source = reviewedAdminContent(row, storedContent);
+  let manuscript = projectPublicExperiencePublicationManuscript(source);
   const currency = typeof row.currency === "string" && /^[A-Z]{3}$/.test(row.currency) ? row.currency : null;
   const unitAmount = safeInteger(row.unit_amount);
   const sellerDisplayName = text(row.seller_display_name, false);
@@ -322,8 +347,6 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   const publishedAtUtc = instant(row.published_at);
   if (slug === null || publicTitle === null || manuscript === null || currency === null || unitAmount === null
       || sellerDisplayName === null || media === null || providerMedia === null || publishedAtUtc === null) return null;
-  const source = record(row.content);
-  if (!source) return null;
   manuscript = remapPhotoReferences(manuscript, source, media.galleryPositionBySourcePosition);
   if (!manuscript) return null;
   const japanese = projectJapaneseManuscript(row, source, publicTitle, media.galleryPositionBySourcePosition);

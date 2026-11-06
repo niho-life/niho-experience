@@ -36,7 +36,7 @@ const item = {
     publicTitle: "Native review page",
     content: {
       lead: "A synthetic native experience.", description: "Only public manuscript appears here.", facts: { language: "English" },
-      highlights: [], included: ["Materials"], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [],
+      highlights: [], included: ["Materials"], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [],
     },
     currency: "JPY", unitAmount: 4_000, sellerDisplayName: "Synthetic Host", meetingOverview: null,
     meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null, photos: [], providerPhoto: null, businessLogo: null,
@@ -60,9 +60,9 @@ function ok(count: number): JourneyReviews {
   return { status: "ok", summary: { count, average, tags: count ? [{ label: "Great host", count }] : [] }, items };
 }
 
-async function render(reviews: JourneyReviews | null): Promise<string> {
+async function render(reviews: JourneyReviews | null, page: SitePublicExperience = item): Promise<string> {
   state.reviews = reviews;
-  return renderToStaticMarkup(await SitePublicationPage({ item }));
+  return renderToStaticMarkup(await SitePublicationPage({ item: page }));
 }
 
 function jsonLd(html: string): Record<string, unknown>[] {
@@ -108,5 +108,32 @@ describe("native publication reviews", () => {
       expect(JSON.stringify(node.review)).toContain("</script><script>alert(1)</script>");
       expect(JSON.stringify(node)).not.toMatch(/providerId|productId|bookingId|noteToHost|bodyJa/);
     }
+  });
+});
+
+describe("native publication FAQ", () => {
+  const withFaq = (faq: SitePublicExperience["publication"]["content"]["faq"]): SitePublicExperience => ({
+    ...item, publication: { ...item.publication, content: { ...item.publication.content, faq } },
+  });
+
+  it("renders no FAQ section, heading or filler when the host wrote none", async () => {
+    const html = await render(null);
+    expect(html).not.toContain('id="faq"');
+    expect(html).not.toContain("Questions before you book");
+    expect(html).not.toContain("<details");
+  });
+
+  it("renders the host FAQ in order in the server HTML: one h2, one h3 per question inside native details, and no FAQPage JSON-LD", async () => {
+    const html = await render(null, withFaq([
+      { question: "Can I bring my child?", answer: "Yes, from age 6.\nAn adult must join." },
+      { question: "Is it held in rain?", answer: "Yes, indoors." },
+    ]));
+    expect(html).toContain('id="faq"');
+    expect(html.match(/<h2[^>]*>Questions before you book<\/h2>/g)).toHaveLength(1);
+    expect(html.match(/<details/g)).toHaveLength(2);
+    expect(html).toMatch(/<summary[^>]*><h3[^>]*><span>Can I bring my child\?<\/span>/);
+    expect(html.indexOf("Can I bring my child?")).toBeLessThan(html.indexOf("Is it held in rain?"));
+    expect(html).toContain("Yes, from age 6.\nAn adult must join.");
+    for (const node of jsonLd(html)) expect(JSON.stringify(node)).not.toContain("FAQPage");
   });
 });

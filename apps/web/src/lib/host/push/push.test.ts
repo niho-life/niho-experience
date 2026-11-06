@@ -25,7 +25,55 @@ describe("hostPushPayload: what a lock screen may show (#177 P2)", () => {
       url: "/host/bookings?filter=pending&booking=bk-2041",
       tag: "booking-bk-2041",
       badge: 2,
+      web_push: 8030,
+      mutable: true,
+      notification: {
+        title: "新しい予約・申込",
+        body: "Kamakura Community Dinner with Locals · 10/22（木）18:00 · 3名",
+        navigate: "/host/bookings?filter=pending&booking=bk-2041",
+        tag: "booking-bk-2041",
+        lang: "ja",
+        dir: "ltr",
+        data: { url: "/host/bookings?filter=pending&booking=bk-2041", badge: 2 },
+        app_badge: "2",
+      },
     });
+  });
+
+  it("is also a Declarative Web Push message (#177 P3): the same words, where a tap goes, and one notification per tag", () => {
+    const origin = "https://experience.example.test";
+    const message = JSON.parse(hostPushPayload({ ...event, badgeCount: 0 }, origin));
+    // The legacy fields stay for /host/sw.js and for browsers without declarative push.
+    expect(message).toMatchObject({ v: 1, title: "新しい予約・申込", url: "/host/bookings?filter=pending&booking=bk-2041", tag: "booking-bk-2041", badge: 0 });
+    expect(message.web_push).toBe(8030);
+    expect(message.mutable).toBe(true);
+    expect(message.notification).toEqual({
+      title: message.title,
+      body: message.body,
+      navigate: `${origin}/host/bookings?filter=pending&booking=bk-2041`,
+      tag: message.tag,
+      lang: "ja",
+      dir: "ltr",
+      // The worker gets this as event.notification (mutable: true): where a tap goes, and the count (0 clears the badge).
+      data: { url: `${origin}/host/bookings?filter=pending&booking=bk-2041`, badge: 0 },
+      icon: `${origin}/host-app/icon-192.png`,
+    });
+    // Zero clears the badge in the worker; the declarative app_badge sets none.
+    expect(message.notification).not.toHaveProperty("app_badge");
+    expect(Object.keys(JSON.parse(hostPushTestPayload(origin)).notification).sort()).toEqual(["body", "data", "dir", "icon", "lang", "navigate", "tag", "title"]);
+    expect(JSON.parse(hostPushTestPayload(origin)).notification.navigate).toBe(`${origin}/host/settings#settings-device`);
+  });
+
+  it("keeps a tap inside the app and the lock screen free of anything the legacy message does not say", () => {
+    const origin = "https://experience.example.test";
+    const smuggled = { ...event, guestName: "合成 予約者", message: "アレルギーがあります", amount: 12000, url: "/host/messages?thread=t1" } as HostPushEvent;
+    const json = hostPushPayload(smuggled, origin);
+    expect(json).not.toMatch(/合成 予約者|アレルギー|12000/);
+    const navigate = new URL(JSON.parse(json).notification.navigate);
+    expect(navigate.origin).toBe(origin);
+    expect(navigate.pathname.startsWith("/host/")).toBe(true);
+    expect(() => hostPushPayload({ ...event, url: "https://evil.example.test/host/home" }, origin)).toThrow(/under \/host\//);
+    expect(Buffer.byteLength(hostPushPayload({ ...event, experienceTitle: "体".repeat(500) }, origin))).toBeLessThanOrEqual(3 * 1024);
   });
 
   it("leaves out what it does not know, and has a title for every kind", () => {
