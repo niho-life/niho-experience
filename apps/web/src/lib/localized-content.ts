@@ -17,6 +17,7 @@ import type { PageId } from "./page-document-contract";
 import { assertSameJapaneseRelease, JapaneseReleaseUnavailable } from "./localized-release";
 import { experienceCounterparts, mapJapaneseExperiences, mapPublicationJapaneseExperiences } from "./localized-mapping";
 import { readBoundedJson } from "./read-bounded-json";
+import { LOCAL_JAPANESE_RELEASE_ID, localJapaneseCopy } from "./ja-static-copy";
 export { assertSameJapaneseRelease, JapaneseReleaseUnavailable, japaneseBookingAllowed } from "./localized-release";
 
 export type SiteLocale = "en" | "ja";
@@ -61,6 +62,39 @@ async function publicJson(path: string): Promise<unknown | null> {
   catch { throw new JapaneseReleaseUnavailable("invalid"); }
 }
 
+/**
+ * Where the Japanese interface comes from (#59). The experiences this site publishes (`EXPERIENCE_PUBLICATIONS_ENABLED`
+ * in http mode) are Japanese from their own confirmed manuscripts, so their copy and static pages are this repository's
+ * (ja-static-copy.ts) and nothing is read from NIHO. Otherwise (the NIHO catalogue of the preview and the former sale) the
+ * release NIHO serves is used as before.
+ */
+export function localJapaneseRelease(): boolean {
+  return config.apiMode === "http" && config.experiencePublicationsEnabled;
+}
+
+/** Route and search-engine data of the four static pages in the local release. Help is not indexed, as in English. */
+const LOCAL_STATIC_PAGES = {
+  home: { titleKey: "meta.siteTitle", descriptionKey: "meta.description", indexable: true },
+  experiences: { titleKey: "catalogue.metaTitle", descriptionKey: "catalogue.metaDescription", indexable: true },
+  host: { titleKey: "host.metaTitle", descriptionKey: "host.metaDescription", indexable: true },
+  help: { titleKey: "help.metaTitle", descriptionKey: null, indexable: false },
+} as const;
+
+function localJapanesePage(pageId: keyof typeof LOCAL_STATIC_PAGES): JapanesePage {
+  const { values } = localJapaneseCopy();
+  const page = LOCAL_STATIC_PAGES[pageId];
+  const sourcePath = STATIC_SOURCE_PATHS[pageId];
+  return {
+    releaseId: LOCAL_JAPANESE_RELEASE_ID,
+    locale: "ja",
+    document: null,
+    route: { pageId, sourcePath, path: sourcePath === "/" ? "/ja" : `/ja${sourcePath}`, indexable: page.indexable },
+    seo: { pageId, title: values[page.titleKey], ...(page.descriptionKey ? { description: values[page.descriptionKey] } : {}), indexable: page.indexable },
+    chrome: null,
+    presentation: null,
+  };
+}
+
 const STATIC_SOURCE_PATHS = {
   home: "/",
   experiences: "/experiences",
@@ -88,6 +122,7 @@ const STATIC_PAGE_IDS = new Set<PageId>(["home", "experiences", "host", "help"])
 export const getJapanesePage = cache(async (pageId: PageId): Promise<JapanesePage> => {
   if (!config.japaneseSiteEnabled) throw new JapaneseReleaseUnavailable("disabled");
   if (!STATIC_PAGE_IDS.has(pageId)) throw new JapaneseReleaseUnavailable("invalid");
+  if (localJapaneseRelease()) return localJapanesePage(pageId as keyof typeof LOCAL_STATIC_PAGES);
   const value = await publicJson(`/api/public/experiences/pages/localized/${encodeURIComponent(pageId)}/ja`);
   if (!isObject(value)) throw new JapaneseReleaseUnavailable("missing");
   try {
@@ -112,6 +147,10 @@ export const getJapaneseSidecar = cache(async (sidecarId: JapaneseSidecar["sidec
 
 export const getJapaneseCopy = cache(async (): Promise<{ releaseId: string; values: StaticCopyValuesV1; copy: StaticCopyAccessorV1 }> => {
   if (!config.japaneseSiteEnabled) throw new JapaneseReleaseUnavailable("disabled");
+  if (localJapaneseRelease()) {
+    const copy = localJapaneseCopy();
+    return { releaseId: LOCAL_JAPANESE_RELEASE_ID, values: copy.values, copy };
+  }
   const result = await (await getApi()).getJapaneseSiteCopy();
   if (!result.ok) throw new JapaneseReleaseUnavailable(result.kind === "not_found" ? "missing" : "invalid");
   try {
