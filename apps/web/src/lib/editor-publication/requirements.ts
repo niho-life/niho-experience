@@ -9,9 +9,10 @@ import { EDITOR_PUBLICATION_DEST, GUIDE_PREVIEW_TOKEN } from "./contract";
  * here. The editor shows these conditions and their wording; this site only declares them. No secrets, the same for every
  * caller, served by `GET /api/public/guides/publication-requirements`.
  *
- * On receipt this site re-checks only what keeps the page safe and listable (English, an optional lead within the
- * product limit, a category, the Markdown subset, https photos on the editor's origins); the editorial conditions are
- * the editor's gate. Cover and lead are optional for this destination.
+ * On receipt this site re-checks only what keeps the page safe and listable (English, a title and an optional lead within
+ * the product limits, a category, the Markdown subset, https photos on the editor's origins); the editorial conditions are
+ * the editor's gate. Cover and lead are optional for this destination. `title` and `images` need an editor that knows
+ * those kinds (niho-life/niho-editor#316): an older editor rejects the whole declaration.
  */
 
 export const GUIDE_PREVIEW_TOKEN_PARAM = "token";
@@ -32,6 +33,7 @@ export interface GuidePublicationCategoryOption {
 
 export function guidePublicationRequirements(siteUrl: string, categories: readonly GuidePublicationCategoryOption[] = []) {
   const leadMax = GUIDE_LIMITS.descriptionMaxLength;
+  const titleMax = GUIDE_LIMITS.titleMaxLength;
   return {
     schemaVersion: 1,
     id: EDITOR_PUBLICATION_DEST,
@@ -51,6 +53,10 @@ export function guidePublicationRequirements(siteUrl: string, categories: readon
       { id: "no-confirm", kind: "noConfirm", message: "未確認の印（CONFIRM）を解消してください", fix: "body" },
       // Whether each related experience is live is the editor server's check (unknown counts as not met).
       { id: "related-live", kind: "relatedLive", message: "掲載中の関連する体験を選んでください", fix: "related" },
+      // This site leaves out a publication whose title is longer (the `Article.headline` limit): stop it in the editor instead.
+      { id: "title", kind: "title", max: titleMax, message: `題名を ${titleMax} 字以内にしてください`, fix: "body" },
+      // Every photo (body and cover) needs alt text: the page's only description of a photo for search and screen readers.
+      { id: "image-alt", kind: "images", alt: true, message: "写真に代替テキスト（alt）を入れてください", fix: "body" },
     ],
   } as const;
 }

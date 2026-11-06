@@ -217,13 +217,14 @@ editor の本文は AST が正本で、`markdown` はその投影（`##` `###`�
 | 英語 | `lang`（`equals: en`） | `lang`（`equals: "en"`） | |
 | カバー（掲載許諾あり） | `cover`（`required`・`requireLicensed`） | `cover`（`consent: true`） | 共有の権利ではなく掲載許諾（上の「写真」） |
 | リード | `lead`（`required`・`maxLength`） | `lead`（`max`） | 上限は `GUIDE_LIMITS`（160） |
-| 題名 | `title`（`maxLength`） | **該当なし** | v1 に kind が無いため宣言から外した。110文字超は受信時に読み飛ばす |
+| 題名 | `title`（`maxLength`） | `title`（`max: 110`） | editor#316 で語彙に入った。受信時も 110 文字超は読み飛ばすので、editor の公開前に止める |
+| 写真の代替テキスト | — | `images`（`alt: true`） | 本文の写真とカバーの alt が空でないこと（editor#316） |
 | カテゴリ | `category`（`required`） | `category`（`oneOf` なし） | 入力欄は editor 側に無い（下の「残る差」） |
 | 見出し1つ以上 | `min-headings`（`min`） | `headings`（`min`） | |
 | `CONFIRM` なし | `no-confirm-marker` | `noConfirm` | |
 | 関連体験が掲載中 | `related-experiences-listed`（`lookup`） | `relatedLive` | 外の事実は editor がサーバーの `facts` として渡す。`lookup` は不要 |
 
-experience が受信時に再確認するのは安全に関わるもの（英語、Markdown subset、https の許可 origin の写真）と、宣言できない上限（題名110・slug80）だけで、編集上の条件は editor の公開前チェックに任せる。関連体験の再判定（権限・掲載状態）は #255。
+experience が受信時に再確認するのは安全に関わるもの（英語、Markdown subset、https の許可 origin の写真）と、表示の上限（題名110。editor の宣言でも止める）だけで、編集上の条件は editor の公開前チェックに任せる。`title`・`images` の kind を知らない editor は宣言ごと拒否するので、この 2 つは editor#316 の配備後に宣言へ足した。関連体験の再判定（権限・掲載状態）は #255。
 
 ### 切替・切戻し
 
