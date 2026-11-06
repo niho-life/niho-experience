@@ -20,8 +20,8 @@ const CLAIM_REQUIRED_KEYS = Object.freeze([
 const CLAIM_OPTIONAL_KEYS = Object.freeze(["purpose", "googleDeliveryOperation"]);
 
 export class ContractError extends Error {
-  constructor(code, message = code) {
-    super(message);
+  constructor(code, message = code, options = undefined) {
+    super(message, options);
     this.name = "ContractError";
     this.code = code;
   }

@@ -42,9 +42,9 @@ export async function createViatorDriver({ job, cloud, config, now = () => new D
     const availabilityUrl = `${supplierOrigin}/availability/`;
     let stopping = false;
     let stopPromise = null;
-    const authOrDrift = async () => {
+    const authOrDrift = async (cause) => {
       await accessMonitor.assertAvailable();
-      return assertAuthOrDrift({ page, guard, supplierOrigin, signInPattern: /sign in|log in|ログイン/i });
+      return assertAuthOrDrift({ page, guard, supplierOrigin, signInPattern: /sign in|log in|ログイン/i, cause });
     };
     const assertActive = async () => {
       if (stopping) throw new ContractError("DRIVER_STOPPED");
@@ -159,8 +159,8 @@ export async function createViatorDriver({ job, cloud, config, now = () => new D
       await assertActive();
       snapshot = null;
       const bootstrap = await receiveRead(() => mode === "navigate"
-        ? page.goto(availabilityUrl, { waitUntil: "domcontentloaded" }).catch(() => authOrDrift())
-        : page.reload({ waitUntil: "domcontentloaded" }).catch(() => authOrDrift()), { targetRequired: false });
+        ? page.goto(availabilityUrl, { waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error))
+        : page.reload({ waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error)), { targetRequired: false });
       await accessMonitor.assertAvailable();
       await verifyAccount();
       if (bootstrap.selected && bootstrap.coversTarget) return authorizeTarget(bootstrap);

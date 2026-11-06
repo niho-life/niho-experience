@@ -115,7 +115,7 @@ export async function createGygReservationReader({
     let stopping = false;
     let stopPromise = null;
     let ready = null;
-    const authOrDrift = () => assertAuthOrDrift({ page, guard, supplierOrigin, signInPattern: /sign in|log in/i });
+    const authOrDrift = (cause) => assertAuthOrDrift({ page, guard, supplierOrigin, signInPattern: /sign in|log in/i, cause });
     const assertActive = () => { if (stopping) throw new ContractError("READER_STOPPED"); };
 
     function assertSessionPage() {
@@ -131,7 +131,7 @@ export async function createGygReservationReader({
     // every failure is raised while the executor already holds stop().
     async function prepareSession() {
       assertActive();
-      await page.goto(companyUrl, { waitUntil: "domcontentloaded" }).catch(() => authOrDrift());
+      await page.goto(companyUrl, { waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error));
       assertActive();
       const label = page.getByText("Supplier ID:", { exact: true });
       await label.waitFor({ state: "visible" }).catch(() => authOrDrift());
@@ -141,7 +141,7 @@ export async function createGygReservationReader({
       if (!match || match[1] !== fixedTarget.externalAccountId) throw new ContractError("ACCOUNT_MISMATCH");
       assertActive();
       const before = guard.appReads;
-      await page.goto(bookingsUrl, { waitUntil: "domcontentloaded" }).catch(() => authOrDrift());
+      await page.goto(bookingsUrl, { waitUntil: "domcontentloaded" }).catch((error) => authOrDrift(error));
       assertActive();
       if (!await guard.waitForAppRead(before, APP_READ_TIMEOUT_MS)) return authOrDrift();
       assertActive();
