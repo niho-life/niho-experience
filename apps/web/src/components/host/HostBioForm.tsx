@@ -5,6 +5,7 @@ import { consoleButtonClass } from "./host-ui";
 import {
   canSaveHostBio,
   draftFromState,
+  englishCheckable,
   hostBioCount,
   hostBioFieldError,
   hostBioMutationOutcome,
@@ -12,17 +13,19 @@ import {
   hostBioSaveBody,
   hostBioTranslationOutcome,
   parseHostBioLoad,
-  savedMatchesDraft,
+  resolveUnknownResult,
+  withEnglish,
   withJapanese,
   type HostBioDraft,
   type HostBioLoad,
+  type HostBioUnknownOperation,
 } from "./host-bio-form-model";
 
 const API = "/host/api/host-bio";
 const FIELD = "w-full rounded-xl border border-line-strong bg-canvas px-3 py-2 text-[1rem] leading-relaxed md:text-[0.875rem] disabled:bg-sand aria-[invalid=true]:border-danger";
 const EMPTY_DRAFT: HostBioDraft = { bioJa: "", bioEn: "", englishChecked: false };
 const AUTH_MESSAGE = "権限を確認できません。入力内容は画面から消去しました。もう一度ログインしてください。";
-const UNKNOWN_MESSAGE = "通信結果を確認できません。保存できたかどうか分からないため、入力はそのまま残しています。「再読込して現在の内容を確認」を押してください。";
+const unknownMessage = (operation: HostBioUnknownOperation) => `通信結果を確認できません。${operation === "DELETE" ? "撤回できたかどうか" : "保存できたかどうか"}分からないため、入力はそのまま残しています。「再読込して現在の内容を確認」を押してください。`;
 export const HOST_BIO_CONSENT_TEXT = "ここに書いた内容は、あなたの体験ページ（日本語・英語）に公開されます。電話番号・メール・住所など、公開したくない情報は書かないでください。";
 
 type ReadResult = { kind: "ok"; load: HostBioLoad } | { kind: "auth" } | { kind: "failed" };
@@ -50,13 +53,13 @@ export function HostBioForm() {
   const [draft, setDraft] = useState<HostBioDraft>(EMPTY_DRAFT);
   const [consented, setConsented] = useState(false);
   const [busy, setBusy] = useState<"save" | "withdraw" | "translate" | "reload" | null>(null);
-  /** A save/withdraw whose result is unknown. Nothing is sent again until the current value is read. */
-  const [unknownResult, setUnknownResult] = useState(false);
+  /** The save (PUT) or withdrawal (DELETE) whose result is unknown. Nothing is sent again until the current value is read. */
+  const [unknownResult, setUnknownResult] = useState<HostBioUnknownOperation | null>(null);
   const [message, setMessage] = useState("読み込み中です…");
   const withdrawDialog = useRef<HTMLDialogElement>(null);
 
   const clearPrivateView = (text: string) => {
-    setLoaded(null); setDraft(EMPTY_DRAFT); setConsented(false); setUnknownResult(false); setMessage(text);
+    setLoaded(null); setDraft(EMPTY_DRAFT); setConsented(false); setUnknownResult(null); setMessage(text);
   };
 
   useEffect(() => {
@@ -73,15 +76,20 @@ export function HostBioForm() {
 
   /** Re-read the saved value. The host's text stays in the form unless `replaceDraft` (nothing to lose). */
   const reload = async (after: "unknown" | "conflict" | "manual") => {
+    const unknownOperation = unknownResult;
     setBusy("reload");
     try {
       const result = await readHostBio();
       if (result.kind === "auth") return clearPrivateView(AUTH_MESSAGE);
       if (result.kind === "failed") return setMessage("現在の内容を読み込めませんでした。時間をおいて再度お試しください。");
       const state = result.load.hostBio;
-      setLoaded(result.load); setConsented(false); setUnknownResult(false);
+      setLoaded(result.load); setConsented(false); setUnknownResult(null);
       if (after === "unknown") {
-        if (savedMatchesDraft(state, draft)) { setDraft(draftFromState(state)); setMessage("保存されていました。" + hostBioPublicationNote(state)); }
+        // The unknown request decides what the re-read means; a withdrawal is judged by the bio being gone, not by the draft.
+        const resolution = resolveUnknownResult(unknownOperation ?? "PUT", state, draft);
+        if (resolution === "SAVED") { setDraft(draftFromState(state)); setMessage("保存されていました。" + hostBioPublicationNote(state)); }
+        else if (resolution === "WITHDRAWN") { setDraft(draftFromState(state)); setMessage("ホスト紹介は撤回されていました。体験ページからは表示されなくなります。"); }
+        else if (resolution === "NOT_WITHDRAWN") setMessage("撤回は反映されていませんでした。ホスト紹介はまだ公開されています。撤回する場合は、もう一度「ホスト紹介を撤回」を押してください。");
         else setMessage("入力内容は保存されていませんでした。入力はそのまま残しています。内容を確認して、もう一度保存してください。");
       } else if (after === "conflict") {
         setMessage("別の画面で内容が変わっていました。保存されている内容を読み直しました（入力はそのまま残しています）。確認してから保存し直してください。");
@@ -94,7 +102,7 @@ export function HostBioForm() {
   };
 
   const mutate = async (method: "PUT" | "DELETE") => {
-    if (!loaded || busy || unknownResult) return;
+    if (!loaded || busy || unknownResult !== null) return;
     const body = method === "PUT" ? hostBioSaveBody(draft, loaded.hostBio, loaded.consentVersion) : { expectedVersion: loaded.hostBio.version };
     setBusy(method === "PUT" ? "save" : "withdraw");
     setMessage("");
@@ -113,9 +121,9 @@ export function HostBioForm() {
       }
       if (outcome.kind === "CONFLICT") { setBusy(null); await reload("conflict"); return; }
       if (outcome.kind === "REJECTED") { setMessage("入力内容を確認してください。文字数と使えない文字をご確認ください。"); return; }
-      setUnknownResult(true); setMessage(UNKNOWN_MESSAGE);
+      setUnknownResult(method); setMessage(unknownMessage(method));
     } catch {
-      setUnknownResult(true); setMessage(UNKNOWN_MESSAGE);
+      setUnknownResult(method); setMessage(unknownMessage(method));
     } finally { setBusy((current) => (current === "reload" ? current : null)); }
   };
 
@@ -145,11 +153,11 @@ export function HostBioForm() {
   }
 
   const state = loaded.hostBio;
-  const locked = busy !== null || unknownResult;
+  const locked = busy !== null || unknownResult !== null;
   const jaError = hostBioFieldError(draft.bioJa, "ja");
   const enError = hostBioFieldError(draft.bioEn, "en");
   const canTranslate = !locked && draft.bioJa.trim().length > 0 && jaError === null;
-  const canCheckEnglish = draft.bioEn.trim().length > 0 && enError === null;
+  const canCheckEnglish = englishCheckable(draft.bioEn);
   const saveAllowed = canSaveHostBio(draft, consented, locked);
 
   return <div className="space-y-4">
@@ -189,7 +197,7 @@ export function HostBioForm() {
         <textarea
           id={`${id}-en`} lang="en" rows={8} className={FIELD} disabled={locked} value={draft.bioEn}
           aria-invalid={enError ? true : undefined} aria-describedby={`${id}-en-count${enError ? ` ${id}-en-error` : ""}`}
-          onChange={(event) => setDraft((current) => ({ ...current, bioEn: event.target.value }))}
+          onChange={(event) => setDraft((current) => withEnglish(current, event.target.value))}
         />
         <Counter id={`${id}-en-count`} text={draft.bioEn} locale="en" />
         {enError ? <p id={`${id}-en-error`} role="alert" className="text-sm font-bold text-danger">{enError}</p> : null}
@@ -205,10 +213,10 @@ export function HostBioForm() {
       </label>
 
       <div className="mt-5 flex flex-wrap gap-2">
-        {unknownResult
+        {unknownResult !== null
           ? <button type="button" className={consoleButtonClass("primary", "lg", "w-full sm:w-auto")} disabled={busy !== null} onClick={() => void reload("unknown")}>再読込して現在の内容を確認</button>
           : <button type="button" className={consoleButtonClass("primary", "lg", "w-full sm:w-auto")} disabled={!saveAllowed} onClick={() => void mutate("PUT")}>{busy === "save" ? "保存中…" : "保存"}</button>}
-        {!unknownResult ? <button type="button" className={consoleButtonClass("secondary", "md", "self-center")} disabled={locked} onClick={() => void reload("manual")}>保存済みの内容に戻す</button> : null}
+        {unknownResult === null ? <button type="button" className={consoleButtonClass("secondary", "md", "self-center")} disabled={locked} onClick={() => void reload("manual")}>保存済みの内容に戻す</button> : null}
       </div>
       {message ? <p role="status" className="mt-4 font-bold">{message}</p> : null}
 

@@ -59,6 +59,18 @@ export function withJapanese(draft: HostBioDraft, bioJa: string): HostBioDraft {
   return bioJa === draft.bioJa ? draft : { ...draft, bioJa, englishChecked: false };
 }
 
+/** English that can be confirmed: not empty, no control characters, within the limit. */
+export const englishCheckable = (bioEn: string): boolean => hostBioTextIssue(normalizeHostBioText(bioEn), "en") === null;
+
+/**
+ * An edited English text. English that cannot be confirmed (emptied, too long, control characters) cannot stay
+ * confirmed either: the check box is shown unchecked and disabled for such a text while Save would stay blocked by the
+ * hidden confirmation, so the host could not save a Japanese-only bio.
+ */
+export function withEnglish(draft: HostBioDraft, bioEn: string): HostBioDraft {
+  return bioEn === draft.bioEn ? draft : { ...draft, bioEn, englishChecked: draft.englishChecked && englishCheckable(bioEn) };
+}
+
 export type HostBioCount = { readonly length: number; readonly limit: number; readonly remaining: number; readonly over: boolean };
 
 /** The counter counts what is saved (normalized, in code points like the database). */
@@ -137,4 +149,19 @@ export function savedMatchesDraft(state: HostBioState, draft: HostBioDraft): boo
   if (state.bioJa !== normalizeHostBioText(draft.bioJa)) return false;
   const english = englishSendable(draft) ? normalizeHostBioText(draft.bioEn) : null;
   return english === null ? state.bioEn === null : state.englishConfirmed && state.bioEn === english;
+}
+
+/** The request whose result is unknown: a save (PUT) or a withdrawal (DELETE). */
+export type HostBioUnknownOperation = "PUT" | "DELETE";
+
+export type HostBioUnknownResolution = "SAVED" | "NOT_SAVED" | "WITHDRAWN" | "NOT_WITHDRAWN";
+
+/**
+ * What the re-read says about an unknown request. A save succeeded when the saved text is the host's. A withdrawal
+ * succeeded when no bio exists any more, never when the saved text differs from the draft (that is what a withdrawal
+ * leaves behind); judging it like a save would tell the host to save again and publish the withdrawn text.
+ */
+export function resolveUnknownResult(operation: HostBioUnknownOperation, state: HostBioState, draft: HostBioDraft): HostBioUnknownResolution {
+  if (operation === "DELETE") return state.version === 0 ? "WITHDRAWN" : "NOT_WITHDRAWN";
+  return savedMatchesDraft(state, draft) ? "SAVED" : "NOT_SAVED";
 }

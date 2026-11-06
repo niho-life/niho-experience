@@ -10,7 +10,9 @@ import {
   hostBioTranslationOutcome,
   parseHostBioLoad,
   parseHostBioState,
+  resolveUnknownResult,
   savedMatchesDraft,
+  withEnglish,
   withJapanese,
   type HostBioState,
 } from "./host-bio-form-model";
@@ -46,6 +48,24 @@ describe("host bio form model", () => {
     expect(hostBioSaveBody(changed, saved, CONSENT)).toEqual({ bioJa: "鎌倉で茶道を20年教えています。", bioEn: null, expectedVersion: 3, consentVersion: CONSENT });
     expect(hostBioSaveBody({ ...changed, englishChecked: true }, saved, CONSENT).bioEn).toBe(saved.bioEn);
     expect(hostBioSaveBody({ bioJa: "紹介", bioEn: "", englishChecked: true }, empty, CONSENT)).toEqual({ bioJa: "紹介", bioEn: null, expectedVersion: null, consentVersion: CONSENT });
+  });
+
+  it("takes the English confirmation away when the English can no longer be confirmed, so Save is not blocked by a hidden check", () => {
+    const draft = draftFromState(saved);
+    expect(withEnglish(draft, saved.bioEn!)).toBe(draft);
+    // The scenario of the review: a confirmed English is emptied. The check is gone, and a Japanese-only bio can be saved.
+    const emptied = withEnglish(draft, "");
+    expect(emptied).toEqual({ bioJa: saved.bioJa, bioEn: "", englishChecked: false });
+    expect(canSaveHostBio(draft, true, false)).toBe(true);
+    expect(canSaveHostBio({ ...draft, bioEn: "" }, true, false)).toBe(false);
+    expect(canSaveHostBio(emptied, true, false)).toBe(true);
+    expect(hostBioSaveBody(emptied, saved, CONSENT).bioEn).toBeNull();
+    expect(withEnglish(draft, "  \r\n").englishChecked).toBe(false);
+    expect(withEnglish(draft, "a".repeat(1501)).englishChecked).toBe(false);
+    expect(withEnglish(draft, "bad\u0007text").englishChecked).toBe(false);
+    // An edit that stays usable keeps the host's check; an unchecked English stays unchecked.
+    expect(withEnglish(draft, "I teach tea ceremony in Kamakura and Tokyo.").englishChecked).toBe(true);
+    expect(withEnglish({ ...draft, englishChecked: false }, "Another intro.").englishChecked).toBe(false);
   });
 
   it("counts saved characters and explains over-long or controlled text", () => {
@@ -99,5 +119,21 @@ describe("host bio form model", () => {
     expect(savedMatchesDraft(saved, { bioJa: saved.bioJa!, bioEn: saved.bioEn!, englishChecked: false })).toBe(false);
     expect(savedMatchesDraft({ ...saved, bioEn: null, englishConfirmed: false }, { bioJa: saved.bioJa!, bioEn: "x", englishChecked: false })).toBe(true);
     expect(savedMatchesDraft(empty, { bioJa: "紹介", bioEn: "", englishChecked: false })).toBe(false);
+  });
+
+  it("judges an unknown withdrawal by the bio being gone, and an unknown save by the saved text", () => {
+    const draft = draftFromState(saved);
+    // Save: unchanged behaviour.
+    expect(resolveUnknownResult("PUT", saved, draft)).toBe("SAVED");
+    expect(resolveUnknownResult("PUT", empty, draft)).toBe("NOT_SAVED");
+    // Withdrawal that reached the database: the state is empty and differs from the draft. Judged like a save this is
+    // "not saved, save again", which would publish the withdrawn text again.
+    expect(savedMatchesDraft(empty, draft)).toBe(false);
+    expect(resolveUnknownResult("DELETE", empty, draft)).toBe("WITHDRAWN");
+    // Withdrawal that failed: the original bio is still there and equals the draft. Judged like a save this is
+    // "saved", which would hide that the withdrawal did not happen.
+    expect(savedMatchesDraft(saved, draft)).toBe(true);
+    expect(resolveUnknownResult("DELETE", saved, draft)).toBe("NOT_WITHDRAWN");
+    expect(resolveUnknownResult("DELETE", { ...saved, version: 4 }, draft)).toBe("NOT_WITHDRAWN");
   });
 });
