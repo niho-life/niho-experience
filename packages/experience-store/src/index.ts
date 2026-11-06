@@ -243,6 +243,8 @@ export type {
   StripeRefundStatus,
   SupportActor,
   SupportCancellationInput,
+  SupportEnabledBookingsOptions,
+  SupportEnabledBookingsPage,
   SupportOperationAction,
   SupportOperationPreview,
   SupportOperationPreviewInput,
