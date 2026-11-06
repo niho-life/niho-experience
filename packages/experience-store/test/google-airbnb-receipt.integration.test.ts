@@ -676,4 +676,91 @@ describe("PostgreSQL Google/Airbnb typed result receipt", { skip: databaseUrl ==
       )).rows[0].last_error, null);
     } finally { await cleanup(value); }
   });
+  it("holds no lease between wait attempts, makes one read per attempt, and leaves another account's listing untouched (#281)", async () => {
+    const value = await fixture("CLOSED");
+    try {
+      await value.runtime.submitResult(value.worker, value.claimed.id, mismatch(value, command(500)));
+      // Another account's listing, settled before the wait runs: its rows are the "not a target" baseline.
+      const admin = { nihoUserId: "admin-a" };
+      const accountB = await value.runtime.createExternalAccount(admin, {
+        id: "account-b", providerId: "provider-a", site: "Airbnb", externalAccountId: "other-account",
+        displayName: "Other synthetic account", operatingModel: 2, active: true,
+      }, command(501));
+      const listingB = await value.runtime.createListing(admin, {
+        id: "listing-b", providerId: "provider-a", accountId: accountB.id, productId: "tea",
+        externalProductId: "other-product", adapter: "airbnb-google-busy", adapterVersion: "1",
+        connectionMode: "GOOGLE", capabilities: { canOpen: true, canClose: true, canObserve: true }, active: true,
+      }, command(502));
+      await value.runtime.assignWorkerAccount(admin, value.worker.workerId, accountB.id, null, command(503));
+      await value.runtime.reconcileListing(admin, listingB.id, command(504));
+      await value.runtime.consumeCalendarOutbox(50, value.worker);
+      const other = await value.runtime.claim(value.worker);
+      assert.ok(other);
+      assert.equal(other.target.externalAccountId, "other-account");
+      await value.runtime.submitResult(value.worker, other.id, {
+        resultId: command(505), leaseToken: other.leaseToken, outcome: "SUPERSEDED", stopped: true, target: other.target,
+      });
+      const baseline = async () => ({
+        desired: (await value.pool.query("SELECT * FROM channel_desired_states WHERE listing_id='listing-b' ORDER BY occurrence_id")).rows,
+        jobs: (await value.pool.query("SELECT id,status,outcome,lease_digest,lease_expires_at,google_propagation_delivery_id FROM channel_jobs WHERE listing_id='listing-b' ORDER BY id")).rows,
+        account: (await value.pool.query("SELECT quarantined_at,version FROM channel_external_accounts WHERE id='account-b'")).rows,
+      });
+      const before = await baseline();
+      const leased = async () => (await value.pool.query("SELECT listing_id FROM channel_jobs WHERE lease_digest IS NOT NULL ORDER BY listing_id")).rows.map((row) => row.listing_id);
+      const reads = async () => (await value.pool.query(
+        "SELECT count(*)::int AS count FROM channel_jobs WHERE google_propagation_delivery_id=$1::uuid AND action='OBSERVE'", [value.delivery.deliveryId],
+      )).rows[0].count as number;
+      const makeDue = () => value.pool.query("UPDATE google_airbnb_propagation_waits SET next_due_at=clock_timestamp()-interval '1 second' WHERE delivery_id=$1::uuid", [value.delivery.deliveryId]);
+      const repository = new GoogleChannelDeliveryRepository(value.pool, value.runtime);
+      assert.deepEqual(await leased(), [], "the source attempt and the other account's job released their leases");
+
+      let expectedReads = 0;
+      for (const [index, outcome] of (["mismatch", "mismatch", "match"] as const).entries()) {
+        await makeDue();
+        assert.deepEqual(await value.runtime.enqueueDueGoogleAirbnbObservations(value.worker, 1), { enqueued: 1 });
+        // One enqueue is one read job, and nothing is leased while it only waits in the queue.
+        assert.equal(await reads(), ++expectedReads);
+        assert.deepEqual(await leased(), []);
+        const observe = await value.runtime.claim(value.worker);
+        assert.ok(observe);
+        assert.equal(observe.googleDeliveryOperation, "observe");
+        assert.equal(observe.target.externalAccountId, "12345", "only the waiting listing's account is read");
+        assert.deepEqual(await leased(), ["listing-a"], "the read holds the account's exclusion alone");
+        // While it is held, no second read is queued for the same wait.
+        assert.deepEqual(await value.runtime.enqueueDueGoogleAirbnbObservations(value.worker, 1), { enqueued: 0 });
+        const operation = await repository.prepareObservation(value.worker, observe.id, observe.leaseToken);
+        await repository.saveResult(
+          value.worker, observe.id, observe.leaseToken, operation.record.deliveryId, operation.operationNonce, "observe", {
+            phase: "GOOGLE_VERIFIED", changed: false, writeAcknowledged: false,
+            metadata: {
+              eventId: "synthetic-event", etag: `"synthetic-etag-${index}"`, bindingHash: "synthetic-binding",
+              mappingVersion: observe.mappingVersion, desiredVersion: observe.desiredVersion,
+              startAtUtc: observe.sourceStartAtUtc, endAtUtc: observe.sourceEndAtUtc,
+              desiredState: "CLOSED", transparency: "opaque",
+            },
+          },
+        );
+        if (outcome === "mismatch") {
+          await value.runtime.submitResult(value.worker, observe.id, mismatch(value, command(510 + index), observe));
+        } else {
+          const verifiedAt = (await value.pool.query("SELECT operation_verified_at FROM google_channel_deliveries WHERE id=$1::uuid", [value.delivery.deliveryId]))
+            .rows[0].operation_verified_at as Date;
+          await value.runtime.submitResult(value.worker, observe.id, value.result(command(510 + index), {
+            leaseToken: observe.leaseToken, target: observe.target, occurrenceId: observe.occurrenceId,
+            sourceStartAtUtc: observe.sourceStartAtUtc, sourceEndAtUtc: observe.sourceEndAtUtc,
+            observedAtUtc: new Date(verifiedAt.getTime() + 1).toISOString(),
+          }));
+        }
+        assert.deepEqual(await leased(), [], `attempt ${index + 1} released the account's exclusion`);
+        assert.equal((await value.pool.query("SELECT quarantined_at FROM channel_external_accounts WHERE id='account-a'")).rows[0].quarantined_at, null);
+        assert.deepEqual(await baseline(), before, `attempt ${index + 1} did not touch the other account's listing`);
+      }
+      assert.equal((await value.pool.query("SELECT status FROM google_airbnb_propagation_waits WHERE delivery_id=$1::uuid", [value.delivery.deliveryId])).rows[0].status, "MATCHED");
+      // A matched wait queues nothing more, and the other account's listing is still as it was.
+      await makeDue();
+      assert.deepEqual(await value.runtime.enqueueDueGoogleAirbnbObservations(value.worker, 1), { enqueued: 0 });
+      assert.equal(await reads(), expectedReads);
+      assert.deepEqual(await baseline(), before);
+    } finally { await cleanup(value); }
+  });
 });
