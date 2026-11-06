@@ -7,8 +7,8 @@ import { assertStoreIdentifier } from "./validation.ts";
 
 /**
  * Host push notifications persisted in `outbox_messages` (#177 P2). Guest questions and booking messages,
- * site bookings and cancellations, approval deadlines, Google calendar attention, OTA changes and new reviews
- * are written by their owning transactions. The existing host push job produces the next-day summary. This
+ * site bookings and cancellations, approval deadlines, Google calendar attention, OTA changes, new reviews and
+ * operations suspensions of a listing (and their clearing) are written by their owning transactions. The existing host push job produces the next-day summary. This
  * class claims only the explicitly listed `host.notify.*` topics; guest mail and payment topics stay untouched.
  */
 export const HOST_NOTIFICATION_TOPICS = {
@@ -23,6 +23,7 @@ export const HOST_NOTIFICATION_TOPICS = {
   newReview: "host.notify.new_review",
   guestEmailDeliveryFailed: "host.notify.guest_email_delivery_failed",
   dayBeforeSummary: "host.notify.day_before_summary",
+  listingSuspension: "host.notify.listing_suspension",
 } as const;
 export type HostNotificationTopic = (typeof HOST_NOTIFICATION_TOPICS)[keyof typeof HOST_NOTIFICATION_TOPICS];
 
@@ -150,6 +151,22 @@ export interface OtaBookingPayload {
   readonly guestName?: string;
 }
 
+/** 運営停止 (`SUSPENDED`) or its clearing by operations (`CLEARED`, #109/#369). */
+export const LISTING_SUSPENSION_CHANGES = ["SUSPENDED", "CLEARED"] as const;
+export type ListingSuspensionChange = (typeof LISTING_SUSPENSION_CHANGES)[number];
+
+/**
+ * Operations stopped one listing, or cleared that stop (#109, #369: 旧事前審査の結果通知 is gone; this replaces it).
+ * The product and its title only: never the reason code, the operator's NIHO user ID or the product's text. The host
+ * reads the details in /host. A clearing does not put the listing back: the OWNER still resumes it there.
+ */
+export interface ListingSuspensionPayload {
+  readonly v: 1;
+  readonly productId: string;
+  readonly experienceTitle: string;
+  readonly change: ListingSuspensionChange;
+}
+
 /** One claimed row. `id` is the row's bigint as text; the payload is parsed by the consumer. */
 export interface ClaimedHostNotification {
   readonly id: string;
@@ -177,6 +194,11 @@ const NEW_REVIEW_KEYS = ["experienceTitle", "reviewId", "v"];
 const GUEST_EMAIL_DELIVERY_FAILED_KEYS = ["bookingId", "classification", "experienceTitle", "seats", "startsAt", "v"];
 const DAY_BEFORE_SUMMARY_KEYS = ["bookingCount", "localDate", "participantCount", "v"];
 const OTA_BOOKING_KEYS = ["change", "experienceTitle", "productId", "ref", "seats", "site", "startsAt", "v"];
+const LISTING_SUSPENSION_KEYS = ["change", "experienceTitle", "productId", "v"];
+/** The store's product identifier (validation.ts), so a row's product is one the store could have written. */
+const PRODUCT_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
+/** What a listing's push says when its title cannot be read (a product title is never empty, so this is a fallback only). */
+export const LISTING_SUSPENSION_FALLBACK_TITLE = "体験";
 const OTA_SITE = /^[A-Za-z][A-Za-z0-9]{0,79}$/;
 const HOST_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const GUEST_NAME_MAX = 200;
@@ -299,6 +321,15 @@ export function parseOtaBookingPayload(value: unknown): OtaBookingPayload | null
     seats: count as number,
     ...(name === undefined ? {} : { guestName: name as string }),
   };
+}
+
+/** The listing suspension's payload, or null for anything else (an unknown key, a wrong type, another change). */
+export function parseListingSuspensionPayload(value: unknown): ListingSuspensionPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, LISTING_SUSPENSION_KEYS) || value.v !== 1) return null;
+  const { productId, experienceTitle, change } = value;
+  if (typeof productId !== "string" || !PRODUCT_ID.test(productId) || !title(experienceTitle)
+    || !(LISTING_SUSPENSION_CHANGES as readonly unknown[]).includes(change)) return null;
+  return { v: 1, productId, experienceTitle, change: change as ListingSuspensionChange };
 }
 
 /**
@@ -627,6 +658,45 @@ export async function enqueueOtaBookingNotification(
     deduplicationKey: `ota-booking:${input.ref}:${input.localRevision}`, payload: mailPayload, productId: input.productId,
   });
   return added;
+}
+
+/**
+ * Operations stopped a listing (`SUSPENDED`) or cleared that stop (`CLEARED`): one push per state change (設定 › 通知's
+ * 掲載の運営停止・解除, which cannot be turned off), due now, to the product's OWNER and operators only. Called in the
+ * transaction that changed the state, right after it, with the state's new version: a retry of the same change adds
+ * nothing, and a change that fails or conflicts rolls this row back with it. A blank title becomes a fixed word rather
+ * than failing the operation. 1 when added, 0 for a repeat.
+ */
+export async function enqueueListingSuspensionNotification(
+  client: PoolClient,
+  input: {
+    readonly providerId: string;
+    readonly productId: string;
+    readonly experienceTitle: string | null;
+    readonly change: ListingSuspensionChange;
+    /** The publication state's version after the change. */
+    readonly stateVersion: number;
+  },
+): Promise<number> {
+  assertStoreIdentifier(input.providerId, "providerId");
+  assertStoreIdentifier(input.productId, "productId");
+  if (!Number.isSafeInteger(input.stateVersion) || input.stateVersion < 1) throw new StoreValidationError("stateVersion must be a positive integer.");
+  const clipped = typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "";
+  const payload: ListingSuspensionPayload = {
+    v: 1, productId: input.productId, experienceTitle: clipped || LISTING_SUSPENSION_FALLBACK_TITLE, change: input.change,
+  };
+  // The same check the push job makes: a row it would drop is refused here instead.
+  if (parseListingSuspensionPayload(payload) === null) throw new StoreValidationError("The listing suspension notification is invalid.");
+  return insertRow(client, {
+    providerId: input.providerId,
+    bookingId: input.productId,
+    aggregateType: "experience_product",
+    topic: HOST_NOTIFICATION_TOPICS.listingSuspension,
+    // A digest keeps the key within 256 characters however long the product ID is.
+    deduplicationKey: `host-push:listing-suspension:${createHash("sha256").update(input.productId).digest("hex").slice(0, 32)}:${input.stateVersion}`,
+    payload,
+    availableAt: null,
+  });
 }
 
 function assertRowId(id: string): void {

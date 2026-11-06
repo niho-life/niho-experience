@@ -19,6 +19,8 @@ NIHOは共通ログインと現在の本人・Connect状態を提供する。Exp
 3. サーバーが必要条件を検証し、掲載条件への同意を受け取って公開する。
 4. 公開後は通常編集で掲載を維持する。本人は停止・再開でき、運営停止は本人の再開では解除できない。
 
+運営停止と解除は、その状態変更と同じ transaction で提供者の OWNER へ push で知らせる（再公開できるのは OWNER だけ）（#109、`host.notify.listing_suspension`。理由は載せない。詳細は [host-pwa.md](host-pwa.md)）。解除しても掲載は戻らず、OWNER の再公開が要る。
+
 初回利用前に運営がExperience seller／本人ID・Connect口座対応／承認済みfeeを登録する。これはNIHO v1が提供者一覧・Connect変更APIを持たないための明示設定で、商品やOWNER membershipは作らない。初回のNIHO認証時に現在本人IDとの完全一致を確認してからExperience OWNERを結ぶ。登録条件の詳細は[NIHO Host v1 consumer contract](host-niho-v1-consumer.md)。旧商品データの移行、旧NIHO販売停止確認、旧予約席の取り込みは行わず、Experienceで作成した商品だけを公開・販売する。
 
 ## 販売条件

@@ -12,7 +12,7 @@ const isDesktop = (projectName: string) => projectName === "host-desktop";
 const calendarPanel = (page: Page) => page.getByRole("region", { name: "カレンダー" });
 const notificationPanel = (page: Page) => page.getByRole("region", { name: "通知" });
 const overflowX = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-const NOTIFICATIONS = ["新しい予約・申込", "承認の期限が近い", "予約の取消", "予約前の質問・予約者からの連絡", "前日の参加者のまとめ", "新しいレビュー", "予約者へのメールの不達", "掲載と審査の結果"];
+const NOTIFICATIONS = ["新しい予約・申込", "承認の期限が近い", "予約の取消", "予約前の質問・予約者からの連絡", "前日の参加者のまとめ", "新しいレビュー", "予約者へのメールの不達", "掲載の運営停止・解除"];
 const STOPPABLE = ["予約前の質問・予約者からの連絡", "前日の参加者のまとめ", "新しいレビュー"];
 
 async function signIn(page: Page, query = "") {

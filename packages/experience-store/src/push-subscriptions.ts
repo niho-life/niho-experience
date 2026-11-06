@@ -148,6 +148,25 @@ export class HostPushSubscriptions {
   }
 
   /**
+   * Devices of the provider's active OWNER only, seen at or after `seenAfter` (#109: an operations suspension of a listing,
+   * which only the OWNER can act on). A product operator, EDITOR or VIEWER gets nothing here.
+   */
+  async ownerRecipients(providerId: string, seenAfter: Date): Promise<HostPushRecipient[]> {
+    assertStoreIdentifier(providerId, "providerId");
+    if (Number.isNaN(seenAfter.getTime())) throw new StoreValidationError("seenAfter must be a valid time.");
+    const result = await this.#pool.query<DbRow>(
+      `SELECT s.id::text AS id, s.endpoint, s.p256dh, s.auth
+         FROM host_push_subscriptions s
+        WHERE s.last_seen_at >= $2
+          AND EXISTS (SELECT 1 FROM provider_memberships m
+                       WHERE m.provider_id = $1 AND m.niho_user_id = s.niho_user_id AND m.active = true AND m.role = 'OWNER')
+        ORDER BY s.id`,
+      [providerId, seenAfter.toISOString()],
+    );
+    return result.rows.map(recipientFromRow);
+  }
+
+  /**
    * The devices of one product's people (#194, an OTA booking): the provider's active OWNER and the product's active,
    * unexpired operators (docs/product-operators.md), seen since `seenAfter`. EDITOR and VIEWER members get nothing
    * here: they do not see the product's bookings. A device appears once even when its person is both.

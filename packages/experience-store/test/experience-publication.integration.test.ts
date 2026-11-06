@@ -6,6 +6,7 @@ import { occurrenceIdFor, type ScheduleRule } from "@niho-experience/experience-
 import { StoreAccessDeniedError, StoreConflictError } from "../src/errors.ts";
 import { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { HostNotificationOutbox } from "../src/host-notification-outbox.ts";
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -452,9 +453,26 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       assert.equal((await publications.getPublicBySlug(original.slug))?.publicTitle, "Synthetic incomplete draft");
       assert.ok(state.firstPublishedAtUtc);
 
+      // The host hears of an operations suspension and its clearing (#109), never of its own stop, publish or resume.
+      const listingRows = async () => (await pool.query<{ provider_id: string; aggregate_type: string; aggregate_id: string; payload: Record<string, unknown> }>(
+        "SELECT provider_id, aggregate_type, aggregate_id, payload FROM outbox_messages WHERE topic='host.notify.listing_suspension' ORDER BY id",
+      )).rows;
+      assert.deepEqual(await listingRows(), [], "the host's own stop and publish write no listing notification");
+
+      await assert.rejects(publications.suspendByOperations(OPS, OWNER.providerId, original.id, "POLICY_REVIEW", state.version - 1), StoreConflictError);
+      assert.deepEqual(await listingRows(), [], "a suspension that conflicts writes nothing");
       state = await publications.suspendByOperations(OPS, OWNER.providerId, original.id, "POLICY_REVIEW", state.version);
       assert.equal(await publications.getPublicBySlug(original.slug), null);
       assert.equal(await publications.claimsSlug(original.slug), true);
+      const suspendedRows = await listingRows();
+      assert.deepEqual(suspendedRows, [{
+        provider_id: OWNER.providerId, aggregate_type: "experience_product", aggregate_id: original.id,
+        payload: { v: 1, productId: original.id, experienceTitle: "Synthetic incomplete draft", change: "SUSPENDED" },
+      }]);
+      assert.doesNotMatch(JSON.stringify(suspendedRows), /POLICY_REVIEW|operations-synthetic/, "neither the reason nor the operator reaches the host");
+      await assert.rejects(publications.suspendByOperations(OPS, OWNER.providerId, original.id, "POLICY_REVIEW", state.version - 1), StoreConflictError);
+      state = await publications.suspendByOperations(OPS, OWNER.providerId, original.id, "TERMS_VIOLATION", state.version);
+      assert.equal((await listingRows()).length, 1, "a stale retry or a second suspension of a suspended listing adds no notification");
       await assert.rejects(
         publications.publish(OWNER, original.id, {
           expectedDraftVersion: incomplete.draft.version,
@@ -464,9 +482,16 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         }),
         (error: unknown) => error instanceof ExperiencePublicationBlockedError && error.blockers.includes("OPERATIONS_SUSPENDED"),
       );
+      await assert.rejects(publications.clearOperationsSuspension(OPS, OWNER.providerId, original.id, state.version - 1), StoreConflictError);
+      assert.equal((await listingRows()).length, 1, "a clearing that conflicts writes nothing");
       state = await publications.clearOperationsSuspension(OPS, OWNER.providerId, original.id, state.version);
       assert.equal(state.ownerResumeRequired, true);
       assert.equal(await publications.getPublicBySlug(original.slug), null);
+      assert.deepEqual((await listingRows()).map((row) => [row.provider_id, row.payload.change]), [[OWNER.providerId, "SUSPENDED"], [OWNER.providerId, "CLEARED"]]);
+      await assert.rejects(publications.clearOperationsSuspension(OPS, OWNER.providerId, original.id, state.version), StoreConflictError);
+      assert.equal((await listingRows()).length, 2, "clearing a listing that is not suspended adds nothing");
+      const claimed = (await new HostNotificationOutbox(pool).claimDue(200, 60_000)).filter((row) => row.topic === "host.notify.listing_suspension");
+      assert.deepEqual(claimed.map((row) => [row.providerId, (row.payload as { change: string }).change]), [[OWNER.providerId, "SUSPENDED"], [OWNER.providerId, "CLEARED"]], "the push job claims them");
       state = await publications.publish(OWNER, original.id, {
         expectedDraftVersion: incomplete.draft.version,
         expectedStateVersion: state.version,
@@ -475,6 +500,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       });
       assert.equal(state.ownerResumeRequired, false);
       assert.ok(await publications.getPublicBySlug(original.slug));
+      assert.equal((await listingRows()).length, 2, "the OWNER's resume writes no listing notification");
 
       const extraAssetId = randomUUID();
       const beforePhotoAdd = await publications.getPublicBySlug(original.slug);

@@ -26,7 +26,7 @@ export const NOTIFICATIONS: readonly NotificationDefinition[] = [
   { key: "DAY_BEFORE_SUMMARY", label: "前日の参加者のまとめ", when: "毎日 18:00 · 翌日に確定の予約があるときだけ", stoppable: true },
   { key: "NEW_REVIEW", label: "新しいレビュー", when: "投稿されたとき · すぐに", stoppable: true },
   { key: "EMAIL_DELIVERY_FAILED", label: "予約者へのメールの不達", when: "相手のメールサーバーが不達を返したとき", stoppable: false },
-  { key: "LISTING_REVIEW", label: "掲載と審査の結果", when: "掲載の承認・差し戻し・停止", stoppable: false },
+  { key: "LISTING_SUSPENSION", label: "掲載の運営停止・解除", when: "運営が掲載を止めたとき・止めた掲載を戻せるようになったとき", stoppable: false },
 ];
 
 /** The only keys 保存 changes (booleans). */

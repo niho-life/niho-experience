@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import {
   HOST_NOTIFICATION_TOPICS,
   parseApprovalDeadlinePayload,
@@ -9,6 +10,7 @@ import {
   parseGuestEmailDeliveryFailedPayload,
   parseGuestMessagePayload,
   parseGuestQuestionPayload,
+  parseListingSuspensionPayload,
   parseNewBookingPayload,
   parseNewReviewPayload,
   parseOtaBookingPayload,
@@ -19,7 +21,7 @@ import {
   type StoppableHostNotificationKey,
 } from "@niho-experience/experience-store";
 import { providerNotificationSettings } from "@/lib/experience/store-server";
-import { HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_MESSAGES_PATH, HOST_REVIEWS_PATH, withQuery } from "../routes";
+import { HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_EXPERIENCES_PATH, HOST_MESSAGES_PATH, HOST_REVIEWS_PATH, withQuery } from "../routes";
 import { notifyHostDevices, type HostPushDeps, type HostPushReport } from "./notify";
 import type { HostPushEvent, HostPushKind } from "./payload";
 
@@ -250,6 +252,27 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         url: withQuery(HOST_BOOKINGS_PATH, { ota: payload.ref, providerId }),
         // A later change of the same booking replaces the earlier notification.
         tag: `ota-${payload.ref}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.listingSuspension) {
+    const payload = parseListingSuspensionPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        kind: "LISTING_SUSPENSION",
+        experienceTitle: payload.experienceTitle,
+        listing: { change: payload.change },
+        // The OWNER only: the screen below is the OWNER's (a product operator is refused there), and only the OWNER can resume.
+        ownerOnly: true,
+        // 体験の編集, where the listing's state (運営停止中・再公開が必要) and its 再公開 are.
+        url: withQuery(`${HOST_EXPERIENCES_PATH}/${encodeURIComponent(payload.productId)}`, { providerId }),
+        // A clearing replaces the suspension on the device.
+        tag: `listing-${createHash("sha256").update(payload.productId).digest("hex").slice(0, 32)}`,
       },
     };
   }
