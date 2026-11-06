@@ -76,6 +76,10 @@ function Rows({ rows }: { rows: readonly BookingRow[] }) {
 
 const WAIT_LINE = "mb-2.5 text-[0.78125rem] leading-normal font-extrabold text-warn";
 
+/** The guest's mail server refused the address (#375): the booking's emails are not sent, so the host is told to reach the guest another way. */
+export const GUEST_EMAIL_UNDELIVERABLE_NOTE =
+  "予約者のメールアドレスにメールが届かない状態です。この予約者へのメールは送られていません。必要な連絡は、予約者の電話番号（ある場合）など別の方法で行うか、NIHOサポートへ相談してください。";
+
 /** Label and amount, the fee panel's rows (FeeSummaryPanel's look). */
 function AmountRows({ rows }: { rows: readonly (readonly [label: string, value: string])[] }) {
   return (
@@ -293,6 +297,12 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
           </>
         ) : null}
       </p>
+
+      {siteTerms?.guestEmailUndeliverable ? (
+        <p role="note" className="mt-3 rounded-xl border border-line-strong px-3 py-2 text-[0.8125rem] leading-normal font-bold text-warn">
+          {GUEST_EMAIL_UNDELIVERABLE_NOTE}
+        </p>
+      ) : null}
 
       <DetailSection title="申込内容">
         <Rows rows={bookingRequestRows(booking, experienceTitle)} />
