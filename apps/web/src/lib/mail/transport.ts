@@ -155,7 +155,11 @@ export function createMailer(mailboxes: { readonly from: Mailbox; readonly reply
         return { ok: true };
       } catch (error) {
         if (sessionFailed(error)) sessionDown = true;
-        return { ok: false, failure: classifyMailFailure(error) };
+        const failure = classifyMailFailure(error);
+        // For operations (why mail does not go): nodemailer's code, the SMTP reply code and command verb only. Never the
+        // server's text, which can quote the recipient's address, nor any address or message content.
+        console.warn(`[mail] send failed ${JSON.stringify({ ...errorFields(error), failure })}`);
+        return { ok: false, failure };
       }
     },
     close() {

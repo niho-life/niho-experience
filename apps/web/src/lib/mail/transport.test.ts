@@ -87,10 +87,10 @@ describe("createMailer", () => {
     expect(transport.sendMail).toHaveBeenCalledOnce();
   });
 
-  it("answers the failure's class without throwing or logging what the server said", async () => {
+  it("answers the failure's class without throwing, and logs only its codes, never what the server said", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const transport = fakeTransport(smtpError({ code: "EENVELOPE", responseCode: 550, command: "RCPT TO" }), smtpError({ code: "EENVELOPE", responseCode: 451, command: "RCPT TO" }));
+    const transport = fakeTransport(smtpError({ code: "EENVELOPE", responseCode: 550, command: "RCPT TO", response: "550 5.1.1 <guest@example.com> unknown" }), smtpError({ code: "EENVELOPE", responseCode: 451, command: "RCPT TO" }));
     const mailer = createMailer(mailboxes, transport);
     expect(await mailer.sendMail(message)).toEqual({ ok: false, failure: "permanent" });
     expect(await mailer.sendMail(message)).toEqual({ ok: false, failure: "transient" });
@@ -98,7 +98,13 @@ describe("createMailer", () => {
     expect(await mailer.sendMail(message)).toEqual({ ok: true });
     expect(transport.sendMail).toHaveBeenCalledTimes(3);
     expect(error).not.toHaveBeenCalled();
-    expect(warn).not.toHaveBeenCalled();
+    expect(warn.mock.calls.map((call) => call.join(" "))).toEqual([
+      '[mail] send failed {"code":"EENVELOPE","responseCode":550,"command":"RCPT TO","failure":"permanent"}',
+      '[mail] send failed {"code":"EENVELOPE","responseCode":451,"command":"RCPT TO","failure":"transient"}',
+    ]);
+    // Neither the address, the server's text nor the message is in the log.
+    const logged = warn.mock.calls.flat().join(" ");
+    for (const secret of ["guest@example.com", "Recipient address rejected", "unknown", "Sample subject", "experiences@example.com"]) expect(logged).not.toContain(secret);
     error.mockRestore();
     warn.mockRestore();
   });
