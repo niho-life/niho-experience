@@ -5,6 +5,7 @@ import type { Pool } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { HostAccounts } from "../src/host-accounts.ts";
+import { isHostSellerRef } from "../src/host-sellers.ts";
 import { HOST_BIO_CONSENT_VERSION } from "../src/host-bio-rules.ts";
 import { ProviderPayoutAccountConsents } from "../src/payout-account-consents.ts";
 import { ProviderHostBioRepository } from "../src/provider-host-bios.ts";
@@ -139,7 +140,7 @@ describe("sellers registered for Experience host accounts", { skip }, () => {
       await assert.rejects(() => registration.provisionHostAccountSeller(seller("provider-copy")), StoreConflictError);
       // A NIHO-mapped seller is not replaced.
       await nihoSeller(pool, "provider-niho", "niho-user-synthetic-1", OTHER_ACCOUNT);
-      assert.deepEqual((await registration.currentHostAccountSellerState({ providerId: "provider-niho", stripeConnectAccountRef: OTHER_ACCOUNT })).sellerProfile, { kind: "niho" });
+      assert.deepEqual((await registration.currentHostAccountSellerState({ providerId: "provider-niho", stripeConnectAccountRef: OTHER_ACCOUNT })).sellerProfile, { kind: "niho", stripeConnectAccountRef: OTHER_ACCOUNT });
       await assert.rejects(() => registration.provisionHostAccountSeller(seller("provider-niho", { stripeConnectAccountRef: OTHER_ACCOUNT })), StoreConflictError);
       for (const bad of [{ sellerDisplayName: " padded" }, { providerDisplayName: "" }, { sellerDisplayName: "two\nlines" }, { stripeConnectAccountRef: "acct_1" }]) {
         await assert.rejects(() => registration.provisionHostAccountSeller(seller("provider-bad", bad)), StoreValidationError, JSON.stringify(bad));
@@ -157,6 +158,94 @@ describe("sellers registered for Experience host accounts", { skip }, () => {
         `INSERT INTO experience_host_seller_profiles (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
          VALUES ('provider-raw',NULL,'Raw','niho-user-raw','acct_SyntheticRaw00001','Raw Seller')`,
       ), (error: { code?: string }) => error.code === "23514");
+    });
+  });
+});
+
+describe("moving a seller mapped to NIHO onto host accounts", { skip }, () => {
+  async function draft(pool: Pool, providerId: string, id: string, ref: string): Promise<void> {
+    await pool.query(
+      `INSERT INTO experience_products
+         (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,
+          seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+       VALUES ($1,$2,$2,'DRAFT','Synthetic draft','{}','JPY',5000,'synthetic-terms',$3,$4,'NIHO Legal Seller')`,
+      [providerId, id, ref, ACCOUNT],
+    );
+  }
+  const provision = async (pool: Pool, email: string) => (await new HostAccounts(pool).provisionHostAccount({ email, nowUtc: at() })).hostAccountId;
+
+  it("keeps the provider, account and names, mints a seller reference, moves the drafts and grants the OWNER in one step", async () => {
+    await withDb(async (pool) => {
+      const registration = new SiteSaleRegistration(pool);
+      await nihoSeller(pool, "provider-moving", "niho-user-moving", ACCOUNT);
+      await draft(pool, "provider-moving", "synthetic-moving-a", "niho-user-moving");
+      await draft(pool, "provider-moving", "synthetic-moving-b", "niho-user-moving");
+      const versionsBefore = new Map((await pool.query("SELECT id,version FROM experience_products WHERE provider_id='provider-moving'")).rows.map((row) => [row.id, Number(row.version)]));
+      const owner = await provision(pool, "moving-owner@example.test");
+      const move = (overrides: Partial<{ stripeConnectAccountRef: string; ownerHostAccountId: string; providerId: string }> = {}) => registration.convertNihoSellerToHostAccounts({
+        providerId: "provider-moving", stripeConnectAccountRef: ACCOUNT, ownerHostAccountId: owner, nowUtc: at(1), ...overrides,
+      });
+
+      // Another account than the registered one, or a provider without a seller, is refused and changes nothing.
+      await assert.rejects(() => move({ stripeConnectAccountRef: OTHER_ACCOUNT }), StoreConflictError);
+      await assert.rejects(() => move({ providerId: "provider-none" }), StoreConflictError);
+      await assert.rejects(() => move({ stripeConnectAccountRef: "acct_1" }), StoreValidationError);
+      await assert.rejects(() => move({ ownerHostAccountId: "niho-user-moving" }), StoreValidationError);
+      assert.equal(await sellerRef(pool, "provider-moving"), "niho-user-moving");
+
+      assert.deepEqual(await move(), { outcome: "CONVERTED", productsUpdated: 2, owner: "granted" });
+      const profile = (await pool.query("SELECT legacy_provider_id,seller_niho_account_ref,stripe_connect_account_ref,provider_display_name,seller_display_name FROM experience_host_seller_profiles WHERE provider_id='provider-moving'")).rows[0]!;
+      assert.equal(profile.legacy_provider_id, null);
+      assert.ok(isHostSellerRef(profile.seller_niho_account_ref));
+      assert.deepEqual([profile.stripe_connect_account_ref, profile.provider_display_name, profile.seller_display_name], [ACCOUNT, "NIHO mapped provider", "NIHO Legal Seller"]);
+      // The drafts follow the new reference with their version raised.
+      for (const product of (await pool.query("SELECT id,version,seller_niho_account_ref FROM experience_products WHERE provider_id='provider-moving'")).rows) {
+        assert.equal(product.seller_niho_account_ref, profile.seller_niho_account_ref);
+        assert.equal(Number(product.version), versionsBefore.get(product.id)! + 1);
+      }
+      // The host account is the OWNER, beside the NIHO OWNER, and resolves the moved seller.
+      const owners = (await pool.query("SELECT niho_user_id FROM provider_memberships WHERE provider_id='provider-moving' AND role='OWNER' AND active ORDER BY niho_user_id")).rows.map((row) => row.niho_user_id);
+      assert.deepEqual(owners, [owner, "niho-user-moving"].sort());
+      assert.equal((await new ExperiencePublicationRepository(pool).currentHostAccountSellerProfile(owner)).kind, "ready");
+
+      // Again: UNCHANGED, the same reference, the OWNER already there.
+      assert.deepEqual(await move(), { outcome: "UNCHANGED", productsUpdated: 0, owner: "already-owner" });
+      assert.equal(await sellerRef(pool, "provider-moving"), profile.seller_niho_account_ref);
+    });
+  });
+
+  it("moves nothing when the OWNER cannot be granted, or a listing stands on a version published under the NIHO seller", async () => {
+    await withDb(async (pool) => {
+      const registration = new SiteSaleRegistration(pool);
+      await nihoSeller(pool, "provider-blocked", "niho-user-blocked", ACCOUNT);
+      await draft(pool, "provider-blocked", "synthetic-blocked-draft", "niho-user-blocked");
+      const move = (ownerHostAccountId: string) => registration.convertNihoSellerToHostAccounts({
+        providerId: "provider-blocked", stripeConnectAccountRef: ACCOUNT, ownerHostAccountId, nowUtc: at(1),
+      });
+      const unchanged = async () => {
+        assert.equal(await sellerRef(pool, "provider-blocked"), "niho-user-blocked");
+        assert.equal((await pool.query("SELECT legacy_provider_id FROM experience_host_seller_profiles WHERE provider_id='provider-blocked'")).rows[0]!.legacy_provider_id, "legacy-provider-blocked");
+        assert.equal((await pool.query("SELECT seller_niho_account_ref FROM experience_products WHERE id='synthetic-blocked-draft'")).rows[0]!.seller_niho_account_ref, "niho-user-blocked");
+      };
+      // A suspended account, an EDITOR of the provider, the OWNER of another provider: refused, the seller stays as it was.
+      const suspended = await provision(pool, "suspended-owner@example.test");
+      await new HostAccounts(pool).suspendHostAccount({ hostAccountId: suspended, nowUtc: at(1) });
+      await assert.rejects(() => move(suspended), StoreConflictError);
+      await unchanged();
+      const editor = await hostMember(pool, "provider-blocked", "editor-blocked@example.test", "EDITOR");
+      await assert.rejects(() => move(editor.nihoUserId), StoreConflictError);
+      await unchanged();
+      await nihoSeller(pool, "provider-other", "niho-user-other", OTHER_ACCOUNT);
+      const elsewhere = await hostMember(pool, "provider-other", "owner-elsewhere@example.test", "OWNER");
+      await assert.rejects(() => move(elsewhere.nihoUserId), StoreConflictError);
+      await unchanged();
+
+      // A listing (live or stopped) on a NIHO-era version: refused, even for an OWNER who could be granted.
+      await listedProduct(pool, { providerId: "provider-blocked", nihoUserId: "niho-user-blocked" }, "synthetic-blocked-listed");
+      const owner = await provision(pool, "blocked-owner@example.test");
+      await assert.rejects(() => move(owner), StoreConflictError);
+      await unchanged();
+      assert.equal(Number((await pool.query("SELECT count(*)::int AS n FROM provider_memberships WHERE provider_id='provider-blocked' AND niho_user_id=$1", [owner])).rows[0]!.n), 0);
     });
   });
 });
