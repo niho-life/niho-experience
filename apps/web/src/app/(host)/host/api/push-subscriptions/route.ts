@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { noStoreJson } from "@/lib/host/server";
-import { hostPushStore, isPushPreview, openPushBff, pushDeviceLabel, pushEndpointFrom, pushNotConfigured, pushSubscriptionFrom, pushUnavailable } from "@/lib/host/push/server";
+import { hostPushStore, isPushPreview, openPushBff, pushDeviceLabel, pushEndpointFrom, pushConnectionKey, pushNotConfigured, pushSubscriptionFrom, pushUnavailable } from "@/lib/host/push/server";
 
 /** 設定 › この端末 › 通知 (#177 P2): this device's subscription, tied to the host and the session's NIHO connection. */
 export async function POST(request: NextRequest) {
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   const store = hostPushStore();
   if (!store) return pushNotConfigured();
   try {
-    await store.save({ nihoUserId: opened.nihoUserId, connectionId: opened.session.connectionId, ...parsed.subscription, deviceLabel: pushDeviceLabel(request.headers.get("user-agent")) });
+    await store.save({ nihoUserId: opened.nihoUserId, connectionId: pushConnectionKey(opened.session), ...parsed.subscription, deviceLabel: pushDeviceLabel(request.headers.get("user-agent")) });
   } catch {
     return pushUnavailable();
   }

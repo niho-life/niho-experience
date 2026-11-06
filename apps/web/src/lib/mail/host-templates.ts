@@ -1,7 +1,7 @@
 import "server-only";
 import { otaSiteLabel } from "@/host/ota-sites";
 import { hostPushLines, whenJa, type HostPushEvent } from "@/lib/host/push/payload";
-import { HOST_NOTIFICATION_EMAIL_PATH, HOST_SETTINGS_PATH } from "@/lib/host/routes";
+import { HOST_LOGIN_LINK_PATH, HOST_NOTIFICATION_EMAIL_PATH, HOST_SETTINGS_PATH } from "@/lib/host/routes";
 import { absolute, mail, oneLine, type MailBlock, type RenderedMail } from "./templates";
 
 /*
@@ -50,6 +50,28 @@ export function hostBookingEmail(event: HostPushEvent, options: { readonly siteU
 }
 
 const JST = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+/**
+ * 「ログインのリンク」 (Experience host accounts, ADR 0003): `/host/auth/open#t=<token>`, the token in the fragment only.
+ * It works once, until `expiresAt` (15 minutes), and only in the browser that asked for it: the email says so, and how to
+ * get it there when the mail app opens links in its own browser. Someone else may have typed the address: nothing
+ * happens unless the link is opened in the browser that asked.
+ */
+export function hostLoginLinkEmail(input: { readonly siteUrl: string; readonly token: string; readonly expiresAt: string; readonly minutes: number }): RenderedMail {
+  const until = JST.format(new Date(input.expiresAt));
+  return mail("NIHO 体験ホストへのログイン", [
+    { kind: "p", text: "NIHO 体験ホストにログインするためのリンクです。" },
+    {
+      kind: "link",
+      lead: `リンクは ${until} まで（${input.minutes} 分間）、1 回だけ使えます。リンクは、リクエストしたブラウザで開いてください。`,
+      label: "ログインする",
+      href: `${absolute(input.siteUrl, HOST_LOGIN_LINK_PATH)}#t=${encodeURIComponent(input.token)}`,
+    },
+    { kind: "p", text: "メールのアプリの中でリンクが開いたときは、リンクをコピーして、リクエストしたブラウザに貼り付けてください。" },
+    { kind: "p", text: "心当たりがなければ、このメールは無視してください。リクエストしたブラウザで開かない限り、ログインはされません。" },
+    REPLY,
+  ], "ja");
+}
 
 /**
  * 「通知の宛先の確認」: the link that makes this address the one this site emails (`/host/notification-email#t=<token>`; the

@@ -98,6 +98,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_OTA_GUEST_DETAILS_ENABLED: "otaGuestDetailsEnabled",
   EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED: "otaBookingNotificationsEnabled",
   EXPERIENCE_HOST_MAIL_ENABLED: "hostMailEnabled",
+  EXPERIENCE_HOST_ACCOUNTS_ENABLED: "hostAccountsEnabled",
   EXPERIENCE_JAPANESE_SITE_ENABLED: "japaneseSiteEnabled",
   EXPERIENCE_CHANNEL_WATCHDOG_ENABLED: "channelWatchdogEnabled",
   EXPERIENCE_CHANNEL_MANAGER_ENABLED: "channelManagerEnabled",
@@ -357,12 +358,14 @@ describe("the deploy workflows' feature flags", () => {
     });
 
     it(`${target}: every compatible flag starts the server and turns on in resolve-config`, () => {
-      const vars = Object.assign({}, ...FLAGS.map((flag) => varsOf(target, flag))) as Vars;
+      // Experience host accounts refuse the NIHO-token flags (its own test below), so it is left out here.
+      const compatible = FLAGS.filter((flag) => (flag.conflicts ?? []).length === 0);
+      const vars = Object.assign({}, ...compatible.map((flag) => varsOf(target, flag))) as Vars;
       const resolved = resolve(target, vars);
       expect(resolved.problems).toEqual([]);
-      expect(resolved.on).toEqual(FLAGS.map((flag) => flag.env));
+      expect(resolved.on).toEqual(compatible.map((flag) => flag.env));
       const config = resolveConfig(revision(target, resolved));
-      for (const flag of FLAGS) expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(flag.value ?? true);
+      for (const flag of compatible) expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(flag.value ?? true);
       // The jobs are called by their own service accounts on the stable URL.
       expect(config.hostPushJobEnabled).toBe(true);
       expect(resolved.env).toMatchObject({
@@ -389,6 +392,24 @@ describe("the deploy workflows' feature flags", () => {
       }
     });
   }
+
+  it("refuses Experience host accounts with a flag that sends the NIHO host access token, as resolve-config does (ADR 0003)", () => {
+    const accounts = byEnv.get("EXPERIENCE_HOST_ACCOUNTS_ENABLED")!;
+    expect(accounts.conflicts).toEqual(expect.arrayContaining([
+      "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_TRANSLATE_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED",
+    ]));
+    for (const target of ["stg", "prod"] as const) {
+      for (const conflict of accounts.conflicts!) {
+        const other = byEnv.get(conflict)!;
+        const both = { ...closure(target, conflict), ...closure(target, accounts.env) };
+        const { problems } = resolve(target, both);
+        expect(problems, conflict).toContain(`EXPERIENCE_HOST_ACCOUNTS_ENABLED (${PREFIX[target]}_HOST_ACCOUNTS_ENABLED) conflicts with ${conflict} (${PREFIX[target]}_${other.variable})`);
+        // The server would refuse the same revision at start-up.
+        const forced = resolve(target, closure(target, accounts.env));
+        expect(() => resolveConfig({ ...revision(target, forced), [conflict]: "true" }), conflict).toThrow(`cannot be on with ${conflict}=true`);
+      }
+    }
+  });
 
   it("production: every flag needs enable_host_calendar=true (the host console and its database)", () => {
     for (const flag of FLAGS) {

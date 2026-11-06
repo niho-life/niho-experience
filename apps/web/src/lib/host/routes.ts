@@ -7,6 +7,13 @@ export const HOST_MOCK_LOGIN_PATH = "/host/auth/mock-login";
 export const HOST_REFRESH_PATH = "/host/auth/refresh";
 export const HOST_LOGOUT_PATH = "/host/auth/logout";
 export const HOST_AUTH_ERROR_PATH = "/host/auth/error";
+/**
+ * Experience host accounts (ADR 0003, EXPERIENCE_HOST_ACCOUNTS_ENABLED): the email form (HOST_LOGIN_PATH sends hosts
+ * there), where it posts, and the emailed link (`/host/auth/open#t=<token>`; its page posts the token to the same path).
+ */
+export const HOST_EMAIL_SIGN_IN_PATH = "/host/auth/sign-in";
+export const HOST_EMAIL_LOGIN_PATH = "/host/auth/email";
+export const HOST_LOGIN_LINK_PATH = "/host/auth/open";
 export const HOST_INVITATIONS_PATH = "/host/invitations";
 export const HOST_API_PREFIX = "/host/api/";
 /** Creates a short-lived Express dashboard login link after server-side OWNER checks. */
@@ -126,6 +133,9 @@ export function hostLandingPath(providerId: string | null, connect: unknown): st
   return connect === "return" || connect === "refresh" ? withQuery(HOST_SETTINGS_PATH, { providerId, connect }) : withProvider(HOST_HOME_PATH, providerId);
 }
 
-/** Why the login did not finish; each has its own message on /host/auth/error. */
-export const LOGIN_ERROR_REASONS = ["expired", "state", "denied", "rejected", "unavailable"] as const;
+/**
+ * Why the login did not finish; each has its own message on /host/auth/error. `link`: an emailed sign-in link that is
+ * expired, used, or opened in another browser than the one that asked for it (Experience host accounts).
+ */
+export const LOGIN_ERROR_REASONS = ["expired", "state", "denied", "rejected", "unavailable", "link"] as const;
 export type LoginErrorReason = (typeof LOGIN_ERROR_REASONS)[number];

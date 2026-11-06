@@ -9,7 +9,8 @@ import { config } from "@/lib/config";
 import { calendarConsoleChoices } from "@/lib/experience/calendar-actor";
 import type { ProductOperatorAssignment } from "@niho-experience/experience-store";
 import { HOST_HOME_PATH, HOST_INTRO_PATH, HOST_LAUNCH_PATH, HOST_LOGIN_PATH, HOST_LOGOUT_PATH } from "@/lib/host/routes";
-import { isHostMock, loadHostProviders, readHostSession, requireHostConsole, type ProvidersLoad } from "@/lib/host/server";
+import { hostLoginLabel, isHostMock, loadHostProviders, readHostSession, requireHostConsole, type ProvidersLoad } from "@/lib/host/server";
+import { sessionKeeperExpiresAt, sessionUsableInApp } from "@/lib/host/session";
 import { productOperatorRepository } from "@/lib/experience/store-server";
 
 function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"], "ok" | "refresh" | "signed-out"> }) {
@@ -19,7 +20,7 @@ function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"],
         <h1 className={`${HOST_HEADING} text-2xl`}>もう一度ログインしてください</h1>
         <p className="text-ink-soft">NIHO との接続が終了しています。ほかの端末でログアウトした場合などに起こります。</p>
         <div className="flex flex-wrap gap-3">
-          <HostLoginLink href={HOST_LOGIN_PATH} className={hostButtonClass("primary")}>NIHO でログイン</HostLoginLink>
+          <HostLoginLink href={HOST_LOGIN_PATH} className={hostButtonClass("primary")}>{hostLoginLabel()}</HostLoginLink>
           <form method="post" action={HOST_LOGOUT_PATH} data-niho-navigation-form>
             <button type="submit" className={hostButtonClass("secondary")}>ログアウト</button>
           </form>
@@ -30,7 +31,7 @@ function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"],
   return (
     <div role="alert" className="space-y-4">
       <h1 className={`${HOST_HEADING} text-2xl`}>提供者の情報を読み込めませんでした</h1>
-      <p className="text-ink-soft">NIHO に接続できませんでした。時間をおいてもう一度お試しください。</p>
+      <p className="text-ink-soft">{config.hostAccountsEnabled ? "読み込めませんでした。" : "NIHO に接続できませんでした。"}時間をおいてもう一度お試しください。</p>
       <a href={HOST_HOME_PATH} className={hostButtonClass("secondary")}>もう一度読み込む</a>
     </div>
   );
@@ -49,7 +50,7 @@ export default async function HostConsoleLayout({ children }: { children: React.
   if (!session) redirect(config.hostPwaEnabled ? HOST_LAUNCH_PATH : HOST_INTRO_PATH);
   const load = await loadHostProviders();
   // Inside the installed app, only a session signed in there is used (#177).
-  const appGuard = <HostAppSurfaceGuard enabled={config.hostPwaEnabled} appSurface={session.surface === "app"} />;
+  const appGuard = <HostAppSurfaceGuard enabled={config.hostPwaEnabled} appSurface={sessionUsableInApp(session)} />;
 
   if (load.status === "refresh" || load.status === "signed-out") {
     return (
@@ -73,7 +74,7 @@ export default async function HostConsoleLayout({ children }: { children: React.
   return (
     <>
       {appGuard}
-      <HostSessionKeeper accessTokenExpiresAt={session.accessTokenExpiresAt} />
+      <HostSessionKeeper accessTokenExpiresAt={sessionKeeperExpiresAt(session)} />
       <HostResumeRefresh enabled={config.hostPwaEnabled} />
       {/* The sidebar and the phone menus are client components: they get the id, name and role, not NIHO's internal ids. */}
       <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} editorUrl={config.guideEditorSiteOrigin ? "/write" : ""} preview={isHostMock()}>

@@ -3,16 +3,18 @@ import { config } from "@/lib/config";
 import { nihoConnectUrl } from "@/lib/host/niho-auth";
 import { createLoginState, createPkceVerifier, pkceChallenge } from "@/lib/host/pkce";
 import { nihoIdOrNull } from "@/lib/host/providers";
-import { HOST_MOCK_LOGIN_PATH, invitationIdOrNull, preparationCaseIdOrNull } from "@/lib/host/routes";
+import { HOST_EMAIL_SIGN_IN_PATH, HOST_MOCK_LOGIN_PATH, invitationIdOrNull, preparationCaseIdOrNull } from "@/lib/host/routes";
 import { hostNotFound, isHostMock, noStoreJson, seeOther, setLoginCookie, siteOrigin } from "@/lib/host/server";
 import { LOGIN_MAX_AGE_SECONDS } from "@/lib/host/session";
 
 /**
  * Starts "NIHO でログイン": PKCE verifier and state in a 10-minute sealed cookie, then NIHO's confirmation page.
  * `?surface=app` comes from the installed app's start page (#177); the session it ends in carries that mark.
+ * With Experience host accounts (ADR 0003) every 「ログイン」 link lands here too, and goes on to the email form.
  */
 export function GET(request: NextRequest) {
   if (!config.hostConsoleEnabled) return hostNotFound();
+  if (config.hostAccountsEnabled) return seeOther(HOST_EMAIL_SIGN_IN_PATH);
   const providerId = nihoIdOrNull(request.nextUrl.searchParams.get("providerId"));
   const preparationCaseId = preparationCaseIdOrNull(request.nextUrl.searchParams.get("preparationCaseId"));
   const invitationId = invitationIdOrNull(request.nextUrl.searchParams.get("invitationId"));

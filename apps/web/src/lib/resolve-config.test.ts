@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY, DEV_ONLY_HOST_SESSION_SECRET, resolveConfig } from "./resolve-config";
+import { DEV_ONLY_HOST_PUSH_VAPID_PUBLIC_KEY, DEV_ONLY_HOST_SESSION_SECRET, NIHO_HOST_TOKEN_FLAGS, resolveConfig } from "./resolve-config";
 
 describe("public API version rollout gate", () => {
   it("keeps v1.0 when the runtime flag is absent", () => {
@@ -500,6 +500,40 @@ describe("admin support console settings", () => {
     expect(() => resolveConfig({ ...mail, EXPERIENCE_HOST_MAIL_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_MAIL_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
     expect(() => resolveConfig({ EXPERIENCE_API_MODE: "http", ...host, EXPERIENCE_HOST_MAIL_ENABLED: "true" }))
       .toThrow("EXPERIENCE_HOST_MAIL_ENABLED=true needs EXPERIENCE_GUEST_MAIL_ENABLED=true");
+  });
+
+  it("signs hosts in with Experience host accounts only in http mode, with the console, the DB and the mail job, and never with a NIHO-token flag (ADR 0003)", () => {
+    const mail = {
+      EXPERIENCE_API_MODE: "http", SITE_URL: "https://experience.example", EXPERIENCE_GUEST_MAIL_ENABLED: "true",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused", EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587",
+      EXPERIENCE_SMTP_USER: "sample-smtp-user", EXPERIENCE_SMTP_PASSWORD: "sample-smtp-password",
+      EXPERIENCE_MAIL_FROM: "NIHO Experiences <experiences@example.com>", EXPERIENCE_MAIL_REPLY_TO: "support@example.com",
+      EXPERIENCE_JOBS_AUDIENCE: "https://experience.example/internal/experience-jobs",
+      EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: "experience-jobs@example.iam.gserviceaccount.com",
+    };
+    const host = { HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key" };
+    const on = { ...mail, ...host, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" };
+    // Off by default: the NIHO login stays. The mock keeps its synthetic NIHO sessions; "1" is not "true".
+    expect(resolveConfig({}).hostAccountsEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }).hostAccountsEnabled).toBe(false);
+    expect(resolveConfig({ ...on, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "1" }).hostAccountsEnabled).toBe(false);
+    expect(resolveConfig(on).hostAccountsEnabled).toBe(true);
+    expect(() => resolveConfig({ ...on, HOST_CONSOLE_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
+    expect(() => resolveConfig({ ...host, EXPERIENCE_API_MODE: "http", EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_DATABASE_URL");
+    expect(() => resolveConfig({ ...host, EXPERIENCE_API_MODE: "http", EXPERIENCE_DATABASE_URL: mail.EXPERIENCE_DATABASE_URL, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_GUEST_MAIL_ENABLED=true");
+    // Every flag whose code sends the NIHO host access token to NIHO stops the server, by name.
+    expect(NIHO_HOST_TOKEN_FLAGS).toEqual(expect.arrayContaining([
+      "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_TRANSLATE_API_ENABLED",
+      "HOST_SUPPORT_SETTINGS_API_ENABLED", "HOST_SUPPORT_HISTORY_API_ENABLED", "EXPERIENCE_FEE_SUMMARY_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED",
+    ]));
+    for (const name of NIHO_HOST_TOKEN_FLAGS) {
+      expect(() => resolveConfig({ ...on, [name]: "true" }), name).toThrow(`EXPERIENCE_HOST_ACCOUNTS_ENABLED=true cannot be on with ${name}=true`);
+      expect(resolveConfig({ ...on, [name]: "false" }).hostAccountsEnabled, name).toBe(true);
+    }
+    // The publication API stays allowed: its boundary closes itself for an Experience session (slice 3 replaces it).
+    expect(resolveConfig({ ...on, EXPERIENCE_PUBLICATIONS_ENABLED: "true", EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true", EXPERIENCE_PUBLICATION_CONSENT_VERSION: "v1", EXPERIENCE_PUBLIC_MEDIA_BUCKET: "bucket", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" }).hostAccountsEnabled).toBe(true);
   });
 
   it("sends guest mail only in http mode with its own flag, and refuses to start without SMTP, the senders and the job identity (#285)", () => {

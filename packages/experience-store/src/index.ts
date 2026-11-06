@@ -222,6 +222,7 @@ export { HOST_ACCOUNT_LIMITS, HostAccounts, isHostAccountId, normalizeHostEmail 
 export type {
   GrantProviderOwnerResult,
   HostAccountChange,
+  HostAccountProviderMembership,
   HostLoginLinkIssue,
   HostLoginRequestAccepted,
   HostLoginResult,

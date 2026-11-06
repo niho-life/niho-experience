@@ -35,7 +35,9 @@ export async function readProviderOperationsJson(request: Request, maxBytes: num
 
 export async function loadProviderOperationsClient() {
   if (!providerOperationsEnabled()) return { ok: false as const, response: providerOperationsJson({ error: "not_found" }, 404) };
-  const session = await readHostSession();
+  // NIHO's API with the host's NIHO token: an Experience host account reads as signed out (its flag is refused with them).
+  const current = await readHostSession();
+  const session = current?.kind === "experience" ? null : current;
   if (!session) return { ok: false as const, response: providerOperationsJson({ error: "unauthenticated" }, 401) };
   if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: providerOperationsJson({ error: "session_refresh_required" }, 401) };
   try {

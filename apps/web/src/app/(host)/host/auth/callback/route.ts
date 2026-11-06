@@ -19,7 +19,8 @@ function failed(reason: LoginErrorReason, preparationCaseId: string | null = nul
  * are never logged; failures only carry a fixed reason to the error page.
  */
 export async function GET(request: NextRequest) {
-  if (!config.hostConsoleEnabled) return hostNotFound();
+  // No NIHO login with Experience host accounts (ADR 0003).
+  if (!config.hostConsoleEnabled || config.hostAccountsEnabled) return hostNotFound();
   const params = request.nextUrl.searchParams;
   const login = decodeLoginState(loginSealer(), request.cookies.get(LOGIN_COOKIE)?.value, Date.now());
   if (!login) return failed("expired");

@@ -14,7 +14,13 @@ import {
   sessionMaxAgeSeconds,
   shouldRefresh,
   startSession,
+  nihoSessionOrNull,
+  recentlyAuthenticated,
+  sessionKeeperExpiresAt,
+  sessionUsableInApp,
+  type ExperienceHostSession,
   type HostSession,
+  type NihoHostSession,
 } from "./session";
 
 const sealer = new CookieSealer(["synthetic-test-secret-0123456789abcdefghij"], "session");
@@ -23,7 +29,7 @@ const NOW = Date.UTC(2026, 9, 21, 3, 0, 0);
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
 
-function session(overrides: Partial<HostSession> = {}): HostSession {
+function session(overrides: Partial<NihoHostSession> = {}): NihoHostSession {
   return startSession(
     {
       refreshToken: "synthetic-refresh-token",
@@ -148,5 +154,61 @@ describe("login cookie", () => {
 
   it("is not accepted from the session sealer", () => {
     expect(decodeLoginState(sealer, encodeLoginState(loginSealer, login), NOW)).toBeNull();
+  });
+});
+
+describe("the session union (NIHO login or Experience host account, ADR 0003)", () => {
+  const experience: ExperienceHostSession = {
+    kind: "experience",
+    sessionToken: "s".repeat(43),
+    hostAccountId: `hst_${"a".repeat(32)}`,
+    email: "synthetic-host@example.test",
+    sessionRef: "0f8fad5b-d9cb-469f-a165-70867728950e",
+    authenticatedAtUtc: new Date(NOW - 10 * MIN).toISOString(),
+    idleExpiresAtUtc: new Date(NOW + 14 * DAY).toISOString(),
+    absoluteExpiresAtUtc: new Date(NOW + 20 * DAY).toISOString(),
+    displayName: "synthetic-host@example.test",
+    iconUrl: null,
+  };
+
+  it("marks every NIHO session it builds or opens, older cookies included", () => {
+    expect(session().kind).toBe("niho");
+    expect(decodeSession(sealer, encodeSession(sealer, session()), NOW)?.kind).toBe("niho");
+  });
+
+  it("uses an Experience session as the store read it: no access token to expire, usable in the app", () => {
+    expect(accessTokenUsable(experience, NOW + 365 * DAY)).toBe(true);
+    expect(sessionUsableInApp(experience)).toBe(true);
+    expect(sessionUsableInApp(session())).toBe(false);
+    expect(sessionUsableInApp(session({ surface: "app" }))).toBe(true);
+  });
+
+  it("lets only a NIHO session reach code that sends NIHO's token", () => {
+    const sessions: HostSession[] = [session(), experience];
+    expect(sessions.map((value) => nihoSessionOrNull(value)?.accessToken ?? null)).toEqual(["synthetic.web-access-token", null]);
+    expect(nihoSessionOrNull(null)).toBeNull();
+    const either: HostSession = experience;
+    // @ts-expect-error An Experience session has no NIHO token: what takes NIHO sessions (the cookie, NIHO's clients) refuses it.
+    const refused: Parameters<typeof encodeSession>[1] = either;
+    expect(refused.kind).toBe("experience");
+    if (either.kind === "experience") {
+      // @ts-expect-error Narrowed to the Experience session: no accessToken property exists.
+      expect(either.accessToken).toBeUndefined();
+      expect(either.hostAccountId).toMatch(/^hst_/);
+    }
+  });
+
+  it("tells the keeper the access token's expiry or the idle end, whichever session it is", () => {
+    expect(sessionKeeperExpiresAt(session())).toBe(NOW + 60 * MIN);
+    expect(sessionKeeperExpiresAt(experience)).toBe(NOW + 14 * DAY);
+    // Near the absolute end, the idle end is capped by it.
+    expect(sessionKeeperExpiresAt({ ...experience, idleExpiresAtUtc: new Date(NOW + 3 * DAY).toISOString(), absoluteExpiresAtUtc: new Date(NOW + 2 * DAY).toISOString() })).toBe(NOW + 2 * DAY);
+  });
+
+  it("asks for a sign-in within the given minutes before a sensitive change", () => {
+    expect(recentlyAuthenticated(experience, NOW, 30)).toBe(true);
+    expect(recentlyAuthenticated(experience, NOW + 20 * MIN, 30)).toBe(true);
+    expect(recentlyAuthenticated(experience, NOW + 21 * MIN, 30)).toBe(false);
+    expect(recentlyAuthenticated({ ...experience, authenticatedAtUtc: "not a time" }, NOW, 30)).toBe(false);
   });
 });

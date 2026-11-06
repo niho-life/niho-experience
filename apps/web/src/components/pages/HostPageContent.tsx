@@ -11,7 +11,7 @@ import { HOST_BAND_VIDEO } from "@/lib/site-media";
 import { publicMetadata } from "@/lib/public-metadata";
 import { nihoIdOrNull } from "@/lib/host/providers";
 import { HOST_LOGIN_PATH, hostLandingPath } from "@/lib/host/routes";
-import { isHostMock, readHostSession } from "@/lib/host/server";
+import { hostLoginLabel, isHostMock, readHostSession } from "@/lib/host/server";
 import { getJapaneseCopy, type SiteLocale } from "@/lib/localized-content";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { englishAlternates } from "@/lib/locale-metadata";
@@ -50,7 +50,10 @@ type SearchParams = Record<string, string | string[] | undefined>;
 async function hostConsoleEntry(query: SearchParams): Promise<{ loginHref: string } | null> {
   if (!config.hostConsoleEnabled) return null;
   const providerId = nihoIdOrNull(query.providerId);
-  if (await readHostSession()) redirect(hostLandingPath(providerId, query.connect));
+  let signedIn = false;
+  // With Experience host accounts the session is read from the DB: an outage leaves the public introduction readable.
+  try { signedIn = (await readHostSession()) !== null; } catch { signedIn = false; }
+  if (signedIn) redirect(hostLandingPath(providerId, query.connect));
   const params = new URLSearchParams();
   if (providerId) params.set("providerId", providerId);
   // Preview only: `?mock=empty` signs in as a synthetic host with no providers.
@@ -103,9 +106,12 @@ export async function HostPageContent({ searchParams, locale }: { searchParams: 
       {consoleEntry ? (
         <div className={openSignup ? "space-y-3" : "mt-5 space-y-3"}>
           {/* A plain link: the console has its own root layout and login is a route handler. */}
-          <a href={consoleEntry.loginHref} lang="ja" className={buttonClass("primary", "text-lg")}>NIHO でログイン</a>
+          <a href={consoleEntry.loginHref} lang="ja" className={buttonClass("primary", "text-lg")}>{hostLoginLabel()}</a>
           <p className="text-sm text-muted">
-            {locale === "ja" ? (openSignup ? "NIHOアカウントでログインして、ホスト登録、体験の編集、予約・売上の確認ができます。" : "NIHOでホストをしている方は、ログインして体験、予約、売上を確認できます。") : openSignup
+            {config.hostAccountsEnabled ? (locale === "ja"
+              ? "ホストとして登録されている方は、メールアドレスでログインして、体験、予約、売上を確認できます。"
+              : "Already hosting? Sign in with your registered email address to see your experiences, bookings and sales.")
+              : locale === "ja" ? (openSignup ? "NIHOアカウントでログインして、ホスト登録、体験の編集、予約・売上の確認ができます。" : "NIHOでホストをしている方は、ログインして体験、予約、売上を確認できます。") : openSignup
               ? "Sign in with your NIHO account to register as a host, edit your experiences and see bookings and sales. Stripe may request identity checks."
               : "Already hosting with NIHO? Sign in to edit your experiences and see bookings and sales."}
           </p>

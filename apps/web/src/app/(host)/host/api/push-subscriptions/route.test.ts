@@ -14,19 +14,24 @@ const state = vi.hoisted(() => ({
     hostPushVapidSubject: "mailto:host-push@example.test",
     hostPushVapidPublicKey: "",
     hostPushVapidPrivateKey: "",
+    hostAccountsEnabled: false,
   },
   cookie: undefined as string | undefined,
+  /** Experience host accounts (ADR 0003): the account session cookie and the store that reads it. */
+  accountCookie: undefined as string | undefined,
+  accounts: null as { readSession: (input: { sessionToken: string }) => Promise<unknown> } | null,
   currentUserId: "user-1",
   pool: null as { query: (sql: string, params: unknown[]) => Promise<{ rowCount: number; rows: unknown[] }> } | null,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: state.config, isPreview: false }));
-vi.mock("@/lib/experience/store-server", () => ({ experiencePool: () => state.pool }));
+vi.mock("@/lib/experience/store-server", () => ({ experiencePool: () => state.pool, hostAccounts: () => state.accounts }));
 vi.mock("@/lib/host/server", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/host/server")>();
   return { ...original, loadHostProviders: async () => ({ status: "ok", nihoUserId: state.currentUserId, providers: [{ id: "provider-a", nihoUserId: state.currentUserId, memberRole: "OWNER" }] }) };
 });
-vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "__Secure-niho_host_session" && state.cookie ? { name, value: state.cookie } : undefined) }) }));
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "__Secure-niho_host_session" && state.cookie ? { name, value: state.cookie }
+  : name === "__Host-niho_host_account_session" && state.accountCookie ? { name, value: state.accountCookie } : undefined) }) }));
 
 import { cookieSealer } from "@/lib/host/cookie-seal";
 import { encodeSession, startSession } from "@/lib/host/session";
@@ -60,7 +65,9 @@ beforeEach(() => {
   queries.length = 0;
   rows = [];
   state.pool = { query: async (sql, params) => { queries.push({ sql, params }); return { rowCount: rows.length || 1, rows }; } };
-  Object.assign(state.config, { apiMode: "http", hostPushEnabled: true });
+  Object.assign(state.config, { apiMode: "http", hostPushEnabled: true, hostAccountsEnabled: false });
+  state.accountCookie = undefined;
+  state.accounts = null;
   const keys = generateVapidKeys();
   state.config.hostPushVapidPublicKey = keys.publicKey;
   state.config.hostPushVapidPrivateKey = keys.privateKey;
@@ -191,5 +198,37 @@ describe("preview (mock mode)", () => {
     expect(await (await sendTest(request("/test", { endpoint: ENDPOINT }))).json()).toEqual({ sent: false, preview: true });
     expect(queries).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("subscriptions with Experience host accounts (ADR 0003)", () => {
+  const HOST = `hst_${"d".repeat(32)}`;
+  const REF = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  beforeEach(() => {
+    state.config.hostAccountsEnabled = true;
+    state.accountCookie = "s".repeat(43);
+    state.currentUserId = HOST;
+    state.accounts = {
+      readSession: async () => ({
+        hostAccountId: HOST, email: "synthetic-host@example.test", sessionRef: REF, authenticatedAtUtc: new Date().toISOString(),
+        idleExpiresAtUtc: new Date(Date.now() + 86_400_000).toISOString(), absoluteExpiresAtUtc: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+      }),
+    };
+  });
+
+  it("keys this device by the session's reference instead of a NIHO connection (no migration: the same text column)", async () => {
+    expect((await save(request("", { endpoint: ENDPOINT, keys: KEYS }))).status).toBe(200);
+    expect(queries[0]?.params).toEqual([HOST, REF, ENDPOINT, KEYS.p256dh, KEYS.auth, "iphone"]);
+    await status(request("/status", { endpoint: ENDPOINT }));
+    expect(queries.at(-1)?.params).toEqual([HOST, ENDPOINT, REF]);
+  });
+
+  it("reads a NIHO cookie left from before as signed out, and a store outage as unavailable", async () => {
+    state.accountCookie = undefined;
+    expect((await save(request("", { endpoint: ENDPOINT, keys: KEYS }))).status).toBe(401);
+    state.accountCookie = "s".repeat(43);
+    state.accounts = { readSession: async () => { throw new Error("db down"); } };
+    expect((await save(request("", { endpoint: ENDPOINT, keys: KEYS }))).status).toBe(503);
+    expect(queries).toEqual([]);
   });
 });

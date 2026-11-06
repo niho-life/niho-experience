@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { noStoreJson } from "@/lib/host/server";
-import { hostPushStore, isPushPreview, openPushBff, pushEndpointFrom, pushNotConfigured, pushUnavailable } from "@/lib/host/push/server";
+import { hostPushStore, isPushPreview, openPushBff, pushConnectionKey, pushEndpointFrom, pushNotConfigured, pushUnavailable } from "@/lib/host/push/server";
 
 /**
  * Whether this device's subscription is still the host's (#177 P2): a logout or a revoked connection
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   const store = hostPushStore();
   if (!store) return pushNotConfigured();
   try {
-    return noStoreJson({ subscribed: await store.claim(opened.nihoUserId, parsed.endpoint, opened.session.connectionId) });
+    return noStoreJson({ subscribed: await store.claim(opened.nihoUserId, parsed.endpoint, pushConnectionKey(opened.session)) });
   } catch {
     return pushUnavailable();
   }
