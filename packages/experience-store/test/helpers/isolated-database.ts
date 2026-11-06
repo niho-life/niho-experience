@@ -47,6 +47,18 @@ function withDatabase(connectionString: string, database: string): string {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * A pool of a test database must not turn the server ending one of its sessions into an unhandled error. `pool.end()`
+ * returns once its clients are asked to close, not once the server has dropped them, so the `DROP DATABASE ... WITH
+ * (FORCE)` that follows can still end a session the pool is closing (57P01, "terminating connection due to
+ * administrator command"). node-postgres then emits `error` on the pool, and a pool without a listener throws it: the
+ * test run fails with every test green. A query on a broken client reports its own error, so nothing is hidden.
+ */
+function quiet<T extends Pool>(pool: T): T {
+  pool.on("error", () => undefined);
+  return pool;
+}
+
 /** A database cannot be renamed or copied while a session of the build is still shutting down on the server. */
 async function retryWhileInUse<T>(run: () => Promise<T>): Promise<T> {
   for (let attempt = 0; ; attempt += 1) {
@@ -147,13 +159,13 @@ export async function createIsolatedDatabase(databaseUrl: string | undefined, pr
   }
   await admin.end();
   const connectionString = withDatabase(databaseUrl, database);
-  const pool = new PgPool({ connectionString, max });
+  const pool = quiet(new PgPool({ connectionString, max }));
   const extras: Pool[] = [];
   let disposed = false;
   return {
     pool,
     extraPool(settings = {}) {
-      const extra = new PgPool({ connectionString, max: settings.max ?? 2, ...(settings.options ? { options: settings.options } : {}) });
+      const extra = quiet(new PgPool({ connectionString, max: settings.max ?? 2, ...(settings.options ? { options: settings.options } : {}) }));
       extras.push(extra);
       return extra;
     },
