@@ -191,6 +191,16 @@ describe("the sign-in a sensitive change asks for comes back to 受取口座", (
     ]) expect(hostReturnPathOrNull(bad), String(bad)).toBeNull();
   });
 
+  it("also accepts a product operator's invitation page, exactly, so a sign-in from it returns there", () => {
+    const invitation = "/host/invitations/8f14e45f-ceea-467a-9575-1f2a3b4c5d6e";
+    expect(hostReturnPathOrNull(invitation)).toBe(invitation);
+    for (const bad of [
+      "/host/invitations/not-a-uuid", "/host/invitations/8f14e45f-ceea-467a-9575-1f2a3b4c5d6e?x=1", "/host/invitations/8f14e45f-ceea-467a-9575-1f2a3b4c5d6e#x",
+      "/host/invitations/8f14e45f-ceea-467a-9575-1f2a3b4c5d6e/accept", "/host/invitations/", "/host/invitations/%2e%2e%2fadmin",
+      "//evil.example.test/host/invitations/8f14e45f-ceea-467a-9575-1f2a3b4c5d6e",
+    ]) expect(hostReturnPathOrNull(bad), bad).toBeNull();
+  });
+
   it("keeps the return page beside the link cookie, and the emailed link's page opens it", async () => {
     const emailed = await requestLink(new NextRequest(`${SITE}/host/auth/email`, { method: "POST", headers: form, body: body({ email: "owner@example.test", next }) }));
     expect(emailed.status).toBe(303);

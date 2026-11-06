@@ -34,6 +34,8 @@
 - `loadHostProvidersFresh()` は store の `listProviderMemberships`（有効な OWNER・EDITOR）だけを読む。NIHO の Host v1 は呼ばない。NIHO の販売者 profile は要らない（名前は profile があればその名前、無ければ提供者 ID）。
 - `ProvidersLoad.nihoUserId` と `HostProvider.nihoUserId` には、ホストアカウント ID（`hst_` + 32 桁）が入る。`*_niho_user_id` 列も同じ（ADR 0003「移行」）。
 - push の購読は NIHO の connection ID の代わりにセッションの `sessionRef`（UUID）を `host_push_subscriptions.connection_id` に入れる。列は text（1〜256 字）なので migration は要らない。
+- 端末のログアウト（参照 ID での失効を含む）はその端末の購読を、全端末のログアウトとアカウントの停止はその人の全購読を、セッションの失効と同じ transaction で消す。配信先の抽出も、ホストアカウントが `ACTIVE` のときだけ数える（停止の後に残った購読にも届けない。予約の通知はゲスト名を含むことがある）。
+- 招待画面の「メールでログイン」は、招待の ID を戻り先（`next`）として持ち、開いたリンクが招待画面へ戻す。戻り先は 設定 › 受取口座 と `/host/invitations/<UUID>` だけを許す。
 
 ## 受取口座と公開の判定（3 段目）
 

@@ -28,7 +28,7 @@ export default async function HostEmailSignInPage({ searchParams }: { searchPara
   const query = await searchParams;
   const next = hostReturnPathOrNull(query.next);
   const reauth = query.reauth === "1" && next !== null;
-  if (!reauth && await readHostSession()) redirect(HOST_HOME_PATH);
+  if (!reauth && await readHostSession()) redirect(next ?? HOST_HOME_PATH);
   const sent = query.sent === "1";
   const error = query.error === "email" || query.error === "unavailable" ? ERRORS[query.error] : null;
   const minutes = HOST_ACCOUNT_LIMITS.linkTtlMinutes;

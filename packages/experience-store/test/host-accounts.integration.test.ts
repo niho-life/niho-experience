@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { Pool } from "pg";
 import { StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
 import { HOST_ACCOUNT_LIMITS, HostAccounts, isHostAccountId, normalizeHostEmail, type HostLoginLinkIssue, type HostLoginResult } from "../src/host-accounts.ts";
+import { HostPushSubscriptions } from "../src/push-subscriptions.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 /** ホストのアカウント (ADR 0003, migration 0064): accounts, sign-in links and sessions against a real schema, synthetic data only. */
@@ -461,6 +462,45 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
       assert.deepEqual(await accounts.listProviderMemberships({ hostAccountId: host }), []);
       assert.deepEqual(await accounts.listProviderMemberships({ hostAccountId: `hst_${"0".repeat(32)}` }), []);
       await assert.rejects(accounts.listProviderMemberships({ hostAccountId: "niho-user-synthetic" }), StoreValidationError);
+    });
+  });
+
+  it("stops a signed-out device's or a suspended account's booking notifications (push) with its sessions", async () => {
+    await withAccounts(async ({ pool, accounts }) => {
+      await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-push')");
+      const host = await provision(accounts, "push-host@example.com");
+      assert.deepEqual(await accounts.grantProviderOwner({ providerId: "provider-push", hostAccountId: host, nowUtc: at(0) }), { kind: "granted" });
+      const push = new HostPushSubscriptions(pool);
+      const keys = { p256dh: `B${"A".repeat(86)}`, auth: "A".repeat(22) };
+      const phone = await signIn(accounts, "push-host@example.com", MINUTE, "phone");
+      const laptop = await signIn(accounts, "push-host@example.com", 2 * MINUTE, "laptop");
+      await push.save({ nihoUserId: host, connectionId: phone.sessionRef, endpoint: "https://web.push.apple.com/synthetic-host-phone", ...keys, deviceLabel: "iphone" });
+      await push.save({ nihoUserId: host, connectionId: laptop.sessionRef, endpoint: "https://fcm.googleapis.com/fcm/send/synthetic-host-laptop", ...keys, deviceLabel: "android" });
+      const endpoints = async () => (await push.recipients("provider-push", new Date(0))).map((recipient) => recipient.endpoint).sort();
+      assert.deepEqual(await endpoints(), ["https://fcm.googleapis.com/fcm/send/synthetic-host-laptop", "https://web.push.apple.com/synthetic-host-phone"]);
+
+      // Signing one device out (by its reference, as "sign out that device" does) forgets that device's push only.
+      assert.equal(await accounts.revokeSession({ hostAccountId: host, sessionRef: phone.sessionRef, nowUtc: at(3 * MINUTE) }), true);
+      assert.deepEqual(await endpoints(), ["https://fcm.googleapis.com/fcm/send/synthetic-host-laptop"]);
+
+      // A subscription left behind (written after the suspension's delete) still gets nothing while the account is suspended.
+      await accounts.suspendHostAccount({ hostAccountId: host, nowUtc: at(4 * MINUTE) });
+      assert.equal(Number((await pool.query("SELECT count(*)::int AS n FROM host_push_subscriptions WHERE niho_user_id = $1", [host])).rows[0]!.n), 0);
+      await push.save({ nihoUserId: host, connectionId: laptop.sessionRef, endpoint: "https://fcm.googleapis.com/fcm/send/synthetic-host-laptop", ...keys, deviceLabel: "android" });
+      assert.deepEqual(await endpoints(), []);
+      assert.deepEqual(await push.ownerRecipients("provider-push", new Date(0)), []);
+      assert.deepEqual(await push.productRecipients("provider-push", "product-synthetic", new Date(0)), []);
+
+      // Signing out everywhere forgets every device of the account as well.
+      await accounts.reactivateHostAccount({ hostAccountId: host, nowUtc: at(5 * MINUTE) });
+      assert.deepEqual(await endpoints(), ["https://fcm.googleapis.com/fcm/send/synthetic-host-laptop"]);
+      await accounts.revokeAllSessions({ hostAccountId: host, nowUtc: at(6 * MINUTE) });
+      assert.deepEqual(await endpoints(), []);
+
+      // A NIHO user's subscription is not affected by the host-account rule.
+      await pool.query("INSERT INTO provider_memberships (provider_id, niho_user_id, role, active) VALUES ('provider-push', 'niho-user-push', 'EDITOR', true)");
+      await push.save({ nihoUserId: "niho-user-push", connectionId: "conn-niho-push", endpoint: "https://web.push.apple.com/synthetic-niho", ...keys, deviceLabel: "iphone" });
+      assert.deepEqual(await endpoints(), ["https://web.push.apple.com/synthetic-niho"]);
     });
   });
 });

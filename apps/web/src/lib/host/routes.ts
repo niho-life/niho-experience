@@ -139,16 +139,23 @@ export function hostPayoutSettingsPath(providerId: string | null): string {
 const RETURN_PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 /**
- * A page an emailed sign-in may return to (a sensitive change asked for a recent sign-in first): only 設定 › 受取口座, with
- * at most its `providerId`. Anything else (another path, another origin, another query) is null, so the value can never
- * send a host off this site or to a page it was not meant for.
+ * A page an emailed sign-in may return to: 設定 › 受取口座 with at most its `providerId` (a sensitive change asked for a
+ * recent sign-in first), or a product operator's invitation page `/host/invitations/<UUID>` (the invitation asked the
+ * host to sign in). Anything else (another path, another origin, another query) is null, so the value can never send a
+ * host off this site or to a page it was not meant for.
  */
 export function hostReturnPathOrNull(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 300 || !value.startsWith("/host/") || value.includes("\\")) return null;
   let url: URL;
   try { url = new URL(value, "https://return.invalid"); }
   catch { return null; }
-  if (url.origin !== "https://return.invalid" || url.pathname !== HOST_SETTINGS_PATH || url.hash !== `#${HOST_SETTINGS_PAYOUT_ANCHOR}`) return null;
+  if (url.origin !== "https://return.invalid") return null;
+  // A product operator's invitation (docs/product-operators.md): a host who signs in from it comes back to accept it.
+  if (url.pathname.startsWith(`${HOST_INVITATIONS_PATH}/`)) {
+    const invitationId = invitationIdOrNull(url.pathname.slice(HOST_INVITATIONS_PATH.length + 1));
+    return invitationId && url.search === "" && url.hash === "" ? hostInvitationPath(invitationId) : null;
+  }
+  if (url.pathname !== HOST_SETTINGS_PATH || url.hash !== `#${HOST_SETTINGS_PAYOUT_ANCHOR}`) return null;
   const keys = [...url.searchParams.keys()];
   if (keys.length > 1 || (keys.length === 1 && keys[0] !== "providerId")) return null;
   const providerId = url.searchParams.get("providerId");
