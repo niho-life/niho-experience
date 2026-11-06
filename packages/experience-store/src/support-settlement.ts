@@ -46,7 +46,52 @@ export interface ExperienceSupportCase {
     readonly occurredAtUtc: string;
     readonly action: string | null;
     readonly outcome: string | null;
+    /** The command that made this event, so a screen opened again can tell its own earlier operation; null when none did. */
+    readonly commandId: string | null;
+    /**
+     * GUEST_CONTACT_SENT only: where the contact's email is (PENDING and SENDING are not yet sent; FAILED will not
+     * be). null for every other event, or when the message is gone. Never the words of the message.
+     */
+    readonly delivery: SupportContactDelivery | null;
   }[];
+}
+
+export type SupportContactDelivery = "PENDING" | "SENDING" | "SENT" | "FAILED";
+const CONTACT_DELIVERIES: readonly string[] = ["PENDING", "SENDING", "SENT", "FAILED"];
+
+function contactDeliveryOf(value: unknown): SupportContactDelivery | null {
+  return typeof value === "string" && CONTACT_DELIVERIES.includes(value) ? value as SupportContactDelivery : null;
+}
+
+/**
+ * The case timeline of one booking, newest first, for the read of a case and for the answer of a change to it.
+ * A contact's delivery state lives on its message row, found by the command that made both. The lateral keeps one
+ * row per event whatever the data holds, and the message itself is never selected.
+ */
+async function readCaseEvents(
+  run: (sql: string, params: readonly unknown[]) => Promise<{ readonly rows: readonly DbRow[] }>,
+  providerId: string,
+  bookingRowId: string,
+): Promise<ExperienceSupportCase["events"]> {
+  const found = await run(
+    `SELECT e.event_type, e.revision, e.actor_admin_user_id, e.occurred_at, e.action, e.outcome, e.command_id::text AS command_id,
+            d.delivery_status
+       FROM experience_support_case_events e
+       LEFT JOIN LATERAL (
+         SELECT m.delivery_status FROM guest_question_messages m
+          WHERE e.event_type='GUEST_CONTACT_SENT' AND m.provider_id=e.provider_id AND m.command_id=e.command_id AND m.author='SUPPORT'
+          ORDER BY m.created_at LIMIT 1
+       ) d ON true
+      WHERE e.provider_id=$1 AND e.booking_id=$2::bigint ORDER BY e.revision DESC LIMIT 50`,
+    [providerId, bookingRowId],
+  );
+  return found.rows.map((event) => ({
+    type: text(event, "event_type") as ExperienceSupportCase["events"][number]["type"],
+    revision: integer(event, "revision"), actorAdminUserId: text(event, "actor_admin_user_id"), occurredAtUtc: isoValue(event, "occurred_at"),
+    action: nullableText(event, "action"), outcome: nullableText(event, "outcome"),
+    commandId: nullableText(event, "command_id"),
+    delivery: contactDeliveryOf(event.delivery_status),
+  }));
 }
 
 export interface ExperienceSupportNotification {
@@ -255,11 +300,6 @@ export class ExperienceSupportRepository {
     const row = found.rows[0];
     if (!row) throw new StoreNotFoundError("guest booking");
     if (!await supportBookingConsent(this.#pool, text(row, "provider_id"), text(row, "booking_row_id"))) return null;
-    const events = await this.#pool.query<DbRow>(
-      `SELECT event_type, revision, actor_admin_user_id, occurred_at, action, outcome FROM experience_support_case_events
-        WHERE provider_id=$1 AND booking_id=$2::bigint ORDER BY revision DESC LIMIT 50`,
-      [row.provider_id, row.booking_row_id],
-    );
     return {
       publicBookingId: bookingId,
       assignedAdminUserId: nullableText(row, "assigned_admin_user_id"),
@@ -267,11 +307,7 @@ export class ExperienceSupportRepository {
       revision: row.revision === null || row.revision === undefined ? 0 : integer(row, "revision"),
       updatedBy: nullableText(row, "updated_by"),
       updatedAtUtc: row.updated_at === null || row.updated_at === undefined ? new Date(0).toISOString() : isoValue(row, "updated_at"),
-      events: events.rows.map((event) => ({
-        type: text(event, "event_type") as ExperienceSupportCase["events"][number]["type"],
-        revision: integer(event, "revision"), actorAdminUserId: text(event, "actor_admin_user_id"), occurredAtUtc: isoValue(event, "occurred_at"),
-        action: nullableText(event, "action"), outcome: nullableText(event, "outcome"),
-      })),
+      events: await readCaseEvents((sql, params) => this.#pool.query<DbRow>(sql, [...params]), text(row, "provider_id"), text(row, "booking_row_id")),
     };
   }
 
@@ -340,7 +376,6 @@ export class ExperienceSupportRepository {
     const state = await client.query<DbRow>("SELECT assigned_admin_user_id,internal_memo,revision,updated_by,updated_at FROM experience_support_cases WHERE provider_id=$1 AND booking_id=$2::bigint", [providerId, bookingRowId]);
     const row = state.rows[0];
     if (!row) throw new StoreNotFoundError("support case");
-    const events = await client.query<DbRow>("SELECT event_type,revision,actor_admin_user_id,occurred_at,action,outcome FROM experience_support_case_events WHERE provider_id=$1 AND booking_id=$2::bigint ORDER BY revision DESC LIMIT 50", [providerId, bookingRowId]);
     return {
       publicBookingId,
       assignedAdminUserId: nullableText(row, "assigned_admin_user_id"),
@@ -348,11 +383,7 @@ export class ExperienceSupportRepository {
       revision: integer(row, "revision"),
       updatedBy: nullableText(row, "updated_by"),
       updatedAtUtc: isoValue(row, "updated_at"),
-      events: events.rows.map((event) => ({
-        type: text(event, "event_type") as ExperienceSupportCase["events"][number]["type"],
-        revision: integer(event, "revision"), actorAdminUserId: text(event, "actor_admin_user_id"), occurredAtUtc: isoValue(event, "occurred_at"),
-        action: nullableText(event, "action"), outcome: nullableText(event, "outcome"),
-      })),
+      events: await readCaseEvents((sql, params) => client.query<DbRow>(sql, [...params]), providerId, bookingRowId),
     };
   }
 

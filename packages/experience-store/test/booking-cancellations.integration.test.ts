@@ -1067,3 +1067,67 @@ describe("PostgreSQL Admin notices from the booking events (#121)", { skip: data
     }, "FREE_UNTIL_48H", undefined, true);
   });
 });
+
+/* ---------- the case timeline an Admin sees again after the screen was opened anew ---------- */
+
+describe("PostgreSQL Admin case timeline: what survives a reload", { skip: databaseUrl === undefined }, () => {
+  it("carries the command and the email's delivery state of a contact, and never the words", async () => {
+    await withSchema(async (context) => {
+      const { pool } = context;
+      const made = await paid(context);
+      const messages = new GuestBookingMessages(pool);
+      const reader = new ExperienceSupportRepository(pool);
+      const commandId = randomUUID();
+      const words = "We can refund you on Friday.";
+      await messages.sendSupportMessage(support, made.publicBookingId, { commandId, message: words });
+
+      const contactOf = async () => (await reader.getCase(support, made.publicBookingId))!.events.filter((event) => event.type === "GUEST_CONTACT_SENT");
+      const [queued] = await contactOf();
+      assert.deepEqual([queued?.commandId, queued?.delivery, queued?.actorAdminUserId], [commandId, "PENDING", support.nihoUserId]);
+
+      // The mail job moves the message on; the same read shows where it is.
+      await pool.query("UPDATE guest_question_messages SET delivery_status='SENT', delivered_at=clock_timestamp(), lease_until=NULL WHERE command_id=$1::uuid", [commandId]);
+      assert.equal((await contactOf())[0]?.delivery, "SENT");
+      await pool.query("UPDATE guest_question_messages SET delivery_status='FAILED', delivered_at=NULL, lease_until=NULL WHERE command_id=$1::uuid", [commandId]);
+      assert.equal((await contactOf())[0]?.delivery, "FAILED");
+
+      // The same command again is the same contact: one event, and the words are not in anything the Admin is sent.
+      assert.equal((await messages.sendSupportMessage(support, made.publicBookingId, { commandId, message: words })).repeated, true);
+      assert.equal((await contactOf()).length, 1);
+      assert.equal(JSON.stringify(await reader.getCase(support, made.publicBookingId)).includes(words), false);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("carries the command of an Admin's operation and of a change to the case, without a delivery state", async () => {
+    await withSchema(async (context) => {
+      const { pool, cancellations } = context;
+      const made = await paid(context);
+      const reader = new ExperienceSupportRepository(pool);
+      const operation = randomUUID();
+      await cancellations.cancelAsSupport(support, made.publicBookingId, { commandId: operation, reason: "OTHER", refund: { kind: "FULL" } });
+      const change = randomUUID();
+      const changed = await reader.updateCase(support, made.publicBookingId, { commandId: change, expectedRevision: 1, assignedAdminUserId: null, internalMemo: "Called the host." });
+
+      // The answer to a change and a plain read are the same timeline.
+      const read = await reader.getCase(support, made.publicBookingId);
+      assert.deepEqual(changed.events, read!.events);
+      const action = read!.events.find((event) => event.type === "SUPPORT_ACTION");
+      assert.deepEqual([action?.commandId, action?.delivery, action?.outcome], [operation, null, "CANCELLED"]);
+      const memo = read!.events.find((event) => event.type === "INTERNAL_MEMO_CHANGED");
+      assert.deepEqual([memo?.commandId, memo?.delivery], [change, null]);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+
+  it("shows no delivery state when the message is gone, instead of failing the read", async () => {
+    await withSchema(async (context) => {
+      const { pool } = context;
+      const made = await paid(context);
+      const reader = new ExperienceSupportRepository(pool);
+      const commandId = randomUUID();
+      await new GuestBookingMessages(pool).sendSupportMessage(support, made.publicBookingId, { commandId, message: "Hello again." });
+      await pool.query("DELETE FROM guest_question_messages WHERE command_id=$1::uuid", [commandId]);
+      const [event] = (await reader.getCase(support, made.publicBookingId))!.events.filter((item) => item.type === "GUEST_CONTACT_SENT");
+      assert.deepEqual([event?.commandId, event?.delivery], [commandId, null]);
+    }, "FREE_UNTIL_48H", undefined, true);
+  });
+});
