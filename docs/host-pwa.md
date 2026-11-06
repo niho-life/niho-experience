@@ -74,6 +74,32 @@
 
 - 鍵を替えると既存の購読は使えなくなる。設定を開くと鍵の違う購読はオフと表示して再登録を案内し、「この端末で通知を受け取る」で作り直す。解除時にブラウザとサーバーの両方が失敗した場合はオン表示を維持して再試行を案内する。
 
+### ステージングで有効にする
+
+PWA は staging では `STG_HOST_PWA_ENABLED` が未設定なら ON（配備すれば出る）。push は次の順で開く。管理者（オーナー）が自分の端末で行い、CI からは実行しない。
+
+1. **GCP の土台**（`niho-app-stg`）：`scripts/gcp/setup-host-staging-push.sh`。空の Secret `experience-stg-host-push-vapid-private-key`、runtime への resource 単位の `secretAccessor`、Scheduler 用の `experience-host-push`（project の role なし、このサービスの `run.invoker` だけ）、**一時停止した** Cloud Scheduler `experience-host-push-drain-stg`（毎分 `POST …/internal/host-push/v1/drain`）を冪等に作る。secret の値は作らず、表示もしない。
+
+   ```sh
+   CONFIRM_HOST_STAGING_PUSH_SETUP=niho-app-stg STG_HOST_SERVICE_URL=<host-staging の STG_HOST_SERVICE_URL> ./scripts/gcp/setup-host-staging-push.sh
+   ```
+
+2. **VAPID 鍵**：1 組作り、秘密鍵は端末に残さず Secret の version に直接入れる。公開鍵だけが画面に出る（公開してよい値）。
+
+   ```sh
+   keys="$(node --input-type=module -e "import { generateVapidKeys } from './packages/web-push/src/index.ts'; console.log(JSON.stringify(generateVapidKeys()))")"
+   jq -r .privateKey <<< "$keys" | gcloud secrets versions add experience-stg-host-push-vapid-private-key --project niho-app-stg --data-file=-
+   jq -r .publicKey <<< "$keys"
+   unset keys
+   ```
+
+3. **Variable**（`host-staging` Environment）：`STG_HOST_PUSH_ENABLED=true`、`STG_HOST_PUSH_VAPID_PUBLIC_KEY=<2 の公開鍵>`、`STG_HOST_PUSH_VAPID_SUBJECT=<mailto: か https:>`（連絡先。個人のメールを外部の push service へ渡さないよう、サイトの URL か運営の共有アドレスにする）、`STG_HOST_PUSH_VAPID_PRIVATE_KEY_REF=experience-stg-host-push-vapid-private-key:<2 の version 番号>`。
+4. **配備**：`Deploy host staging`（candidate → 確認 → promote）。体験 DB に `0004_host_push_subscriptions.sql` と runtime の grant が要る（`scripts/gcp/bootstrap-host-staging-db.mjs` が入れる）。
+5. **Scheduler を再開**：昇格のあと `gcloud scheduler jobs resume experience-host-push-drain-stg --project niho-app-stg --location asia-northeast1`。次の実行が 200 で終わることを Scheduler の実行記録で確かめる。
+6. **実機**：このファイル末尾の P0 の手順で、設定 › この端末 › 通知から購読し、「テスト通知」が届くことを確かめる。
+
+本番は、本番の GCP project に同じ土台（Secret・service account・Scheduler）を作り、`PROD_HOST_PWA_ENABLED=true` と `PROD_HOST_PUSH_*` の Variable を足してから開く（本番の鍵は staging と分ける）。
+
 ## Declarative Web Push（P3）
 
 送る JSON は、これまでの `{ v: 1, title, body, url, tag, badge? }` に、[W3C Push API §3.3](https://www.w3.org/TR/push-api/) の宣言的な形を足した 1 つのまま（`lib/host/push/payload.ts`）。
