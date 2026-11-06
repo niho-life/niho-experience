@@ -65,7 +65,7 @@
 - **購読**：体験 DB の `host_push_subscriptions`（`packages/experience-store/migrations/0004_host_push_subscriptions.sql`）。NIHO user・接続・endpoint（一意。最後に購読した人の端末になる）・鍵・端末種別（User-Agent からの粗い区分）・`last_seen_at`・失敗回数。BFF は `/host/api/push-subscriptions`（登録 POST・解除 DELETE）・`/status`・`/test`（本人の端末だけ・30 秒に 1 回）。同一 origin とセッション cookie で確かめ、NIHO は呼ばない。DB 未設定は 503。mock は検証だけして保存も送信もしない。
 - **消す・送らない条件**：ログアウトと、NIHO が接続を終えた refresh（`rejected`）でその接続の購読を消す（成功した refresh は `last_seen_at` を進める。どちらも認証の流れを止めない）。30 日見ていない端末には送らない。push service が 404/410 を返したら消す。設定を開くたびに、端末の購読がまだ本人のものか確かめ、残っていれば今のセッションの接続へ付け替える（後からログインし直しても、古い接続の失効で消えない）。消えていれば「オフ」と出す。
 - **許可**：設定 › この端末 › 通知のボタンからだけ求める。iPhone・iPad はホーム画面に追加したアプリの中だけ。アイコンのバッジ（承認待ち＋未返信）は Badging API がある端末だけ：プッシュの `badge` と、アプリでホームを開いたとき（表示中の提供者の件数）。
-- **環境変数**：`HOST_PUSH_ENABLED`（既定 `false`。`HOST_PWA_ENABLED=true` のときだけ効く）、`HOST_PUSH_VAPID_PUBLIC_KEY`、`HOST_PUSH_VAPID_PRIVATE_KEY`（Secret Manager だけ。リポ・`.env`・ログに書かない）、`HOST_PUSH_VAPID_SUBJECT`（`mailto:` か `https:`）。http mode で有効にして鍵・subject が欠ける・形が違う・対にならないと起動しない。mock は開発用の公開鍵（秘密鍵は捨ててある）で、送らない。stg・本番の workflow は、上の機能のフラグで既定 OFF のまま渡せる（まだどの環境でも有効にしていない）。
+- **環境変数**：`HOST_PUSH_ENABLED`（既定 `false`。`HOST_PWA_ENABLED=true` のときだけ効く）、`HOST_PUSH_VAPID_PUBLIC_KEY`、`HOST_PUSH_VAPID_PRIVATE_KEY`（Secret Manager だけ。リポ・`.env`・ログに書かない）、`HOST_PUSH_VAPID_SUBJECT`（`mailto:` か `https:`）。http mode で有効にして鍵・subject が欠ける・形が違う・対にならないと起動しない。mock は開発用の公開鍵（秘密鍵は捨ててある）で、送らない。stg・本番の workflow は、上の機能のフラグで渡す。2026-11-07 時点で staging は PWA・push とも ON（push の土台と Variable は下の「ステージングで有効にする」）、本番は未設定（OFF）。
 - **鍵の作り方**（root で 1 回。秘密鍵は Secret Manager へ直接入れ、端末に残さない）：
 
   ```sh
@@ -73,6 +73,34 @@
   ```
 
 - 鍵を替えると既存の購読は使えなくなる。設定を開くと鍵の違う購読はオフと表示して再登録を案内し、「この端末で通知を受け取る」で作り直す。解除時にブラウザとサーバーの両方が失敗した場合はオン表示を維持して再試行を案内する。
+
+### ステージングで有効にする
+
+PWA は staging では `STG_HOST_PWA_ENABLED` が未設定なら ON（配備すれば出る）。push は次の順で開く。管理者（オーナー）が自分の端末で行い、CI からは実行しない。
+
+1. **GCP の土台**（`niho-app-stg`）：`scripts/gcp/setup-host-staging-push.sh`。空の Secret `experience-stg-host-push-vapid-private-key`、runtime への resource 単位の `secretAccessor`、Scheduler 用の `experience-host-push`（project の role なし、このサービスの `run.invoker` だけ）、**一時停止した** Cloud Scheduler `experience-host-push-drain-stg`（毎分 `POST …/internal/host-push/v1/drain`）を冪等に作る。secret の値は作らず、表示もしない。
+
+   ```sh
+   CONFIRM_HOST_STAGING_PUSH_SETUP=niho-app-stg STG_HOST_SERVICE_URL=<host-staging の STG_HOST_SERVICE_URL> ./scripts/gcp/setup-host-staging-push.sh
+   ```
+
+2. **VAPID 鍵**：1 組作り、秘密鍵は端末に残さず Secret の version に直接入れる。公開鍵だけが画面に出る（公開してよい値）。
+
+   ```sh
+   keys="$(node --input-type=module -e "import { generateVapidKeys } from './packages/web-push/src/index.ts'; console.log(JSON.stringify(generateVapidKeys()))")"
+   jq -r .privateKey <<< "$keys" | gcloud secrets versions add experience-stg-host-push-vapid-private-key --project niho-app-stg --data-file=-
+   jq -r .publicKey <<< "$keys"
+   unset keys
+   ```
+
+3. **Variable**（**`host-staging` と `host-staging-owner` の両方**の Environment。owner が実行する配備は `host-staging-owner` の Variable だけを読むため、片方だけでは候補の env に入らない。2026-11-07 に実際に入らなかった）：`STG_HOST_PUSH_ENABLED=true`、`STG_HOST_PUSH_VAPID_PUBLIC_KEY=<2 の公開鍵>`、`STG_HOST_PUSH_VAPID_SUBJECT=<mailto: か https:>`（連絡先。個人のメールを外部の push service へ渡さないよう、サイトの URL か運営の共有アドレスにする）、`STG_HOST_PUSH_VAPID_PRIVATE_KEY_REF=experience-stg-host-push-vapid-private-key:<2 の version 番号>`。
+4. **配備**：`Deploy host staging`（candidate → 確認 → promote）。体験 DB に `0004_host_push_subscriptions.sql` と runtime の grant が要る（`scripts/gcp/bootstrap-host-staging-db.mjs` が入れる）。
+5. **Scheduler を再開**：昇格のあと `gcloud scheduler jobs resume experience-host-push-drain-stg --project niho-app-stg --location asia-northeast1`。次の実行が 200 で終わることを Scheduler の実行記録で確かめる。
+6. **実機**：このファイル末尾の P0 の手順で、設定 › この端末 › 通知から購読し、「テスト通知」が届くことを確かめる。
+
+**実施記録（2026-11-07、staging）**：1〜5 を実施した。revision `niho-experience-host-stg-00035-qur`（SHA `7720fcb`、runtime image digest `sha256:e0f226447d86b39856a8b0180527b2886ece73d379341fdeb58d7ecb9d05959b`）を 100% にし、候補の env に `HOST_PUSH_ENABLED`・VAPID の公開鍵と subject・秘密鍵の Secret 参照（version 1）・push job の audience と service account が入っていること、`/host/manifest.webmanifest` と `/host/sw.js` が 200 であること、Scheduler `experience-host-push-drain-stg` の手動実行が 200 であることを確かめた。**6（実機）は未実施**。Scheduler は毎分動く。
+
+本番は、本番の GCP project に同じ土台（Secret・service account・Scheduler）を作り、`PROD_HOST_PWA_ENABLED=true` と `PROD_HOST_PUSH_*` の Variable を足してから開く（本番の鍵は staging と分ける）。
 
 ## Declarative Web Push（P3）
 

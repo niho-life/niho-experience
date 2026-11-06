@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildFixtureExperiences, buildPilotExperiences } from "@niho-experience/api-client/mock";
 import { kamakuraAfter4Pm } from "@/content/guides/kamakura-after-4-pm";
 import { PUBLISHED_GUIDES, SAMPLE_GUIDES, guideRegistry, type Guide } from "@/content/guides";
-import { formatGuideDate, guideAlternates, guideCtaInsertAfter, guideOutline, guideProblems, guidePublishProblems, guideReadMinutes, guideRegistryProblems, guidesForExperience, isGuideDate, listedExperienceSlugs, relatedGuidesOf, shareableGuideImage, sortGuides } from "./guides";
+import { formatGuideDate, guideAlternates, guideCtaInsertAfter, guideOutline, guideProblems, guidePublishProblems, guideReadMinutes, guideRegistryProblems, guidesForExperience, guideSummary, isGuideDate, listedExperienceSlugs, relatedGuidesOf, shareableGuideImage, sortGuides } from "./guides";
 import { parseGuideMarkdown } from "./guide-markdown";
 import { pickRelatedExperiences } from "./related-experiences";
 import { guideArticleJsonLd } from "./structured-data";
@@ -229,7 +229,8 @@ describe("Article structured data", () => {
       url,
       mainEntityOfPage: { "@type": "WebPage", "@id": url },
       inLanguage: "en",
-      author: { "@type": "Person", name: sample.author.name, jobTitle: sample.author.role },
+      articleSection: "Evenings",
+      author: { "@type": "Person", name: sample.author.name, jobTitle: sample.author.role, description: sample.author.bio },
       datePublished: sample.publishedAt,
       dateModified: sample.updatedAt,
       publisher: { "@type": "Organization", "@id": `${SITE}/#organization`, name: "NIHO Experience", url: `${SITE}/` },
@@ -244,6 +245,106 @@ describe("Article structured data", () => {
     expect(guideArticleJsonLd(external, SITE, "NIHO Experience").image).toEqual(["https://images.example.com/a.jpg"]);
     const none = { ...sample, hero: undefined };
     expect(guideArticleJsonLd(none, SITE, "NIHO Experience")).not.toHaveProperty("image");
+  });
+});
+
+describe("guide summary (meta description fallback)", () => {
+  const leadless = (body: string): Guide => ({ ...sample, description: "", body });
+
+  it("is the description whenever the guide has one", () => {
+    expect(guideSummary(sample)).toBe(sample.description);
+    expect(guideSummary({ ...sample, body: "## A\n\nSomething else entirely." })).toBe(sample.description);
+  });
+
+  it("reads the opening paragraphs as plain text, skipping headings, photos, lists and notes", () => {
+    const body = [
+      "## Getting there",
+      "",
+      "Meet at the **station** and follow [the coast](https://maps.example.com/coast).",
+      "",
+      "![A lane](https://images.example.com/a.jpg)",
+      "",
+      "- Bring water",
+      "",
+      ":::note",
+      "A note.",
+      ":::",
+      "",
+      "Then   sit down for tea.",
+    ].join("\n");
+    expect(guideSummary(leadless(body))).toBe("Meet at the station and follow the coast. Then sit down for tea.");
+    expect(guideSummary(leadless("## Only a heading"))).toBe("");
+  });
+
+  it("cuts over 160 characters at the last sentence end", () => {
+    // Guides are English only (the editor publishes `lang: en` here), so the experience pages' rule applies as it is.
+    const summary = guideSummary(leadless(`${"A".repeat(90)}. ${"B".repeat(90)}.`));
+    expect(summary).toBe(`${"A".repeat(90)}.`);
+  });
+
+  it("falls back to a word boundary with an ellipsis when no sentence ends in time", () => {
+    const summary = guideSummary(leadless(`Kamakura ${"evening ".repeat(40)}`));
+    expect(summary.length).toBeLessThanOrEqual(160);
+    expect(summary).toMatch(/ evening…$/);
+  });
+});
+
+describe("related guides of an editor publication", () => {
+  const editorGuide = (slug: string, updatedAt: string, extra: Partial<Guide> = {}): Guide => ({
+    ...sample,
+    slug,
+    title: `Synthetic ${slug}`,
+    pillar: undefined,
+    category: { slug: "walks", label: "Walks", displayOrder: 1 },
+    editorPublication: { id: `0e000000-0000-4000-8000-${slug.padStart(12, "0")}`, version: 1 },
+    relatedGuideSlugs: [],
+    updatedAt,
+    ...extra,
+  });
+
+  it("names the newest other listed guides of the same category, at most three", () => {
+    const self = editorGuide("self", "2026-10-10");
+    const guides = [
+      self,
+      editorGuide("older", "2026-10-01"),
+      editorGuide("newest", "2026-10-30"),
+      editorGuide("middle", "2026-10-20"),
+      editorGuide("third", "2026-10-05"),
+      editorGuide("hidden", "2026-10-31", { unlisted: true }),
+      editorGuide("other", "2026-10-29", { category: { slug: "food", label: "Food", displayOrder: 2 } }),
+    ];
+    expect(relatedGuidesOf(guides, self).map((guide) => guide.slug)).toEqual(["newest", "middle", "third"]);
+    expect(relatedGuidesOf([self], self)).toEqual([]);
+    // Without a category there is nothing to match.
+    expect(relatedGuidesOf(guides, { ...self, category: undefined })).toEqual([]);
+  });
+
+  it("leaves static and database guides as they were (their own related guides only)", () => {
+    expect(relatedGuidesOf(SAMPLE_GUIDES, sample).map((guide) => guide.slug)).toEqual(["sample-rainy-day-in-kamakura", "sample-kamakura-day-plan"]);
+    const categorized = { ...sample, relatedGuideSlugs: [], category: { slug: "walks", label: "Walks", displayOrder: 1 } };
+    expect(relatedGuidesOf([categorized, editorGuide("same-category", "2026-10-30")], categorized)).toEqual([]);
+  });
+});
+
+describe("Article structured data for what the page shows", () => {
+  it("uses the category as the section before the pillar, and leaves it out with neither", () => {
+    const categorized = { ...sample, category: { slug: "walks", label: "Coastal walks", displayOrder: 1 } };
+    expect(guideArticleJsonLd(categorized, SITE, "NIHO Experience").articleSection).toBe("Coastal walks");
+    expect(guideArticleJsonLd({ ...sample, pillar: undefined }, SITE, "NIHO Experience")).not.toHaveProperty("articleSection");
+  });
+
+  it("describes a lead-less guide by its summary, and the author by the role and introduction the page shows", () => {
+    const leadless = { ...sample, description: "", body: "## A\n\nThe opening paragraph.", author: { name: "Sample Writer", bio: "Writes about the sea." } };
+    const data = guideArticleJsonLd(leadless, SITE, "NIHO Experience");
+    expect(data.description).toBe("The opening paragraph.");
+    expect(data.author).toEqual({ "@type": "Person", name: "Sample Writer", description: "Writes about the sea." });
+    expect(guideArticleJsonLd({ ...leadless, body: "## Only a heading" }, SITE, "NIHO Experience")).not.toHaveProperty("description");
+  });
+
+  it("mentions the experiences shown as booking cards, and none when none are shown", () => {
+    const data = guideArticleJsonLd(sample, SITE, "NIHO Experience", [{ slug: "evening-pottery-session", name: "Evening pottery session" }]);
+    expect(data.mentions).toEqual([{ "@type": "TouristTrip", name: "Evening pottery session", url: `${SITE}/experiences/evening-pottery-session` }]);
+    expect(guideArticleJsonLd(sample, SITE, "NIHO Experience", [])).not.toHaveProperty("mentions");
   });
 });
 

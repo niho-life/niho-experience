@@ -30,6 +30,12 @@ describe("home journal", () => {
     expect(journal.items[3]!.topic).toBeNull();
   });
 
+  it("describes a guide without a lead by the opening of its body", () => {
+    const journal = homeJournal([synthetic("leadless", { description: "", body: "## A\n\nThe opening paragraph." }), synthetic("lead")]);
+    expect(journal.items[0]!.description).toBe("The opening paragraph.");
+    expect(journal.items[1]!.description).toBe(sample.description);
+  });
+
   it("keeps pillar topics in the fixed pillar order", () => {
     const journal = homeJournal([synthetic("p", { pillar: "planning" }), synthetic("z", { pillar: "zazen" }), synthetic("e", { pillar: "evenings" })]);
     expect(journal.topics.map((topic) => topic.key)).toEqual(["evenings", "zazen", "planning"]);

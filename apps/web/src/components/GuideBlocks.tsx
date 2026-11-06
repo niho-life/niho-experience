@@ -5,7 +5,7 @@ import type { CardModel } from "@/lib/card-model";
 import type { GuideDraftProblem } from "@/lib/guide-drafts";
 import { imageAlt } from "@/lib/experience-copy";
 import { parseGuideAnswer } from "@/lib/guide-markdown";
-import { formatGuideDate, guideReadMinutes } from "@/lib/guides";
+import { formatGuideDate, guideReadMinutes, guideSummary } from "@/lib/guides";
 import { CardDates, type CardDatesSource } from "./CardDates";
 import { ExperienceCard } from "./ExperienceCard";
 import { GuideInlines } from "./GuideBody";
@@ -32,7 +32,7 @@ export function GuideTeasers({ guides, level = 3, draftSlugs = [], columns = "on
               {guide.title}
             </Link>
           </Heading>
-          {descriptions ? <p className="mt-1.5 text-[0.9375rem] text-ink-soft">{guide.description}</p> : null}
+          {descriptions ? <p className="mt-1.5 text-[0.9375rem] text-ink-soft">{guideSummary(guide)}</p> : null}
           {variant !== "detail" ? <p className="mt-2 text-sm text-muted">
             {guideReadMinutes(guide)} min · {guide.checkedAt ? "Checked" : "Updated"}{" "}
             <time dateTime={guide.checkedAt ?? guide.updatedAt}>{formatGuideDate(guide.checkedAt ?? guide.updatedAt)}</time>

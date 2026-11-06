@@ -3,19 +3,21 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /** The traveler privacy notice at /privacy (#285, owner decision 2026-10-31). Synthetic settings only. */
-const state = vi.hoisted(() => ({ config: { siteUrl: "https://experience.example", privacyPolicyUrl: "" } }));
+const state = vi.hoisted(() => ({ config: { siteUrl: "https://experience.example", privacyPolicyUrl: "" }, ga4MeasurementId: null as string | null }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
+vi.mock("@/lib/public-site-analytics", () => ({ getPublicSiteAnalyticsSettings: async () => ({ ga4MeasurementId: state.ga4MeasurementId, searchConsoleVerification: null }) }));
 
 import PrivacyPage, { generateMetadata } from "@/app/(site)/privacy/page";
 import { PrivacyNotice } from "./PrivacyNotice";
 
 const POLICY = "https://policy.example/legal/privacy";
-const html = (policyUrl = "") => renderToStaticMarkup(createElement(PrivacyNotice, { policyUrl }));
+const html = (policyUrl = "", analytics = false) => renderToStaticMarkup(createElement(PrivacyNotice, { policyUrl, analytics }));
 const text = (markup: string) => markup.replace(/<[^>]+>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/\s+/g, " ");
 
 beforeEach(() => {
   state.config = { siteUrl: "https://experience.example", privacyPolicyUrl: "" };
+  state.ga4MeasurementId = null;
 });
 
 describe("the privacy notice", () => {
@@ -58,6 +60,21 @@ describe("the privacy notice", () => {
     expect(text(html(POLICY))).toContain("If you booked through a partner site");
   });
 
+  it("says what the visit counts send, to whom, and what is off, only when analytics is on (#70)", () => {
+    expect(text(html())).not.toContain("Google");
+    expect(html()).not.toContain("privacy-analytics");
+    const words = text(html("", true));
+    expect(words).toContain("We use Google Analytics (Google LLC) to count visits to our public pages");
+    expect(words).toContain("the page address and title, the site you came from, your browser and device type, an approximate location and your IP address");
+    expect(words).toContain("Nothing about your name, email address or booking is sent");
+    expect(words).toContain("turned off Google signals and ad personalization, and Google keeps this data for 2 months");
+    expect(words).toContain("Do Not Track");
+    expect(words).toContain("Outside the EEA, the UK and Switzerland, Google Analytics sets cookies");
+    expect(words).toContain("Advertising cookies are never set");
+    const headings = [...html("", true).matchAll(/<h2[^>]*>([^<]+)<\/h2>/g)].map((match) => match[1]);
+    expect(headings).toEqual(["What we keep", "If you booked through a partner site", "Why we use it", "Who sees or handles it", "How long we keep it", "Cookies", "Visit counts", "Questions or requests"]);
+  });
+
   it("sends questions to the site's own booking help", () => {
     expect(html()).toMatch(/<a[^>]*href="\/help"[^>]*>Booking help<\/a>/);
   });
@@ -73,12 +90,18 @@ describe("the privacy notice", () => {
 });
 
 describe("the /privacy page", () => {
-  it("renders the notice with the configured policy link, and without it while the setting is empty", () => {
-    const page = PrivacyPage();
+  it("renders the notice with the configured policy link, and without it while the setting is empty", async () => {
+    const page = await PrivacyPage();
     expect(isValidElement(page)).toBe(true);
     expect(renderToStaticMarkup(page)).not.toContain("NIHO privacy policy");
     state.config = { ...state.config, privacyPolicyUrl: POLICY };
-    expect(renderToStaticMarkup(PrivacyPage())).toContain(`href="${POLICY}"`);
+    expect(renderToStaticMarkup(await PrivacyPage())).toContain(`href="${POLICY}"`);
+  });
+
+  it("describes the visit counts only while the GA4 tag can load (#70)", async () => {
+    expect(renderToStaticMarkup(await PrivacyPage())).not.toContain("Google Analytics");
+    state.ga4MeasurementId = "G-TEST123456";
+    expect(renderToStaticMarkup(await PrivacyPage())).toContain("Google Analytics");
   });
 
   it("is titled Privacy, canonical on this site, and sets no robots of its own (the layout adds noindex while search publishing is off)", () => {

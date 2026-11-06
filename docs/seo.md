@@ -57,7 +57,9 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 
 - `SITE_INDEXING=allow` **かつ** `EXPERIENCE_API_MODE=http` の時だけindexを許可する。それ以外（プレビュー・合成データ）は全ページ `noindex, nofollow`、robots.txtは全体を拒否、sitemapは空。
 - 値はリクエスト時に読むので、同じイメージのまま環境変数だけで切り替えられる。
-- 本番で有効にするのは公開受入（#15）の後。
+- 本番はオーナー決定（2026-11-07）で、販売開始（#15）より先に有効にした。`deploy-production.yml` が `SITE_INDEXING=allow` と `BOOKINGS_ENABLED=false` を設定し、候補と昇格の前に robots.txt（全体拒否が無い・sitemapの告知・非公開パスの除外）、sitemap、トップに `noindex` が無いことを確かめる。止める時は `block` に戻すPRを配備するか、直前の revision へ traffic を戻す。2026-11-07 の公開は、#410 の切替前の版のまま環境変数だけを変えた例外の revision で行った（[production-deploy.md](production-deploy.md#個別ゲートと切戻し)）。
+- 検索公開はサイト全体のスイッチで、掲載中の体験はすべて索引の対象になる。NIHO 側の掲載同意（`EXPERIENCE_SITE_LISTING_CONSENT_VERSION`）は掲載だけが対象で、検索登録は別に同意を得る決まり（NIHO の体験サイト連携 runbook §3）。2026-11-07 時点の掲載は NIHO kamakura 拠点の体験だけで、検索登録はコンテンツの所有者であるオーナーの決定で同意済みとする。外部提供者の掲載を承認する時は、承認の前に検索登録の同意を得る。
+- 体験詳細の canonical は API（今は NIHO の公開API）が返す正規URLに従う。NIHO 側の `EXPERIENCE_SITE_PUBLIC_ORIGIN` が未設定の間は NIHO の企画ページ（`noindex`）を指すため、体験詳細はこのサイトの URL では索引に載らない想定。載せるには NIHO 側の切替が要る（[production-deploy.md](production-deploy.md#niho-の実apiとの整合)）。
 
 ## クローラーと AI 検索（robots.txt）
 
@@ -88,7 +90,7 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 
 - Search Console：ドメインプロパティ `experience.niho.life` を 2026-10-26 に追加した。親の `niho.life` のドメインプロパティを DNS で確認済みのため、所有権は自動で確認された。担当者を足す時は最小権限（閲覧だけなら「制限付き」）。
 - Bing Webmaster Tools：オーナーのアカウントで登録済み（2026-10-26）。
-- 検索公開（#15）の後に行うこと：両方で sitemap（`/sitemap.xml`）を送信、トップ・一覧・体験詳細 1 件の URL 検査、`node scripts/indexnow-submit.mjs` の実行。予約・`/host/*`・`/admin` が索引に無いことを確認する。
+- 検索公開の配備の後に行うこと：両方で sitemap（`/sitemap.xml`）を送信、トップ・一覧・体験詳細 1 件の URL 検査、`node scripts/indexnow-submit.mjs` の実行。予約・`/host/*`・`/admin` が索引に無いことを確認する。
 - 月次で見るもの：Search Console の「生成 AI 機能」レポートと、Bing の AI Performance レポート（計測の Issue で扱う）。数値は公開 Issue に貼らない。
 
 ## 初期HTMLに入れるもの
@@ -117,7 +119,13 @@ Server Componentで描画し、JavaScriptなしで次が読める（E2Eの `seo.
 - **表示**：Server Component で、h1・著者（名前と役割）・公開日と更新日（画面の文字）・ヒーロー画像・本文・FAQ（h2 と質問ごとの h3）・予約できる体験のカード（2〜3 件。カタログに無いものは飛ばし、カタログが読めなければ節ごと出さない）・関連記事を最初の HTML に入れる。体験の詳細（英語版）には、その体験を `relatedExperienceSlugs` に持つ記事への枠（"Guides for your visit"）を出し、無ければ出さない。
 - **公開の範囲**：実 API（`EXPERIENCE_API_MODE=http`）では公開記事だけ。0 本の間は `/guides`・`/guides/{slug}` が 404、sitemap に載せず、フッターのリンクも出さない。mock のプレビューだけ合成のサンプル記事（`samples/`・題名と著者に `(sample)`）を足す。`robots` はほかの公開ページと同じ（検索公開のスイッチが off なら `noindex, nofollow`）。
 - **メタデータ**：`title`・`description`・自己参照の canonical・Open Graph（`type: article`・`publishedTime`・`modifiedTime`）を `<head>` に入れる（`htmlLimitedBots` の対象。`e2e/guides.spec.ts` が Googlebot・GPTBot の UA で確かめる）。OG 画像は `hero.licensed` が true のときだけ。Twitter カードは `summary`。
-- **構造化データ**：`Article`（`headline`・`description`・`url`・`mainEntityOfPage`・`inLanguage: en`・`author`＝`Person`〔`name`・`jobTitle`〕・`datePublished`・`dateModified`・`publisher`＝トップの `Organization` と同じ `@id`・名称・URL。`image` は `hero.licensed` のときだけ）と `BreadcrumbList`（Home › Guides › 題名）。一覧は `BreadcrumbList`（Home › Guides）だけ。FAQ の構造化データ（`FAQPage`）は出さない（Google のリッチリザルトの対象外。画面の FAQ と一致させるだけ）。`Article` は画面にある事実だけなので、プレビューのサンプル記事にも出す（プレビューは `noindex`）。
+- **構造化データ**：`Article`（`headline`・`description`・`url`・`mainEntityOfPage`・`inLanguage: en`・`articleSection`（題名の上の区分＝カテゴリの表示名、無ければ柱の名前。どちらも無ければ出さない）・`author`＝`Person`〔`name`・`jobTitle`（役割）・`description`（紹介。画面の著者欄にあるときだけ）〕・`datePublished`・`dateModified`・`publisher`＝トップの `Organization` と同じ `@id`・名称・URL。`image` は `hero.licensed` のときだけ。`mentions` は記事に予約カードとして実際に出している体験だけを `TouristTrip`〔`name`・`url`〕で、0 件なら出さない）と `BreadcrumbList`（Home › Guides › 題名）。一覧は `BreadcrumbList`（Home › Guides）だけ。FAQ の構造化データ（`FAQPage`）は出さない（Google のリッチリザルトの対象外。画面の FAQ と一致させるだけ）。`Article` は画面にある事実だけなので、プレビューのサンプル記事にも出す（プレビューは `noindex`）。
+- **editor.niho.life の公開版から来る記事**（`GUIDE_PUBLIC_SOURCE=editor`。契約 v1 を `lib/editor-publication/` で読む）：
+  - **description**：リードは任意なので、リードが無い記事は本文の先頭の段落の文字（見出し・写真・箇条書き・囲みは飛ばす）から 160 字以内で作る（`guideSummary`。160 字を超えたら文の区切り（`. ! ?`。体験詳細の `seoDescription` と同じ規則）で、無ければ単語の区切りで切って「…」）。meta description・Open Graph・Twitter・`Article.description`・一覧とトップの記事カードに使う。記事ページの題名の下のリードには使わない（本文の冒頭と同じ文が並ぶため）。
+  - **OG 画像**：カバーに著者が「共有画像にも使う許諾」を付けた（公開版の `coverShareable`）ときだけ `hero.licensed` にする。掲載許諾だけのカバーはページに出すが共有しない。editor の写真には寸法が無く、仮の寸法（`hero.sizeAssumed`）なので、OG 画像の `width`・`height` は出さない（`<img>` の描画は仮の寸法のまま比率は写真どおり）。
+  - **著者**：公開版の `authorProfile`（公開した時点の肩書・紹介文）があれば、肩書を題名の下と構造化データの `jobTitle`、紹介文を「About the author.」と構造化データの `description` に出す。無ければ名前だけ。
+  - **関連記事**：契約に関連記事の欄が無いので、同じカテゴリの他の公開記事（限定公開と自分を除く）を新しい順に最大 3 件出す。コードで置く記事・DB の記事は今のまま（`relatedGuideSlugs` だけ）。
+  - **上限**：slug は契約の上限 160 字まで受ける（コードで置く記事は 80 字のまま）。写真のクレジットは editor の上限 500 字まで受ける。文字数は editor と同じく code point で数える。
 - **sitemap**：公開記事があるときだけ `/guides`（最新の `updatedAt`）と各記事（`lastModified` = `updatedAt`）を足す。プレビューと検索公開 off の sitemap は従来どおり空。
 - **hreflang**：`en` と `x-default`（自分自身）。`ja` は、その記事に `translations.ja` があり**かつ**日本語の記事のページが実在するときだけ足す（`locale-metadata.ts` と同じ考え方）。`/ja/guides` はまだ無い（#59）ので、今はどの記事にも `ja` を出さない。
 

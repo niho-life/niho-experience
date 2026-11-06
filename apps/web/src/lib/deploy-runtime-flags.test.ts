@@ -514,4 +514,17 @@ describe("the deploy workflows", () => {
       if (target === "prod") expect(text.match(new RegExp(originReadback.source, "g"))?.length).toBe(jobs.length);
     });
   }
+
+  it("deploy-production.yml opens search indexing with sales still stopped, and checks both in every job (owner 2026-11-07, #141)", () => {
+    const text = workflow("deploy-production.yml");
+    expect(text).toContain("SITE_INDEXING=allow,BOOKINGS_ENABLED=false");
+    expect(text).not.toMatch(/SITE_INDEXING=block/);
+    for (const name of ["deploy", "promote"]) {
+      const body = job(text, name);
+      expect(body, name).toContain(`select(.name == "SITE_INDEXING") | .value' <<< "$revision_json")" = allow`);
+      expect(body, name).toContain(`select(.name == "BOOKINGS_ENABLED") | .value' <<< "$revision_json")" = false`);
+      expect(body, name).toContain("if grep -qxF 'Disallow: /' <<< \"$robots\"; then exit 1; fi");
+      expect(body, name).toContain("grep -qxF 'Sitemap: https://experience.niho.life/sitemap.xml' <<< \"$robots\"");
+    }
+  });
 });

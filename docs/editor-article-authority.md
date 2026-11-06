@@ -36,6 +36,8 @@ Editor の公開版にはカテゴリの表示名・順序・revisionをサー�
 
 カバー写真とリードは最新のowner決定により任意。値を設定した場合の長さ・形式・掲載許諾は検証する。公開写真はEditor側が現在の公開版・画像状態・許諾を確認して配信し、未公開写真を匿名公開しない。
 
+掲載許諾は「ページに載せてよい」だけで、カバーを OG 画像・`Article.image` などの共有画像に使うのは、著者がカバーに別の「共有画像にも使う許諾」を付け、公開版が `coverShareable: true` を持つときだけにする（無い公開版・許諾の無いカバーは共有しない。[seo.md](seo.md) の「ガイド記事」）。
+
 ## 入口とホスト操作
 
 Experience の `/write?experience={slug}` は固定 Editor origin の `/p/new?destination=exp&lang=en&experience={slug}` へ一度だけ移動する。slug は安全な形式だけを渡す。NIHO ID、メール、token、任意の戻り先を query に含めない。フッターの For writers とホストの記事入口はこの一本に揃える。

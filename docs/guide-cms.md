@@ -11,7 +11,7 @@ NIHOがライター招待と現在の役割・記事連携同意を所有し、E
 契約・設定・段階配備は[記事連携契約](editor-article-authority.md)を正とする。以下の旧Experience内CMS・grant/outbox・`/editor`の記述は保存済みデータと過去実装の履歴で、新規執筆・認可経路として使わない。
 
 
-> 2026-11-06: 旧 `/editor` の画面・API・認証・TipTapエディタと、その設定（`EDITOR_CONSOLE_ENABLED`・`EDITOR_SESSION_SECRET`・`NIHO_EXPERIENCE_EDITOR_ORIGIN`）のコード、api-clientの`editor-auth`（仮契約）を撤去した（#251）。`/editor` は1つのルート（`apps/web/src/app/editor/[[...path]]/route.ts`）が引き受け、`/editor/api/**` と `/editor/auth/**` はどのメソッドにも410（本文を読まず、OAuthのcode/stateを渡さず、セッション・DBに触れない）、それ以外のページは `/write` へ307で送る。保存済みの下書き・版・写真・公開版のテーブルとmigration、DB公開元（`EXPERIENCE_GUIDE_PUBLIC_SOURCE=database`）の読取り、Guide Admin（カテゴリ・writer設定）は残している。Storeの書込みメソッド（`GuideRepository` の下書き・公開・招待・写真）はWebから呼ばれなくなったが、まだ削除していない（切戻し判断の後）。
+> 2026-11-06: 旧 `/editor` の画面・API・認証・TipTapエディタと、その設定（`EDITOR_CONSOLE_ENABLED`・`EDITOR_SESSION_SECRET`・`NIHO_EXPERIENCE_EDITOR_ORIGIN`）のコード、api-clientの`editor-auth`（仮契約）を撤去した（#251）。`/editor` は1つのルート（`apps/web/src/app/editor/[[...path]]/route.ts`）が引き受け、`/editor/api/**` と `/editor/auth/**` はどのメソッドにも410（本文を読まず、OAuthのcode/stateを渡さず、セッション・DBに触れない）、それ以外のページは `/write` へ307で送る。保存済みの下書き・版・写真・公開版のテーブルとmigration、DB公開元（`EXPERIENCE_GUIDE_PUBLIC_SOURCE=database`）の読取り、Guide Admin（カテゴリ・writer設定）は残している。Storeの書込みメソッド（`GuideRepository` の下書き・公開・招待・写真）も撤去した。`GuideRepository` に残るのは公開の読取り（カテゴリ・公開記事・公開メディア）だけで、テーブルとmigrationは保持している。以下の節に出る `commitPublication` などのStoreメソッド名は過去実装の記録である。
 > 2026-11-03: Experience内の旧 `/editor` は読み書き・認証APIを410で閉じ、画面入口だけ`/write`へ移した。以下のdatabase CMS節は既存データと切戻し判断の記録であり、現在のwriter権限や記事連携の根拠ではない。現在の責任分界は [Editor記事authority](editor-article-authority.md) を正とする。
 
 [#215](https://github.com/niho-life/niho-experience/issues/215) では英語記事に任意のカバー写真を1枚だけ設定し、[#216](https://github.com/niho-life/niho-experience/issues/216) で同じ非公開asset境界を本文写真へ拡張した。[#189](https://github.com/niho-life/niho-experience/issues/189) は公開SSRと公開画像配信を実装するが、`EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` まで既存の静的表示を維持し、公開 media route は404のままにする。
@@ -271,9 +271,9 @@ npm -w @niho-experience/web run dev
 **残る差・オーナー判断が要る点**（勝手に緩めていない）:
 
 1. **カテゴリ**：解消済み。EditorはExperienceのactiveカテゴリを公開ごとに読み、選択slugを`category`、英日表示名・順序・revisionを任意の`categoryDisplay` snapshotとして固定する。activeが空、取得失敗、または選択slugが停止済みなら次の公開は503/不許可で、既存公開版とそのsnapshot表示名は維持する。
-2. **共有の権利と OG 画像**：editor v1 は写真の共有権利を宣言しないので OG・`Article.image` は出ない。editor が Asset に明示の宣言（例：共有可否）を足せば、`licensed` に写像する。
-3. **写真の寸法**：契約に無い。editor が `width`・`height` を Asset に足せば名目値をやめられる（互換を壊さない追加）。
-4. **著者の役割・紹介文・プロフィール URL**：契約に `role`・`bio` が無く、`handle`・`url` は使っていない。著者ページを作る判断は別。
+2. **共有の権利と OG 画像**：解消済み。editor は著者がカバーに「共有画像にも使う許諾」を付けたときだけ、トップレベルの任意項目 `coverShareable: true` を出す（niho-life/niho-editor#316）。それを `hero.licensed` に写像し、OG・`Article.image` に使う。無い公開版は従来どおり共有しない。
+3. **写真の寸法**：契約に無い。editor のカバーは `hero.sizeAssumed` として名目値で描き、OG 画像には `width`・`height` を出さない。editor が寸法を足せば名目値をやめられる（互換を壊さない追加）。
+4. **著者の役割・紹介文**：解消済み。editor が公開時点の肩書・紹介文をトップレベルの任意項目 `authorProfile { role, bio }` で出し（editor#316）、画面と `Article.author` の `jobTitle`・`description` に使う。`handle`・`url` は使っていない。著者ページを作る判断は別。
 5. **「体験ページに載せる」（`extras.xp`）**：未対応。宣言は `extras: []` で、editor に選択肢を出さない。関連体験を選べば、体験の詳細に記事が出る（従来どおり）。
 6. **`movedTo`**：NIHO の別の面へ移した記事の 410 に付くが、旧 URL から新 URL への転送は実装していない（`/guides` へ 307）。
 7. **`checkedOn`（確認日）**：v1 に無いので editor 記事では表示しない。
