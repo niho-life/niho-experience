@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { GoogleChannelOptionsRepository } from "../src/google-channel-options.ts";
 import { StoreAccessDeniedError, StoreValidationError } from "../src/errors.ts";
 import type { HostActor } from "../src/types.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const occurrenceId = "rule-a@2099-01-01";
@@ -13,14 +13,8 @@ const anchorCommandId = "00000000-0000-4000-8000-000000000318";
 const owner: HostActor = { providerId: "provider-a", nihoUserId: "owner-a", calendarRoleCeiling: "OWNER" };
 
 async function fixture() {
-  const { Pool } = await import("pg");
-  const schema = `google_options_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
-  await pool.query(`CREATE SCHEMA "${schema}"`);
-  const migrationUrl = new URL("../migrations/", import.meta.url);
-  for (const name of (await readdir(migrationUrl)).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-    await pool.query(await readFile(new URL(name, migrationUrl), "utf8"));
-  }
+  const db = await createIsolatedDatabase(databaseUrl, "google_options", { max: 4 });
+  const pool = db.pool;
   await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
   await pool.query(`INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES
     ('provider-a','owner-a','OWNER'),('provider-a','owner-b','OWNER'),('provider-a','cohost-a','EDITOR'),
@@ -59,12 +53,11 @@ async function fixture() {
     VALUES ('provider-a',$1::uuid,'account-a','listing-a',$2,'owner-a',$3,'INITIALIZE',$4::uuid,1,1,1,$5,
       $6,$7,'OPEN',7,'2099-01-01T01:00:00Z','2099-01-01T02:00:00Z','PREPARING')`,
   [anchorCommandId, occurrenceId, "c".repeat(64), randomUUID(), generation, "d".repeat(64), "e".repeat(64)]);
-  return { pool, schema };
+  return { pool, db };
 }
 
 async function cleanup(value: Awaited<ReturnType<typeof fixture>>) {
-  await value.pool.query(`DROP SCHEMA IF EXISTS "${value.schema}" CASCADE`).catch(() => undefined);
-  await value.pool.end();
+  await value.db.dispose();
 }
 
 describe("PostgreSQL Google channel OWNER options", { skip: databaseUrl === undefined }, () => {

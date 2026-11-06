@@ -30,6 +30,14 @@ Claude Codeのクラウド環境のようにChromiumが入っている環境で�
 
 WebのVitestは `unit` と `integration` に分ける。DB統合テスト（`*.integration.test.ts`）は単体テストの後に最大2ファイルずつ実行し、各ケースの全migration適用を含めて30秒を上限とする。単体テストは既定の5秒を維持する。DB統合テストには合成データ専用の `TEST_DATABASE_URL` が必要で、対象だけなら `npm -C apps/web test -- --project integration <ファイル>` を使う。CIの全件検証には両projectを含める。
 
+DB統合テストの1ケースごとの空DBは `packages/experience-store/test/helpers/isolated-database.ts` の `createIsolatedDatabase` で作る（#431）。全migrationを1回だけ流した「テンプレートDB」を作り、各ケースはそれを `CREATE DATABASE ... TEMPLATE` で複製して、終わったら捨てる。以前は各ケースが専用スキーマへ全migrationを流して `DROP SCHEMA ... CASCADE` しており、1ケースあたり約1秒（CIと同じ `postgres:17-alpine` で実測。複製は約0.07秒）かかっていた。store のテスト全体は約245秒から約73秒、webの統合テストは約56秒から約25秒になった（ローカルでCIと同じイメージを使った実測。CIの値は#431で確認する）。
+
+- テンプレートは migration ファイルの内容のハッシュ名（`exptmpl_<hash>`）。migration を変えると別のテンプレートが作られ、古いものを使い回さない。並列のテストプロセスは advisory lock で1回だけ作り、完成してから改名するので、途中で止まった構築を後続が信用することはない。
+- 複製は `exptest_` で始まる名前で、ケースの最後に必ず捨てる。テストが強制終了した後に残った `exptest_*` とテンプレート（`exptmpl_*`）は、ローカルの `TEST_DATABASE_URL` のDBに残る。要らなければ `DROP DATABASE` で捨てる。CIは使い捨てのPostgreSQLなので溜まらない。
+- `CREATE DATABASE` の権限がないロールの `TEST_DATABASE_URL` では、従来どおり専用スキーマへ全migrationを流す方式に自動で戻る（遅いが動く）。
+- 一部のmigrationだけを流すテスト（`guide-*`、`postgres.integration`）と、migration自体を検証する `migration-sql.test.ts` は、この仕組みを使わず専用スキーマのまま。
+- 新しいDB統合テストは `createIsolatedDatabase(databaseUrl, "<ラベル>")` で `{ pool, extraPool, dispose }` を受け取り、`finally` で `dispose()` を呼ぶ。別のロールで同じDBへつなぎたいときは `extraPool({ options })` を使う。
+
 ## コンテナ
 
 本番はCloud Run（入口はCloudflare）で動かす（[ADR 0001](adr/0001-web-stack.md)）。

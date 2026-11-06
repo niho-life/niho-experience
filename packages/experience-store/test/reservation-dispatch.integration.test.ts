@@ -1,27 +1,20 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { ScheduleRule } from "@niho-experience/experience-domain";
 import { ChannelRuntime, type ClaimedChannelJob } from "../src/channels.ts";
 import { StoreValidationError } from "../src/errors.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 describe("PostgreSQL reservation read dispatch", { skip: databaseUrl === undefined }, () => {
   it("runs repeated cycles, keeps worker scope, and applies terminal evidence and backoff atomically", { timeout: 60_000 }, async () => {
-    const { Pool } = await import("pg");
-    const schema = `reservation_dispatch_test_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
-    let schemaCreated = false;
+    const db = await createIsolatedDatabase(databaseUrl, "reservation_dispatch_test", { max: 8 });
+    const pool = db.pool;
     let now = new Date("2099-01-01T00:00:00.000Z");
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      schemaCreated = true;
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url)))
-        .filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
 
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER'),('provider-b','owner-b','OWNER')");
@@ -349,8 +342,7 @@ describe("PostgreSQL reservation read dispatch", { skip: databaseUrl === undefin
       )).rows[0]?.halted_at, null);
       assert.equal((await runtime.enqueueDueReservationReads(workerA, 10)).enqueued, 1);
     } finally {
-      if (schemaCreated) await pool.query(`DROP SCHEMA "${schema}" CASCADE`).catch(() => {});
-      await pool.end();
+      await db.dispose();
     }
   });
 });

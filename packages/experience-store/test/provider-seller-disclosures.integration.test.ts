@@ -1,21 +1,17 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { StoreConflictError } from "../src/errors.ts";
 import { ProviderSellerDisclosureRepository } from "../src/provider-seller-disclosures.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 describe("provider seller disclosure persistence", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
   it("enforces OWNER/CAS/idempotency, fails public reads closed on seller-account drift, and leaves booking snapshots unchanged", async () => {
-    const { Pool } = await import("pg");
-    const schema = `seller_disclosure_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "seller_disclosure", { max: 4 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
 
       const actor = { providerId: "provider-seller-synthetic", nihoUserId: "owner-seller-synthetic" } as const;
       const concurrentActor = { providerId: "provider-seller-concurrent", nihoUserId: "owner-seller-concurrent" } as const;
@@ -176,8 +172,7 @@ describe("provider seller disclosure persistence", { skip: databaseUrl === undef
       const booking = await pool.query("SELECT seller_snapshot FROM bookings WHERE provider_id=$1", [actor.providerId]);
       assert.deepEqual(booking.rows[0]!.seller_snapshot, sellerSnapshot);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => {});
-      await pool.end();
+      await db.dispose();
     }
   });
 });

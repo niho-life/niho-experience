@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { ScheduleRule } from "@niho-experience/experience-domain";
 import { ChannelRuntime } from "../src/channels.ts";
 import { GoogleChannelDeliveryRepository } from "../src/google-channel-delivery.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { StoreConflictError } from "../src/errors.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const command = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
@@ -19,9 +18,8 @@ const scopes = [
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
-  const { Pool } = await import("pg");
-  const schema = `google_airbnb_receipt_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
+  const db = await createIsolatedDatabase(databaseUrl, "google_airbnb_receipt", { max: 6 });
+  const pool = db.pool;
   const now = new Date();
   let clockOffsetMs = 0;
   const occurrenceParts = new Intl.DateTimeFormat("en-CA", {
@@ -30,10 +28,6 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
   const occurrenceValues = Object.fromEntries(occurrenceParts.map((part) => [part.type, part.value]));
   const occurrenceDate = `${occurrenceValues.year}-${occurrenceValues.month}-${occurrenceValues.day}`;
   const authorityExpiresAtUtc = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1_000).toISOString();
-  await pool.query(`CREATE SCHEMA "${schema}"`);
-  for (const name of (await readdir(new URL("../migrations/", import.meta.url))).filter((item) => /^\d{4}.*\.sql$/.test(item)).sort()) {
-    await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
-  }
   await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
   await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-a','owner-a','OWNER')");
   await pool.query(`INSERT INTO experience_products
@@ -109,14 +103,13 @@ async function fixture(desiredState: "OPEN" | "CLOSED" = "CLOSED") {
     googleAirbnbProof: { deliveryId: delivery.deliveryId, evidence: "EXACT_SLOT_V1" as const, partySize: 1 as const },
     ...overrides,
   });
-  return { schema, pool, runtime, disabledRuntime, worker, claimed, delivery, generation, result, desiredState,
+  return { db, pool, runtime, disabledRuntime, worker, claimed, delivery, generation, result, desiredState,
     restartRuntime: () => new ChannelRuntime(pool, { ...options, googleAirbnbObservationEnabled: true }),
     setNow: (value: Date) => { clockOffsetMs = value.getTime() - Date.now(); } };
 }
 
 async function cleanup(value: Fixture) {
-  await value.pool.query(`DROP SCHEMA IF EXISTS "${value.schema}" CASCADE`).catch(() => undefined);
-  await value.pool.end();
+  await value.db.dispose();
 }
 
 function mismatch(value: Fixture, resultId: string, job = value.claimed) {

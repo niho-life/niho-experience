@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { Pool } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "../src/errors.ts";
 import { GuestQuestionRepository, type ClaimedQuestionReply, type SubmitGuestQuestionInput } from "../src/guest-questions.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -20,13 +20,9 @@ const ownerB = { providerId: "provider-b", nihoUserId: "owner-b" } as const;
 
 /** A fresh schema with every migration and synthetic providers, members and experiences. */
 async function withSchema(run: (pool: Pool, repository: GuestQuestionRepository) => Promise<void>): Promise<void> {
-  const { Pool } = await import("pg");
-  const schema = `guest_questions_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+  const db = await createIsolatedDatabase(databaseUrl, "guest_questions", { max: 4 });
+  const pool = db.pool;
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-    for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
     await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
     await pool.query(
       `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES
@@ -44,8 +40,7 @@ async function withSchema(run: (pool: Pool, repository: GuestQuestionRepository)
     );
     await run(pool, new GuestQuestionRepository(pool));
   } finally {
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    await pool.end();
+    await db.dispose();
   }
 }
 

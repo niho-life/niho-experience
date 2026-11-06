@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
@@ -14,6 +13,7 @@ import { HOST_NOTIFICATION_TOPICS } from "../src/host-notification-outbox.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { ExperienceSupportRepository } from "../src/support-settlement.ts";
 import { consentSupportOffForTest, seedTestPublications } from "./helpers/experience-publication-fixtures.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 /** 取消と返金 (#285 slice 7) against a real schema, synthetic data only. */
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -58,13 +58,9 @@ async function withSchema(
   customCancellation?: { readonly windowMinutes: number | null; readonly refundBasisPoints: number },
   supportEnabled = false,
 ): Promise<void> {
-  const { Pool } = await import("pg");
-  const schema = `cancellations_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: databaseUrl, max: 6, options: `-c search_path=${schema}` });
+  const db = await createIsolatedDatabase(databaseUrl, "cancellations", { max: 6 });
+  const pool = db.pool;
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-    for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
     await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a')");
     await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ('provider-a','owner-a','OWNER',true), ('provider-a','editor-a','EDITOR',true)");
     await pool.query(
@@ -96,8 +92,7 @@ async function withSchema(
     await seedTestPublications(pool);
     await run({ pool, store, guests, access: new GuestBookingAccess(pool), cancellations: new BookingCancellations(pool), outbox: new GuestMailOutbox(pool) });
   } finally {
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    await pool.end();
+    await db.dispose();
   }
 }
 

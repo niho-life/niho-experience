@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readdir, readFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 // eslint-disable-next-line @typescript-eslint/no-restricted-imports -- This server-side integration test exercises the selected host client.
@@ -62,6 +61,7 @@ import { publicationCollectionRequest, publicationRequest } from "./publication-
 import { getSitePublicExperience } from "./site-publications";
 import { sitePublicationCard, cancellationSummary } from "./site-card-model";
 import { confirmPublicationEnglish } from "@/components/host/publication-confirmation";
+import { createIsolatedDatabase } from "../../../../../packages/experience-store/test/helpers/isolated-database.ts";
 
 const japanese = {
   title: "合成の体験",
@@ -121,20 +121,11 @@ const saleTerms = {
 };
 
 async function isolatedSchema(run: (pool: import("pg").Pool) => Promise<void>) {
-  const { Pool } = await import("pg");
-  const schema = `host_contract_${randomUUID().replaceAll("-", "")}`;
-  const pool = new Pool({ connectionString: TEST_DATABASE_URL, max: 8, options: `-c search_path=${schema}` });
+  const db = await createIsolatedDatabase(TEST_DATABASE_URL, "host_contract", { max: 8 });
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    const migrations = (await readdir(new URL("../../../../../packages/experience-store/migrations/", import.meta.url)))
-      .filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-    for (const name of migrations) {
-      await pool.query(await readFile(new URL(`../../../../../packages/experience-store/migrations/${name}`, import.meta.url), "utf8"));
-    }
-    await run(pool);
+    await run(db.pool);
   } finally {
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
-    await pool.end();
+    await db.dispose();
   }
 }
 

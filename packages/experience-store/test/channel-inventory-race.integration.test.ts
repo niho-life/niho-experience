@@ -1,18 +1,17 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { it } from "node:test";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
 import type { Pool } from "pg";
 import { ChannelRuntime } from "../src/channels.ts";
 import { ExperienceStore } from "../src/repository.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 it("serializes an OPEN result with a concurrent group hold before accepting its observation", { skip: !databaseUrl, timeout: 15_000 }, async () => {
-  const { Pool: PgPool } = await import("pg");
-  const schema = `inventory_result_race_${randomUUID().replaceAll("-", "")}`;
-  const pool = new PgPool({ connectionString: databaseUrl, max: 8, options: `-c search_path=${schema}` });
+  const db = await createIsolatedDatabase(databaseUrl, "inventory_result_race", { max: 8 });
+  const pool = db.pool;
   let resumeRead!: () => void;
   let readReached!: () => void;
   const paused = new Promise<void>((resolve) => { readReached = resolve; });
@@ -20,10 +19,6 @@ it("serializes an OPEN result with a concurrent group hold before accepting its 
   let resultPending: Promise<unknown> | undefined;
   let holdPending: Promise<unknown> | undefined;
   try {
-    await pool.query(`CREATE SCHEMA "${schema}"`);
-    for (const name of (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort()) {
-      await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
-    }
     await pool.query("INSERT INTO experience_providers(id) VALUES ('provider')");
     await pool.query("INSERT INTO provider_memberships(provider_id,niho_user_id,role) VALUES ('provider','owner','OWNER')");
     const actor = { providerId: "provider", nihoUserId: "owner" };
@@ -120,7 +115,6 @@ it("serializes an OPEN result with a concurrent group hold before accepting its 
   } finally {
     resumeRead();
     await Promise.allSettled([resultPending, holdPending]);
-    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    await pool.end();
+    await db.dispose();
   }
 });

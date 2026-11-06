@@ -1,27 +1,23 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreAccessDeniedError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 describe("Admin product draft handoff (#169)", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
   it("keeps ADMIN explicit through preparation and lets only the mapped OWNER publish", async () => {
-    const { Pool } = await import("pg");
-    const schema = `admin_product_draft_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "admin_product_draft", { max: 4 });
+    const pool = db.pool;
     const providerId = "provider-assisted-synthetic";
     const owner = { providerId, nihoUserId: "owner-assisted-synthetic" } as const;
     const admin = { nihoUserId: "admin-assisted-synthetic" } as const;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", [providerId]);
       await pool.query(
         `INSERT INTO experience_host_seller_profiles
@@ -159,8 +155,7 @@ describe("Admin product draft handoff (#169)", { skip: databaseUrl === undefined
       assert.deepEqual(audit.rows.map((row) => row.action), ["DRAFT_CREATED", "MEDIA_ADDED", "SCHEDULE_SAVED", "SALE_TERMS_SAVED"]);
       assert.ok(audit.rows.every((row) => row.actor_niho_user_id === admin.nihoUserId));
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });
