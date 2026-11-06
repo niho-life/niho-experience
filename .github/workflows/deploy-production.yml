@@ -304,8 +304,11 @@ jobs:
           for private_path in '/experiences/*/book' '/booking/' '/host/' '/admin'; do
             grep -qxF "Disallow: ${private_path}" <<< "$robots"
           done
-          curl -fsS "${URL}/sitemap.xml" | grep -qF '<loc>https://experience.niho.life'
-          if curl -fsS "${URL}/" | grep -qE '<meta name="robots" content="[^"]*noindex'; then exit 1; fi
+          # Read whole bodies first: an early grep -q exit must not turn a curl SIGPIPE into a pass or a failure.
+          sitemap="$(curl -fsS "${URL}/sitemap.xml")"
+          grep -qF '<loc>https://experience.niho.life' <<< "$sitemap"
+          top_page="$(curl -fsS "${URL}/")"
+          if grep -qE '<meta name="robots" content="[^"]*noindex' <<< "$top_page"; then exit 1; fi
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/states")" = 404
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/checkout")" = 404
           {
@@ -449,8 +452,11 @@ jobs:
           for private_path in '/experiences/*/book' '/booking/' '/host/' '/admin'; do
             grep -qxF "Disallow: ${private_path}" <<< "$robots"
           done
-          curl -fsS "${URL}/sitemap.xml" | grep -qF '<loc>https://experience.niho.life'
-          if curl -fsS "${URL}/" | grep -qE '<meta name="robots" content="[^"]*noindex'; then exit 1; fi
+          # Read whole bodies first: an early grep -q exit must not turn a curl SIGPIPE into a pass or a failure.
+          sitemap="$(curl -fsS "${URL}/sitemap.xml")"
+          grep -qF '<loc>https://experience.niho.life' <<< "$sitemap"
+          top_page="$(curl -fsS "${URL}/")"
+          if grep -qE '<meta name="robots" content="[^"]*noindex' <<< "$top_page"; then exit 1; fi
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/states")" = 404
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/checkout")" = 404
       - name: Promote the reviewed existing revision
