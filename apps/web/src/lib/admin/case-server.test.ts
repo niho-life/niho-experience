@@ -19,7 +19,7 @@ vi.mock("./server", () => ({
   isAdminHttpRead: mocks.read,
   isAdminPreview: mocks.preview,
   isAdminReadPreview: mocks.readPreview,
-  loadAdminHttpSession: mocks.load,
+  loadNihoAdminHttpSession: mocks.load,
   clearAdminHttpSessionCookie: mocks.clear,
   adminJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }),
 }));

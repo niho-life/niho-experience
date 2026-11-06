@@ -36,7 +36,7 @@ export async function POST(request: Request, context: Context): Promise<NextResp
   const repository = experiencePublicationRepository();
   if (!repository) return json({ error: { code: "STORE_UNAVAILABLE" } }, 503);
   try {
-    const state = await repository.clearOperationsSuspension({ nihoUserId: session.verified.actor.id }, providerId, productId, input.expectedStateVersion);
+    const state = await repository.clearOperationsSuspension({ nihoUserId: session.actor.id }, providerId, productId, input.expectedStateVersion);
     return json({ publication: {
       state: state.ownerResumeRequired ? "RESUME_REQUIRED" : state.selfStoppedAtUtc ? "SELF_STOPPED" : "PUBLISHED",
       stateVersion: state.version, firstPublishedAtUtc: state.firstPublishedAtUtc,

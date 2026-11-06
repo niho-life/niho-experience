@@ -21,7 +21,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.enabled = true;
   mocks.csrf = true;
-  mocks.load.mockResolvedValue({ status: "ok", verified: { actor: { id: "verified-admin" } } });
+  mocks.load.mockResolvedValue({ status: "ok", kind: "niho", actor: { id: "verified-admin", displayName: null }, verified: { actor: { id: "verified-admin" } } });
   mocks.runtime = { listExternalAccounts: vi.fn().mockResolvedValue([]), listListings: vi.fn().mockResolvedValue([]) };
 });
 

@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ config: { experienceFeeSummaryApiEnabled: fals
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: mocks.config }));
 vi.mock("@niho-experience/api-client/fee-summary-server", () => ({ createExperienceFeeSummaryApiClient: mocks.create }));
-vi.mock("./server", () => ({ isAdminHttp: mocks.http, isAdminReadPreview: mocks.readPreview, loadAdminHttpSession: mocks.load, clearAdminHttpSessionCookie: mocks.clear, adminJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }) }));
+vi.mock("./server", () => ({ isAdminNihoLogin: mocks.http, isAdminReadPreview: mocks.readPreview, loadNihoAdminHttpSession: mocks.load, clearAdminHttpSessionCookie: mocks.clear, adminJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }) }));
 
 import { adminFeeSummaryFailureJson, isAdminFeeSummaryEnabled, isAdminFeeSummaryPreview, loadAdminFeeSummaryClient } from "./fee-summary-server";
 

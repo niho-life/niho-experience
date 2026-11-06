@@ -157,7 +157,7 @@ async function authorize(request: Request, mutation = false): Promise<
   const load = await loadAdminHttpSession();
   if (load.status === "ok") {
     if (mutation && !adminMutationAllowed(request)) return { ok: false, response: adminJson({ error: { code: "FORBIDDEN" } }, 403) };
-    return { ok: true, actor: { nihoUserId: load.verified.actor.id } };
+    return { ok: true, actor: { nihoUserId: load.actor.id } };
   }
   if (load.status === "error") return { ok: false, response: adminJson({ error: { code: "UNAVAILABLE" } }, 503) };
   const response = adminJson({ error: { code: load.status === "refresh" ? "SESSION_REFRESH_REQUIRED" : "SESSION_ENDED" } }, 401);

@@ -43,7 +43,8 @@ function tokenPayloadClaims(payload: TokenPayload): GoogleServiceIdentityClaims 
   };
 }
 
-function isVerificationOutage(error: unknown): boolean {
+/** Whether a verifyIdToken failure is Google's key retrieval being unavailable (an outage), not a bad token. */
+export function isVerificationOutage(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const record = error as { code?: unknown; cause?: { code?: unknown }; response?: { status?: unknown } };
   const networkCodes = [

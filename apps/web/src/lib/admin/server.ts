@@ -33,10 +33,16 @@ import {
   type AdminHttpLoginState,
   type AdminHttpSession,
 } from "./http-session";
+import type { AdminActor } from "./actor";
+import { ADMIN_GOOGLE_SESSION_COOKIE, clearAdminGoogleSessionCookie, loadExperienceAdminSession, type ExperienceAdminSessionLoad } from "./google-login";
 
 export const isAdminPreview = () => config.apiMode === "mock" && config.adminSupportConsoleEnabled;
 export const isAdminHttp = () => config.apiMode === "http" && config.adminSupportConsoleEnabled;
-export const isAdminHttpRead = () => isAdminHttp() && config.adminSupportReadApiEnabled;
+/** /admin signs in with Google and an Experience session (EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED, ADR 0003): NIHO is not called. */
+export const isAdminGoogleLogin = () => isAdminHttp() && config.adminGoogleLoginEnabled === true;
+/** /admin signs in through NIHO (app-connect and NIHO's Admin session): the only mode that holds a NIHO admin token. */
+export const isAdminNihoLogin = () => isAdminHttp() && !config.adminGoogleLoginEnabled;
+export const isAdminHttpRead = () => isAdminNihoLogin() && config.adminSupportReadApiEnabled;
 export const isAdminReadPreview = () => isAdminPreview() && config.adminSupportReadPreviewEnabled;
 
 export function requireAdminConsole() {
@@ -68,7 +74,7 @@ export function adminReadFailureJson(failure: ExperienceAdminReadFailure): NextR
 
 export async function loadAdminReadClient(): Promise<{ ok: true; client: ExperienceAdminReadApiClient } | { ok: false; response: NextResponse }> {
   if (!isAdminHttpRead()) return { ok: false, response: adminJson({ error: "not_found" }, 404) };
-  const load = await loadAdminHttpSession();
+  const load = await loadNihoAdminHttpSession();
   if (load.status === "ok") return { ok: true, client: adminReadApiClient(load.session) };
   if (load.status === "error") return { ok: false, response: adminJson({ error: "unavailable" }, 503) };
   const response = adminJson({ error: load.status === "refresh" ? "refresh_required" : "signed_out" }, 401);
@@ -92,20 +98,34 @@ export function clearAdminSessionCookie(response: NextResponse) {
 }
 
 export const readAdminHttpSession = cache(async (): Promise<AdminHttpSession | null> => {
-  if (!isAdminHttp()) return null;
+  if (!isAdminNihoLogin()) return null;
   const jar = await cookies();
   return decodeAdminHttpSession(adminHttpSessionSealer(), jar.get(ADMIN_HTTP_SESSION_COOKIE)?.value, Date.now());
 });
 
-export type AdminHttpSessionLoad =
-  | { status: "ok"; session: AdminHttpSession; verified: ExperienceAdminVerifiedSession }
+/**
+ * An Admin signed in through NIHO: the only load that carries the NIHO admin token (`session.idToken`). Code that sends
+ * that token to NIHO takes this (loadNihoAdminHttpSession), never AdminHttpSessionLoad.
+ */
+export type NihoAdminHttpSessionLoad =
+  | { status: "ok"; kind: "niho"; actor: AdminActor; session: AdminHttpSession; verified: ExperienceAdminVerifiedSession }
   | { status: "signed-out" }
   | { status: "refresh"; session: AdminHttpSession }
   | { status: "rejected" }
   | { status: "error" };
 
-/** Verify the dedicated client and current ADMIN role before exposing an actor to the UI. */
-export const loadAdminHttpSession = cache(async (): Promise<AdminHttpSessionLoad> => {
+/**
+ * Whoever is signed in to /admin: through NIHO (`kind: "niho"`) or with Google (`kind: "experience"`, ADR 0003). Pages
+ * and APIs that only use the experience DB take `actor` and work with either.
+ */
+export type AdminHttpSessionLoad = NihoAdminHttpSessionLoad | Extract<ExperienceAdminSessionLoad, { status: "ok" }>;
+
+/**
+ * Verify the dedicated client and current ADMIN role with NIHO before exposing an actor to the UI. With the Google
+ * login there is no NIHO admin token: always an error (the flags that would reach here cannot be on with it).
+ */
+export const loadNihoAdminHttpSession = cache(async (): Promise<NihoAdminHttpSessionLoad> => {
+  if (isAdminGoogleLogin()) return { status: "error" };
   const session = await readAdminHttpSession();
   if (!session) return { status: "signed-out" };
   const now = Date.now();
@@ -118,7 +138,23 @@ export const loadAdminHttpSession = cache(async (): Promise<AdminHttpSessionLoad
     || verified.data.connection.expiresAt <= now
     || verified.data.connection.expiresAt > session.connectionExpiresAt
   ) return { status: "rejected" };
-  return { status: "ok", session, verified: verified.data };
+  return {
+    status: "ok",
+    kind: "niho",
+    actor: { id: verified.data.actor.id, displayName: verified.data.actor.displayName },
+    session,
+    verified: verified.data,
+  };
+});
+
+/**
+ * The signed-in admin, checked on every request: with the Google login from the experience DB and the allowlist (no
+ * call to NIHO), otherwise with NIHO's Admin session as before.
+ */
+export const loadAdminHttpSession = cache(async (): Promise<AdminHttpSessionLoad> => {
+  if (!isAdminGoogleLogin()) return loadNihoAdminHttpSession();
+  const jar = await cookies();
+  return loadExperienceAdminSession(jar.get(ADMIN_GOOGLE_SESSION_COOKIE)?.value);
 });
 
 export type AdminRenewal =
@@ -166,7 +202,17 @@ export function setAdminHttpSessionCookie(response: NextResponse, session: Admin
   );
 }
 
+/** Clears the signed-in admin's cookie: the Experience session's with the Google login, NIHO's sealed one otherwise. */
 export function clearAdminHttpSessionCookie(response: NextResponse) {
+  if (isAdminGoogleLogin()) {
+    clearAdminGoogleSessionCookie(response);
+    return;
+  }
+  response.cookies.set(ADMIN_HTTP_SESSION_COOKIE, "", adminHttpCookieOptions(ADMIN_HTTP_SESSION_PATH, 0));
+}
+
+/** NIHO's sealed Admin cookie, whatever the mode (a NIHO login's cookie from before the switch goes on sign-out). */
+export function clearNihoAdminHttpSessionCookie(response: NextResponse) {
   response.cookies.set(ADMIN_HTTP_SESSION_COOKIE, "", adminHttpCookieOptions(ADMIN_HTTP_SESSION_PATH, 0));
 }
 

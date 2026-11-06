@@ -41,6 +41,8 @@ import {
 const SITE = "https://experience.example";
 const verified = (id = "admin-current") => ({
   status: "ok",
+  kind: "niho",
+  actor: { id, displayName: "Current Admin" },
   session: { actorId: id },
   verified: { actor: { id, displayName: "Current Admin" }, connection: { id: "connection", expiresAt: Date.now() + 60_000 } },
 });

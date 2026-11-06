@@ -36,7 +36,7 @@ export default async function AdminSiteBookingsPage() {
     queue = await cancellations.supportQueue({ limit: 100 });
     [supportBookings, notifications, settlements] = await Promise.all([
       cancellations.supportEnabledBookings(),
-      support.listNotifications({ nihoUserId: loaded.verified.actor.id }, { limit: 50 }),
+      support.listNotifications({ nihoUserId: loaded.actor.id }, { limit: 50 }),
       support.listAdminSummaries(100),
     ]);
   } catch {

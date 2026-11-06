@@ -3,7 +3,7 @@ const mocks = vi.hoisted(() => ({ config: { adminOperationsApiEnabled: false, ad
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: mocks.config }));
 vi.mock("@niho-experience/api-client/admin-operations", () => ({ createExperienceAdminOperationsApiClient: mocks.create }));
-vi.mock("./server", () => ({ isAdminHttp: mocks.http, isAdminHttpRead: mocks.read, isAdminPreview: mocks.preview, isAdminReadPreview: mocks.readPreview, loadAdminHttpSession: mocks.load, clearAdminHttpSessionCookie: mocks.clear, adminJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }) }));
+vi.mock("./server", () => ({ isAdminHttp: mocks.http, isAdminHttpRead: mocks.read, isAdminPreview: mocks.preview, isAdminReadPreview: mocks.readPreview, loadNihoAdminHttpSession: mocks.load, clearAdminHttpSessionCookie: mocks.clear, adminJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }) }));
 import { adminOperationsFailureJson, isAdminHttpOperations, isAdminOperationsPreview, loadAdminOperationsClient } from "./operations-server";
 
 beforeEach(() => { vi.clearAllMocks(); mocks.config.adminOperationsApiEnabled = false; mocks.config.adminOperationsPreviewEnabled = false; mocks.http.mockReturnValue(true); mocks.read.mockReturnValue(true); mocks.preview.mockReturnValue(true); mocks.readPreview.mockReturnValue(true); mocks.create.mockReturnValue({ marker: "operations-client" }); });

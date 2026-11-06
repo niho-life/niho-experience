@@ -17,7 +17,7 @@ const COMMAND = "00000000-0000-4000-8000-000000000221";
 const request = (body: unknown) => new Request("https://experience.example/admin/api/operators", { method: "POST", headers: { origin: "https://experience.example", "sec-fetch-site": "same-origin", "content-type": "application/json" }, body: JSON.stringify(body) });
 
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.csrf = true; mocks.load.mockResolvedValue({ status: "ok", verified: { actor: { id: "admin-a" } } });
+  vi.clearAllMocks(); mocks.csrf = true; mocks.load.mockResolvedValue({ status: "ok", kind: "niho", actor: { id: "admin-a", displayName: null }, verified: { actor: { id: "admin-a" } } });
   mocks.snapshot.mockResolvedValue({ products: [], invitations: [], grants: [] });
   mocks.create.mockResolvedValue({ invitation: { id: ID }, token: "a".repeat(43), repeated: false });
 });

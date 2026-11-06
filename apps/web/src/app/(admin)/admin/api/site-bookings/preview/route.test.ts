@@ -40,7 +40,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.csrf = true;
   mocks.config = { guestBookingEnabled: true, siteUrl: "https://experience.example" };
-  mocks.load.mockResolvedValue({ status: "ok", verified: { actor: { id: "admin-a" } } });
+  mocks.load.mockResolvedValue({ status: "ok", kind: "niho", actor: { id: "admin-a", displayName: null }, verified: { actor: { id: "admin-a" } } });
   mocks.store = { previewSupportOperation: vi.fn(async () => PREVIEW) };
 });
 

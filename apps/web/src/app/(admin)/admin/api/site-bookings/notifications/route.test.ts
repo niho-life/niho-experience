@@ -24,7 +24,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.csrf = true;
   mocks.enabled = true;
-  mocks.load.mockResolvedValue({ status: "ok", verified: { actor: { id: "admin-a" } } });
+  mocks.load.mockResolvedValue({ status: "ok", kind: "niho", actor: { id: "admin-a", displayName: null }, verified: { actor: { id: "admin-a" } } });
   mocks.repo = { listNotifications: vi.fn(async () => []), markNotificationRead: vi.fn(async () => undefined) };
 });
 

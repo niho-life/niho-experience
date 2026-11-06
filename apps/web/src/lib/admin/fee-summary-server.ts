@@ -2,9 +2,10 @@ import "server-only";
 
 import { createExperienceFeeSummaryApiClient, type ExperienceFeeSummaryFailure } from "@niho-experience/api-client/fee-summary-server";
 import { config } from "@/lib/config";
-import { adminJson, clearAdminHttpSessionCookie, isAdminHttp, isAdminReadPreview, loadAdminHttpSession } from "./server";
+import { adminJson, clearAdminHttpSessionCookie, isAdminNihoLogin, isAdminReadPreview, loadNihoAdminHttpSession } from "./server";
 
-export const isAdminFeeSummaryEnabled = () => isAdminHttp() && config.experienceFeeSummaryApiEnabled;
+/** The Admin side sends the NIHO admin token: only with the NIHO admin login. */
+export const isAdminFeeSummaryEnabled = () => isAdminNihoLogin() && config.experienceFeeSummaryApiEnabled;
 export const isAdminFeeSummaryPreview = () => isAdminReadPreview() && config.experienceFeeSummaryPreviewEnabled;
 export const isAdminFeeSummaryUiEnabled = () => isAdminFeeSummaryEnabled() || isAdminFeeSummaryPreview();
 
@@ -22,7 +23,7 @@ export function adminFeeSummaryFailureJson(failure: ExperienceFeeSummaryFailure)
 /** Re-verifies the dedicated current ADMIN session for every fixed fee-summary read. */
 export async function loadAdminFeeSummaryClient() {
   if (!isAdminFeeSummaryEnabled()) return { ok: false as const, response: adminJson({ error: "not_found" }, 404) };
-  const load = await loadAdminHttpSession();
+  const load = await loadNihoAdminHttpSession();
   if (load.status === "ok") return { ok: true as const, client: createExperienceFeeSummaryApiClient({ nihoWebOrigin: config.nihoWebOrigin, idToken: load.session.idToken, audience: "admin", fetch }) };
   if (load.status === "error") return { ok: false as const, response: adminJson({ error: "unavailable" }, 503) };
   const response = adminJson({ error: load.status === "refresh" ? "refresh_required" : "signed_out" }, 401);

@@ -40,7 +40,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.csrf = true;
   mocks.enabled = true;
-  mocks.load.mockResolvedValue({ status: "ok", session: { idToken: "synthetic-id-token" }, verified: { actor: { id: "admin-a" } } });
+  mocks.load.mockResolvedValue({ status: "ok", kind: "niho", actor: { id: "admin-a", displayName: null }, session: { idToken: "synthetic-id-token" }, verified: { actor: { id: "admin-a" } } });
   mocks.repo = { getCase: vi.fn(async () => null), updateCase: vi.fn(async () => caseValue) };
   mocks.roster.mockResolvedValue({ ok: true, data: { admins: [{ id: "admin-b", displayName: "担当Admin" }], truncated: false } });
 });
@@ -66,6 +66,18 @@ describe("Experience Admin support case API", () => {
     mocks.roster.mockResolvedValueOnce({ ok: true, data: { admins: [], truncated: false } });
     expect((await POST(post({ ...body, commandId: "00000000-0000-4000-8000-000000000222" }))).status).toBe(409);
     expect(mocks.repo.updateCase).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets an admin signed in with Google (ADR 0003) assign to themselves only, recorded by their adm_ actor ID, without calling NIHO", async () => {
+    const admin = `adm_${"0".repeat(32)}`;
+    mocks.load.mockResolvedValue({ status: "ok", kind: "experience", actor: { id: admin, displayName: "admin.sample@niho.life" }, session: { kind: "experience" } });
+    const self = await POST(post({ publicBookingId: BOOKING, commandId: COMMAND, expectedRevision: 0, assignedAdminUserId: "SELF", internalMemo: null }));
+    expect(self.status).toBe(200);
+    expect(mocks.repo.updateCase).toHaveBeenLastCalledWith({ nihoUserId: admin }, BOOKING, expect.objectContaining({ assignedAdminUserId: admin }));
+    const other = await POST(post({ publicBookingId: BOOKING, commandId: "00000000-0000-4000-8000-000000000222", expectedRevision: 1, assignedAdminUserId: "admin-b", internalMemo: null }));
+    expect(other.status).toBe(409);
+    expect(await other.json()).toEqual({ error: "assignee_unavailable" });
+    expect(mocks.roster).not.toHaveBeenCalled();
   });
 
   it("allows the unchanged legacy assignment and self-assignment without inventing candidates", async () => {

@@ -2,7 +2,7 @@ import "server-only";
 import { config } from "@/lib/config";
 import { parseChannelAdapters } from "./channel-adapters";
 import { Pool } from "pg";
-import { ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { AdminSessions, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -123,6 +123,16 @@ export function hostAccounts(): HostAccounts | null {
   if (!config.hostAccountsEnabled) return null;
   const pool = experiencePool();
   return pool ? new HostAccounts(pool) : null;
+}
+
+/**
+ * Admin のログイン (ADR 0003 slice 4): the sessions of admins signed in with Google. null until
+ * EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED is on (which needs the experience DB).
+ */
+export function adminSessions(): AdminSessions | null {
+  if (!config.adminGoogleLoginEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new AdminSessions(pool) : null;
 }
 
 /** 受取口座の利用同意 (ADR 0003 slice 3): the host-account OWNER's payout-account consent. Only with host accounts. */

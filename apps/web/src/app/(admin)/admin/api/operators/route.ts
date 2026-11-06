@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   if (!commandId) return adminJson({ error: "invalid_command_id" }, 400);
   const repository = productOperatorRepository();
   if (!repository) return adminJson({ error: "unavailable" }, 503);
-  const actor = { nihoUserId: loaded.verified.actor.id };
+  const actor = { nihoUserId: loaded.actor.id };
   try {
     if (body.action === "createInvitation" && typeof body.providerId === "string" && typeof body.productId === "string" && typeof body.assignmentLabel === "string") {
       const created = await repository.createInvitation(actor, { providerId: body.providerId, productId: body.productId, assignmentLabel: body.assignmentLabel }, commandId);
