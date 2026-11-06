@@ -1,5 +1,5 @@
 import { config } from "@/lib/config";
-import { guideCoverStorage } from "@/lib/editor/guide-cover-storage";
+import { guideCoverStorage } from "@/lib/guide-cover-storage";
 import { guideRepository } from "@/lib/experience/store-server";
 
 type Context = { params: Promise<{ assetId: string }> };

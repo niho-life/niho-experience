@@ -23,7 +23,7 @@ import {
   type ProductSaleTermsInput,
   type PublicationAdminDraftActor,
 } from "@niho-experience/experience-store";
-import { GuideCoverImageError, processGuideCoverImage, readGuideCoverInput } from "@/lib/editor/guide-cover-image";
+import { GuideCoverImageError, processGuideCoverImage, readGuideCoverInput } from "@/lib/guide-cover-image";
 import { experiencePublicMediaStorage } from "@/lib/experience/public-media-storage";
 import { experiencePublicationRepository, experienceStore } from "@/lib/experience/store-server";
 import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";

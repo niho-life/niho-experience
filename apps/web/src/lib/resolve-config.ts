@@ -22,7 +22,6 @@ const SERVICE_ACCOUNT_EMAIL = /^[a-z0-9][a-z0-9-]*@[a-z0-9][a-z0-9-]*\.iam\.gser
 
 const MIN_HOST_SESSION_SECRET_LENGTH = 32;
 const MIN_ADMIN_SESSION_SECRET_LENGTH = 32;
-const MIN_EDITOR_SESSION_SECRET_LENGTH = 32;
 
 function deploymentOrigin(value: string, setting: string): string {
   let url: URL;
@@ -755,7 +754,6 @@ export function resolveConfig(env: Env) {
   const nihoFirebaseWebApiKey = env.NIHO_FIREBASE_WEB_API_KEY?.trim() ?? "";
   const adminSessionSecret = env.ADMIN_SESSION_SECRET?.trim() || (apiMode === "mock" ? DEV_ONLY_HOST_SESSION_SECRET : "");
   const adminOriginSetting = env.NIHO_EXPERIENCE_ADMIN_ORIGIN?.trim() ?? "";
-  const editorSettings = resolveEditorConsoleSettings(apiMode, env);
   const guideDraftsDir = guideDraftsSetting(apiMode, env.GUIDE_DRAFTS_DIR);
   const guidePublicSource = guidePublicSourceSetting(apiMode, env);
   const guideEditor = guidePublicSource === "editor" ? guideEditorSettings(env) : NO_GUIDE_EDITOR;
@@ -908,43 +906,8 @@ export function resolveConfig(env: Env) {
     hostSessionSecret,
     adminSessionSecret,
     adminOrigin,
-    editorConsoleEnabled: editorSettings.enabled,
-    editorSessionSecret: editorSettings.sessionSecret,
-    editorOrigin: editorSettings.origin,
     nihoFirebaseWebApiKey,
   } as const;
-}
-
-/**
- * The editor client does not exist on NIHO yet (#19459). Missing rollout
- * settings therefore close the surface with 404 instead of enabling a mock or
- * partially configured authentication path.
- */
-function resolveEditorConsoleSettings(apiMode: "mock" | "http", env: Env): { enabled: boolean; sessionSecret: string; origin: string } {
-  if (apiMode !== "http" || env.EDITOR_CONSOLE_ENABLED !== "true") return { enabled: false, sessionSecret: "", origin: "" };
-  const sessionSecret = env.EDITOR_SESSION_SECRET?.trim() ?? "";
-  const firebaseWebApiKey = env.NIHO_FIREBASE_WEB_API_KEY?.trim() ?? "";
-  const configuredOrigin = env.NIHO_EXPERIENCE_EDITOR_ORIGIN?.trim() ?? "";
-  const keys = sessionSecret.split(",").map((key) => key.trim()).filter(Boolean);
-  const otherCookieKeys = [env.HOST_SESSION_SECRET, env.ADMIN_SESSION_SECRET]
-    .flatMap((value) => (value ?? "").split(",").map((key) => key.trim()).filter(Boolean));
-  if (
-    keys.length === 0
-    || keys.some((key) => key.length < MIN_EDITOR_SESSION_SECRET_LENGTH || key === DEV_ONLY_HOST_SESSION_SECRET || otherCookieKeys.includes(key))
-    || !firebaseWebApiKey
-    || !configuredOrigin
-  ) return { enabled: false, sessionSecret: "", origin: "" };
-
-  const origin = deploymentOrigin(configuredOrigin, "NIHO_EXPERIENCE_EDITOR_ORIGIN");
-  deploymentOrigin(env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life", "NEXT_PUBLIC_NIHO_WEB_ORIGIN");
-  let siteOrigin: string;
-  try {
-    siteOrigin = new URL(env.SITE_URL ?? "http://localhost:3000").origin;
-  } catch {
-    throw new Error("SITE_URL must be an absolute URL");
-  }
-  if (origin !== siteOrigin) throw new Error("NIHO_EXPERIENCE_EDITOR_ORIGIN must exactly match the SITE_URL origin");
-  return { enabled: true, sessionSecret, origin };
 }
 
 /** Push settings; http mode refuses to start without a usable key pair shape and a subject (the pair itself: startup-check.ts). */
