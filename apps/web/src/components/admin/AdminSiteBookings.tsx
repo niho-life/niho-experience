@@ -21,7 +21,7 @@ import {
   type LockTransition,
   type SiteBookingOperationLock,
 } from "./site-booking-operation-lock";
-import { contactDeliveryText, unsettledOwnContact } from "./site-booking-contact-recovery";
+import { contactDeliveryText, unsettledOwnContact, withRefreshedEvents } from "./site-booking-contact-recovery";
 
 /*
  * サイト予約の取消・返金 (#285 slice 7, docs/guest-booking.md「取消と返金（第7段）」): what NIHO support has to look at
@@ -112,18 +112,29 @@ function SupportCasePanel({ booking, operationLock, onBeginContact, onContactUnk
     && operationLock.commandId === contactCommandState?.commandId;
   const canSendContact = operationLock === null || (ownsContact && operationLock.phase === "UNKNOWN");
   const operationBlocked = operationLock !== null;
-  const load = useCallback(async () => {
+  const fetchCase = useCallback(async () => {
     const response = await fetch(`${API}/case?publicBookingId=${encodeURIComponent(booking.publicBookingId)}`, { cache: "no-store", credentials: "same-origin" });
     if (response.status === 401 || response.status === 403) { onSessionExpired(); throw new Error("session"); }
     if (!response.ok) throw new Error(String(response.status));
-    const result = await response.json() as { case: ExperienceSupportCase | null; currentAdminUserId: string };
+    return await response.json() as { case: ExperienceSupportCase | null; currentAdminUserId: string };
+  }, [booking.publicBookingId, onSessionExpired]);
+  const load = useCallback(async () => {
+    const result = await fetchCase();
     setCaseData(result.case ?? { publicBookingId: booking.publicBookingId, assignedAdminUserId: null, internalMemo: null, revision: 0, updatedBy: null, updatedAtUtc: new Date(0).toISOString(), events: [] });
     setCurrentAdmin(result.currentAdminUserId);
     setAssignee(result.case?.assignedAdminUserId ?? "");
     setMemo(result.case?.internalMemo ?? "");
     setLoaded(true);
     setLoadedAtMs(Date.now());
-  }, [booking.publicBookingId, onSessionExpired]);
+  }, [booking.publicBookingId, fetchCase]);
+  // Only the history is read again: the assignee and the memo being typed, and the revision they will be saved against,
+  // stay as they are, so checking where an email is neither loses an edit nor hides another Admin's change from the save.
+  const refreshHistory = useCallback(async () => {
+    const result = await fetchCase();
+    setCaseData((current) => current === null ? current : withRefreshedEvents(current, result.case));
+    setCurrentAdmin(result.currentAdminUserId);
+    setLoadedAtMs(Date.now());
+  }, [fetchCase]);
   const loadRoster = useCallback(async () => {
     setRosterState("loading");
     const response = await fetch("/admin/api/support-admins", { cache: "no-store", credentials: "same-origin" });
@@ -229,7 +240,7 @@ function SupportCasePanel({ booking, operationLock, onBeginContact, onContactUnk
     if (busy) return;
     setBusy(true);
     setMessage("");
-    void load().catch(() => setMessage("案件情報を読み込めません。通信状態と権限を確認して、もう一度お試しください。")).finally(() => setBusy(false));
+    void refreshHistory().catch(() => setMessage("送信状態を読み込めません。通信状態と権限を確認して、もう一度お試しください。")).finally(() => setBusy(false));
   };
   return <details className="mt-3 rounded-xl border border-line bg-sand/40 p-3" onToggle={(event: SyntheticEvent<HTMLDetailsElement>) => { if (event.currentTarget.open) openPanel(); }}>
     <summary className="cursor-pointer font-bold">Admin案件 · 担当・内部メモ・操作履歴</summary>

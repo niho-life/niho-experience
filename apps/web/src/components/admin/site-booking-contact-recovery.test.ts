@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExperienceSupportCase } from "@niho-experience/experience-store";
-import { CONTACT_DELIVERY_LABEL, contactDeliveryText, RECENT_CONTACT_WINDOW_MS, unsettledOwnContact } from "./site-booking-contact-recovery";
+import { CONTACT_DELIVERY_LABEL, contactDeliveryText, RECENT_CONTACT_WINDOW_MS, unsettledOwnContact, withRefreshedEvents } from "./site-booking-contact-recovery";
 
 type CaseEvent = ExperienceSupportCase["events"][number];
 
@@ -50,5 +50,28 @@ describe("a contact the Admin made, seen again after the screen was opened anew"
     // A sent contact does not hide an older one that is still waiting.
     const waiting = event({ revision: 2, delivery: "PENDING" });
     expect(unsettledOwnContact([event({ revision: 3, delivery: "SENT" }), waiting], "admin-1", NOW)).toBe(waiting);
+  });
+});
+
+describe("checking where an email is while the case is being edited", () => {
+  const screen = (patch: Partial<ExperienceSupportCase> = {}): ExperienceSupportCase => ({
+    publicBookingId: "0b1f6a52-7a4e-4f0a-9d8e-3c5c1d2e4a99", assignedAdminUserId: "admin-1", internalMemo: "Saved memo", revision: 4,
+    updatedBy: "admin-1", updatedAtUtc: minutesAgo(10), events: [event({ delivery: "PENDING" })], ...patch,
+  });
+
+  it("takes the history from the fresh read and keeps the revision, the assignee and the memo the screen holds", () => {
+    const current = screen();
+    // Meanwhile the mail job sent the email, and another Admin changed the memo (revision 5).
+    const fresh = screen({ revision: 5, internalMemo: "Another Admin's memo", assignedAdminUserId: "admin-2", events: [event({ delivery: "SENT" })] });
+    const merged = withRefreshedEvents(current, fresh);
+    expect(merged.events).toEqual([event({ delivery: "SENT" })]);
+    expect([merged.revision, merged.internalMemo, merged.assignedAdminUserId]).toEqual([4, "Saved memo", "admin-1"]);
+    // The screen's case is not changed in place.
+    expect(current.events[0]?.delivery).toBe("PENDING");
+  });
+
+  it("changes nothing when the fresh read has no case", () => {
+    const current = screen();
+    expect(withRefreshedEvents(current, null)).toBe(current);
   });
 });

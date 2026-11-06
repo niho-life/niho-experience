@@ -21,6 +21,15 @@ export function contactDeliveryText(event: Pick<CaseEvent, "delivery">): string 
 }
 
 /**
+ * The case as the screen holds it, with only its history taken from a fresh read. The assignee, the memo and the revision
+ * stay the screen's own: a draft being typed is not lost, and the revision it will be saved against is not moved past
+ * another Admin's change the Admin has not seen. A fresh read that is not a case (none to open) changes nothing.
+ */
+export function withRefreshedEvents(current: ExperienceSupportCase, fresh: ExperienceSupportCase | null): ExperienceSupportCase {
+  return fresh === null ? current : { ...current, events: fresh.events };
+}
+
+/**
  * The newest contact this Admin made a short while ago whose email is not known to be sent. A screen opened again
  * has lost the command it held in memory (and the words, which are never kept anywhere in the browser), so this is
  * what tells the Admin the contact was already accepted and must not be sent a second time. A contact that was sent,
