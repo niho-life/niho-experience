@@ -97,6 +97,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_OTA_GUEST_DETAILS_ENABLED: "otaGuestDetailsEnabled",
   EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED: "otaBookingNotificationsEnabled",
   EXPERIENCE_HOST_MAIL_ENABLED: "hostMailEnabled",
+  EXPERIENCE_JAPANESE_SITE_ENABLED: "japaneseSiteEnabled",
 };
 
 const byEnv = new Map(FLAGS.map((flag) => [flag.env, flag]));

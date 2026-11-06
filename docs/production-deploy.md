@@ -82,9 +82,11 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_OTA_GUEST_DETAILS_ENABLED` | `OTA_GUEST_DETAILS_ENABLED` | DB、メール（1 年後の消去） | — | — | — |
 | `EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED` | `OTA_BOOKING_NOTIFICATIONS_ENABLED` | push・DB | — | — | — |
 | `EXPERIENCE_HOST_MAIL_ENABLED` | `HOST_MAIL_ENABLED` | ホストの画面・DB、メール | — | — | — |
+| `EXPERIENCE_JAPANESE_SITE_ENABLED` | `JAPANESE_SITE_ENABLED` | ホストの画面・DB（配線のため。機能は公開サイト） | — | — | — |
 
 - OTA の 2 つ（#194）は、OTA の予約の取込みそのものは開かない（取込みは channel runtime の設定のまま）。`0036` を先に適用する。[外部予約台帳](ota-external-reservations.md)の「予約者の情報（#194）」「ホストへの通知（#194）」。
 - ホストへのメール（#194、オーナー決定 2026-11-01）：ログインのときに NIHO の確認済みのメールを写し、設定 › 通知で宛先を変えられ、新しい予約・取消・日時変更をメールでも知らせる。メールはメール job が送るので、メール（`EXPERIENCE_GUEST_MAIL_ENABLED`）が要る。新しい Secret・Scheduler・サービスアカウントは無い。**`0038` を新しいコードより先に適用する**（予約の確定・取消と OTA の台帳の transaction が、宛先の表を読んで行を積むため。フラグが off でも読む。off の間は宛先が 1 件も無いので行は積まれない）。[guest-booking.md](guest-booking.md) の「ホストへの通知」。
+- 日本語サイト（#59）の `JAPANESE_SITE_ENABLED` は、公式配備の表に載せただけで、既定は OFF（`STG_` / `PROD_` とも未設定）。ON にするのは、NIHO の承認済み日本語 release の実配備と実機確認が済んでから、専用の変更で行う（[localization-consumer.md](localization-consumer.md)「有効化の前に確かめること」）。
 - 「ホストの画面・DB」は本番では `enable_host_calendar=true`（と `PROD_HOST_CALENDAR_READY=true`）。サイトの URL は `https://experience.niho.life`、`<project>` は `niho-app-prd`。
 - `PROVIDER_PAGES_API_ENABLED` はlegacy NIHO provider-pages consumerのflagで、Experience商品・原稿・写真・公開には使用しない。新しい販売フローではOFFを維持する。
 - `PROVIDER_OPERATIONS_API_ENABLED` は旧NIHO予約の一覧・詳細・承認/辞退/取消／返金・メッセージなど、NIHOが引き続き所有する予約運営業務の限定APIだけを扱う。NIHO本番に `APP_CONNECT_WEB_ORIGINS` と許可されたservice identityを設定し、契約と旧予約権限をstgで受け入れてから開く。Experienceの商品・原稿・写真・公開は `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` が使うExperience BFFだけで行う。NIHOのtokenはExperience serverだけで扱う。旧 `niho.life/experiences/provider` 転送はNIHO Web側の別配備。

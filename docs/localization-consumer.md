@@ -42,7 +42,7 @@
 
 ## 有効化の前に確かめること
 
-`EXPERIENCE_JAPANESE_SITE_ENABLED=true` は、次がそろってから専用の変更PRで入れる。
+`EXPERIENCE_JAPANESE_SITE_ENABLED=true` は、次がそろってから専用の変更PRで入れる。公式配備の表（`scripts/deploy/runtime-flags.mjs`）には載っており、GitHub variable `STG_JAPANESE_SITE_ENABLED` / `PROD_JAPANESE_SITE_ENABLED` を `true` にして配備すると ON になる（未設定は OFF。[production-deploy.md](production-deploy.md)「機能のフラグ」）。
 
 - 承認済みの日本語 release が NIHO の stg・prod に実配備されている（copy・静的4ページ・catalog・detail が同じ `releaseId`）。
 - `verify:live` で公開APIの契約を確認する。今の `verify:live` は日本語の `/api/public/experiences/v1.2/ja/*` と `pages/localized/*` を読まないので、日本語の検査を足すか、同じ観点で手動確認して記録する。
