@@ -187,7 +187,7 @@ jobs:
           image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/web@${{ steps.pushed_image.outputs.digest }}"
           tag="candidate-${CANDIDATE_SHA}"
           tag="${tag:0:22}"
-          env_vars='EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life,SITE_URL=https://experience.niho.life,SITE_INDEXING=block,BOOKINGS_ENABLED=false,HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider'
+          env_vars='EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life,SITE_URL=https://experience.niho.life,SITE_INDEXING=block,BOOKINGS_ENABLED=false,HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider,GUIDE_EDITOR_SITE_ORIGIN=https://editor.niho.life'
           runtime_options=()
           if [ "$HOST_CALENDAR_ENABLED" = true ]; then
             test "$HOST_CALENDAR_READY" = true
@@ -270,6 +270,7 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_INDEXING") | .value' <<< "$revision_json")" = block
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_SIGNUP_MODE") | .value' <<< "$revision_json")" = pilot
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NIHO_HOST_START_URL") | .value' <<< "$revision_json")" = https://niho.life/experiences/provider
+          test "$(jq -r '.spec.containers[0].env[] | select(.name == "GUIDE_EDITOR_SITE_ORIGIN") | .value' <<< "$revision_json")" = https://editor.niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_URL") | .value' <<< "$revision_json")" = https://experience.niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NEXT_PUBLIC_NIHO_WEB_ORIGIN") | .value' <<< "$revision_json")" = https://niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_CONSOLE_ENABLED") | .value' <<< "$revision_json")" = "$HOST_CALENDAR_ENABLED"
@@ -390,6 +391,7 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_INDEXING") | .value' <<< "$revision_json")" = block
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_SIGNUP_MODE") | .value' <<< "$revision_json")" = pilot
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NIHO_HOST_START_URL") | .value' <<< "$revision_json")" = https://niho.life/experiences/provider
+          test "$(jq -r '.spec.containers[0].env[] | select(.name == "GUIDE_EDITOR_SITE_ORIGIN") | .value' <<< "$revision_json")" = https://editor.niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_URL") | .value' <<< "$revision_json")" = https://experience.niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NEXT_PUBLIC_NIHO_WEB_ORIGIN") | .value' <<< "$revision_json")" = https://niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_API_MODE") | .value' <<< "$revision_json")" = http

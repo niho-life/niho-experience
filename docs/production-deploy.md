@@ -11,7 +11,7 @@
 | イメージ | 本リポのレビュー済み `main` の40文字SHA。資格情報なしで build と smoke を行い、SHA256確認済みのイメージだけを配備jobへ渡す |
 | 配備権限 | `experience-deployer` に `niho-experience` サービス単位の `roles/run.admin`、専用Artifact Registryのwriter、runtime SAだけのService Account Userを付与。専用 Workload Identity Pool は GitHub repository ID `1425500695`、`refs/heads/main`、`production` environment、手動起動、`deploy-production.yml` の同時一致を要求 |
 | GitHub | `production` environment は `main` のみ。owner決定（2026-11-03）によりrequired reviewerは不要。起動者IDと再実行者をworkflowで検査し、WIFも本人IDへ限定。`PRODUCTION_DEPLOY_ENABLED=true` は設定が揃うまで付けない |
-| 初期revision | `EXPERIENCE_API_MODE=http`、`EXPERIENCE_PUBLIC_API_VERSION=1.0`、`EXPERIENCE_GUIDE_PUBLIC_SOURCE=static`、`SITE_URL=https://experience.niho.life`、`NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life`、`SITE_INDEXING=block`、`BOOKINGS_ENABLED=false`、`HOST_SIGNUP_MODE=pilot`、`NIHO_HOST_START_URL=https://niho.life/experiences/provider`、`HOST_CONSOLE_ENABLED=false`。`MOCK_CATALOG` と `UMAMI_WEBSITE_ID` は渡さない |
+| 初期revision | `EXPERIENCE_API_MODE=http`、`EXPERIENCE_PUBLIC_API_VERSION=1.0`、`EXPERIENCE_GUIDE_PUBLIC_SOURCE=static`、`SITE_URL=https://experience.niho.life`、`NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life`、`SITE_INDEXING=block`、`BOOKINGS_ENABLED=false`、`HOST_SIGNUP_MODE=pilot`、`NIHO_HOST_START_URL=https://niho.life/experiences/provider`、`GUIDE_EDITOR_SITE_ORIGIN=https://editor.niho.life`、`HOST_CONSOLE_ENABLED=false`。`MOCK_CATALOG` と `UMAMI_WEBSITE_ID` は渡さない |
 
 初期pilotでは既存の `niho-app-prd` にCloud Runサービスと限定した配備IDを足し、既存のglobal external Application Load BalancerとCloudflare proxyを再利用する。新規プロジェクト作成と新しいロードバランサーは不要。GCP project Owner、請求、API有効化、クォータの管理境界は共有する一方、GitHub deployerのCloud Run Adminは `niho-experience` サービスだけに付け、既存アプリのサービス・runtime identity・DB/Secretsへ権限を与えない（[Cloud Runのリソース単位IAM](https://docs.cloud.google.com/run/docs/securing/managing-access)）。売上や取り扱いデータが増える、組織ポリシー・障害範囲・請求分離が必要になる段階では専用GCP projectへ移行する。Googleは Cloud Run domain mapping をproductionに推奨していないため、DNS onlyのdomain mappingは採らない。Cloud Runは候補段階で公開 `run.app` のrevision URLを使い、販売前にはALB経由だけを受けるingressと候補revisionの検証経路を整える。プレビュー用deployerに本番権限は付けない。
 
@@ -153,9 +153,11 @@ Admin代理公開は、NIHO本番の `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN=https:
 | --- | --- | --- |
 | `ARTICLE_AUTHORITY_API_ENABLED` | 現在OWNER・体験候補・関連権限API | DB、`ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS`、`NIHO_ARTICLE_AUTHORITY_ORIGIN` / `AUDIENCE`、`EDITOR_ARTICLE_AUTHORITY_ORIGIN` / `AUDIENCE` |
 | `GUIDE_ADMIN_API_ENABLED` | NIHO Admin BFFからの限定writer/category管理API | ホストの画面・DB、`GUIDE_ADMIN_AUDIENCE`（Cloud Run service URL）、`GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL`（NIHO API runtime SA 1つ） |
-| `HOST_ARTICLE_LINKS_ENABLED` | ホスト設定のNIHO正本への招待・取消 | ホスト画面、`NIHO_ARTICLE_AUTHORITY_ORIGIN`、`NIHO_ARTICLE_LINKS_AUDIENCE`、`GUIDE_EDITOR_SITE_ORIGIN` |
-| `EDITOR_PUBLICATIONS_ENABLED` | 公開元を`editor`へ切替 | DB、authority API、`GUIDE_EDITOR_API_BASE_URL`、`GUIDE_EDITOR_API_TOKEN_REF`の固定数値版、`GUIDE_EDITOR_ASSET_ORIGIN`、`GUIDE_EDITOR_SITE_ORIGIN` |
+| `HOST_ARTICLE_LINKS_ENABLED` | ホスト設定のNIHO正本への招待・取消 | ホスト画面、`NIHO_ARTICLE_AUTHORITY_ORIGIN`、`NIHO_ARTICLE_LINKS_AUDIENCE` |
+| `EDITOR_PUBLICATIONS_ENABLED` | 公開元を`editor`へ切替 | DB、authority API、`GUIDE_EDITOR_API_BASE_URL`、`GUIDE_EDITOR_API_TOKEN_REF`の固定数値版、`GUIDE_EDITOR_ASSET_ORIGIN` |
 | `GUIDE_APP_CARDS_ENABLED` | NIHOライブラリ向けの公開summary | `EDITOR_PUBLICATIONS_ENABLED=true`。著者が`extras.app`を選んだlive公開版だけ。[記事カード契約](guide-app-cards.md) |
+
+書き手の入口の `GUIDE_EDITOR_SITE_ORIGIN=https://editor.niho.life` はどのflagにも属さない固定値で、表には載せない。stagingとproductionのworkflowが全revisionに設定し、読戻しで値を照合する（flagがすべてOFFの本番revisionでも、表の名前として余分扱いにならない）。
 
 許可サービスアカウントはセミコロン区切りで複数を指定する。gcloudのカンマ区切りと衝突せず、単一のenv値として渡し、runtimeでも同じリストを解釈する。サービス専用APIのaudienceは配備先の固定site URL。ホスト用`NIHO_ARTICLE_LINKS_AUDIENCE`はNIHOの既存writer resolver用audienceと一致させ、サービス専用の`NIHO_ARTICLE_AUTHORITY_AUDIENCE`と混同しない。
 
