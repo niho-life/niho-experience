@@ -10,7 +10,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
 vi.mock("@/lib/experience/store-server", () => ({ guideRepository: state.repositoryFactory }));
-vi.mock("@/lib/editor/guide-cover-storage", () => ({ guideCoverStorage: state.storageFactory }));
+vi.mock("@/lib/guide-cover-storage", () => ({ guideCoverStorage: state.storageFactory }));
 
 import { GET } from "@/app/api/public/guides/media/[assetId]/route";
 
