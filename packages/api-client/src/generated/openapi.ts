@@ -418,6 +418,11 @@ export type components = {
         };
         PublicExperienceOccurrence: {
             bookable: boolean;
+            /**
+             * Format: date-time
+             * @description この回の予約を締め切る時刻（UTC。表示は Asia/Tokyo に換算する）。開催日時から提供者の予約締切を引いたもの。締切が開始時刻と同じ（締切なし）の回は startAt と同じ値。締切時刻が分からない提供元では null。
+             */
+            bookingClosesAt: string | null;
             date: components["schemas"]["PublicExperienceLocalDate"];
             /** Format: date-time */
             endAt: string;

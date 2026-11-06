@@ -861,8 +861,12 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
       assert.ok(Math.abs(Date.parse(availability.generatedAt) - Date.now()) < 60_000);
       assert.deepEqual(occurrence(availability.occurrences, "sample-am", day(2)), {
         offerId: "sample-am", date: day(2), startAt: tokyoLocalToUtc(day(2), "10:00"), endAt: addMinutes(tokyoLocalToUtc(day(2), "10:00"), 90),
+        // The rule's 60 minutes of booking cutoff before the start (#146).
+        bookingClosesAt: addMinutes(tokyoLocalToUtc(day(2), "10:00"), -60),
         bookable: true, seatsLeft: 2, reason: null,
       });
+      // The same rule's cutoff is what turns an occurrence into CUTOFF, so the two always agree: a year of cutoff closes a year before.
+      assert.equal(occurrence(availability.occurrences, "sample-late", day(2))?.bookingClosesAt, addMinutes(tokyoLocalToUtc(day(2), "18:00"), -525_600));
       // Today through 89 days later; the rule starts tomorrow.
       assert.equal(availability.occurrences.filter((item) => item.offerId === "sample-am").length, 89);
       assert.ok(availability.occurrences.every((item) => item.date >= day(1) && item.date <= day(89)));

@@ -4,9 +4,11 @@ import { TrackView } from "@/components/Analytics";
 import { DesktopGallery, MobileGallery } from "@/components/DetailGallery";
 import { HandIcon } from "@/components/HandIcon";
 import { JsonLd } from "@/components/JsonLd";
+import { NextDateBand } from "@/components/NextDateBand";
 import { Photo } from "@/components/Photo";
 import { ReviewsSection } from "@/components/ReviewsSection";
 import { config } from "@/lib/config";
+import { siteNextDates } from "@/lib/guest-booking-source";
 import { formatDuration, formatYen } from "@/lib/format";
 import { iconForText } from "@/lib/themes";
 import { publicMetadata } from "@/lib/public-metadata";
@@ -47,6 +49,10 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
     ? formatDuration(durationValues[0]!, locale)
     : durationValues.length > 1 ? `${formatDuration(durationValues[0]!, locale)}–${formatDuration(durationValues.at(-1)!, locale)}` : null;
   const language = (content?.language ?? publication.content.facts.language).trim();
+  // The next dates and when the next one stops taking bookings (#146), read from the experience DB as the booking page reads them.
+  // Only where a guest can book: otherwise there is nothing to book by, and a failed read shows none.
+  const bookingHref = `${ja ? "/ja" : ""}/experiences/${publication.slug}/book`;
+  const nextDates = config.bookingsEnabled && config.guestBookingEnabled && offers.length ? await siteNextDates(publication.slug) : [];
   // Host-written FAQ in the page's language; none written means no section (never a filler FAQ).
   const faq = content ? content.faq : publication.content.faq;
 
@@ -75,6 +81,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
             {offers.length ? <li><span className="eyebrow">{ja ? "参加人数" : "Group size"}</span><p className="font-extrabold">{Math.min(...offers.map((offer) => offer.minimumParticipants))}–{Math.max(...offers.map((offer) => offer.maxPartySize))}{ja ? "名" : " guests"}</p></li> : null}
           </ul>
         </header>
+        {nextDates.length ? <NextDateBand dates={nextDates} locale={locale} bookingHref={bookingHref} allDatesHref={bookingHref} /> : null}
         <DesktopGallery photos={photos} title={title} />
 
         <div className="grid gap-10 pt-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-[72px] lg:pt-4">

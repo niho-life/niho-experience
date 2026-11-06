@@ -59,6 +59,8 @@ export function buildMockOccurrences(params: {
         date,
         startAt: new Date(startMs).toISOString(),
         endAt: new Date(endMs).toISOString(),
+        // The mock's only cutoff is the start itself (a past start answers CUTOFF), so it closes when it starts.
+        bookingClosesAt: new Date(startMs).toISOString(),
         seatsLeft,
         bookable: reason === null,
         reason,

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   addLocalDays,
+  addMinutes,
   assertLocalDate,
   expandOccurrences,
   findOverlappingOpenOccurrenceIds,
@@ -246,6 +247,8 @@ export interface PublicOccurrence {
   readonly date: string;
   readonly startAt: string;
   readonly endAt: string;
+  /** UTC: the start minus the rule's booking cutoff, the moment after which the same occurrence answers CUTOFF (#146). */
+  readonly bookingClosesAt: string;
   readonly bookable: boolean;
   readonly seatsLeft: number;
   readonly reason: PublicOccurrenceReason | null;
@@ -1784,6 +1787,7 @@ export class GuestBookingRepository {
         date: occurrence.localDate,
         startAt: occurrence.startUtc,
         endAt: occurrence.endUtc,
+        bookingClosesAt: addMinutes(occurrence.startUtc, -occurrence.bookingCutoffMinutes),
         bookable: reason === null,
         seatsLeft: isOverlapping ? 0 : availability?.availableSeats ?? 0,
         reason,
