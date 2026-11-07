@@ -17,10 +17,11 @@ const state = vi.hoisted(() => ({
   },
   store: null as Record<string, ReturnType<typeof import("vitest").vi.fn>> | null,
   pool: null as { query: (sql: string, params: unknown[]) => Promise<{ rowCount: number; rows: unknown[] }> } | null,
+  addresses: { recordLogin: (() => Promise.resolve("stored")) as ReturnType<typeof import("vitest").vi.fn> },
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: state.config, isPreview: false }));
-vi.mock("@/lib/experience/store-server", () => ({ hostAccounts: () => state.store, experiencePool: () => state.pool }));
+vi.mock("@/lib/experience/store-server", () => ({ hostAccounts: () => state.store, experiencePool: () => state.pool, hostNotificationAddresses: () => state.addresses }));
 
 import { POST as requestLink } from "@/app/(host)/host/auth/email/route";
 import { GET as openPage, POST as openLink } from "@/app/(host)/host/auth/open/route";
@@ -250,6 +251,24 @@ describe("POST /host/auth/open", () => {
     expect(cookies.get(LINK_BINDING_COOKIE)).toMatchObject({ value: "" });
     expect(cookies.get(LINK_BINDING_COOKIE)!.attributes).toMatch(/Max-Age=0/);
     expect(store.revokeSession).not.toHaveBeenCalled();
+  });
+
+  it("copies the address the link proved as the sign-in's notification address, only while host mail is on", async () => {
+    const recordLogin = vi.fn(async () => "stored");
+    state.addresses = { recordLogin } as unknown as typeof state.addresses;
+    Object.assign(state.config, { hostMailEnabled: false });
+    expect((await open(`${LINK_BINDING_COOKIE}=${BINDING}`)).status).toBe(204);
+    expect(recordLogin).not.toHaveBeenCalled();
+    Object.assign(state.config, { hostMailEnabled: true });
+    expect((await open(`${LINK_BINDING_COOKIE}=${BINDING}`)).status).toBe(204);
+    expect(recordLogin).toHaveBeenCalledExactlyOnceWith({ nihoUserId: HOST, verifiedEmail: ADDRESS, invitation: false });
+    // A failing copy never blocks the sign-in.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    recordLogin.mockRejectedValueOnce(new Error("db down"));
+    expect((await open(`${LINK_BINDING_COOKIE}=${BINDING}`)).status).toBe(204);
+    expect(errors.mock.calls.flat().join(" ")).not.toContain(ADDRESS);
+    errors.mockRestore();
+    Object.assign(state.config, { hostMailEnabled: false });
   });
 
   it("signs out the session this browser held before", async () => {

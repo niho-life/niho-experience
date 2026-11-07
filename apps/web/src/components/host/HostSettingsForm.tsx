@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useId, useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { saveNotificationSettings, saveProviderMeetingPoint, saveProviderProfile, submitProviderReview } from "@/host/actions";
 import { CALENDAR_LOAD_FAILED_TEXT, type HostCalendarLoad } from "@/host/calendar";
@@ -54,6 +55,11 @@ export interface HostSettingsFormProps {
    * state and the OWNER's consent, with its own forms outside this one). `payout` still feeds the review row.
    */
   payoutPanel?: ReactNode;
+  /**
+   * 予約後の集合案内 (Experience's own, per experience) when it is open (the host publication API): where 既定の集合案内
+   * points in http mode, where NIHO's provider-wide default is not read.
+   */
+  bookingGuidesHref?: string | null;
 }
 
 /**
@@ -73,7 +79,7 @@ export interface HostSettingsFormProps {
  * their own, and a form cannot hold another. The meeting fields join it with `form`, so 保存 still
  * checks them.
  */
-export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account, notificationAddress, payoutPanel }: HostSettingsFormProps) {
+export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account, notificationAddress, payoutPanel , bookingGuidesHref = null }: HostSettingsFormProps) {
   const ids = useId();
   const formId = `${ids}-form`;
   const owner = role === "OWNER";
@@ -349,7 +355,13 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
           {meetingEditable && meeting ? (
             <MeetingPointFields idPrefix="settings-meeting" value={meeting} form={formId} onChange={(value) => { setMeeting(value); setNotice(null); }} />
           ) : (
-            <p className="text-ink-soft">{role === "OWNER" || role === "EDITOR" ? "既定の集合案内を読めませんでした。" : "既定の集合案内はオーナーと編集者が変えられます。"}</p>
+            role === "OWNER" || role === "EDITOR" ? (
+              // http mode reads no provider-wide default from NIHO: the meeting guide is kept per experience in Experience.
+              <p className="text-ink-soft">
+                集合場所と当日の案内は、体験ごとに「予約後の集合案内」で設定します。
+                {bookingGuidesHref ? <> <Link href={bookingGuidesHref} className="font-bold text-moss underline underline-offset-4">予約後の集合案内を開く</Link></> : null}
+              </p>
+            ) : <p className="text-ink-soft">既定の集合案内はオーナーと編集者が変えられます。</p>
           )}
         </FieldSection>
 

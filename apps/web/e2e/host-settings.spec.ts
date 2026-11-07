@@ -219,7 +219,7 @@ test("通知: NIHO's eight notifications in its order; the three the owner may s
   // Where the mail goes (#194): the person's own address, the sign-in's by default; 宛先を変える opens the field.
   const to = panel.getByRole("group", { name: "宛先" });
   await expect(to).toContainText("kitchen@example.com");
-  await expect(to).toContainText("以前に確認したNIHOアカウントのメールです。");
+  await expect(to).toContainText("ログインで確認したメールアドレスです。");
   await expect(panel.getByRole("textbox")).toHaveCount(0);
   await expect(panel.getByRole("button")).toHaveCount(1);
   await expect(panel.getByRole("button", { name: "宛先を変える" })).toBeVisible();
@@ -280,7 +280,7 @@ test("宛先: a new address waits for the link sent to it; 取り消す closes i
   await expect(to).toContainText("desk@example.test に確認のメールを送ります（プレビューでは送りません）");
   // Nothing changes until the link is opened: the sign-in's address is still the one in use.
   await expect(to).toContainText("kitchen@example.com");
-  await expect(to).toContainText("以前に確認したNIHOアカウントのメールです。");
+  await expect(to).toContainText("ログインで確認したメールアドレスです。");
   await panel.getByRole("button", { name: "取り消す" }).click();
   await expect(to).not.toContainText("desk@example.test");
   await expect(panel.getByRole("status").filter({ hasText: "確認を取り消しました。" })).toBeVisible();
