@@ -137,19 +137,38 @@ export function hostPayoutSettingsPath(providerId: string | null): string {
 }
 
 const RETURN_PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const WRITE_ARTICLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const WRITE_EXPERIENCE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
- * A page an emailed sign-in may return to: 設定 › 受取口座 with at most its `providerId` (a sensitive change asked for a
- * recent sign-in first), or a product operator's invitation page `/host/invitations/<UUID>` (the invitation asked the
- * host to sign in). Anything else (another path, another origin, another query) is null, so the value can never send a
- * host off this site or to a page it was not meant for.
+ * A page an emailed or NIHO sign-in may return to: one of the fixed /write
+ * routes (with only a validated experience slug), 設定 › 受取口座 with at most
+ * its providerId, or a product operator invitation. Anything else is null, so
+ * the value can never send a host off this site or to an arbitrary local path.
  */
 export function hostReturnPathOrNull(value: unknown): string | null {
-  if (typeof value !== "string" || value.length > 300 || !value.startsWith("/host/") || value.includes("\\")) return null;
+  if (typeof value !== "string" || value.length > 300 || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return null;
   let url: URL;
   try { url = new URL(value, "https://return.invalid"); }
   catch { return null; }
   if (url.origin !== "https://return.invalid") return null;
+  if (url.pathname === "/write" || url.pathname === "/write/new") {
+    if (url.hash !== "") return null;
+    const keys = [...url.searchParams.keys()];
+    if (keys.length > 1 || (keys.length === 1 && keys[0] !== "experience")) return null;
+    const experience = url.searchParams.get("experience");
+    if (experience !== null && (experience.length > 160 || !WRITE_EXPERIENCE_SLUG.test(experience))) return null;
+    return withQuery(url.pathname, { experience });
+  }
+  const writeMatch = /^\/write\/([^/]+)(\/preview)?$/.exec(url.pathname);
+  if (writeMatch) {
+    let articleId: string;
+    try { articleId = decodeURIComponent(writeMatch[1]!); }
+    catch { return null; }
+    if (!WRITE_ARTICLE_ID.test(articleId) || url.search !== "" || url.hash !== "") return null;
+    return `/write/${encodeURIComponent(articleId)}${writeMatch[2] ?? ""}`;
+  }
+  if (!url.pathname.startsWith("/host/")) return null;
   // A product operator's invitation (docs/product-operators.md): a host who signs in from it comes back to accept it.
   if (url.pathname.startsWith(`${HOST_INVITATIONS_PATH}/`)) {
     const invitationId = invitationIdOrNull(url.pathname.slice(HOST_INVITATIONS_PATH.length + 1));

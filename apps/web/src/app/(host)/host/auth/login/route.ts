@@ -3,7 +3,7 @@ import { config } from "@/lib/config";
 import { nihoConnectUrl } from "@/lib/host/niho-auth";
 import { createLoginState, createPkceVerifier, pkceChallenge } from "@/lib/host/pkce";
 import { nihoIdOrNull } from "@/lib/host/providers";
-import { HOST_EMAIL_SIGN_IN_PATH, HOST_MOCK_LOGIN_PATH, hostInvitationPath, invitationIdOrNull, preparationCaseIdOrNull, withQuery } from "@/lib/host/routes";
+import { HOST_EMAIL_SIGN_IN_PATH, HOST_MOCK_LOGIN_PATH, hostInvitationPath, hostReturnPathOrNull, invitationIdOrNull, preparationCaseIdOrNull, withQuery } from "@/lib/host/routes";
 import { hostNotFound, isHostMock, noStoreJson, seeOther, setLoginCookie, siteOrigin } from "@/lib/host/server";
 import { LOGIN_MAX_AGE_SECONDS } from "@/lib/host/session";
 
@@ -15,8 +15,9 @@ import { LOGIN_MAX_AGE_SECONDS } from "@/lib/host/session";
 export function GET(request: NextRequest) {
   if (!config.hostConsoleEnabled) return hostNotFound();
   const invitationId = invitationIdOrNull(request.nextUrl.searchParams.get("invitationId"));
+  const returnPath = hostReturnPathOrNull(request.nextUrl.searchParams.get("returnTo"));
   // The email form keeps an invitation as the page the opened link returns to (hostReturnPathOrNull).
-  if (config.hostAccountsEnabled) return seeOther(invitationId ? withQuery(HOST_EMAIL_SIGN_IN_PATH, { next: hostInvitationPath(invitationId) }) : HOST_EMAIL_SIGN_IN_PATH);
+  if (config.hostAccountsEnabled) return seeOther(withQuery(HOST_EMAIL_SIGN_IN_PATH, { next: invitationId ? hostInvitationPath(invitationId) : returnPath }));
   const providerId = nihoIdOrNull(request.nextUrl.searchParams.get("providerId"));
   const preparationCaseId = preparationCaseIdOrNull(request.nextUrl.searchParams.get("preparationCaseId"));
   const surface = request.nextUrl.searchParams.get("surface") === "app" ? "app" : undefined;
@@ -28,6 +29,7 @@ export function GET(request: NextRequest) {
     if (providerId) params.set("providerId", providerId);
     if (preparationCaseId) params.set("preparationCaseId", preparationCaseId);
     if (invitationId) params.set("invitationId", invitationId);
+    if (returnPath) params.set("returnTo", returnPath);
     if (request.nextUrl.searchParams.get("mock") === "empty") params.set("mock", "empty");
     if (surface) params.set("surface", surface);
     return seeOther(params.size ? `${HOST_MOCK_LOGIN_PATH}?${params}` : HOST_MOCK_LOGIN_PATH);
@@ -36,6 +38,6 @@ export function GET(request: NextRequest) {
   const verifier = createPkceVerifier();
   const state = createLoginState();
   const response = seeOther(nihoConnectUrl(config.nihoWebOrigin, { challenge: pkceChallenge(verifier), state, origin: siteOrigin() }));
-  setLoginCookie(response, { verifier, state, providerId, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(surface ? { surface } : {}), expiresAt: Date.now() + LOGIN_MAX_AGE_SECONDS * 1000 });
+  setLoginCookie(response, { verifier, state, providerId, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(returnPath ? { returnPath } : {}), ...(surface ? { surface } : {}), expiresAt: Date.now() + LOGIN_MAX_AGE_SECONDS * 1000 });
   return response;
 }

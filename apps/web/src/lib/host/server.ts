@@ -23,6 +23,7 @@ import {
   LOGIN_COOKIE,
   LOGIN_COOKIE_PATH,
   LOGIN_MAX_AGE_SECONDS,
+  LEGACY_SESSION_COOKIE_PATH,
   SESSION_COOKIE,
   SESSION_COOKIE_PATH,
   sessionMaxAgeSeconds,
@@ -47,7 +48,7 @@ export function requireHostConsole() {
 }
 
 /**
- * The signed-in host for this request, or null. Read once per request. With Experience host accounts
+ * The signed-in host/writer for this request, or null. Read once per request. With Experience host accounts
  * (EXPERIENCE_HOST_ACCOUNTS_ENABLED) only their session cookie counts, read from the experience DB (a store failure
  * throws); otherwise only the NIHO login's sealed cookie.
  */
@@ -247,12 +248,22 @@ export function seeOther(location: string): NextResponse {
 }
 
 export function setSessionCookie(response: NextResponse, session: NihoHostSession, now: number) {
-  response.cookies.set(SESSION_COOKIE, encodeSession(sessionSealer(), session), hostCookieOptions(SESSION_COOKIE_PATH, sessionMaxAgeSeconds(session, now)));
+  // ResponseCookies keys by name and cannot retain two paths for one name.
+  // Serialize the root cookie on a temporary response, then append both raw
+  // headers. The sole live cookie stays last for simple cookie parsers.
+  const serialized = new NextResponse();
+  serialized.cookies.set(SESSION_COOKIE, encodeSession(sessionSealer(), session), hostCookieOptions(SESSION_COOKIE_PATH, sessionMaxAgeSeconds(session, now)));
+  response.headers.append("set-cookie", `${SESSION_COOKIE}=; Path=${LEGACY_SESSION_COOKIE_PATH}; Max-Age=0; Secure; HttpOnly; SameSite=Lax`);
+  response.headers.append("set-cookie", serialized.headers.get("set-cookie")!);
 }
 
 export function clearSessionCookie(response: NextResponse) {
-  // Deleting a __Secure- cookie needs the same Secure attribute and path.
-  response.cookies.set(SESSION_COOKIE, "", hostCookieOptions(SESSION_COOKIE_PATH, 0));
+  // Deleting a __Secure- cookie needs the same Secure attribute and path. Clear
+  // both the current scope and the one issued before /write shared the login.
+  const serialized = new NextResponse();
+  serialized.cookies.set(SESSION_COOKIE, "", hostCookieOptions(SESSION_COOKIE_PATH, 0));
+  response.headers.append("set-cookie", `${SESSION_COOKIE}=; Path=${LEGACY_SESSION_COOKIE_PATH}; Max-Age=0; Secure; HttpOnly; SameSite=Lax`);
+  response.headers.append("set-cookie", serialized.headers.get("set-cookie")!);
 }
 
 export function setLoginCookie(response: NextResponse, login: HostLoginState) {

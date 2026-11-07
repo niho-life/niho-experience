@@ -2,12 +2,19 @@ import type { CookieSealer } from "./cookie-seal";
 import { ACCESS_TOKEN_MIN_REMAINING_MS, REFRESH_WINDOW_MS } from "./timing";
 
 /**
- * The host console session: NIHO's scoped app-connect access token and rotating
+ * The host/writer session: NIHO's scoped app-connect access token and rotating
  * refresh token, sealed in an HttpOnly cookie. The browser only sees expiry time.
  */
 export const SESSION_COOKIE = "__Secure-niho_host_session";
 export const LOGIN_COOKIE = "__Secure-niho_host_login";
-export const SESSION_COOKIE_PATH = "/host";
+/**
+ * The host and writer are one same-origin authenticated surface. New NIHO
+ * sessions therefore use one cookie at Path=/; the old /host-scoped cookie is
+ * accepted only by the migration bridge and is cleared whenever a session is
+ * written or removed.
+ */
+export const SESSION_COOKIE_PATH = "/";
+export const LEGACY_SESSION_COOKIE_PATH = "/host";
 export const LOGIN_COOKIE_PATH = "/host/auth";
 export const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 export const LOGIN_MAX_AGE_SECONDS = 10 * 60;
@@ -108,6 +115,8 @@ export interface HostLoginState {
   providerId: string | null;
   preparationCaseId: string | null;
   invitationId?: string | null;
+  /** An allowlisted same-origin page, revalidated again at the callback. */
+  returnPath?: string | null;
   /** `/host/auth/login?surface=app`: the sign-in was started inside the installed app. */
   surface?: HostSessionSurface;
   /** Epoch ms; the login cookie lives 10 minutes. */
@@ -136,6 +145,7 @@ interface LoginWire {
   pid?: string;
   pc?: string;
   ii?: string;
+  rt?: string;
   sf?: 1;
   x: number;
 }
@@ -266,7 +276,7 @@ export function decodeSession(sealer: CookieSealer, raw: string | undefined | nu
 }
 
 export function encodeLoginState(sealer: CookieSealer, login: HostLoginState): string {
-  const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}), ...(login.invitationId ? { ii: login.invitationId } : {}), ...(login.surface === "app" ? { sf: 1 as const } : {}) };
+  const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}), ...(login.invitationId ? { ii: login.invitationId } : {}), ...(login.returnPath ? { rt: login.returnPath } : {}), ...(login.surface === "app" ? { sf: 1 as const } : {}) };
   return sealer.seal(wire);
 }
 
@@ -277,10 +287,10 @@ export function decodeLoginState(sealer: CookieSealer, raw: string | undefined |
   const preparationCaseId = typeof wire.pc === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(wire.pc) ? wire.pc : null;
   const invitationId = typeof wire.ii === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(wire.ii) ? wire.ii : null;
   if (preparationCaseId && invitationId) return null;
-  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(wire.sf === 1 ? { surface: "app" as const } : {}), expiresAt: wire.x };
+  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(isString(wire.rt, 300) ? { returnPath: wire.rt } : {}), ...(wire.sf === 1 ? { surface: "app" as const } : {}), expiresAt: wire.x };
 }
 
-/** HttpOnly, Secure, SameSite=Lax; scoped to the host console path. */
+/** HttpOnly, Secure, SameSite=Lax; the caller supplies the narrowest compatible path. */
 export function hostCookieOptions(path: string, maxAge: number) {
   return { httpOnly: true, secure: true, sameSite: "lax" as const, path, maxAge };
 }
