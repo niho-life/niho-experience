@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StoreConflictError } from "@niho-experience/experience-store";
 
 const state = vi.hoisted(() => ({
+  config: { apiMode: "mock", guidePublicSource: "static", siteUrl: "https://experience.example.test" },
   providers: { status: "signed-out" } as unknown,
   repository: {
     listActiveCategories: vi.fn(), createArticle: vi.fn(), listArticles: vi.fn(), getArticle: vi.fn(), saveDraft: vi.fn(),
@@ -13,7 +14,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/config", () => ({ config: { siteUrl: "https://experience.example.test" } }));
+vi.mock("@/lib/config", () => ({ config: state.config }));
 vi.mock("@/lib/host/server", () => ({
   loadHostProvidersFresh: () => state.providers,
   siteOrigin: () => "https://experience.example.test",
@@ -72,6 +73,8 @@ const routeContext = { params: Promise.resolve({ articleId: ID }) };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  state.config.apiMode = "mock";
+  state.config.guidePublicSource = "static";
   state.providers = { status: "signed-out" };
   state.storage = { write: vi.fn().mockResolvedValue(undefined), read: vi.fn(), remove: vi.fn().mockResolvedValue(undefined) };
   state.repository.createArticle.mockResolvedValue(ARTICLE);
@@ -86,6 +89,14 @@ beforeEach(() => {
 });
 
 describe("/write API authority and optimistic writes", () => {
+  it("keeps live writes closed until the public reader uses the same database", async () => {
+    state.config.apiMode = "http";
+    const response = await createGuide(jsonRequest("https://experience.example.test/write/api/guides", createBody));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "write_not_ready" });
+    expect(state.repository.createArticle).not.toHaveBeenCalled();
+  });
+
   it("accepts the bounded client create contract", () => {
     expect(parseWriteCreate(createBody)).not.toBeNull();
   });

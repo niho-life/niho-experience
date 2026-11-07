@@ -78,6 +78,11 @@ export async function loadWriteContext(providerId?: string): Promise<
   | { readonly ok: true; readonly value: WriteContext }
   | { readonly ok: false; readonly response: NextResponse }
 > {
+  // Until the public reader uses this same database, accepting a publication
+  // would report success for an article travelers cannot see.
+  if (config.apiMode === "http" && config.guidePublicSource !== "database") {
+    return { ok: false, response: writeJson({ error: "write_not_ready" }, 503) };
+  }
   const providers = await loadHostProvidersFresh();
   if (providers.status === "signed-out") return { ok: false, response: writeJson({ error: "unauthenticated" }, 401) };
   if (providers.status === "refresh") return { ok: false, response: writeJson({ error: "session_refresh_required" }, 401) };
