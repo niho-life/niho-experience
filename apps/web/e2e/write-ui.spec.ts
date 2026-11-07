@@ -131,7 +131,7 @@ test("login entry → idempotent create retry → latest save → private previe
   await page.getByRole("button", { name: "公開する" }).click();
   await page.getByRole("dialog", { name: "記事を公開" }).getByRole("button", { name: "公開する" }).click();
   await expect(page.getByText("公開中", { exact: true })).toBeVisible();
-  await page.locator(".write-settings-rail summary").click();
+  await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
   await expect(page.getByLabel("記事URL")).toHaveAttribute("readonly", "");
   await expect(page.getByRole("status").filter({ hasText: "記事を公開しました。" })).toBeVisible();
   await expect(page.getByRole("link", { name: "公開ページを見る" })).toHaveAttribute("href", `/guides/${api.guide.slug}`);
@@ -176,7 +176,7 @@ test("cover rights revocation waits for the saved revision and completes", async
   test.skip(testInfo.project.name !== "write-desktop", "desktop rights flow");
   const api = await mockWriterApi(page, true);
   await page.goto(`/write/write-e2e-fixture/edit-photo/${ID}`);
-  await page.getByText("公開設定", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "掲載権利を取り消す" }).click();
   await expect.poll(() => api.events.includes("revoke-cover")).toBe(true);
