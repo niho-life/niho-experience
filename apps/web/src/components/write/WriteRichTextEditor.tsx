@@ -143,7 +143,8 @@ export function WriteRichTextEditor({
     onSelectionUpdate: () => redraw((value) => value + 1),
   });
 
-  useEffect(() => { editor?.setEditable(!disabled); }, [editor, disabled]);
+  // setEditable emits an update by default, which would save an untouched article.
+  useEffect(() => { editor?.setEditable(!disabled, false); }, [editor, disabled]);
   useEffect(() => { if (editor && revokedAssetId) removeAssetFigures(editor, revokedAssetId); }, [editor, revokedAssetId]);
 
   const closePhoto = () => { if (busy) return; setPhotoOpen(false); queueMicrotask(() => photoOpener.current?.focus()); };
