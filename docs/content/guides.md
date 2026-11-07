@@ -5,7 +5,7 @@
 
 対象：[#145](https://github.com/niho-life/niho-experience/issues/145)。置き場所を決めた理由は [ADR 0002](../adr/0002-guide-content.md)、検索まわり（構造化データ・sitemap・hreflang）は [seo.md](../seo.md) の「ガイド記事」。
 
-> 2026-10-30 のオーナー判断で、記事は editor.niho.life で書いて公開し、experience はその公開版を読む発信先になる（[ADR 0002](../adr/0002-guide-content.md) の「2026-10-30」、Epic [#251](https://github.com/niho-life/niho-experience/issues/251)）。この文書の手順（リポ内のモジュールとして公開する）は、公開元を editor へ切り替えるまでの静的経路の説明。ここで出した記事は、切り替える前に editor へ移す（同じ slug を二重に出さない）。
+> 2026-11-07 のオーナー判断で、記事は experience.niho.life の `/write` で書いて公開し、正本は Experience DB になる（[ADR 0002](../adr/0002-guide-content.md) の「2026-11-07」、Epic [#476](https://github.com/niho-life/niho-experience/issues/476)）。この文書の手順（リポ内のモジュールとして公開する）は、公開元を `database` へ切り替えるまでの静的経路の説明。ここで出した記事は、切り替える前に DB へ移す（同じ slug を二重に出さない。#479）。
 
 ## 置き場所
 

@@ -1,5 +1,11 @@
 # Guide CMS の非公開写真と関連体験
 
+## 方針の変更（2026-11-07、#476）
+
+オーナー判断で、記事は experience.niho.life の `/write` で書き、正本は Experience DB に戻す。editor.niho.life から Experience への公開は止める。体験の OWNER は NIHO のライター権限なしで書ける。OWNER 以外のライターは NIHO のライター権限と記事連携を使う。決定の全体は [ADR 0002 ガイド記事](adr/0002-guide-content.md)の「2026-11-07」を正とする。
+
+この文書の「現在の経路（2026-11-03）」と editor 公開 API の節は、#477〜#480 が入るまでの現状の記録。Store の書込みは #477、`/write` の画面は #478、公開元の `database` への切替は #479、editor 経路の撤去は #480 で直す。下の旧 Experience 内 CMS の節（非公開写真・公開SSR・database flag のゲート・本文写真・関連体験）は、#477 で書込みを戻すときの設計の参照に使う。
+
 ## 現在の経路（2026-11-03、#254 / #255）
 
 記事はEditorクラウドで作成・公開する。Experienceの旧`/editor`認証・書込・下書きAPIは410で閉じ、入口は`/write`から固定Editorへ移動する。旧Storeの保存済み下書き・grant・招待・公開版は削除しないが、旧writer grantや招待台帳を現在権限の根拠にしない。

@@ -1,8 +1,8 @@
 # ADR 0002：ガイド記事の原稿の置き場所
 
-- 状態：superseded（2026-10-30 のオーナー判断で記事の正本は editor.niho.life。experience は発信先。下の「2026-10-30」を正とし、移行が終わるまで静的経路を既定値・mock preview 用に、database 経路を受入済みの切戻し先として残す）
+- 状態：superseded（2026-11-07 のオーナー判断で、記事は experience.niho.life の `/write` で書き、正本は experience DB。editor.niho.life から experience への公開は止める。下の「2026-11-07」を正とする。「2026-10-30」は経緯として残す）
 - 日付：2026-10-26
-- 関連：[#145 ガイド記事の仕組み](https://github.com/niho-life/niho-experience/issues/145)、[#59 日本語版](https://github.com/niho-life/niho-experience/issues/59)、[#139 index 化前の技術面](https://github.com/niho-life/niho-experience/issues/139)、[#251 記事の正本を editor.niho.life へ](https://github.com/niho-life/niho-experience/issues/251)
+- 関連：[#145 ガイド記事の仕組み](https://github.com/niho-life/niho-experience/issues/145)、[#59 日本語版](https://github.com/niho-life/niho-experience/issues/59)、[#139 index 化前の技術面](https://github.com/niho-life/niho-experience/issues/139)、[#251 記事の正本を editor.niho.life へ](https://github.com/niho-life/niho-experience/issues/251)、[#476 記事を /write で書く](https://github.com/niho-life/niho-experience/issues/476)
 
 ## 背景
 
@@ -73,3 +73,35 @@ database modeの有効化条件・staging受入・切戻しは [Guide CMS](../gu
 ### 未決
 
 - 日本語の記事を experience の `/ja/guides` に出すか（#59）。
+
+## 2026-11-07：experience の `/write` で書く。正本を experience DB に戻す（#476）
+
+オーナー判断（2026-11-07）。上の「2026-10-30」を置き換える。
+
+### 背景
+
+- editor.niho.life はフォルダ・ページ・録音・AI・手順まで持つ汎用の作業場で、体験の記事を1本書きたいホストやライターには、別のアプリを案内される負担が大きい。
+- 記事が別サービスにあるために、サービス間の API・プレビュー用トークン・期限のある editor API の資格・公開条件の宣言が必要になっていた（[記事連携契約](../editor-article-authority.md)）。記事を体験・カテゴリと同じ DB に置けば、ほとんどが同じ DB の中の確認で済む。
+- 本番の公開元はまだ `static` で、editor から experience へ公開した記事は無い。旧 Guide CMS の表・migration・`database` の読取り・カテゴリ管理は残っている（画面と書込みは #446 / #447 で撤去したが、履歴から戻せる）。
+
+### 決定
+
+- **書く場所は experience の `/write`**：`/write`（自分の記事の一覧）、`/write/new`、`/write/{articleId}`、`/write/{articleId}/preview`。公開 URL は `/guides/{slug}` のまま。`/write` 以下は `noindex`・`no-store`。フッターの「For writers」とホストの画面の「記事を書く」は `/write` へ向ける。
+- **記事の正本は experience DB**：下書き・版・本文・写真と掲載許諾・公開版・公開と停止は experience が持つ。公開元は `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` に切り替える。公開元は一つだけ選び、union しない。
+- **editor.niho.life から experience への公開は止める（凍結）**：experience は editor の公開 API・プレビュー用トークン・Editor 向け内部 API を使わない。editor の発信先から NIHO Experience を外す（niho-life/niho-editor#332）。editor と双方向に同期しない。
+- **書ける人**：
+  - 体験の OWNER は、NIHO のライター権限なしで、自分の提供者の記事を書いて公開できる。関連体験はその提供者の公開中の体験だけ。
+  - OWNER 以外のライターは、NIHO アカウントのライターとして書く。ライター権限と記事連携（招待・承諾・辞退・取消）の正本は NIHO のまま。ライター側の承諾・辞退は `/write` に置く（#481、niho-coliving/niho-app#19943）。
+- **ログイン**：`/write` はホストの画面と同じログイン・セッションを使い、ログイン方式に依存しない。ホストのログインの本来の形は NIHO ログインで、今の Experience 自前のメールのリンク（[ADR 0003](0003-experience-independence.md)）は一時的。NIHO ログインへ戻すときは、セッションを `/write` にも届く Path=/ に置く（旧 NIHO の session cookie は Path=/host）。OWNER 以外のライターは NIHO ログインへ戻した後に開く。
+- **公開の条件**：英語、題名 110 字以内、有効なカテゴリ、本文に `##` 見出し 1 つ以上、未確認の印（CONFIRM）なし、写真の代替テキストと掲載許諾。カバー・リード・関連体験は任意。関連体験は公開読取のたびに現在の権限と掲載状態で再判定し、失効しても本文は消さない。
+- **将来の引っ越し**：editor.niho.life が広まったら、記事を丸ごと editor へ移せるようにしておく。今は作らない。移すときは一括・片道で、書き出し → editor へ取り込み → 公開元を `editor` へ → experience の書込みを閉じる、の順にする。そのために、記事 ID は不変、slug は公開後に固定、公開版は不変の snapshot、本文は安全な Markdown の部分集合（editor v1 の `markdown` と同じ形）、写真は掲載許諾と共有可否を持つ。
+
+### 結果
+
+- 書き手は experience.niho.life だけで、書く・確かめる・公開するを終えられる。公開・更新・停止は再ビルドなしで反映される。
+- 「2026-10-30」で作った editor 公開元・プレビュー用トークン・Editor 向け内部 API・`GUIDE_EDITOR_SITE_ORIGIN` は撤去する（#480）。NIHO の記事連携（`provider-owner`、ホストの招待の中継、NIHO の `check`）は OWNER 以外のライターのために残す。
+- 保存済みのデータと表は消さない。
+
+### 子 Issue
+
+#477（Store の書込み）→ #478（`/write`）→ #479（公開元を `database` へ）。#480（editor 経路の撤去）は独立。#481（OWNER 以外のライター）は NIHO ログインへ戻した後。
