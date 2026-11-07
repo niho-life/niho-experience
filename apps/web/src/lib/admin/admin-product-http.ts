@@ -379,7 +379,8 @@ export async function adminDraftMediaRequest(request: Request, context: ProductC
       width: processed.width, height: processed.height, byteSize: processed.bytes.byteLength,
       altText, altTextJa, publicCredit,
     };
-    await repository.addMediaAsAdmin(auth.actor, providerId, productId, asset); registered = true;
+    const registeredAsset = await repository.addMediaAsAdmin(auth.actor, providerId, productId, asset); registered = true;
+    if (registeredAsset.id !== id) await storage.remove(objectKey).catch(() => undefined);
     return adminJson({ product: await productDto(auth.actor, providerId, productId), publicationConsentVersion: config.experiencePublicationConsentVersion }, 201);
   } catch (error) {
     if (stored && !registered) await storage.remove(objectKey).catch(() => undefined);

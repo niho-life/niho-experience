@@ -452,6 +452,7 @@ export async function publicationMediaRequest(request: Request, context: Publica
     };
     const asset = await prepared.repository.addMedia(prepared.context.actor, productId, assetInput);
     registered = true;
+    if (asset.id !== id) await storage.remove(objectKey).catch(() => undefined);
     const product = await productDto(prepared.repository, prepared.context.actor, productId);
     return noStoreJson({
       asset: { ...asset, previewUrl: `/host/api/products/${encodeURIComponent(productId)}/media/${encodeURIComponent(asset.id)}` },

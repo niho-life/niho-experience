@@ -517,6 +517,22 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       });
       assert.equal((await publications.getPublicBySlug(original.slug))?.photos.length, 2);
 
+      // Re-uploading a removed photo restores its original asset and never duplicates a gallery selection.
+      const retained = (await publications.listMedia(OWNER, original.id)).filter((asset) => asset.id !== extraAssetId)
+        .map(({ id, altText, altTextJa, publicCredit }) => ({ id, altText, altTextJa, publicCredit }));
+      await publications.saveMediaSelection(OWNER, original.id, (await publications.getProduct(OWNER, original.id)).version, retained);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const newId = randomUUID();
+        const restored = await publications.addMedia(OWNER, original.id, {
+          id: newId, objectKey: `experience-products/${newId}.jpg`, sourceRefHash: "4".repeat(64),
+          width: 640, height: 480, byteSize: 2048, altText: "Second synthetic photo", altTextJa: "2枚目の合成写真", publicCredit: null,
+        });
+        assert.equal(restored.id, extraAssetId);
+        assert.equal((await publications.listMedia(OWNER, original.id)).length, 2);
+        assert.equal((await publications.getPublicBySlug(original.slug))?.photos.length, 2, "draft restoration does not change the public snapshot");
+      }
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM experience_product_media_assets WHERE provider_id=$1 AND product_id=$2 AND source_ref_hash=$3", [OWNER.providerId, original.id, "4".repeat(64)])).rows[0]?.n, 1);
+
       const providerPhotoId = randomUUID();
       const logoId = randomUUID();
       const profileWithPhoto = await publications.addProviderMedia(OWNER, 1, {
