@@ -65,7 +65,6 @@ describe("robots.txt", () => {
   it("keeps editor draft previews out without hiding guides whose slug starts with preview", () => {
     const robots = robotsFor({ indexingAllowed: true, siteUrl: SITE });
     for (const agent of [...SEARCH_CRAWLERS, "SomeOtherBot"]) {
-      expect(allows(robots, agent, "/guides/preview?token=abcdefghijklmnop"), agent).toBe(false);
       expect(allows(robots, agent, "/guides/preview-of-autumn"), agent).toBe(true);
       expect(allows(robots, agent, "/guides"), agent).toBe(true);
     }

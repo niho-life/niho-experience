@@ -26,12 +26,12 @@ describe("the retired /editor", () => {
     expect(request.bodyUsed).toBe(false);
   });
 
-  it("sends every old page to /write, with noindex", async () => {
+  it("keeps every old page gone with noindex", async () => {
     for (const path of [[], ["guides"], ["guides", "new"], ["guides", "00000000-0000-4000-8000-000000000042"], ["guides", "00000000-0000-4000-8000-000000000042", "preview"]]) {
       for (const [method, handler] of [["GET", GET], ["HEAD", HEAD]] as const) {
         const response = await call(handler, method, path);
-        expect(response.status).toBe(307);
-        expect(response.headers.get("location")).toBe("/write");
+        expect(response.status).toBe(410);
+        expect(response.headers.get("location")).toBeNull();
         expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
       }
     }

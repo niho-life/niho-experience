@@ -8,7 +8,7 @@ const state = vi.hoisted(() => ({
   guideCatalog: {} as Record<string, unknown>,
   hasGuides: false,
   config: {
-    apiMode: "http", siteUrl: "https://experience.example", umamiWebsiteId: "", publicApiVersion: "1.0", indexingAllowed: true, guideEditorSiteOrigin: "", mockCatalog: "synthetic",
+    apiMode: "http", siteUrl: "https://experience.example", umamiWebsiteId: "", publicApiVersion: "1.0", indexingAllowed: true, mockCatalog: "synthetic",
   },
 }));
 vi.mock("server-only", () => ({}));
@@ -43,13 +43,11 @@ describe("the Privacy footer link", () => {
     expect(plain.at(-1)).toEqual(["/privacy", "Privacy"]);
     expect(plain.map(([href]) => href)).toEqual(["/experiences", "/host", "/help", "/write", "/privacy"]);
     state.hasGuides = true;
-    state.config = { ...state.config, guideEditorSiteOrigin: "https://editor.example" };
     try {
       const more = links(renderToStaticMarkup(await RootLayout({ children: createElement("p", null, "page") })));
       expect(more.map(([href]) => href)).toEqual(["/experiences", "/host", "/help", "/guides", "/write", "/privacy"]);
     } finally {
       state.hasGuides = false;
-      state.config = { ...state.config, guideEditorSiteOrigin: "" };
     }
   });
 

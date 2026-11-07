@@ -283,7 +283,7 @@ describe("guide summary (meta description fallback)", () => {
   });
 
   it("cuts over 160 characters at the last sentence end", () => {
-    // Guides are English only (the editor publishes `lang: en` here), so the experience pages' rule applies as it is.
+    // Guides are English only, so the experience pages' rule applies as it is.
     const summary = guideSummary(leadless(`${"A".repeat(90)}. ${"B".repeat(90)}.`));
     expect(summary).toBe(`${"A".repeat(90)}.`);
   });
@@ -295,29 +295,28 @@ describe("guide summary (meta description fallback)", () => {
   });
 });
 
-describe("related guides of an editor publication", () => {
-  const editorGuide = (slug: string, updatedAt: string, extra: Partial<Guide> = {}): Guide => ({
+describe("related guides by CMS category", () => {
+  const categorizedGuide = (slug: string, updatedAt: string, extra: Partial<Guide> = {}): Guide => ({
     ...sample,
     slug,
     title: `Synthetic ${slug}`,
     pillar: undefined,
     category: { slug: "walks", label: "Walks", displayOrder: 1 },
-    editorPublication: { id: `0e000000-0000-4000-8000-${slug.padStart(12, "0")}`, version: 1 },
     relatedGuideSlugs: [],
     updatedAt,
     ...extra,
   });
 
   it("names the newest other listed guides of the same category, at most three", () => {
-    const self = editorGuide("self", "2026-10-10");
+    const self = categorizedGuide("self", "2026-10-10");
     const guides = [
       self,
-      editorGuide("older", "2026-10-01"),
-      editorGuide("newest", "2026-10-30"),
-      editorGuide("middle", "2026-10-20"),
-      editorGuide("third", "2026-10-05"),
-      editorGuide("hidden", "2026-10-31", { unlisted: true }),
-      editorGuide("other", "2026-10-29", { category: { slug: "food", label: "Food", displayOrder: 2 } }),
+      categorizedGuide("older", "2026-10-01"),
+      categorizedGuide("newest", "2026-10-30"),
+      categorizedGuide("middle", "2026-10-20"),
+      categorizedGuide("third", "2026-10-05"),
+      categorizedGuide("hidden", "2026-10-31", { unlisted: true }),
+      categorizedGuide("other", "2026-10-29", { category: { slug: "food", label: "Food", displayOrder: 2 } }),
     ];
     expect(relatedGuidesOf(guides, self).map((guide) => guide.slug)).toEqual(["newest", "middle", "third"]);
     expect(relatedGuidesOf([self], self)).toEqual([]);
@@ -328,7 +327,7 @@ describe("related guides of an editor publication", () => {
   it("leaves static and database guides as they were (their own related guides only)", () => {
     expect(relatedGuidesOf(SAMPLE_GUIDES, sample).map((guide) => guide.slug)).toEqual(["sample-rainy-day-in-kamakura", "sample-kamakura-day-plan"]);
     const categorized = { ...sample, relatedGuideSlugs: [], category: { slug: "walks", label: "Walks", displayOrder: 1 } };
-    expect(relatedGuidesOf([categorized, editorGuide("same-category", "2026-10-30")], categorized)).toEqual([]);
+    expect(relatedGuidesOf([categorized, categorizedGuide("same-category", "2026-10-30")], categorized)).toEqual([]);
   });
 });
 

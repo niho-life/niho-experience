@@ -7,7 +7,6 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { siteUrl: "https://experience.example" }, isPreview: false }));
 vi.mock("@/lib/guide-registry", () => ({
   findGuide: async () => (state.guide ? { guide: state.guide, draft: false } : null),
-  missingGuideRedirect: async () => null,
 }));
 vi.mock("@/components/pages/GuideArticle", () => ({ GuideArticle: () => null }));
 

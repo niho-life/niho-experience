@@ -16,25 +16,19 @@ import { guideCatalogForSite } from "@/lib/guide-registry";
 import { formatGuideDate, guideCtaInsertAfter, guideOutline, guidePillarDetails, guideReadMinutes, listedExperienceSlugs, relatedGuidesOf } from "@/lib/guides";
 import { SITE_NAME } from "@/lib/public-metadata";
 import { breadcrumbJsonLd, guideArticleJsonLd } from "@/lib/structured-data";
-import { filterCurrentRelatedGuide } from "@/lib/article-authority/publication-read";
-import { withoutUnverifiedPreviewRelated } from "./guide-article-policy";
 
 /**
  * How a guide is shown:
  * - `published`: a listed guide (or an unlisted one by its direct URL; its metadata says noindex).
  * - `draft`: a mock-preview draft, with a notice.
- * - `editor-preview`: an editor.niho.life draft at /guides/preview (#253), with a notice and no structured data.
  */
-export type GuideArticleVariant = "published" | "draft" | "editor-preview";
+export type GuideArticleVariant = "published" | "draft";
 
 /**
  * One guide, fully in the server HTML: title, author, dates, hero, body, FAQ, experiences to book and related guides.
- * `/guides/{slug}` and `/guides/preview` both render through here, so a preview looks exactly like the published page.
+ * Published guides and local preview drafts render through this component.
  */
 export async function GuideArticle({ guide, variant, query }: { guide: Guide; variant: GuideArticleVariant; query: SearchParams }) {
-  guide = variant === "published"
-    ? await filterCurrentRelatedGuide(guide)
-    : withoutUnverifiedPreviewRelated(guide, variant === "editor-preview");
   const structuredData = variant === "published" || variant === "draft";
   const blocks = parseGuideMarkdown(guide.body);
   const outline = guideOutline(blocks);
@@ -64,11 +58,6 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
           {variant === "draft" ? (
             <div className="mb-5">
               <Notice tone="warn" title="Draft · not published · visible only in this preview" />
-            </div>
-          ) : null}
-          {variant === "editor-preview" ? (
-            <div className="mb-5">
-              <Notice tone="warn" title="Preview from editor.niho.life · not published · link expires soon" />
             </div>
           ) : null}
           <nav aria-label="Breadcrumb" className="text-sm text-muted">

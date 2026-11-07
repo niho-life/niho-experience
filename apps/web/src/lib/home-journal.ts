@@ -47,7 +47,7 @@ export function homeJournal(guides: readonly Guide[], { draftSlugs = [] }: { dra
     return {
       slug: guide.slug,
       title: guide.title,
-      // A lead-less editor publication shows the opening of its body instead (guideSummary).
+      // A guide without a lead uses the opening of its body instead (guideSummary).
       description: guideSummary(guide),
       topic: homeJournalTopic(guide),
       badge: draftSlugs.includes(guide.slug) ? "Draft" : null,

@@ -50,82 +50,9 @@ function guideDraftsSetting(apiMode: "mock" | "http", value: string | undefined)
   return dir;
 }
 
-type GuideEditorSettings = Readonly<{ apiBaseUrl: string; handle: string; token: string; assetOrigins: readonly string[] }>;
-
-const NO_GUIDE_EDITOR: GuideEditorSettings = { apiBaseUrl: "", handle: "", token: "", assetOrigins: [] };
-/**
- * NIHO Experience reads the editor as the face `exp` (EDITOR_PUBLICATION_DEST). Any other handle is another face or an
- * owner's site, whose publications this site never lists, so it is refused at start instead of serving an empty /guides.
- */
-const GUIDE_EDITOR_HANDLE = "exp";
-
 const isLoopbackHost = (hostname: string) => hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 
-/** The editor's public API base (with its version path, `/v1`): https, or loopback http for a local fixture server. */
-function guideEditorBaseUrl(value: string): URL {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error("GUIDE_EDITOR_API_BASE_URL must be an absolute URL");
-  }
-  if (url.username || url.password || url.search || url.hash) throw new Error("GUIDE_EDITOR_API_BASE_URL must not contain credentials, a query or a fragment");
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname))) {
-    throw new Error("GUIDE_EDITOR_API_BASE_URL must use HTTPS, except loopback HTTP in development");
-  }
-  return url;
-}
-
-/** Comma-separated https origins that may serve editor photos; the API's own origin when unset. */
-function guideEditorAssetOrigins(value: string | undefined, apiOrigin: string): string[] {
-  const entries = (value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
-  if (!entries.length) return [apiOrigin];
-  return [...new Set(entries.map((entry) => {
-    let url: URL;
-    try {
-      url = new URL(entry);
-    } catch {
-      throw new Error("GUIDE_EDITOR_ASSET_ORIGINS must list absolute https origins");
-    }
-    if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
-      throw new Error("GUIDE_EDITOR_ASSET_ORIGINS must list https origins only");
-    }
-    return url.origin;
-  }))];
-}
-
-/**
- * editor.niho.life's public API as the guide source (#252, contract v1: lib/editor-publication/contract.ts).
- * Every setting is required; a missing one stops the server instead of falling back to static guides.
- */
-function guideEditorSettings(env: Env): GuideEditorSettings {
-  const base = env.GUIDE_EDITOR_API_BASE_URL?.trim() ?? "";
-  const handle = env.GUIDE_EDITOR_API_HANDLE?.trim() ?? "";
-  const token = env.GUIDE_EDITOR_API_TOKEN?.trim() ?? "";
-  if (!base) throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor needs GUIDE_EDITOR_API_BASE_URL in http mode");
-  if (!handle) throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor needs GUIDE_EDITOR_API_HANDLE in http mode");
-  if (!token) throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor needs GUIDE_EDITOR_API_TOKEN in http mode");
-  if (handle !== GUIDE_EDITOR_HANDLE) throw new Error(`GUIDE_EDITOR_API_HANDLE must be ${GUIDE_EDITOR_HANDLE} (NIHO Experience's handle on the editor)`);
-  const url = guideEditorBaseUrl(base);
-  return {
-    apiBaseUrl: url.href.replace(/\/+$/, ""),
-    handle,
-    token,
-    assetOrigins: guideEditorAssetOrigins(env.GUIDE_EDITOR_ASSET_ORIGINS, url.origin),
-  };
-}
-
-/**
- * Where writers go to write (editor.niho.life, #254): the footer's "For writers" and the host console's 記事を書く.
- * Unset keeps both links hidden, so neither points at an editor that is not serving yet.
- */
-function guideEditorSiteOrigin(value: string | undefined): string {
-  const origin = value?.trim() ?? "";
-  return origin ? deploymentOrigin(origin, "GUIDE_EDITOR_SITE_ORIGIN") : "";
-}
-
-function guidePublicSourceSetting(apiMode: "mock" | "http", env: Env): "static" | "database" | "editor" {
-  if (apiMode === "http" && env.EXPERIENCE_GUIDE_PUBLIC_SOURCE === "editor") return "editor";
+function guidePublicSourceSetting(apiMode: "mock" | "http", env: Env): "static" | "database" {
   if (apiMode !== "http" || env.EXPERIENCE_GUIDE_PUBLIC_SOURCE !== "database") return "static";
   if (!env.EXPERIENCE_DATABASE_URL?.trim()) {
     throw new Error("EXPERIENCE_GUIDE_PUBLIC_SOURCE=database needs EXPERIENCE_DATABASE_URL in http mode");
@@ -168,7 +95,7 @@ function articleAuthoritySettings(apiMode: "mock" | "http", env: Env) {
   const enabled = apiMode === "http" && env.EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED === "true";
   const hostLinksEnabled = apiMode === "http" && env.EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED === "true";
   if (!enabled && !hostLinksEnabled) {
-    return { enabled: false, audience: "", serviceAccountEmails: [] as readonly string[], nihoOrigin: "", nihoAudience: "", nihoLinksAudience: "", editorOrigin: "", editorAudience: "", hostLinksEnabled: false };
+    return { enabled: false, audience: "", serviceAccountEmails: [] as readonly string[], nihoOrigin: "", nihoAudience: "", nihoLinksAudience: "", hostLinksEnabled: false };
   }
   const nihoOrigin = deploymentOrigin(env.NIHO_ARTICLE_AUTHORITY_ORIGIN?.trim() ?? "", "NIHO_ARTICLE_AUTHORITY_ORIGIN");
   const nihoAudience = enabled ? env.NIHO_ARTICLE_AUTHORITY_AUDIENCE?.trim() ?? "" : "";
@@ -179,14 +106,11 @@ function articleAuthoritySettings(apiMode: "mock" | "http", env: Env) {
     throw new Error("EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED=true needs HOST_CONSOLE_ENABLED=true in http mode");
   }
   if (!enabled) {
-    return { enabled: false, audience: "", serviceAccountEmails: [] as readonly string[], nihoOrigin, nihoAudience, nihoLinksAudience, editorOrigin: "", editorAudience: "", hostLinksEnabled };
+    return { enabled: false, audience: "", serviceAccountEmails: [] as readonly string[], nihoOrigin, nihoAudience, nihoLinksAudience, hostLinksEnabled };
   }
   if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error("EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED=true needs EXPERIENCE_DATABASE_URL");
   const audience = env.EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE?.trim() ?? "";
   if (!audience) throw new Error("EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED=true needs EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE");
-  const editorOrigin = deploymentOrigin(env.EDITOR_ARTICLE_AUTHORITY_ORIGIN?.trim() ?? "", "EDITOR_ARTICLE_AUTHORITY_ORIGIN");
-  const editorAudience = env.EDITOR_ARTICLE_AUTHORITY_AUDIENCE?.trim() ?? "";
-  if (!editorAudience) throw new Error("EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED=true needs EDITOR_ARTICLE_AUTHORITY_AUDIENCE");
   return {
     enabled,
     audience,
@@ -194,8 +118,6 @@ function articleAuthoritySettings(apiMode: "mock" | "http", env: Env) {
     nihoOrigin,
     nihoAudience,
     nihoLinksAudience,
-    editorOrigin,
-    editorAudience,
     hostLinksEnabled,
   };
 }
@@ -864,8 +786,6 @@ export function resolveConfig(env: Env) {
   const adminOriginSetting = env.NIHO_EXPERIENCE_ADMIN_ORIGIN?.trim() ?? "";
   const guideDraftsDir = guideDraftsSetting(apiMode, env.GUIDE_DRAFTS_DIR);
   const guidePublicSource = guidePublicSourceSetting(apiMode, env);
-  const guideEditor = guidePublicSource === "editor" ? guideEditorSettings(env) : NO_GUIDE_EDITOR;
-  const guideEditorSite = guideEditorSiteOrigin(env.GUIDE_EDITOR_SITE_ORIGIN);
   const guideAdmin = guideAdminSettings(apiMode, env);
   const articleAuthority = articleAuthoritySettings(apiMode, env);
   if (apiMode === "http" && hostConsoleEnabled) assertHostConsoleSecrets(hostSessionSecret);
@@ -897,17 +817,8 @@ export function resolveConfig(env: Env) {
     mockCatalog: env.MOCK_CATALOG === "pilot" ? "pilot" : "synthetic",
     // Unpublished guide drafts shown in the mock preview only (absolute path, outside git); null otherwise.
     guideDraftsDir,
-    // Public CMS reads are opt-in and HTTP-only. Database and editor modes never fall back to code-backed guides.
+    // Public CMS reads are opt-in and HTTP-only. Database mode never falls back to code-backed guides.
     guidePublicSource,
-    // editor.niho.life's public API (editor mode only; empty otherwise). The token is a server-only secret.
-    guideEditorApiBaseUrl: guideEditor.apiBaseUrl,
-    guideEditorApiHandle: guideEditor.handle,
-    guideEditorApiToken: guideEditor.token,
-    guideEditorAssetOrigins: guideEditor.assetOrigins,
-    // Public summaries consumed by NIHO. Opt-in and off unless explicitly enabled in the HTTP runtime.
-    guideAppCardsEnabled: apiMode === "http" && env.EXPERIENCE_GUIDE_APP_CARDS_ENABLED === "true",
-    // The editor's own site, linked from the footer and /host; empty hides the links.
-    guideEditorSiteOrigin: guideEditorSite,
     // NIHO platform ADMIN server -> Experience guide administration. This is a
     // service-to-service surface and never reuses /admin, /editor, or /host sessions.
     guideAdminApiEnabled: guideAdmin.enabled,
@@ -919,8 +830,6 @@ export function resolveConfig(env: Env) {
     nihoArticleAuthorityOrigin: articleAuthority.nihoOrigin,
     nihoArticleAuthorityAudience: articleAuthority.nihoAudience,
     nihoArticleLinksAudience: articleAuthority.nihoLinksAudience,
-    editorArticleAuthorityOrigin: articleAuthority.editorOrigin,
-    editorArticleAuthorityAudience: articleAuthority.editorAudience,
     hostArticleLinksEnabled: articleAuthority.hostLinksEnabled,
     siteUrl: (env.SITE_URL ?? "http://localhost:3000").replace(/\/$/, ""),
     // Synthetic data must never be indexed, even if SITE_INDEXING is set by mistake.

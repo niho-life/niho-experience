@@ -90,8 +90,6 @@ const nextConfig: NextConfig = {
       // root and children explicit, as for /admin.
       { source: "/bookings", headers: privatePageHeaders },
       { source: "/bookings/:path+", headers: privatePageHeaders },
-      // editor.niho.life drafts (#253): the token is in the query, so no Referer may carry it anywhere.
-      { source: "/guides/preview", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
       // `:path+` leaves /host itself (the public introduction) indexable.
       { source: "/host/:path+", headers: hostConsoleHeaders },
       { source: "/host/invitations/:path+", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
@@ -112,7 +110,7 @@ const nextConfig: NextConfig = {
       // explicit so changes in path-pattern handling cannot accidentally leave /admin public.
       { source: "/admin", headers: hostConsoleHeaders },
       { source: "/admin/:path+", headers: hostConsoleHeaders },
-      // The retired /editor (a redirect to /write and 410s, src/app/editor) stays private and uncached.
+      // The retired /editor responds 410 and stays private and uncached.
       { source: "/editor", headers: hostConsoleHeaders },
       { source: "/editor/:path+", headers: hostConsoleHeaders },
     ];

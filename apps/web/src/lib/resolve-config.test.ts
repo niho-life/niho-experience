@@ -84,8 +84,6 @@ describe("article authority settings", () => {
     EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS: "editor@example-project.iam.gserviceaccount.com",
     NIHO_ARTICLE_AUTHORITY_ORIGIN: "https://niho.example.invalid",
     NIHO_ARTICLE_AUTHORITY_AUDIENCE: "https://niho.example.invalid/internal/editor-authority",
-    EDITOR_ARTICLE_AUTHORITY_ORIGIN: "https://editor.example.invalid",
-    EDITOR_ARTICLE_AUTHORITY_AUDIENCE: "https://editor.example.invalid/internal/publication-authority",
   };
 
   it("is HTTP-only, exact-flag default OFF, and exposes no partial runtime", () => {
@@ -100,7 +98,7 @@ describe("article authority settings", () => {
   });
 
   it("fails startup when an enabled authority lacks DB, origin, audience, or a valid allowlist", () => {
-    for (const key of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE", "NIHO_ARTICLE_AUTHORITY_ORIGIN", "NIHO_ARTICLE_AUTHORITY_AUDIENCE", "EDITOR_ARTICLE_AUTHORITY_ORIGIN", "EDITOR_ARTICLE_AUTHORITY_AUDIENCE", "EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS"] as const) {
+    for (const key of ["EXPERIENCE_DATABASE_URL", "EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE", "NIHO_ARTICLE_AUTHORITY_ORIGIN", "NIHO_ARTICLE_AUTHORITY_AUDIENCE", "EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS"] as const) {
       expect(() => resolveConfig({ ...authority, [key]: "" }), key).toThrow();
     }
     expect(() => resolveConfig({ ...authority, EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS: "person@example.com" })).toThrow(/SERVICE_ACCOUNT_EMAILS/);
@@ -801,95 +799,6 @@ describe("public guide source", () => {
     expect(resolveConfig(database).guidePublicSource).toBe("database");
     expect(() => resolveConfig({ ...database, EXPERIENCE_DATABASE_URL: "" })).toThrow(/EXPERIENCE_DATABASE_URL/);
     expect(() => resolveConfig({ ...database, GUIDE_MEDIA_BUCKET: "" })).toThrow(/GUIDE_MEDIA_BUCKET/);
-  });
-});
-
-describe("editor site entrance (#254)", () => {
-  it("stays hidden until set, then keeps only an https origin (loopback http in development)", () => {
-    expect(resolveConfig({}).guideEditorSiteOrigin).toBe("");
-    expect(resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: " " }).guideEditorSiteOrigin).toBe("");
-    expect(resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: "https://editor.example/" }).guideEditorSiteOrigin).toBe("https://editor.example");
-    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", GUIDE_EDITOR_SITE_ORIGIN: "https://editor.example" }).guideEditorSiteOrigin).toBe("https://editor.example");
-    expect(resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: "http://127.0.0.1:4320" }).guideEditorSiteOrigin).toBe("http://127.0.0.1:4320");
-    for (const origin of ["http://editor.example", "editor.example", "https://editor.example/p/new", "https://editor.example/?from=footer", "https://user:pass@editor.example", "javascript:alert(1)"]) {
-      expect(() => resolveConfig({ GUIDE_EDITOR_SITE_ORIGIN: origin }), origin).toThrow(/GUIDE_EDITOR_SITE_ORIGIN/);
-    }
-  });
-});
-
-describe("editor public guide source (#252, contract v1)", () => {
-  const editor = {
-    EXPERIENCE_API_MODE: "http",
-    EXPERIENCE_GUIDE_PUBLIC_SOURCE: "editor",
-    GUIDE_EDITOR_API_BASE_URL: "https://api.editor.example/v1/",
-    GUIDE_EDITOR_API_HANDLE: "exp",
-    GUIDE_EDITOR_API_TOKEN: "synthetic-editor-token",
-  };
-
-  it("cannot be chosen in mock mode and leaves every editor setting empty otherwise", () => {
-    expect(resolveConfig({ ...editor, EXPERIENCE_API_MODE: "mock" })).toMatchObject({
-      guidePublicSource: "static",
-      guideEditorApiBaseUrl: "",
-      guideEditorApiHandle: "",
-      guideEditorApiToken: "",
-      guideEditorAssetOrigins: [],
-    });
-    expect(resolveConfig({ ...editor, EXPERIENCE_GUIDE_PUBLIC_SOURCE: "EDITOR" }).guidePublicSource).toBe("static");
-  });
-
-  it("opens with the three required settings, trimming the base URL's trailing slash", () => {
-    expect(resolveConfig(editor)).toMatchObject({
-      guidePublicSource: "editor",
-      guideEditorApiBaseUrl: "https://api.editor.example/v1",
-      guideEditorApiHandle: "exp",
-      guideEditorApiToken: "synthetic-editor-token",
-      guideEditorAssetOrigins: ["https://api.editor.example"],
-    });
-  });
-
-  it("keeps NIHO app cards off by default and enables them only in the HTTP runtime", () => {
-    expect(resolveConfig(editor).guideAppCardsEnabled).toBe(false);
-    expect(resolveConfig({ ...editor, EXPERIENCE_GUIDE_APP_CARDS_ENABLED: "true" }).guideAppCardsEnabled).toBe(true);
-    expect(resolveConfig({ ...editor, EXPERIENCE_API_MODE: "mock", EXPERIENCE_GUIDE_APP_CARDS_ENABLED: "true" }).guideAppCardsEnabled).toBe(false);
-  });
-
-  it("refuses to start without any of them, without falling back to static guides", () => {
-    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "" })).toThrow(/GUIDE_EDITOR_API_BASE_URL/);
-    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: " " })).toThrow(/GUIDE_EDITOR_API_HANDLE/);
-    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_TOKEN: "" })).toThrow(/GUIDE_EDITOR_API_TOKEN/);
-    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: "a/b" })).toThrow(/GUIDE_EDITOR_API_HANDLE/);
-  });
-
-  it("reads the editor as the face exp only: another face or an owner's site would list nothing here", () => {
-    expect(resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: " exp " }).guideEditorApiHandle).toBe("exp");
-    for (const handle of ["niho", "niho-experience", "EXP", "sample-site"]) {
-      expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_HANDLE: handle }), handle).toThrow(/GUIDE_EDITOR_API_HANDLE must be exp/);
-    }
-  });
-
-  it("accepts https, or http on loopback only, and never echoes the token in an error", () => {
-    expect(resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "http://127.0.0.1:4319/v1" }).guideEditorApiBaseUrl).toBe("http://127.0.0.1:4319/v1");
-    expect(resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "http://localhost:4319/api/public/v1" }).guideEditorApiBaseUrl).toBe("http://localhost:4319/api/public/v1");
-    expect(resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "http://[::1]:4319/v1" }).guideEditorApiBaseUrl).toBe("http://[::1]:4319/v1");
-    for (const base of ["http://api.editor.example/v1", "ftp://api.editor.example/v1", "api.editor.example/v1", "https://user:pass@api.editor.example/v1", "https://api.editor.example/v1?x=1"]) {
-      expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: base }), base).toThrow(/GUIDE_EDITOR_API_BASE_URL/);
-    }
-    let message = "";
-    try {
-      resolveConfig({ ...editor, GUIDE_EDITOR_API_BASE_URL: "http://api.editor.example/v1" });
-    } catch (error) {
-      message = String(error);
-    }
-    expect(message).toMatch(/GUIDE_EDITOR_API_BASE_URL/);
-    expect(message).not.toContain(editor.GUIDE_EDITOR_API_TOKEN);
-  });
-
-  it("reads the photo origins as https origins only", () => {
-    expect(resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: " https://assets.editor.example , https://cdn.editor.example,https://assets.editor.example " }).guideEditorAssetOrigins)
-      .toEqual(["https://assets.editor.example", "https://cdn.editor.example"]);
-    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: "http://assets.editor.example" })).toThrow(/GUIDE_EDITOR_ASSET_ORIGINS/);
-    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: "https://assets.editor.example/photos" })).toThrow(/GUIDE_EDITOR_ASSET_ORIGINS/);
-    expect(() => resolveConfig({ ...editor, GUIDE_EDITOR_ASSET_ORIGINS: "assets" })).toThrow(/GUIDE_EDITOR_ASSET_ORIGINS/);
   });
 });
 
