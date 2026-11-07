@@ -2,6 +2,8 @@
 
 2026-11-03。#251 / #254 / #255、NIHO app #19459 / #19460 / #19462 / #19479、NIHO editor #42。
 
+> 2026-11-07 のオーナー判断で、editor.niho.life から Experience への公開は止めた。記事は Experience の `/write` で書き、正本は Experience DB（[ADR 0002 ガイド記事](adr/0002-guide-content.md)の「2026-11-07」、#476）。この契約のうち、Editor が呼ぶ `candidates`・`check-related`、Experience が呼ぶ Editor の `publication`、Editor の公開本文の読取りとプレビュー用トークンは使わなくなり、#480 で撤去する。OWNER 以外のライターのために、NIHO のライター権限・記事連携、NIHO の `check`、Experience の `provider-owner`、ホストの招待の中継は残す（#481）。ライター側の承諾・辞退は Editor の画面から Experience の `/write` へ移す（niho-coliving/niho-app#19943）。
+
 ## 責任分界
 
 本文、下書き、写真、版、公開版は Editor のクラウドが正本。Experience は公開面・カテゴリ・提供者と体験の現在状態を持つ。NIHO はアカウント、writer、記事連携の招待・同意・取消を管理する。旧 `guide_writer_grants` / `guide_link_invitations` を現在権限として使わず、旧 `/editor` から下書きを書き込める経路を残さない。既存表や保存データは削除しない。

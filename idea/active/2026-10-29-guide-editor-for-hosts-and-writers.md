@@ -1,5 +1,7 @@
 # ホストとライターのガイド記事作成画面
 
+> 2026-11-07：記事は experience.niho.life の `/write` で書く方針に戻った（[ADR 0002 ガイド記事](../../docs/adr/0002-guide-content.md)の「2026-11-07」、Epic [#476](https://github.com/niho-life/niho-experience/issues/476)）。この文書の「User journey」と画面の配置は `/write`（#478）で使う。URL は `/editor/guides` ではなく `/write`、ログインは独立の `/editor` セッションではなくホストの画面と同じセッション、書ける人は体験の OWNER と NIHO のライター権限を持つ人（#481）に読み替える。
+
 作成日：2026-10-29。状態：仕様確定・分割実装中。Epic [#185](https://github.com/niho-life/niho-experience/issues/185)。関連：[#147](https://github.com/niho-life/niho-experience/issues/147)、[#145](https://github.com/niho-life/niho-experience/issues/145)、[#16](https://github.com/niho-life/niho-experience/issues/16)。
 
 ## Goal

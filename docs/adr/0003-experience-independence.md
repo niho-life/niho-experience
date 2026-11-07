@@ -1,6 +1,7 @@
 # ADR 0003: Experience を NIHO 本体から独立させる（ホストの本人・受取口座・Admin）
 
 - 状態: 採用（2026-11-07。オーナーの方針を受けて、構成はこの ADR で決めた）
+- 補足（オーナー 2026-11-07）: ホストのログインの本来の形は NIHO ログイン。§1 のメールのリンクは一時的な運用で、後で NIHO ログインへ戻す。戻す時期と手順は別に決める。戻すときはセッションを `/host` だけでなく記事の `/write` にも届く形にする（[ADR 0002 ガイド記事](0002-guide-content.md)の「2026-11-07」）。
 - 方針: オーナー指示（2026-11-07）「できるだけ niho-experience で独立させる。セキュリティ上どうしても必要な場合だけ niho-app の非公開リポを使う。口座の構成も最適を考える」
 - 置き換えるもの: [ADR 0002](0002-experience-domain-ownership.md) のうち、次の 3 点
   - NIHO アカウントを、ホストの共通の本人確認に使う
@@ -72,6 +73,7 @@ NIHO の user ID は、`provider_memberships.niho_user_id`、販売者 profile �
 
 - NIHO アプリ自身の口座管理（NIHO の会員と Stripe の結び付け）は NIHO に残す。Experience の販売には使わない。
 - 記事ライターの権限と招待（Editor 連携）は NIHO と Editor の機能なので残す。Experience の販売とは独立した flag で扱う。
+  - 2026-11-07 補足：Editor から Experience への公開は止めた。記事は Experience の `/write` で書く。ライター権限と記事連携の正本は NIHO のまま残し、OWNER 以外のライターは NIHO ログインへ戻した後に `/write` で書く（[ADR 0002 ガイド記事](0002-guide-content.md)の「2026-11-07」、#481）。
 - 非公開リポは、公開できない業務コードがセキュリティ上必要になった場合だけ作る。現時点で該当するものは無い。秘密は Secret Manager に置き、リポには置かない。
 
 ## セキュリティ
