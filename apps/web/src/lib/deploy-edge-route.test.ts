@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 const root = new URL('../../../../', import.meta.url);
 
-for (const [file, service, environment] of [['deploy-host-staging.yml', 'niho-experience-host-stg', 'host-staging'], ['deploy-production.yml', 'niho-experience', 'production']]) {
+for (const [file, service, environment] of [['deploy-host-staging.yml', 'niho-experience-host-stg', 'host-staging'], ['deploy-production.yml', 'niho-experience', 'production']] as const) {
   const source = readFileSync(new URL(`.github/workflows/${file}`, root), 'utf8');
   const blocks = [...source.matchAll(/# EDGE_CANDIDATE_READBACK_BEGIN\n([\s\S]*?)# EDGE_CANDIDATE_READBACK_END/g)];
   it(`${file} uses restricted ingress and the trusted edge for every candidate readback`, () => {
@@ -14,8 +14,8 @@ for (const [file, service, environment] of [['deploy-host-staging.yml', 'niho-ex
     expect(source).not.toContain('node scripts/deploy/edge-route.mjs');
   });
   for (const [i, block] of blocks.entries()) {
-    const query = block[1].match(/--arg tag "[^\n]+" '([\s\S]*?)' <<< "\$state"/)?.[1];
-    const state = () => ({ metadata: { name: service, labels: { app: 'niho-experience', env: environment }, annotations: { 'run.googleapis.com/ingress': 'internal-and-cloud-load-balancing' } }, status: { traffic: [{ revisionName: 'accepted', tag: 'candidate' }, { revisionName: 'accepted', tag: 'cand-abc-123' }, { revisionName: 'previous', percent: 100 }] } });
+    const query = block[1]!.match(/--arg tag "[^\n]+" '([\s\S]*?)' <<< "\$state"/)?.[1];
+    const state = () => ({ metadata: { name: String(service), labels: { app: 'niho-experience', env: String(environment) }, annotations: { 'run.googleapis.com/ingress': 'internal-and-cloud-load-balancing' } }, status: { traffic: [{ revisionName: 'accepted', tag: 'candidate' }, { revisionName: 'accepted', tag: 'cand-abc-123' }, { revisionName: 'previous', percent: 100 }] } });
     const accepts = (value: unknown, tag = 'cand-abc-123') => {
       expect(query).toBeTruthy();
       return spawnSync('jq', ['-e', '--arg', 'service', service, '--arg', 'environment', environment, '--arg', 'revision', 'accepted', '--arg', 'tag', tag, query!], { input: JSON.stringify(value), encoding: 'utf8' }).status === 0;
@@ -23,7 +23,7 @@ for (const [file, service, environment] of [['deploy-host-staging.yml', 'niho-ex
     describe(`${file} candidate readback ${i + 1}`, () => {
       it('accepts the matching aliases without moving stable traffic', () => { expect(accepts(state())).toBe(true); });
       it('refuses a moved alias, missing immutable tag, or duplicate alias', () => {
-        const moved = state(); moved.status.traffic[0].revisionName = 'another';
+        const moved = state(); moved.status.traffic[0]!.revisionName = 'another';
         expect(accepts(moved)).toBe(false);
         expect(accepts(state(), 'candidate-absent')).toBe(false);
         const duplicate = state(); duplicate.status.traffic.push({ revisionName: 'accepted', tag: 'candidate' });
