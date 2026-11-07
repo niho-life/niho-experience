@@ -175,10 +175,10 @@ describe("the editor guide source (#252)", () => {
     expect(logged()).not.toContain(EDITOR_FIXTURE.token);
   });
 
-  it("leaves the database source's failures as they were", async () => {
+  it("hides database source failures from pages where guides are optional", async () => {
     state.config = { ...editorConfig, guidePublicSource: "database" };
     const { guideCatalogForSite } = await load();
     state.repository.listPublicArticles.mockRejectedValue(new Error("database unavailable"));
-    await expect(guideCatalogForSite()).rejects.toThrow("database unavailable");
+    await expect(guideCatalogForSite()).resolves.toEqual({ source: "database", guides: [], draftSlugs: [], draftProblems: [] });
   });
 });

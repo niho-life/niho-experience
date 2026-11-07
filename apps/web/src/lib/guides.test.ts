@@ -20,14 +20,20 @@ describe("registered guides", () => {
     expect(PUBLISHED_GUIDES.flatMap((guide) => guidePublishProblems(guide).map((problem) => `${guide.slug}: ${problem}`))).toEqual([]);
   });
 
-  it("the preview registry (published + samples) is valid", () => {
+  it("keeps the real legacy article valid only as an ops import source", () => {
+    expect(PUBLISHED_GUIDES).not.toContain(kamakuraAfter4Pm);
+    expect(guideRegistryProblems([kamakuraAfter4Pm])).toEqual([]);
+    expect(guidePublishProblems(kamakuraAfter4Pm)).toEqual([]);
+  });
+
+  it("the mock preview sample registry is valid", () => {
     expect(guideRegistryProblems(guideRegistry(true))).toEqual([]);
   });
 
   it("only the mock preview gets the samples", () => {
-    const listed = PUBLISHED_GUIDES.filter((guide) => !guide.unlisted);
-    expect(guideRegistry(false)).toEqual(listed);
-    expect(guideRegistry(true)).toEqual([...listed, ...SAMPLE_GUIDES]);
+    expect(PUBLISHED_GUIDES).toEqual([]);
+    expect(guideRegistry(false)).toEqual([]);
+    expect(guideRegistry(true)).toEqual(SAMPLE_GUIDES);
   });
 
   it("selects the dinner CTA in both the pilot preview and the current live catalog", () => {

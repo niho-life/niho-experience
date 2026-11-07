@@ -21,7 +21,6 @@ import { imageAlt } from "@/lib/experience-copy";
 import { JsonLd } from "@/components/JsonLd";
 import { HomeJournal } from "@/components/HomeJournal";
 import { buttonClass } from "@/components/ui";
-import { PUBLISHED_GUIDES } from "@/content/guides";
 import { guideCatalogForSite, hasGuidesPage } from "@/lib/guide-registry";
 import { homeJournal } from "@/lib/home-journal";
 import { LISTING_NAME, publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib/public-metadata";
@@ -117,12 +116,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   const cards = withReviewLines(buildCardModels(summaries, details, isPilotPreview), await getReviewSummaries(summaries.map((summary) => summary.slug)));
   const listed = summaries.map((summary) => details.get(summary.slug)).filter((detail): detail is ExperienceDetailForSite => Boolean(detail));
   const cardDates: CardDatesSource = { kind: "read", preview: isPreview, sources: await guestBookingSources(cards.map((card) => card.slug)) };
-  // An explicit home feature makes this noindex editorial preview visible without opening /guides or the sitemap.
-  const homePreview = guideCatalogResult.source === "static"
-    ? PUBLISHED_GUIDES.find((guide) => guide.slug === "kamakura-after-4-pm" && guide.unlisted)
-    : undefined;
-  const featuredGuide = homePreview ? guideCatalogResult.guides.find((guide) => guide.slug === homePreview.slug) ?? homePreview : null;
-  const journal = homeJournal(guideCatalogResult.guides, { featured: featuredGuide, draftSlugs: guideCatalogResult.draftSlugs });
+  const journal = homeJournal(guideCatalogResult.guides, { draftSlugs: guideCatalogResult.draftSlugs });
   const guideEntry = journal.items.length ? <HomeJournal journal={journal} allHref={hasGuidesPage(guideCatalogResult) ? "/guides" : null} moreClassName={buttonClass("secondary")} /> : undefined;
   return <>
     <JsonLd data={siteJsonLd(config.siteUrl, SITE_NAME, LISTING_NAME)} />

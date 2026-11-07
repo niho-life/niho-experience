@@ -1,17 +1,17 @@
 # ガイド記事の書き方と公開手順
 
-2026-11-03: 新規記事はEditorクラウドで作成・公開する。Experienceの`/write`は固定Editorへ執筆文脈を渡す。旧`/editor`と、以下の旧CMS編集手順は新規執筆に使わない。公開元の切替前は静的/databaseの既存公開版を保持し、移行済みと推測しない。[現在の契約](../editor-article-authority.md)を参照する。
+2026-11-08: 新規記事はExperienceの`/write`から現行ホストログインで作成し、Experience DBへ公開する。書込みは記事提供者のactive OWNERだけ。非OWNER writerは#481、旧editor経路の撤去は#480で扱う。
 
 
 対象：[#145](https://github.com/niho-life/niho-experience/issues/145)。置き場所を決めた理由は [ADR 0002](../adr/0002-guide-content.md)、検索まわり（構造化データ・sitemap・hreflang）は [seo.md](../seo.md) の「ガイド記事」。
 
-> 2026-11-07 のオーナー判断で、記事は experience.niho.life の `/write` で書いて公開し、正本は Experience DB になる（[ADR 0002](../adr/0002-guide-content.md) の「2026-11-07」、Epic [#476](https://github.com/niho-life/niho-experience/issues/476)）。この文書の手順（リポ内のモジュールとして公開する）は、公開元を `database` へ切り替えるまでの静的経路の説明。ここで出した記事は、切り替える前に DB へ移す（同じ slug を二重に出さない。#479）。
+> 2026-11-07 のオーナー判断どおり正本は Experience DB（[ADR 0002](../adr/0002-guide-content.md)）。リポ内の本物の静的記事は公開経路から外した。`kamakura-after-4-pm.ts` は非公開ops移行の入力としてだけ残し、`PUBLISHED_GUIDES`へ戻さない。
 
 ## 置き場所
 
-- 公開する記事だけを `apps/web/src/content/guides/{slug}.ts` に置く（1記事1ファイル）。**下書き・未公開の原稿はコミットしない**（公開リポ）。下書きは非公開台帳で書き（[下書きをプレビューで見る](#下書きをプレビューで見る)）、公開の PR で初めて入れる。
-- `apps/web/src/content/guides/index.ts` の `PUBLISHED_GUIDES` に足すと、次のデプロイで公開される。
-- 公開 URL で内容を確認しつつ `/guides`・sitemap・フッターに載せない記事は `unlisted: true` とする。記事自体は誰でも URL で閲覧でき、常に `noindex, nofollow` を出す。#147 の記事だけは、オーナーの指示によりトップに「Editorial preview」として明示的に案内する。トップからも誰でも到達できる。掲載を確定するときは `unlisted` を外す。取り下げるときは `PUBLISHED_GUIDES` から外してデプロイする。
+- 本物の記事・下書き・公開版はExperience DBに置く。公開リポへ未公開原稿、実provider/OWNER ID、DB URL、object keyを置かない。
+- `PUBLISHED_GUIDES` は空を維持する。http/staticへ切り戻しても一覧・直URL・トップ・sitemapへ本物または合成sampleを出さない。
+- `UNLISTED` はURLを知る人だけが直接読め、常に`noindex, nofollow`。一覧・トップ・フッター・sitemap・関連記事には出さない。トップの静的記事特別扱いはない。
 - `samples/` はプレビュー（mock）専用の合成の記事。実 API の配備には出ない。サンプルを本物の記事の雛形として写すときは、`(sample)` の表記と冒頭の注記を必ず消す。
 
 ## 項目（`types.ts` の `Guide`）
@@ -130,21 +130,19 @@ relatedGuides: kamakura-day-trip-from-tokyo, hands-on-kamakura
 | `relatedExperiences`・`relatedGuides` | `relatedExperienceSlugs`・`relatedGuideSlugs` | カンマ区切り。数の決まりは公開記事と同じ |
 | `:::faq` 〜 `:::` | `faq` | 1 つだけ。`### 質問` の次の段落が答え |
 
-公開するときは、下書きを `apps/web/src/content/guides/{slug}.ts` のモジュールに写し（項目は上の表のとおり、本文は `body`、`:::faq` は `faq`）、`pillar` と `author.bio` を加え、本文に目次用の `##` を1つ以上置き、`[CONFIRM]` と `/sample/` の写真を無くしてから次の手順で PR にする。
+このファイル形式はmockで原稿構造を試す用途だけで、本物の記事を静的モジュールへ写して公開しない。本番原稿は`/write`で保存し、カテゴリ、author、本文の`##`、`[CONFIRM]`除去、非公開写真の権利を公開前検査で確定する。
 
 ## 画面での使われ方
 
-- `/guides` は柱順にカードを並べ、0本の柱は出さない。カードの読了分数は `readMinutes` または自動算出値、日付は `checkedAt` または `updatedAt` を使う。
+- `/guides` はDBカテゴリ順に`PUBLIC`カードを並べ、0本のカテゴリは出さない。mockだけは合成sampleの柱順を使う。カードの日付は`checkedOn`または公開版日時を使う。
 - 記事の目次と番号は本文の `##` から作る。同じ見出しが複数あってもリンク先IDは重複させない。本文は構文木からReact要素へ描画し、HTML文字列を注入しない。
 - 本文途中の体験案内は `relatedExperienceSlugs` の先頭から、公開カタログに現在ある最初の1件を選ぶ。価格・所要時間・日程は公開API由来のカード表示値を使い、記事へ固定値を写さない。カタログ取得失敗・未掲載では出さない。
-- トップの入口（Kamakura Journal）は体験カードと予約の流れの直後に置く（[design-system.md](../design-system.md) のトップ）。#147 の未掲載記事は「Editorial preview」と表記して先頭に大きく出し、`/guides` へのリンクは `/guides` があるときだけ出す。続けて catalog の順に、トップ全体で最大10本。サムネイルは `hero`。無ければカテゴリ名の面になるので、トップに並ぶ記事には `hero` を付ける。体験一覧末尾の `Plan your day` は掲載済みガイドが1本以上で最大3枚を出す。httpモードでは `PUBLISHED_GUIDES` だけを使う。
+- トップのKamakura JournalはDBの`PUBLIC` catalog順で最大10本。`UNLISTED`は特別掲載しない。体験一覧末尾の`Plan your day`は掲載済みガイドが1本以上で最大3枚を出す。DB障害時はどちらの記事枠も隠し、体験・予約入口は維持する。
 
 ## 公開の手順
 
-1. 原稿を確定する（事実確認・写真の許諾。[copy-guidelines.md](copy-guidelines.md)、[photo-requirements.md](photo-requirements.md)）。検索語は [seo-content-policy.md](../growth/seo-content-policy.md) に従い、量産・言い換えだけの記事は作らない。
-2. `apps/web/src/content/guides/{slug}.ts` を作り、`PUBLISHED_GUIDES` に足す。写真は `apps/web/public/guides/` に置くか https の URL を使う。
-3. `npm test`（記事の検査）と `npm run build` を通す。プレビュー（`npm run dev`）で `/guides/{slug}` の見え方を確かめる。
-4. PR を出してレビューを受け、マージ後のデプロイで公開される。最初の 1 本を公開すると、`/guides`・sitemap・フッターのリンクも出る。
-5. 公開後は Search Console の URL 検査で確かめる（[seo.md](../seo.md)「担当3と決めること」）。
-
-更新は同じ PR の流れで、本文を直して `updatedAt` を変える。記事をやめるときは `PUBLISHED_GUIDES` から外す（URL は 404 になる。別の記事へ移すなら転送を足す）。
+1. active OWNERとして現行ホストログインから`/write`を開き、原稿、カテゴリ、事実確認日、写真の現在のWeb掲載権利を確認する。
+2. 下書きを保存して再訪し、非公開画像がprivate/no-storeで見えることを確認する。公開時にcurrent OWNER、英語本文、カテゴリ、写真権利が再検査される。
+3. `UNLISTED`なら直URLの200/noindexと一覧・トップ・sitemap除外、`PUBLIC`なら一覧・トップ・sitemapを次requestで確認する。関連体験は実際に公開中のものだけ表示される。
+4. 更新は新しいimmutable publicationを作る。停止・membership失効・写真取消が次requestに反映されることを確認する。写真取消後の旧snapshotは監査用に残すが画像は404。
+5. DB/画像障害とCloudflare bypassの受入、rollbackは[Guide CMS](../guide-cms.md#database-flagを開く前のゲート)に従う。書込み開始後はstaticへ戻さず、DB互換の既知revisionへ戻す。

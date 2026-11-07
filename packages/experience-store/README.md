@@ -106,9 +106,9 @@ COMMIT;
 
 `0011_guide_draft_product_links.sql` adds ordered, article-scoped related experience selections. Publication copies the order into immutable links. Legacy sealed links keep a null order and retain the former provider/product sort; the migration does not update their rows.
 
-The code-backed `kamakura-after-4-pm` slug is reserved at the database boundary until #189 imports that article. The import must delete its reservation and create the matching database article in one transaction before switching public readers.
+Fresh schemas reserve the legacy `kamakura-after-4-pm` slug. #479's private ops importer reads the retained static source, verifies a current active OWNER, and deletes the reservation in the same transaction that creates its immutable `UNLISTED` database publication. Dry-run rolls the whole transaction back; a retry verifies the exact publication and never overwrites it.
 
-The migrations do not change the current code-backed `/guides` pages. Database-backed public SSR is separately gated by `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database`. HTTP invitation routes, category admin APIs, and migration of existing code-backed guides remain follow-up work.
+Database-backed public SSR is separately gated by `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database`; official deploys set it through `DATABASE_GUIDE_PUBLICATIONS_ENABLED` with the private media bucket. HTTP/static has no real publications after #479, and only mock previews use synthetic samples. Non-OWNER writer support remains follow-up work (#481).
 
 Schedule rules use optimistic versions. Booking hold creation derives the requested occurrence with `@niho-experience/experience-domain`, materializes it, and locks both its schedule rule and occurrence row. All hold creators therefore serialize on one occurrence before counting active holds and confirmed seats.
 

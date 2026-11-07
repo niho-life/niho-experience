@@ -189,4 +189,5 @@ export const MIGRATION_LEDGER_TABLE = "experience_schema_migrations";
 export const OPERATOR_ONLY_SOURCES = Object.freeze([
   "packages/experience-store/src/site-sale-registration.ts",
   "packages/experience-store/src/host-seller-provisioning.ts",
+  "packages/experience-store/src/legacy-guide-import.ts",
 ]);

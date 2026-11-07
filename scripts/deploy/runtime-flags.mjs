@@ -70,7 +70,8 @@ const serviceAccount = (name) => ({ project }) => `${name}@${project}.iam.gservi
 const siteUrl = ({ siteUrl: url }) => url;
 
 /**
- * The table. `env`: the Cloud Run variable set to "true". `variable`: the GitHub variable after the prefix.
+ * The table. `id` identifies a flag when multiple mutually-exclusive choices write the same runtime env; otherwise
+ * `env` is also the id. `env`: the Cloud Run variable set to "true". `variable`: the GitHub variable after the prefix.
  * `defaults`: on when its variable is unset (only staging's PWA, which it always had). `needs`: CAPABILITIES or other
  * flags' `env`, "A|B" for either. `conflicts`: flags that may not be on at the same time. `secrets`: Secret Manager
  * references (`name:version`), with staging's fixed Secret
@@ -117,10 +118,12 @@ export const FLAGS = Object.freeze([
     ],
   },
   {
+    id: "EDITOR_GUIDE_PUBLICATIONS",
     env: "EXPERIENCE_GUIDE_PUBLIC_SOURCE",
     variable: "EDITOR_PUBLICATIONS_ENABLED",
     value: "editor",
     needs: ["DATABASE", "EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED"],
+    conflicts: ["DATABASE_GUIDE_PUBLICATIONS"],
     settings: [
       { env: "GUIDE_EDITOR_API_BASE_URL", variable: "GUIDE_EDITOR_API_BASE_URL", shape: "httpsUrl" },
       { env: "GUIDE_EDITOR_ASSET_ORIGINS", variable: "GUIDE_EDITOR_ASSET_ORIGIN", shape: "httpsOrigin" },
@@ -129,9 +132,19 @@ export const FLAGS = Object.freeze([
     fixed: { GUIDE_EDITOR_API_HANDLE: () => "exp" },
   },
   {
+    id: "DATABASE_GUIDE_PUBLICATIONS",
+    env: "EXPERIENCE_GUIDE_PUBLIC_SOURCE",
+    variable: "DATABASE_GUIDE_PUBLICATIONS_ENABLED",
+    value: "database",
+    needs: ["DATABASE"],
+    conflicts: ["EDITOR_GUIDE_PUBLICATIONS"],
+    settings: [{ env: "GUIDE_MEDIA_BUCKET", variable: "GUIDE_MEDIA_BUCKET", shape: "bucketName" }],
+  },
+  {
     env: "EXPERIENCE_GUIDE_APP_CARDS_ENABLED",
     variable: "GUIDE_APP_CARDS_ENABLED",
-    needs: ["EXPERIENCE_GUIDE_PUBLIC_SOURCE"],
+    needs: ["EDITOR_GUIDE_PUBLICATIONS"],
+    conflicts: ["DATABASE_GUIDE_PUBLICATIONS"],
   },
   {
     env: "EXPERIENCE_GUEST_BOOKING_ENABLED",
@@ -340,21 +353,22 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
     const raw = vars?.[name(variable)];
     return typeof raw === "string" ? raw : "";
   };
+  const flagId = (flag) => flag.id ?? flag.env;
   const on = new Set();
   for (const flag of FLAGS) {
     const raw = value(flag.variable);
     if (raw === "") {
-      if (flag.defaults?.[target]) on.add(flag.env);
-    } else if (raw === "true") on.add(flag.env);
+      if (flag.defaults?.[target]) on.add(flagId(flag));
+    } else if (raw === "true") on.add(flagId(flag));
     else if (raw !== "false") problems.push(`${name(flag.variable)} must be true, false or unset`);
   }
   const has = (need) => need.split("|").some((one) => (CAPABILITIES.includes(one) ? hostConsole === true : on.has(one)));
   for (const flag of FLAGS) {
-    if (!on.has(flag.env)) continue;
+    if (!on.has(flagId(flag))) continue;
     for (const conflict of flag.conflicts ?? []) {
       if (!on.has(conflict)) continue;
-      const other = FLAGS.find((candidate) => candidate.env === conflict);
-      problems.push(`${flag.env} (${name(flag.variable)}) conflicts with ${other?.env ?? conflict}${other ? ` (${name(other.variable)})` : ""}`);
+      const other = FLAGS.find((candidate) => flagId(candidate) === conflict);
+      problems.push(`${flagId(flag)} (${name(flag.variable)}) conflicts with ${other ? flagId(other) : conflict}${other ? ` (${name(other.variable)})` : ""}`);
     }
   }
   const env = {};
@@ -371,8 +385,8 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
     }
   }
   for (const flag of FLAGS) {
-    if (!on.has(flag.env)) continue;
-    const by = `${flag.env} (${name(flag.variable)})`;
+    if (!on.has(flagId(flag))) continue;
+    const by = `${flagId(flag)} (${name(flag.variable)})`;
     for (const need of flag.needs ?? []) {
       if (!has(need)) {
         const words = need.split("|").map((one) => (one === "HOST_CONSOLE" || one === "DATABASE" ? (target === "prod" ? "enable_host_calendar=true" : "the host console") : one)).join(" or ");
@@ -394,7 +408,7 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
     }
     for (const [key, derive] of Object.entries(flag.fixed ?? {})) env[key] = derive(context);
   }
-  return { problems: [...new Set(problems)], on: FLAGS.map((flag) => flag.env).filter((flag) => on.has(flag)), env, secrets, names: tableNames() };
+  return { problems: [...new Set(problems)], on: FLAGS.map(flagId).filter((id) => on.has(id)), env, secrets, names: tableNames() };
 }
 
 /** `NAME=value,…` in the table's order of names (stable for review). */

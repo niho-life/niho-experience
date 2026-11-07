@@ -23,10 +23,9 @@ import { withoutUnverifiedPreviewRelated } from "./guide-article-policy";
  * How a guide is shown:
  * - `published`: a listed guide (or an unlisted one by its direct URL; its metadata says noindex).
  * - `draft`: a mock-preview draft, with a notice.
- * - `editorial-preview`: a static unlisted editorial preview, with a notice and no structured data.
  * - `editor-preview`: an editor.niho.life draft at /guides/preview (#253), with a notice and no structured data.
  */
-export type GuideArticleVariant = "published" | "draft" | "editorial-preview" | "editor-preview";
+export type GuideArticleVariant = "published" | "draft" | "editor-preview";
 
 /**
  * One guide, fully in the server HTML: title, author, dates, hero, body, FAQ, experiences to book and related guides.
@@ -36,7 +35,6 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
   guide = variant === "published"
     ? await filterCurrentRelatedGuide(guide)
     : withoutUnverifiedPreviewRelated(guide, variant === "editor-preview");
-  const editorialPreview = variant === "editorial-preview";
   const structuredData = variant === "published" || variant === "draft";
   const blocks = parseGuideMarkdown(guide.body);
   const outline = guideOutline(blocks);
@@ -68,18 +66,13 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
               <Notice tone="warn" title="Draft · not published · visible only in this preview" />
             </div>
           ) : null}
-          {editorialPreview ? (
-            <div className="mb-5">
-              <Notice tone="warn" title="Editorial preview · details are being checked · anyone with this link can view it" />
-            </div>
-          ) : null}
           {variant === "editor-preview" ? (
             <div className="mb-5">
               <Notice tone="warn" title="Preview from editor.niho.life · not published · link expires soon" />
             </div>
           ) : null}
           <nav aria-label="Breadcrumb" className="text-sm text-muted">
-            {editorialPreview ? <Link href="/" className="font-extrabold text-ink hover:underline">NIHO Experience</Link> : <Link href="/guides" className="font-extrabold text-ink hover:underline">Guides</Link>}
+            <Link href={guide.unlisted ? "/" : "/guides"} className="font-extrabold text-ink hover:underline">{guide.unlisted ? "NIHO Experience" : "Guides"}</Link>
             <span aria-hidden> / </span>
             <span aria-current="page">{sectionLabel}</span>
           </nav>
@@ -87,7 +80,7 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
             <p className="eyebrow">{sectionLabel}</p>
             <h1 className="mt-1.5 text-[2.125rem] leading-[1.1] sm:text-[2.875rem]">{guide.title}</h1>
             <p className="mt-4 text-[0.9375rem] text-muted">
-              <b className="font-extrabold text-ink">{guide.author.name}</b> · {guide.author.role ? <>{guide.author.role} · </> : null}{editorialPreview ? "Previewed" : "Published"}{" "}
+              <b className="font-extrabold text-ink">{guide.author.name}</b> · {guide.author.role ? <>{guide.author.role} · </> : null}Published{" "}
               <time dateTime={guide.publishedAt}>{formatGuideDate(guide.publishedAt)}</time> · Updated{" "}
               <time dateTime={guide.updatedAt}>{formatGuideDate(guide.updatedAt)}</time> · {guideReadMinutes(guide)} min read
             </p>

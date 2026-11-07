@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { guideRegistry, PUBLISHED_GUIDES, type Guide } from "@/content/guides";
+import { guideRegistry, type Guide } from "@/content/guides";
 import { config, isPreview } from "./config";
 import { isEditorGuideSlug } from "./editor-publication/contract";
 import { findEditorGuide, readEditorPublications } from "./editor-publication/source";
@@ -82,20 +82,21 @@ export const guideCatalog = cache(async (): Promise<GuideCatalog> => {
   return { source: "static", guides: sortGuides([...bySlug.values()]), draftSlugs: drafts.guides.map((guide) => guide.slug), draftProblems: drafts.problems };
 });
 
-const EMPTY_EDITOR_CATALOG: GuideCatalog = { source: "editor", guides: [], draftSlugs: [], draftProblems: [] };
+const emptySiteCatalog = (source: "database" | "editor"): GuideCatalog => ({ source, guides: [], draftSlugs: [], draftProblems: [] });
 
 /**
  * The catalog for pages that only mention guides (the footer link, the home journal, the experience list and detail):
- * with the editor source, an editor outage past the stale limit hides those mentions instead of failing booking pages.
- * The guide pages themselves use `guideCatalog` and fail. Static and database sources behave exactly as `guideCatalog`.
+ * a database/editor outage hides those optional mentions instead of failing booking pages. The guide pages themselves use
+ * `guideCatalog` and fail into their local error boundary. Static never needs a remote fallback.
  */
 export const guideCatalogForSite = cache(async (): Promise<GuideCatalog> => {
-  if (config.guidePublicSource !== "editor") return guideCatalog();
+  const source = config.guidePublicSource;
+  if (source === "static") return guideCatalog();
   try {
     return await guideCatalog();
-  } catch (error) {
-    console.error(`[guides] guides hidden on this page: ${error instanceof Error ? error.message : "the editor publications could not be read"}`);
-    return EMPTY_EDITOR_CATALOG;
+  } catch {
+    console.error(`[guides] ${source} publications unavailable; guides hidden on optional page`);
+    return emptySiteCatalog(source);
   }
 });
 
@@ -118,7 +119,7 @@ export function hasGuidesPage(catalog: GuideCatalog): boolean {
   return catalog.guides.length > 0 || catalog.draftProblems.length > 0;
 }
 
-export async function findGuide(slug: string): Promise<{ guide: Guide; draft: boolean; unlisted?: true; editorialPreview?: true } | null> {
+export async function findGuide(slug: string): Promise<{ guide: Guide; draft: boolean; unlisted?: true } | null> {
   if (config.guidePublicSource === "database") {
     const guide = await databaseGuide(slug);
     return guide === null ? null : { guide, draft: false, ...(guide.unlisted ? { unlisted: true as const } : {}) };
@@ -130,8 +131,7 @@ export async function findGuide(slug: string): Promise<{ guide: Guide; draft: bo
   const catalog = await guideCatalog();
   const guide = catalog.guides.find((candidate) => candidate.slug === slug);
   if (guide) return { guide, draft: catalog.draftSlugs.includes(slug) };
-  const unlisted = PUBLISHED_GUIDES.find((candidate) => candidate.unlisted && candidate.slug === slug);
-  return unlisted ? { guide: unlisted, draft: false, unlisted: true, editorialPreview: true } : null;
+  return null;
 }
 
 /**
