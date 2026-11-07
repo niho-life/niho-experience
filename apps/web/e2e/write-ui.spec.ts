@@ -104,6 +104,16 @@ async function mockWriterApi(page: Page, withCover = false) {
   return { get guide() { return guide; }, createIds, events, setNextSave(value: "401" | "409") { nextSave = value; } };
 }
 
+test("opening an existing article does not create an unpublished revision", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "write-desktop", "desktop editor lifecycle");
+  const api = await mockWriterApi(page);
+  await page.goto(`/write/write-e2e-fixture/edit/${ID}`);
+  await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
+  await page.waitForTimeout(1200); // Exceeds the editor's 900ms autosave debounce.
+  expect(api.events.filter((event) => event.startsWith("save:"))).toEqual([]);
+  expect(api.guide.revision).toBe(1);
+});
+
 test("login entry → idempotent create retry → latest save → private preview → publish → public guide → stop", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "write-desktop", "desktop flow");
   const api = await mockWriterApi(page);
