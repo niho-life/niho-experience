@@ -6,6 +6,23 @@ import { StoreValidationError } from "../src/errors.ts";
 import { GuideRepository, parseGuideContent } from "../src/guides.ts";
 
 describe("guide CMS schema", () => {
+  it("adds provider-owned draft flexibility, immutable upload actors, and operations stop state", async () => {
+    const sql = await readFile(new URL("../migrations/0067_guide_provider_ownership.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /length\(title\) BETWEEN 0 AND 110/);
+    assert.match(sql, /length\(cover_alt\) BETWEEN 0 AND 300/);
+    assert.match(sql, /status IN \('DRAFT', 'PUBLISHED', 'STOPPED', 'OPS_STOPPED'\)/);
+    assert.match(sql, /ADD COLUMN ops_stop_reason text/);
+    assert.match(sql, /ADD COLUMN ops_stop_contact text/);
+    assert.match(sql, /ADD COLUMN uploaded_by_actor_id text/);
+    assert.match(sql, /DISABLE TRIGGER guide_media_assets_protect/);
+    assert.match(sql, /SET uploaded_by_actor_id = creator_niho_user_id/);
+    assert.match(sql, /ENABLE TRIGGER guide_media_assets_protect/);
+    assert.match(sql, /ALTER COLUMN uploaded_by_actor_id SET NOT NULL/);
+    assert.match(sql, /NEW\.uploaded_by_actor_id IS DISTINCT FROM OLD\.uploaded_by_actor_id/);
+  });
+
   it("adds versioned guide administration and append-only minimal receipts", async () => {
     const sql = await readFile(new URL("../migrations/0012_guide_admin.sql", import.meta.url), "utf8");
     assert.match(sql, /^BEGIN;/);
@@ -103,11 +120,13 @@ describe("guide content boundary", () => {
     assert.deepEqual(
       parseGuideContent({
         markdown: "## A synthetic walk\n\nPlain text.",
+        language: "en",
         author: { name: "Synthetic Writer", role: "Guide", bio: "Writes synthetic test guides." },
         checkedOn: "2026-10-29",
       }),
       {
         markdown: "## A synthetic walk\n\nPlain text.",
+        language: "en",
         author: { name: "Synthetic Writer", role: "Guide", bio: "Writes synthetic test guides." },
         checkedOn: "2026-10-29",
       },
@@ -119,6 +138,22 @@ describe("guide content boundary", () => {
     assert.throws(() => parseGuideContent({ markdown: "safe", checkedOn: "29/10/2026" }), StoreValidationError);
     assert.throws(() => parseGuideContent({ markdown: "safe", checkedOn: "2026-02-30" }), StoreValidationError);
     assert.throws(() => parseGuideContent({ markdown: "safe", author: { name: "A", role: "B" } }), StoreValidationError);
+    assert.throws(() => parseGuideContent({ markdown: "safe", language: "ja" }), StoreValidationError);
+  });
+
+  it("rejects unsafe or malformed Markdown before opening a database transaction", async () => {
+    const pool = { async connect() { throw new Error("database must not be reached"); } } as unknown as Pool;
+    const repository = new GuideRepository(pool);
+    const input = (markdown: string) => repository.createArticle("hst_synthetic_owner", {
+      id: "unsafe-guide",
+      slug: "unsafe-guide",
+      subject: { kind: "PROVIDER" as const, providerId: "provider-a" },
+      title: "Unsafe guide",
+      content: { language: "en" as const, markdown },
+    });
+    await assert.rejects(() => input("## Unsafe\n\n<script>bad()</script>"), StoreValidationError);
+    await assert.rejects(() => input("## Unsafe\n\n[broken link](javascript:bad())"), StoreValidationError);
+    await assert.rejects(() => input("## Unsafe\n\n**unclosed emphasis*"), StoreValidationError);
   });
 });
 

@@ -44,9 +44,9 @@ async function insertReadyAsset(pool: Pool, input: {
 }): Promise<void> {
   await pool.query(
     `INSERT INTO guide_media_assets
-       (id, article_id, creator_niho_user_id, object_key, state, width, height, byte_size, ready_at,
+       (id, article_id, creator_niho_user_id, uploaded_by_actor_id, object_key, state, width, height, byte_size, ready_at,
         public_credit, web_confirmed_at, web_confirmed_by_niho_user_id)
-     VALUES ($1::uuid, $2, $3, $4, 'READY', $5, $6, 4096, '2026-10-01T00:00:00Z',
+     VALUES ($1::uuid, $2, $3, $3, $4, 'READY', $5, $6, 4096, '2026-10-01T00:00:00Z',
         $7, CASE WHEN $7::text IS NULL THEN NULL ELSE '2026-10-02T00:00:00Z'::timestamptz END,
         CASE WHEN $7::text IS NULL THEN NULL ELSE $3 END)`,
     [input.id, input.articleId, input.creator, `synthetic/guides/${input.id}.jpg`, input.width, input.height, input.credit ?? null],
@@ -131,13 +131,13 @@ describe("public guide reads after the Store write path was removed", { skip: da
       );
 
       // A public article first sealed as UNLISTED, then republished as PUBLIC with a cover and figures.
-      await insertArticle(pool, { id: "article-public", slug: "public-guide", creator: "writer-a", categorySlug: "culture", title: "Draft title" });
+      await insertArticle(pool, { id: "article-public", slug: "public-guide", creator: "writer-a", subjectProviderId: "provider-a", categorySlug: "culture", title: "Draft title" });
       await insertReadyAsset(pool, { id: ASSET.oldCover, articleId: "article-public", creator: "writer-a", width: 800, height: 600 });
       await insertReadyAsset(pool, { id: ASSET.cover, articleId: "article-public", creator: "writer-a", width: 1200, height: 800 });
       await insertReadyAsset(pool, { id: ASSET.figure, articleId: "article-public", creator: "writer-a", width: 900, height: 600, credit: "Synthetic Photographer" });
       await insertReadyAsset(pool, { id: ASSET.revokedFigure, articleId: "article-public", creator: "writer-a", width: 900, height: 600, credit: "Synthetic Revoked" });
       const firstPublication = await insertPublication(pool, {
-        articleId: "article-public", number: 1, slug: "public-guide", category: ["culture", "Culture", "文化", 20],
+        articleId: "article-public", number: 1, slug: "public-guide", subjectProviderId: "provider-a", category: ["culture", "Culture", "文化", 20],
         title: "Synthetic first title", visibility: "UNLISTED", publishedAt: "2026-10-10T00:00:00Z", publishedBy: "writer-a",
       });
       await pool.query(
@@ -148,7 +148,7 @@ describe("public guide reads after the Store write path was removed", { skip: da
       await seal(pool, firstPublication);
       await setCurrent(pool, "article-public", firstPublication, "PUBLISHED");
       const publicPublication = await insertPublication(pool, {
-        articleId: "article-public", number: 2, slug: "public-guide", category: ["culture", "Culture", "文化", 20],
+        articleId: "article-public", number: 2, slug: "public-guide", subjectProviderId: "provider-a", category: ["culture", "Culture", "文化", 20],
         title: "Synthetic public title", visibility: "PUBLIC", publishedAt: "2026-10-20T00:00:00Z", publishedBy: "writer-a",
       });
       await pool.query(
@@ -238,7 +238,7 @@ describe("public guide reads after the Store write path was removed", { skip: da
         publicationNumber: 2,
         sourceRevision: 3,
         slug: "public-guide",
-        subject: { kind: "WRITER" },
+        subject: { kind: "PROVIDER", providerId: "provider-a" },
         category: { slug: "culture", labelEn: "Culture", labelJa: "文化", displayOrder: 20 },
         title: "Synthetic public title",
         description: "Synthetic public title description",
@@ -246,7 +246,6 @@ describe("public guide reads after the Store write path was removed", { skip: da
         visibility: "PUBLIC",
         indexable: true,
         productLinks: [
-          { providerId: "provider-b", productId: "walk", productSlug: "walk" },
           { providerId: "provider-a", productId: "tea", productSlug: "tea" },
           { providerId: "provider-a", productId: "tea-three", productSlug: "tea-three" },
         ],
@@ -256,6 +255,16 @@ describe("public guide reads after the Store write path was removed", { skip: da
         publishedAtUtc: "2026-10-20T00:00:00.000Z",
       };
       assert.deepEqual(await repository.getPublicArticleBySlug("public-guide"), expectedPublic);
+      assert.equal(expectedPublic.productLinks.some((link) => link.providerId === "provider-b"), false);
+      await pool.query(
+        "UPDATE provider_memberships SET role='EDITOR' WHERE provider_id='provider-a' AND niho_user_id='host-a'",
+      );
+      const bodyWithoutOwnerLink = await repository.getPublicArticleBySlug("public-guide");
+      assert.equal(bodyWithoutOwnerLink?.title, "Synthetic public title");
+      assert.deepEqual(bodyWithoutOwnerLink?.productLinks, []);
+      await pool.query(
+        "UPDATE provider_memberships SET role='OWNER' WHERE provider_id='provider-a' AND niho_user_id='host-a'",
+      );
 
       const unlisted = await repository.getPublicArticleBySlug("unlisted-guide");
       assert.deepEqual(
@@ -304,6 +313,7 @@ describe("public guide reads after the Store write path was removed", { skip: da
         id: ASSET.figure,
         articleId: "article-public",
         creatorNihoUserId: "writer-a",
+        uploadedByActorId: "writer-a",
         objectKey: `synthetic/guides/${ASSET.figure}.jpg`,
         state: "READY",
         width: 900,
@@ -317,6 +327,7 @@ describe("public guide reads after the Store write path was removed", { skip: da
         id: ASSET.cover,
         articleId: "article-public",
         creatorNihoUserId: "writer-a",
+        uploadedByActorId: "writer-a",
         objectKey: `synthetic/guides/${ASSET.cover}.jpg`,
         state: "READY",
         width: 1200,
