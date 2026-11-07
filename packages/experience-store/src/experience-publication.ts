@@ -891,6 +891,51 @@ async function insertOrFindPublication(
   return publicationId;
 }
 
+/** The caller holds the provider inventory and product locks and has checked OWNER/Admin authority. */
+async function selectUploadedGalleryMedia(client: PoolClient, providerId: string, productId: string, input: ExperienceHostMediaAssetInput): Promise<ExperienceHostMediaAsset> {
+  const existing = await client.query<DbRow>(
+    `SELECT id,source_position,width,height,byte_size,state FROM experience_product_media_assets
+      WHERE provider_id=$1 AND product_id=$2 AND source_ref_hash=$3`,
+    [providerId, productId, input.sourceRefHash],
+  );
+  let row = existing.rows[0];
+  if (row) {
+    if (row.state !== "READY") throw new StoreConflictError("The existing photo is not available for reuse.");
+  } else {
+    const position = Number((await client.query<{ position: number }>(
+      `SELECT COALESCE(MAX(source_position)+1,0)::int AS position FROM experience_product_media_assets WHERE provider_id=$1 AND product_id=$2`,
+      [providerId, productId],
+    )).rows[0]?.position);
+    if (!Number.isSafeInteger(position) || position < 0 || position > 999) throw new StoreValidationError("A product has reached its media upload limit.");
+    row = (await client.query<DbRow>(
+      `INSERT INTO experience_product_media_assets
+         (id,provider_id,product_id,source_position,object_key,source_ref_hash,width,height,byte_size,alt_text,public_credit,rights_confirmed_at)
+       VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,clock_timestamp())
+       RETURNING id,source_position,width,height,byte_size`,
+      [input.id, providerId, productId, position, input.objectKey, input.sourceRefHash, input.width, input.height, input.byteSize, input.altText, input.publicCredit],
+    )).rows[0]!;
+  }
+  // A retry keeps its current gallery position. A removed photo is appended once using its existing object.
+  const position = Number((await client.query<{ position: number }>(
+    `SELECT COALESCE(
+       (SELECT position FROM experience_product_media_selection WHERE provider_id=$1 AND product_id=$2 AND asset_id=$3::uuid AND placement='GALLERY'),
+       (SELECT COALESCE(MAX(position)+1,0)::int FROM experience_product_media_selection WHERE provider_id=$1 AND product_id=$2 AND placement='GALLERY')
+     )::int AS position`, [providerId, productId, row.id],
+  )).rows[0]?.position);
+  if (!Number.isSafeInteger(position) || position < 0 || position > 19) throw new StoreValidationError("A product has reached its gallery selection limit.");
+  // Assets stay immutable; selection uses the existing INSERT/DELETE runtime grants.
+  await client.query("DELETE FROM experience_product_media_selection WHERE provider_id=$1 AND product_id=$2 AND asset_id=$3::uuid", [providerId, productId, row.id]);
+  await client.query(
+    `INSERT INTO experience_product_media_selection
+       (provider_id,product_id,asset_id,placement,position,alt_text,alt_text_ja,public_credit)
+     VALUES ($1,$2,$3::uuid,'GALLERY',$4,$5,$6,$7)`,
+    [providerId, productId, row.id, position, input.altText, input.altTextJa, input.publicCredit],
+  );
+  return { id: String(row.id), position, sourcePosition: safeInteger(row.source_position, "media source position"), placement: "GALLERY",
+    width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"), byteSize: safeInteger(row.byte_size, "media byte_size"),
+    altText: input.altText, altTextJa: input.altTextJa, publicCredit: input.publicCredit };
+}
+
 export class ExperiencePublicationRepository {
   readonly #pool: Pool;
 
@@ -1296,46 +1341,15 @@ export class ExperiencePublicationRepository {
       await lockProviderInventory(client, providerId);
       await adminDraftSeller(client, providerId);
       const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
-      const next = await client.query<{ position: number }>(
-        `SELECT COALESCE(MAX(source_position)+1,0)::int AS position
-           FROM experience_product_media_assets WHERE provider_id=$1 AND product_id=$2`,
-        [providerId, productId],
-      );
-      const sourcePosition = Number(next.rows[0]?.position);
-      if (!Number.isSafeInteger(sourcePosition) || sourcePosition < 0 || sourcePosition > 999) throw new StoreValidationError("A product has reached its media upload limit.");
-      const result = await client.query<DbRow>(
-        `INSERT INTO experience_product_media_assets
-           (id,provider_id,product_id,source_position,object_key,source_ref_hash,width,height,byte_size,alt_text,public_credit,rights_confirmed_at)
-         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,clock_timestamp())
-         RETURNING id,source_position,width,height,byte_size,alt_text,public_credit`,
-        [input.id, providerId, productId, sourcePosition, input.objectKey, input.sourceRefHash,
-          input.width, input.height, input.byteSize, input.altText, input.publicCredit],
-      );
-      const selectionPosition = Number((await client.query<{ position: number }>(
-        `SELECT COALESCE(MAX(position)+1,0)::int AS position FROM experience_product_media_selection
-          WHERE provider_id=$1 AND product_id=$2 AND placement='GALLERY'`,
-        [providerId, productId],
-      )).rows[0]?.position ?? 0);
-      await client.query(
-        `INSERT INTO experience_product_media_selection
-           (provider_id,product_id,asset_id,placement,position,alt_text,alt_text_ja,public_credit)
-         VALUES ($1,$2,$3::uuid,'GALLERY',$4,$5,$6,$7)`,
-        [providerId, productId, input.id, selectionPosition, input.altText, input.altTextJa, input.publicCredit],
-      );
+      const asset = await selectUploadedGalleryMedia(client, providerId, productId, input);
       const bumped = await client.query(
         `UPDATE experience_products SET version=version+1,updated_at=clock_timestamp()
           WHERE provider_id=$1 AND id=$2 AND version=$3 AND status='DRAFT'`,
         [providerId, productId, product.version],
       );
       if (bumped.rowCount !== 1) throw new StoreConflictError("Product changed while adding media.");
-      await auditAdminDraft(client, actor, providerId, productId, "MEDIA_ADDED", { assetId: input.id });
-      const row = result.rows[0]!;
-      return {
-        id: String(row.id), position: selectionPosition, sourcePosition, placement: "GALLERY",
-        width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),
-        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: input.altText, altTextJa: input.altTextJa,
-        publicCredit: row.public_credit === null ? null : String(row.public_credit),
-      };
+      await auditAdminDraft(client, actor, providerId, productId, "MEDIA_ADDED", { assetId: asset.id });
+      return asset;
     });
   }
 
@@ -1832,45 +1846,14 @@ export class ExperiencePublicationRepository {
         [actor.providerId, productId],
       );
       if (!product.rows[0]) throw new StoreNotFoundError("product");
-      const next = await client.query<{ position: number }>(
-        `SELECT COALESCE(MAX(source_position)+1,0)::int AS position
-           FROM experience_product_media_assets WHERE provider_id=$1 AND product_id=$2`,
-        [actor.providerId, productId],
-      );
-      const position = Number(next.rows[0]?.position);
-      if (!Number.isSafeInteger(position) || position < 0 || position > 999) throw new StoreValidationError("A product has reached its media upload limit.");
-      const result = await client.query<DbRow>(
-        `INSERT INTO experience_product_media_assets
-           (id,provider_id,product_id,source_position,object_key,source_ref_hash,width,height,byte_size,alt_text,public_credit,rights_confirmed_at)
-         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,clock_timestamp())
-         RETURNING id,source_position,width,height,byte_size,alt_text,public_credit`,
-        [input.id, actor.providerId, productId, position, input.objectKey, input.sourceRefHash,
-          input.width, input.height, input.byteSize, input.altText, input.publicCredit],
-      );
-      const row = result.rows[0]!;
-      const selectionPosition = (await client.query<{ position: number }>(
-        `SELECT COALESCE(MAX(position)+1,0)::int AS position FROM experience_product_media_selection
-          WHERE provider_id=$1 AND product_id=$2 AND placement='GALLERY'`, [actor.providerId, productId],
-      )).rows[0]?.position ?? 0;
-      await client.query(
-        `INSERT INTO experience_product_media_selection
-           (provider_id,product_id,asset_id,placement,position,alt_text,alt_text_ja,public_credit)
-         VALUES ($1,$2,$3::uuid,'GALLERY',$4,$5,$6,$7)`,
-        [actor.providerId, productId, input.id, selectionPosition, input.altText, input.altTextJa, input.publicCredit],
-      );
+      const asset = await selectUploadedGalleryMedia(client, actor.providerId, productId, input);
       const versioned = await client.query(
         `UPDATE experience_products SET version=version+1,updated_at=clock_timestamp()
           WHERE provider_id=$1 AND id=$2 AND version=$3 RETURNING version`,
         [actor.providerId, productId, product.rows[0].version],
       );
       if (versioned.rowCount !== 1) throw new StoreConflictError("Product changed while adding media.");
-      return {
-        id: String(row.id), position: safeInteger(selectionPosition, "media position"), placement: "GALLERY",
-        sourcePosition: safeInteger(row.source_position, "media source position"),
-        width: safeInteger(row.width, "media width"), height: safeInteger(row.height, "media height"),
-        byteSize: safeInteger(row.byte_size, "media byte_size"), altText: input.altText, altTextJa: input.altTextJa,
-        publicCredit: row.public_credit === null ? null : String(row.public_credit),
-      };
+      return asset;
     });
   }
 

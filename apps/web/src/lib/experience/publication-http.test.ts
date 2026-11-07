@@ -228,7 +228,7 @@ describe("Experience owner product API", () => {
     expect(mocks.repository.stop).toHaveBeenCalledWith(actor, product.id, 3);
   });
 
-  it("returns the next product version when a photo changes the publication draft", async () => {
+  it.each([false, true])("returns the product version and removes only the unused upload when reusing=%s", async (reuse) => {
     const addedMedia = {
       id: "00000000-0000-4000-8000-000000000402", position: 1, sourcePosition: 1, placement: "GALLERY", width: 640, height: 480,
       byteSize: 2048, altText: "Second synthetic photo", altTextJa: "2枚目の合成写真", publicCredit: null,
@@ -236,10 +236,14 @@ describe("Experience owner product API", () => {
     mocks.mediaStorage = { write: vi.fn().mockResolvedValue(undefined), read: vi.fn(), remove: vi.fn().mockResolvedValue(undefined) };
     mocks.coverInput.mockResolvedValue(Buffer.from("synthetic-original"));
     mocks.coverImage.mockResolvedValue({ bytes: Buffer.from("synthetic-jpeg"), width: 640, height: 480 });
-    mocks.repository.addMedia.mockResolvedValue(addedMedia);
+    let selectedId = addedMedia.id;
+    mocks.repository.addMedia.mockImplementation((_actor: unknown, _productId: unknown, input: { id: string }) => {
+      selectedId = reuse ? addedMedia.id : input.id;
+      return { ...addedMedia, id: selectedId };
+    });
     mocks.repository.getProduct.mockResolvedValue({ ...product, version: 5 });
     mocks.repository.getSaleTerms.mockResolvedValue({ draftVersion: 5, stateVersion: 3, saleTerms: terms });
-    mocks.repository.listMedia.mockResolvedValue([...media, addedMedia]);
+    mocks.repository.listMedia.mockImplementation(() => [...media, { ...addedMedia, id: selectedId }]);
     const response = await uploadProductMedia(new Request(`https://experience.example.test/host/api/products/${product.id}/media`, {
       method: "POST",
       headers: {
@@ -254,7 +258,9 @@ describe("Experience owner product API", () => {
 
     expect(response.status).toBe(201);
     const body = await response.json();
-    expect(body.asset.id).toBe(addedMedia.id);
+    expect(body.asset.id).toBe(selectedId);
+    if (reuse) expect(mocks.mediaStorage.remove).toHaveBeenCalledWith(mocks.mediaStorage.write.mock.calls[0]![0]);
+    else expect(mocks.mediaStorage.remove).not.toHaveBeenCalled();
     expect(body.product.version).toBe(Buffer.from("1:5:3:2").toString("base64url"));
     expect(body.product.media).toHaveLength(2);
     expect(mocks.repository.addMedia).toHaveBeenCalledWith(actor, product.id, expect.objectContaining({

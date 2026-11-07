@@ -69,6 +69,15 @@ describe("Admin product draft handoff (#169)", { skip: databaseUrl === undefined
         publicCredit: null,
       });
       assert.equal(media.position, 0);
+      const repeatedId = randomUUID();
+      const repeated = await publications.addMediaAsAdmin(admin, providerId, draft.id, {
+        id: repeatedId, objectKey: `experience-products/${repeatedId}.jpg`, sourceRefHash: "a".repeat(64),
+        width: 1200, height: 800, byteSize: 4096, altText: "Synthetic craft materials", altTextJa: "合成の工芸材料", publicCredit: null,
+      });
+      assert.equal(repeated.id, mediaId);
+      assert.equal(repeated.position, 0);
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM experience_product_media_assets WHERE provider_id=$1 AND product_id=$2", [providerId, draft.id])).rows[0]?.n, 1);
+
 
       const rule: ScheduleRule = {
         id: randomUUID(), timeZone: "Asia/Tokyo", startsOn: "2099-01-01", localStartTime: "10:00",
@@ -152,7 +161,7 @@ describe("Admin product draft handoff (#169)", { skip: databaseUrl === undefined
         "SELECT actor_niho_user_id,action FROM admin_product_draft_audit_events WHERE provider_id=$1 AND product_id=$2 ORDER BY id",
         [providerId, draft.id],
       );
-      assert.deepEqual(audit.rows.map((row) => row.action), ["DRAFT_CREATED", "MEDIA_ADDED", "SCHEDULE_SAVED", "SALE_TERMS_SAVED"]);
+      assert.deepEqual(audit.rows.map((row) => row.action), ["DRAFT_CREATED", "MEDIA_ADDED", "MEDIA_ADDED", "SCHEDULE_SAVED", "SALE_TERMS_SAVED"]);
       assert.ok(audit.rows.every((row) => row.actor_niho_user_id === admin.nihoUserId));
     } finally {
       await db.dispose();
