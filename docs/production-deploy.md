@@ -17,6 +17,19 @@
 
 ## 初回準備（本番設定の確認後）
 
+### 独立認証の本番有効化（#456、2026-11-07）
+
+ホストと Admin の本人確認・口座の正本は [ADR 0003](adr/0003-experience-independence.md) に従う。以下の手順では NIHO Host v1 の配備・NIHO の口座再利用同意を前提にしない。この節を、後述の旧 NIHO 認証を使う有効化手順より優先する。
+
+1. レビュー済みの main SHA を固定し、公式の `apply-experience-db-migrations.mjs` で `0064`〜`0066` と runtime grants を適用する。既存予約・販売者・公開版の件数を事前に確認する。実レコードとアドレスは公開の証跡へ書かない。
+2. Stripe は既存 NIHO プラットフォームを使い、Experience 専用の制限付きキーを Secret Manager に登録する。NIHOapp の全権限キーを Experience runtime に渡さない。現行コードに必要な権限は、接続口座の Checkout Sessions・Charges and Refunds の書込み、Payment Intents・Balance・Balance Transaction Sources・Payouts の読取り、Accounts・Application Fees の読取り、Login Links・Transfers の書込み。新規口座の作成はまだ開かないので、Accounts・Account Links の書込みは不要。
+3. 予約を開く場合は、Experience 専用の Connect webhook と署名鍵、checkout IP HMAC 鍵も用意する。webhook のイベントは [staging の予約設定](host-calendar-staging.md#旅行者の予約stripe-テストモード285) と同じ。既存 NIHOapp の webhook と署名鍵は変更しない。
+4. SMTP は NIHOapp の既存 `RECEIPT_DELIVERY_SMTP_*` を使える。同一の送信先サーバー・ポート・アカウントであることを照合し、送信せずに TLS と SMTP 認証を確認する。2026-11-07 は staging で認証できる既存資格情報を本番の `RECEIPT_DELIVERY_SMTP_PASSWORD:2` に登録した。既存版は保持する。runtime へは各 Secret 単位で読取りを許可する。From・Reply-To は既存の NIHO の送信者を用いる。
+5. Google OAuth の本番 callback と、既存管理者本人のアドレスを照合して `PROD_ADMIN_ALLOWED_EMAILS` を設定する。`PROD_PROVIDER_PAGES_API_ENABLED` など、ホストの NIHO トークンを使う競合 flag を外す。`PROD_GUEST_MAIL_ENABLED`・`PROD_HOST_ACCOUNTS_ENABLED`・`PROD_ADMIN_SUPPORT_CONSOLE_ENABLED`・`PROD_ADMIN_GOOGLE_LOGIN_ENABLED` と、承認済み `PROD_PAYOUT_ACCOUNT_CONSENT_VERSION=experience-payout-account-2026-11-07-v1` を設定する。
+6. 最初の OWNER と販売者は [ホストアカウントの登録手順](host-accounts.md#登録ops) で登録する。事業者・既存接続口座・OWNER を照合し、同意や公開を運用 SQL で代行しない。実アドレス・口座 ID をリポ・GitHub の本文へ置かない。
+7. staging の合成体験で予約・Stripe テスト決済・確定 webhook・取消／返金まで確認する。`run.app` の直アクセスには Cloudflare の `CF-Connecting-IP` が無いため、ブラウザからの checkout は安全のため 503 になる。予約を開く受入には、このヘッダーを上書きする信頼できる edge 経路と、origin への直アクセスの制限が必要。欠けたヘッダーを任意のクライアント値へ fallback させない。
+8. 公式 workflow の `candidate` → 候補確認 → 同じ SHA・revision・digest の `promote`。メールログイン、許可済み Admin、公開データ、予約停止、既存 Guide を確認する。予約・公開の gate はそれぞれの受入後に開く。Secret の登録だけ、DB 移行だけ、または候補の作成だけを、本番有効化済みと扱わない。
+
 1. `@niho.life` の `niho-app-prd` Ownerで `ORG_ID=299180592876 PROJECT_ID=niho-app-prd ALLOW_SHARED_NIHO_APP_PROJECT=true bash scripts/gcp/setup-production.sh` を実行する。既存請求先は確認するだけで変更しない。スクリプトは専用Artifact Registry、runtime/deployer SA、GitHub OIDC pool/providerを作り、認証必須のprivate bootstrap serviceを用意する。公開host ruleは候補revisionの昇格まで追加しない。deployerの `roles/run.admin` はこのCloud Run serviceにだけ付与する。出力されたGitHub variablesを記録する。
 2. GitHubの `production` environment が **mainのみのbranch rule** を持ち、prod WIFの `actor_id` が `252574334`（niho3 / ghN）、`345803507`（taku-niho / ghL）、`119937906`（takuyatakahama3）の3件だけであることを確認する。本人起動・再実行ガードをmainへ反映してからrequired reviewersを外す。元のEnvironment/provider設定を保存し、rollback時はreviewersを先に戻す。スクリプトが出した `PROD_GCP_*` 6変数をrepository variablesに登録する。preview用 `GCP_*` と混ぜない。最後に `PRODUCTION_DEPLOY_ENABLED=true` を登録する。
 3. `.github/workflows/deploy-production.yml` を `main` から `action=candidate` で手動起動し、入力 `commit_sha` を起動時の `main` SHA と完全一致させる。ホストカレンダーの受入前は `enable_host_calendar=false` を選ぶ。workflow は資格情報なしで build/smoke → 保護環境で image push → digest固定の `--no-traffic --tag candidate-<sha12>` → NIHO本番公開APIの一覧・revision専用URL・runtime env・robots・preview 404 を確認する。APIが未配備で404なら候補を受け入れない。実行結果に出るSHA・revision・**Cloud Run実行用image digest**・候補URLを確認する。DockerがOCI indexをpushした場合、Cloud Runの実行用digestはその `linux/amd64` 子manifestとなる。workflowは親子関係を検証し、両方のdigestを記録する。
