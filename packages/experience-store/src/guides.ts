@@ -606,7 +606,7 @@ function reviewGuideMarkdown(markdown: string): GuideMarkdownReview {
       inNote = false;
       continue;
     }
-    if (/^(?:```|~~~|>|<|#(?!#\s)|####|[*+]\s|\d{1,3}\)\s)/.test(line)
+    if (/^(?:```|~~~|>|<|####|[*+]\s|\d{1,3}\)\s)/.test(line)
       || /^(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,}|=+\s*)$/.test(line)) {
       throw new StoreValidationError(`guide.content.markdown line ${index + 1} uses unsupported Markdown.`);
     }
@@ -1186,6 +1186,7 @@ export class GuideRepository {
         throw new StoreConflictError("Guide draft revision mismatch.");
       }
       if (article.content.language !== "en") throw new StoreValidationError("Guide publication content must declare English (en).");
+      if (article.content.author === undefined) throw new StoreValidationError("A public author is required before guide publication.");
       assertNonEmptyText(article.title, "guide.title", 110);
       assertPublicationUsesLatinScript(article.title, article.content.markdown);
       const review = reviewGuideMarkdown(article.content.markdown);

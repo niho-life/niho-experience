@@ -32,7 +32,7 @@ const viewerId = "hst_synthetic_viewer";
 const assetId = "00000000-0000-4000-8000-000000000477";
 const baseContent = {
   language: "en",
-  markdown: "## A synthetic route\n\nThis opening paragraph is used as the optional lead for a test-only guide.",
+  markdown: "## A synthetic route\n\nThis opening paragraph is used as the optional lead for a test-only guide.\n\n### A useful stop\n\nThe route continues here.",
   author: { name: "Synthetic Host", role: "Host", bio: "A synthetic profile for a disposable database test." },
 } as const;
 
@@ -159,6 +159,20 @@ describe("PostgreSQL OWNER guide writes", { skip: databaseUrl === undefined ? "T
         }),
         StoreValidationError,
       );
+      const withoutAuthor = await repository.saveDraft(actorId, requirements.id, {
+        slug: requirements.slug,
+        title: "Publication requirements",
+        description: "",
+        categorySlug: "culture",
+        content: { language: "en", markdown: "## An English heading\n\nA complete English paragraph." },
+      }, japaneseMemo.revision);
+      await assert.rejects(
+        () => repository.commitPublication(actorId, requirements.id, {
+          expectedRevision: withoutAuthor.revision,
+          visibility: "PUBLIC",
+        }),
+        StoreValidationError,
+      );
 
       const created = await repository.createArticle(actorId, {
         id: "provider-guide",
@@ -254,7 +268,7 @@ describe("PostgreSQL OWNER guide writes", { skip: databaseUrl === undefined ? "T
         visibility: "PUBLIC",
       });
       assert.equal(first.publicationNumber, 1);
-      assert.equal(first.description, "This opening paragraph is used as the optional lead for a test-only guide.");
+      assert.equal(first.description, "This opening paragraph is used as the optional lead for a test-only guide. The route continues here.");
       assert.deepEqual(first.productLinks, [
         { providerId: "provider-a", productId: "tea", productSlug: "synthetic-tea" },
       ]);
