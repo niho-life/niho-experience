@@ -2,11 +2,12 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { loadWritePageAccess, writeExperienceQuery } from "@/lib/write/page-access";
 import { privateGuideArticle, writeApiError } from "@/lib/write/server";
+import { writeStatusLabel } from "@/lib/write/client-types";
 
 export const metadata: Metadata = { title: "記事" };
 
 function State({ message }: { readonly message: string }) {
-  return <main id="main" className="mx-auto max-w-3xl px-4 py-12"><h1 className="text-2xl">記事を書く</h1><p className="mt-4">{message}</p></main>;
+  return <main id="main" className="write-state"><h1>記事を書く</h1><p>{message}</p><Link href="/host">ホスト画面へ戻る</Link></main>;
 }
 
 export default async function WriteIndexPage({ searchParams }: { readonly searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -15,7 +16,7 @@ export default async function WriteIndexPage({ searchParams }: { readonly search
   const returnPath = query.experience ? `/write?experience=${encodeURIComponent(query.experience)}` : "/write";
   const newPath = query.experience ? `/write/new?experience=${encodeURIComponent(query.experience)}` : "/write/new";
   const access = await loadWritePageAccess(returnPath);
-  if (!access.ok) return <State message={access.reason === "forbidden" ? "記事を管理できる提供者 OWNER がありません。" : "記事を読み込めません。時間をおいてお試しください。"} />;
+  if (!access.ok) return <State message={access.reason === "forbidden" ? "記事を書ける提供者 OWNER がありません。ホスト画面で権限を確認してください。" : access.reason === "preparing" ? "記事機能を準備中です。公開サイトのデータ切替が完了するまで、保存や公開は受け付けません。" : "記事を読み込めません。時間をおいてお試しください。"} />;
   let guides: ReturnType<typeof privateGuideArticle>[] | null = null;
   let message: string | null = null;
   try {
@@ -25,12 +26,11 @@ export default async function WriteIndexPage({ searchParams }: { readonly search
   }
   if (!guides) return <State message={message ?? "記事を読み込めません。"} />;
   return (
-    <main id="main" className="mx-auto max-w-3xl px-4 py-12">
-      <header className="flex items-center justify-between gap-4"><h1 className="text-2xl">記事を書く</h1><Link href={newPath} className="font-bold underline">新しい記事</Link></header>
-      <p className="mt-3 text-sm text-muted">編集画面は phase B で追加します。このページは認証済みの下書き境界を確認するための仮画面です。</p>
-      <ul className="mt-8 grid gap-3">
-        {guides.map((guide) => <li key={guide.id} className="rounded-xl border border-line p-4"><Link href={`/write/${encodeURIComponent(guide.id)}`} className="font-bold underline">{guide.title || "無題の記事"}</Link><span className="ml-2 text-sm text-muted">{guide.status}</span></li>)}
-      </ul>
+    <main id="main" className="write-list-page">
+      <header><div><p className="eyebrow">Write with NIHO.</p><h1>記事を書く</h1><p>地域の物語や体験の背景を、旅行者へ英語で届けます。</p></div><Link href={newPath} className="write-primary">新しい記事</Link></header>
+      {guides.length ? <ul className="write-guide-list">
+        {guides.map((guide) => <li key={guide.id}><Link href={`/write/${encodeURIComponent(guide.id)}`}><span><b>{guide.title || "無題の記事"}</b><small>更新 {new Date(guide.updatedAtUtc).toLocaleDateString("ja-JP")}</small></span><em>{writeStatusLabel(guide)}</em></Link></li>)}
+      </ul> : <section className="write-empty"><h2>最初の記事を書きましょう</h2><p>タイトルから始め、本文と公開設定は下書きに自動保存できます。作成しただけでは公開されません。</p><Link href={newPath} className="write-primary">新しい記事を作る</Link></section>}
     </main>
   );
 }

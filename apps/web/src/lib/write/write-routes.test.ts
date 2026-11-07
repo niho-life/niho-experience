@@ -147,6 +147,18 @@ describe("/write API authority and optimistic writes", () => {
     expect(state.repository.saveDraft).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts a concurrent create retry when the other request saved the same experience link", async () => {
+    owner();
+    state.products.listProducts.mockResolvedValue([{ id: "product-a", slug: "tea", status: "PUBLISHED" }]);
+    const linked = { ...ARTICLE, draftProductLinks: [{ providerId: "provider-a", productId: "product-a" }], revision: 2 };
+    state.repository.saveDraft.mockRejectedValueOnce(new StoreConflictError("revision mismatch"));
+    state.repository.getArticle.mockResolvedValueOnce(linked);
+
+    const response = await createGuide(jsonRequest("https://experience.example.test/write/api/guides?experience=tea", createBody));
+    expect(response.status, await response.clone().text()).toBe(201);
+    expect(await response.json()).toMatchObject({ experienceLinked: true, guide: { revision: 2, draftProductLinks: linked.draftProductLinks } });
+  });
+
   it("does not adopt an unpublished or other-provider experience slug", async () => {
     owner();
     state.products.listProducts.mockResolvedValue([{ id: "other", slug: "tea", status: "DRAFT" }]);

@@ -1,4 +1,5 @@
 import "../globals.css";
+import "./write.css";
 import "@niho/experience-presentation/v1/styles.css";
 import type { Metadata, Viewport } from "next";
 

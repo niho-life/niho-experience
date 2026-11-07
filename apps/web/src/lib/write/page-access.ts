@@ -5,7 +5,7 @@ import { loadWriteContext, type WriteContext } from "./server";
 
 export type WritePageAccess =
   | { readonly ok: true; readonly context: WriteContext }
-  | { readonly ok: false; readonly reason: "forbidden" | "unavailable" };
+  | { readonly ok: false; readonly reason: "forbidden" | "preparing" | "unavailable" };
 
 const EXPERIENCE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -26,5 +26,10 @@ export async function loadWritePageAccess(returnPath: string): Promise<WritePage
   const loaded = await loadWriteContext();
   if (loaded.ok) return { ok: true, context: loaded.value };
   if (loaded.response.status === 401) redirect(withQuery("/host/auth/write-bridge", { returnTo: safeReturn }));
-  return { ok: false, reason: loaded.response.status === 403 ? "forbidden" : "unavailable" };
+  if (loaded.response.status === 403) return { ok: false, reason: "forbidden" };
+  try {
+    const body = await loaded.response.clone().json() as { error?: string };
+    if (body.error === "write_not_ready") return { ok: false, reason: "preparing" };
+  } catch { /* malformed internal response remains unavailable */ }
+  return { ok: false, reason: "unavailable" };
 }

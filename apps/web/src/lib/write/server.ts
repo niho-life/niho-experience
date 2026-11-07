@@ -40,6 +40,8 @@ type WriteProductRepository = Pick<ExperiencePublicationRepository, "listProduct
 
 export type WriteContext = {
   readonly actorId: string;
+  /** Safe client-facing identity projection. Private NIHO ids and email stay outside /write UI. */
+  readonly ownerProviders: readonly { readonly id: string; readonly displayName: string }[];
   readonly ownerProviderIds: readonly string[];
   readonly repository: WriteGuideRepository;
   readonly products: WriteProductRepository;
@@ -103,6 +105,7 @@ export async function loadWriteContext(providerId?: string): Promise<
     ok: true,
     value: {
       actorId: providers.nihoUserId,
+      ownerProviders: owners.map((provider) => ({ id: provider.id, displayName: provider.displayName })),
       ownerProviderIds: owners.map((provider) => provider.id),
       repository,
       products,
@@ -267,6 +270,8 @@ export function privateGuideArticle(article: GuideArticleRecord) {
     ...(article.cover === undefined ? {} : { cover: article.cover }),
     draftProductLinks: article.draftProductLinks,
     status: article.status,
+    ...(article.opsStopReason === undefined ? {} : { opsStopReason: article.opsStopReason }),
+    ...(article.opsStopContact === undefined ? {} : { opsStopContact: article.opsStopContact }),
     revision: article.revision,
     ...(article.currentPublication === undefined ? {} : { currentPublication: article.currentPublication }),
     createdAtUtc: article.createdAtUtc,
@@ -319,20 +324,27 @@ export async function createGuideIdempotently(
   }
 
   if (link) {
-    const sameLink = article.draftProductLinks.length === 1
-      && article.draftProductLinks[0]!.providerId === link.providerId
-      && article.draftProductLinks[0]!.productId === link.productId;
-    if (!sameLink) {
+    const sameLink = (value: GuideArticleRecord) => value.draftProductLinks.length === 1
+      && value.draftProductLinks[0]!.providerId === link.providerId
+      && value.draftProductLinks[0]!.productId === link.productId;
+    if (!sameLink(article)) {
       if (article.revision !== 1 || article.draftProductLinks.length !== 0) throw new StoreConflictError("The idempotent create result changed before its experience link was saved.");
-      article = await context.repository.saveDraft(context.actorId, article.id, {
-        slug: article.slug,
-        title: article.title,
-        description: article.description,
-        ...(article.categorySlug === undefined ? {} : { categorySlug: article.categorySlug }),
-        content: article.content,
-        ...(article.cover === undefined ? {} : { cover: article.cover }),
-        draftProductLinks: [link],
-      }, article.revision);
+      try {
+        article = await context.repository.saveDraft(context.actorId, article.id, {
+          slug: article.slug,
+          title: article.title,
+          description: article.description,
+          ...(article.categorySlug === undefined ? {} : { categorySlug: article.categorySlug }),
+          content: article.content,
+          ...(article.cover === undefined ? {} : { cover: article.cover }),
+          draftProductLinks: [link],
+        }, article.revision);
+      } catch (error) {
+        if (!(error instanceof StoreConflictError)) throw error;
+        const current = await context.repository.getArticle(context.actorId, article.id);
+        if (!createFieldsMatch(current, input) || !sameLink(current)) throw error;
+        article = current;
+      }
     }
   }
   return { article, created, experienceLinked: link !== null };
