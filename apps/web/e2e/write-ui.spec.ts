@@ -189,6 +189,12 @@ test("360px and 320px keep primary actions and rails inside the viewport", async
   test.skip(testInfo.project.name === "write-desktop", "mobile layout");
   await mockWriterApi(page);
   await page.goto(`/write/write-e2e-fixture/edit/${ID}`);
+  const title = page.getByLabel("タイトル");
+  await title.fill("A long title about experiencing the slower side of Kamakura and finding beautiful places around the neighborhood");
+  const titleMetrics = await title.evaluate((element) => ({ height: element.clientHeight, content: element.scrollHeight, width: element.clientWidth, contentWidth: element.scrollWidth }));
+  expect(titleMetrics.height).toBeGreaterThan(100);
+  expect(titleMetrics.content).toBeLessThanOrEqual(titleMetrics.height + 1);
+  expect(titleMetrics.contentWidth).toBeLessThanOrEqual(titleMetrics.width + 1);
   await expect(page.getByRole("button", { name: "プレビュー" })).toBeVisible();
   await expect(page.getByRole("button", { name: "公開する" })).toBeVisible();
   const metrics = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }));

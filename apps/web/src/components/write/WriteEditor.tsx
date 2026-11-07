@@ -79,7 +79,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
   const [actionNotice, setActionNotice] = useState<{ message: string; url?: string } | null>(null);
   const [revokedAssetId, setRevokedAssetId] = useState<string | null>(null);
   const [serverLatest, setServerLatest] = useState<WriteGuide | null>(null);
-  const titleRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
   const categoryRef = useRef<HTMLSelectElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const authorRef = useRef<HTMLInputElement>(null);
@@ -265,7 +265,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
       <article className="write-rail">
         <p className="write-language-note">公開する記事は英語で書きます。日本語のメモは下書きのまま保存できます。</p>
         <label className="write-title-label" htmlFor="write-title">タイトル</label>
-        <input ref={titleRef} id="write-title" className="write-title-input" maxLength={110} disabled={actionBusy} value={draft.title} placeholder="A story worth sharing" onCompositionStart={() => composition(true)} onCompositionEnd={() => composition(false)} onChange={(event) => patchDraft({ title: event.target.value })} />
+        <textarea ref={titleRef} id="write-title" className="write-title-input" rows={2} maxLength={110} disabled={actionBusy} value={draft.title} placeholder="A story worth sharing" onCompositionStart={() => composition(true)} onCompositionEnd={() => composition(false)} onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) event.preventDefault(); }} onChange={(event) => patchDraft({ title: event.target.value.replace(/\s*[\r\n]+\s*/g, " ") })} />
         {initialDocument ? <><WriteRichTextEditor articleId={guide.id} initialContent={initialDocument} revokedAssetId={revokedAssetId} disabled={autosave.phase === "conflict" || actionBusy} onCompositionChange={composition} onChange={(markdown) => patchDraft({ content: { ...draftRef.current.content, markdown } })} onMediaBusyChange={media} onValidationError={setBodyInvalid} beforeRevisionMutation={flush} onRevoked={adoptGuide} onConflict={() => queue.freezeConflict()} />{bodyInvalid ? <p className="write-error" role="alert">{bodyInvalid} 入力はこのタブに残っています。</p> : null}</> : <section className="write-unsupported" role="note"><h2>本文は読み取り専用です</h2><p>表・note・未対応の装飾が含まれるため、壊さないよう本文の編集を止めています。設定だけ保存しても、本文は1バイトも変更しません。</p><textarea readOnly value={draft.content.markdown} aria-label="読み取り専用の記事本文" /></section>}
       </article>
 
