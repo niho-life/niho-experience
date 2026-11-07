@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
-import { kamakuraAfter4Pm } from "../../../apps/web/src/content/guides/kamakura-after-4-pm.ts";
 import { GuideRepository } from "../src/guides.ts";
 import {
   importLegacyGuide,
   LegacyGuideImportError,
+  type LegacyGuideSource,
 } from "../src/legacy-guide-import.ts";
+
+const { kamakuraAfter4Pm } = await import(
+  new URL("../../../apps/web/src/content/guides/kamakura-after-4-pm.ts", import.meta.url).href
+) as { kamakuraAfter4Pm: LegacyGuideSource };
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 

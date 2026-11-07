@@ -16,7 +16,7 @@ export interface LegacyGuideSource {
   readonly slug: string;
   readonly title: string;
   readonly description: string;
-  readonly author: { readonly name: string; readonly role: string; readonly bio?: string };
+  readonly author: { readonly name: string; readonly role?: string; readonly bio?: string };
   readonly publishedAt: string;
   readonly updatedAt: string;
   readonly checkedAt?: string;
@@ -52,6 +52,8 @@ function requiredIdentifier(value: string, name: string): string {
 }
 
 export function legacyGuideContent(source: LegacyGuideSource): GuideContent {
+  const role = source.author.role?.trim();
+  if (!role) throw new LegacyGuideImportError("The legacy guide author role is missing.");
   const faq = source.faq?.length
     ? `\n\n## Frequently asked questions\n\n${source.faq.map(({ question, answer }) => `### ${question}\n\n${answer}`).join("\n\n")}`
     : "";
@@ -60,8 +62,8 @@ export function legacyGuideContent(source: LegacyGuideSource): GuideContent {
     markdown: `${source.body.trim()}${faq}`,
     author: {
       name: source.author.name,
-      role: source.author.role,
-      bio: source.author.bio ?? source.author.role,
+      role,
+      bio: source.author.bio ?? role,
     },
     checkedOn: source.checkedAt ?? source.updatedAt,
   });

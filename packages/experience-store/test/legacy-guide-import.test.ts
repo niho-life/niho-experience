@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { kamakuraAfter4Pm } from "../../../apps/web/src/content/guides/kamakura-after-4-pm.ts";
-import { legacyGuideContent } from "../src/legacy-guide-import.ts";
+import { legacyGuideContent, type LegacyGuideSource } from "../src/legacy-guide-import.ts";
+
+const { kamakuraAfter4Pm } = await import(
+  new URL("../../../apps/web/src/content/guides/kamakura-after-4-pm.ts", import.meta.url).href
+) as { kamakuraAfter4Pm: LegacyGuideSource };
 
 const environmentModule = await import(
   new URL("../../../scripts/gcp/legacy-guide-import-environment.mjs", import.meta.url).href
