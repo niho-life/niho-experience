@@ -31,6 +31,14 @@ function draftOf(guide: WriteGuide): WriteDraft {
   };
 }
 
+function withoutRevokedFigure(markdown: string, assetId: string): string {
+  const uri = `niho-guide-asset:${assetId.toLowerCase()}`;
+  return markdown.split("\n").filter((line) => {
+    const trimmed = line.trim();
+    return !(trimmed.startsWith("![") && trimmed.toLowerCase().includes(uri));
+  }).join("\n");
+}
+
 function saveLabel(state: AutosaveState): string {
   if (state.phase === "editing") return "編集中";
   if (state.phase === "saving") return "保存中…";
@@ -69,6 +77,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [actionNotice, setActionNotice] = useState<{ message: string; url?: string } | null>(null);
+  const [revokedAssetId, setRevokedAssetId] = useState<string | null>(null);
   const [serverLatest, setServerLatest] = useState<WriteGuide | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const categoryRef = useRef<HTMLSelectElement>(null);
@@ -128,7 +137,16 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
   };
   const adoptGuide = (next: WriteGuide, revokedAssetId?: string) => {
     setGuide(next); queue.adoptRevision(next.revision);
-    if (revokedAssetId && draftRef.current.cover?.assetId === revokedAssetId) patchDraft({ cover: null });
+    if (revokedAssetId) {
+      const current = draftRef.current;
+      const markdown = withoutRevokedFigure(current.content.markdown, revokedAssetId);
+      const coverRevoked = current.cover?.assetId.toLowerCase() === revokedAssetId.toLowerCase();
+      if (coverRevoked || markdown !== current.content.markdown) patchDraft({
+        ...(coverRevoked ? { cover: null } : {}),
+        content: { ...current.content, markdown },
+      });
+      setRevokedAssetId(revokedAssetId);
+    }
   };
 
   const focusSetting = (field: "slug" | "category" | "description" | "author") => {
@@ -250,7 +268,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
         <p className="write-language-note">公開する記事は英語で書きます。日本語のメモは下書きのまま保存できます。</p>
         <label className="write-title-label" htmlFor="write-title">タイトル</label>
         <input ref={titleRef} id="write-title" className="write-title-input" maxLength={110} disabled={actionBusy} value={draft.title} placeholder="A story worth sharing" onCompositionStart={() => composition(true)} onCompositionEnd={() => composition(false)} onChange={(event) => patchDraft({ title: event.target.value })} />
-        {initialDocument ? <><WriteRichTextEditor articleId={guide.id} initialContent={initialDocument} disabled={autosave.phase === "conflict" || actionBusy} onCompositionChange={composition} onChange={(markdown) => patchDraft({ content: { ...draftRef.current.content, markdown } })} onMediaBusyChange={media} onValidationError={setBodyInvalid} beforeRevisionMutation={flush} onRevoked={adoptGuide} onConflict={() => queue.freezeConflict()} />{bodyInvalid ? <p className="write-error" role="alert">{bodyInvalid} 入力はこのタブに残っています。</p> : null}</> : <section className="write-unsupported" role="note"><h2>本文は読み取り専用です</h2><p>表・note・未対応の装飾が含まれるため、壊さないよう本文の編集を止めています。設定だけ保存しても、本文は1バイトも変更しません。</p><textarea readOnly value={draft.content.markdown} aria-label="読み取り専用の記事本文" /></section>}
+        {initialDocument ? <><WriteRichTextEditor articleId={guide.id} initialContent={initialDocument} revokedAssetId={revokedAssetId} disabled={autosave.phase === "conflict" || actionBusy} onCompositionChange={composition} onChange={(markdown) => patchDraft({ content: { ...draftRef.current.content, markdown } })} onMediaBusyChange={media} onValidationError={setBodyInvalid} beforeRevisionMutation={flush} onRevoked={adoptGuide} onConflict={() => queue.freezeConflict()} />{bodyInvalid ? <p className="write-error" role="alert">{bodyInvalid} 入力はこのタブに残っています。</p> : null}</> : <section className="write-unsupported" role="note"><h2>本文は読み取り専用です</h2><p>表・note・未対応の装飾が含まれるため、壊さないよう本文の編集を止めています。設定だけ保存しても、本文は1バイトも変更しません。</p><textarea readOnly value={draft.content.markdown} aria-label="読み取り専用の記事本文" /></section>}
       </article>
 
       <aside className="write-settings-rail">
@@ -258,7 +276,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
           <summary>公開設定</summary>
           <fieldset disabled={actionBusy} className="write-settings-fields">
             <label>カテゴリ<select ref={categoryRef} value={draft.categorySlug ?? ""} onChange={(event) => patchDraft({ categorySlug: event.target.value || undefined })}><option value="">選択してください</option>{categories.map((category) => <option key={category.slug} value={category.slug}>{category.labelJa} / {category.labelEn}</option>)}</select></label>
-            <label>記事URL<input ref={slugRef} value={draft.slug} maxLength={160} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" onChange={(event) => patchDraft({ slug: event.target.value.toLowerCase() })} /></label>
+            <label>記事URL<input ref={slugRef} value={draft.slug} readOnly={guide.status !== "DRAFT"} maxLength={160} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" onChange={(event) => patchDraft({ slug: event.target.value.toLowerCase() })} />{guide.status !== "DRAFT" ? <span className="write-help">初回公開後のURLは変更できません。</span> : null}</label>
             <label>短い紹介（任意）<textarea ref={descriptionRef} value={draft.description} maxLength={160} rows={3} onChange={(event) => patchDraft({ description: event.target.value })} /></label>
             <fieldset><legend>公開する著者</legend><p className="write-help">非公開のログインメールは使いません。読者に見せる名前・肩書き・紹介を入力してください。</p><label>名前<input ref={authorRef} maxLength={120} value={authorFields.name} onChange={(event) => setAuthor("name", event.target.value)} /></label><label>肩書き<input maxLength={160} value={authorFields.role} onChange={(event) => setAuthor("role", event.target.value)} /></label><label>紹介<textarea maxLength={500} rows={3} value={authorFields.bio} onChange={(event) => setAuthor("bio", event.target.value)} /></label>{authorInvalid ? <p className="write-error" role="alert">著者の3項目をすべて入力すると保存します。入力はこのタブに残っています。</p> : null}</fieldset>
             <fieldset ref={coverRef}><legend>カバー写真（任意）</legend><WriteCoverField articleId={guide.id} cover={draft.cover} initialAssets={assets} onChange={(cover) => patchDraft({ cover })} onBusy={media} beforeRevisionMutation={flush} onRevoked={adoptGuide} onConflict={() => queue.freezeConflict()} /></fieldset>

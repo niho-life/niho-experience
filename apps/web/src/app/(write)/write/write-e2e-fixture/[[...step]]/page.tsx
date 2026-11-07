@@ -32,10 +32,10 @@ export default async function WriteE2EFixture({ params }: { readonly params: Pro
   if ((step[0] !== "edit" && step[0] !== "edit-photo") || step[1] !== ARTICLE_ID) return <main id="main" className="write-state"><h1>Writer browser fixture</h1><Link href="/write/write-e2e-fixture/new">NIHOでログインして記事を書く</Link></main>;
   const withCover = step[0] === "edit-photo";
   return <WriteEditor
-    guide={withCover ? { ...GUIDE, cover: { assetId: COVER_ID, alt: "A table at NIHO", credit: "NIHO", webConfirmed: true } } : GUIDE}
+    guide={withCover ? { ...GUIDE, content: { ...GUIDE.content, markdown: `${GUIDE.content.markdown}\n\n![A table at NIHO](niho-guide-asset:${COVER_ID})` }, cover: { assetId: COVER_ID, alt: "A table at NIHO", credit: "NIHO", webConfirmed: true } } : GUIDE}
     categories={[{ slug: "local-life", labelEn: "Local life", labelJa: "暮らし", displayOrder: 1 }]}
     products={[{ id: "product-e2e", providerId: "provider-e2e", slug: "tea-walk", title: "Tea walk" }]}
     assets={withCover ? [{ id: COVER_ID, width: 800, height: 600, publicCredit: "NIHO", webConfirmed: true }] : []}
-    initialDocument={{ type: "doc", content: [{ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Start with the market" }] }, { type: "paragraph", content: [{ type: "text", text: "Walk slowly and greet the neighbors." }] }] }}
+    initialDocument={{ type: "doc", content: [{ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Start with the market" }] }, { type: "paragraph", content: [{ type: "text", text: "Walk slowly and greet the neighbors." }] }, ...(withCover ? [{ type: "guideFigure", attrs: { assetId: COVER_ID, alt: "A table at NIHO" } }] : [])] }}
   />;
 }

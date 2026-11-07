@@ -2,7 +2,7 @@
 "use client";
 
 import { Fragment, Slice } from "@tiptap/pm/model";
-import { Node, type JSONContent } from "@tiptap/core";
+import { Node, type Editor, type JSONContent } from "@tiptap/core";
 import { ListItem } from "@tiptap/extension-list";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -52,9 +52,20 @@ function uploadPhoto(articleId: string, file: File, onProgress: (value: number) 
   });
 }
 
+function removeAssetFigures(editor: Editor, assetId: string) {
+  const positions: number[] = [];
+  editor.state.doc.descendants((node, position) => {
+    if (node.type.name === "guideFigure" && String(node.attrs.assetId).toLowerCase() === assetId.toLowerCase()) positions.push(position);
+  });
+  let transaction = editor.state.tr;
+  for (const position of positions.reverse()) transaction = transaction.delete(position, position + editor.state.doc.nodeAt(position)!.nodeSize);
+  if (transaction.docChanged) editor.view.dispatch(transaction);
+}
+
 export function WriteRichTextEditor({
   articleId,
   initialContent,
+  revokedAssetId,
   disabled,
   onChange,
   onCompositionChange,
@@ -66,6 +77,7 @@ export function WriteRichTextEditor({
 }: {
   readonly articleId: string;
   readonly initialContent: JSONContent;
+  readonly revokedAssetId?: string | null;
   readonly disabled?: boolean;
   readonly onChange: (markdown: string) => void;
   readonly onCompositionChange: (composing: boolean) => void;
@@ -132,6 +144,7 @@ export function WriteRichTextEditor({
   });
 
   useEffect(() => { editor?.setEditable(!disabled); }, [editor, disabled]);
+  useEffect(() => { if (editor && revokedAssetId) removeAssetFigures(editor, revokedAssetId); }, [editor, revokedAssetId]);
 
   const closePhoto = () => { if (busy) return; setPhotoOpen(false); queueMicrotask(() => photoOpener.current?.focus()); };
   const begin = () => { setBusy(true); onMediaBusyChange(true); };
@@ -192,11 +205,7 @@ export function WriteRichTextEditor({
       if (expectedRevision === null) { setPhotoError("保存を完了できないため、権利を取り消せません。"); return; }
       onMediaBusyChange(true); registered = true;
       const response = await writeApi<GuideResponse>(`/write/api/guides/${encodeURIComponent(articleId)}/media/${encodeURIComponent(assetId)}`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedRevision }) });
-      const positions: number[] = [];
-      editor.state.doc.descendants((node, position) => { if (node.type.name === "guideFigure" && node.attrs.assetId === assetId) positions.push(position); });
-      let transaction = editor.state.tr;
-      for (const position of positions.reverse()) transaction = transaction.delete(position, position + editor.state.doc.nodeAt(position)!.nodeSize);
-      if (transaction.docChanged) editor.view.dispatch(transaction);
+      removeAssetFigures(editor, assetId);
       onRevoked(response.guide, assetId);
       setAssets((items) => items.filter((item) => item.id !== assetId)); setAssetId("");
       setPhotoError("掲載権利を取り消しました。");

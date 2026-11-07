@@ -32,7 +32,11 @@ function initialGuide(): SyntheticGuide {
 }
 
 async function mockWriterApi(page: Page, withCover = false) {
-  let guide: SyntheticGuide = withCover ? { ...initialGuide(), cover: { assetId: COVER_ID, alt: "A table at NIHO", credit: "NIHO", webConfirmed: true } } : initialGuide();
+  let guide: SyntheticGuide = withCover ? {
+    ...initialGuide(),
+    content: { ...initialGuide().content, markdown: `${initialGuide().content.markdown}\n\n![A table at NIHO](niho-guide-asset:${COVER_ID})` },
+    cover: { assetId: COVER_ID, alt: "A table at NIHO", credit: "NIHO", webConfirmed: true },
+  } : initialGuide();
   let createAttempts = 0;
   const createIds: string[] = [];
   const events: string[] = [];
@@ -127,6 +131,8 @@ test("login entry → idempotent create retry → latest save → private previe
   await page.getByRole("button", { name: "公開する" }).click();
   await page.getByRole("dialog", { name: "記事を公開" }).getByRole("button", { name: "公開する" }).click();
   await expect(page.getByText("公開中", { exact: true })).toBeVisible();
+  await page.locator(".write-settings-rail summary").click();
+  await expect(page.getByLabel("記事URL")).toHaveAttribute("readonly", "");
   await expect(page.getByRole("status").filter({ hasText: "記事を公開しました。" })).toBeVisible();
   await expect(page.getByRole("link", { name: "公開ページを見る" })).toHaveAttribute("href", `/guides/${api.guide.slug}`);
   const publicPagePromise = page.context().waitForEvent("page");
@@ -175,6 +181,8 @@ test("cover rights revocation waits for the saved revision and completes", async
   await page.getByRole("button", { name: "掲載権利を取り消す" }).click();
   await expect.poll(() => api.events.includes("revoke-cover")).toBe(true);
   await expect(page.getByRole("button", { name: "掲載権利を取り消す" })).toHaveCount(0);
+  await expect.poll(() => api.guide.content.markdown.includes(`niho-guide-asset:${COVER_ID}`)).toBe(false);
+  await expect(page.locator(`.write-figure[data-asset-id="${COVER_ID}"]`)).toHaveCount(0);
 });
 
 test("360px and 320px keep primary actions and rails inside the viewport", async ({ page }, testInfo) => {
