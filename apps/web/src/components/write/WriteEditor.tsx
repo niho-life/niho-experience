@@ -85,7 +85,6 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
   const authorRef = useRef<HTMLInputElement>(null);
   const slugRef = useRef<HTMLInputElement>(null);
   const coverRef = useRef<HTMLFieldSetElement>(null);
-  const settingsRef = useRef<HTMLDetailsElement>(null);
 
   const [queue] = useState(() => new WriteAutosaveQueue(draft, initialGuide.revision, async (latest, expectedRevision) => {
       const response = await writeApi<GuideResponse>(`/write/api/guides/${encodeURIComponent(initialGuide.id)}`, {
@@ -150,7 +149,6 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
   };
 
   const focusSetting = (field: "slug" | "category" | "description" | "author") => {
-    settingsRef.current?.setAttribute("open", "");
     setPublishOpen(false);
     queueMicrotask(() => ({ slug: slugRef, category: categoryRef, description: descriptionRef, author: authorRef })[field].current?.focus());
   };
@@ -169,7 +167,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
     if (id === "title") { setPublishOpen(false); queueMicrotask(() => titleRef.current?.focus()); return; }
     if (id === "body") { setPublishOpen(false); queueMicrotask(() => document.querySelector<HTMLElement>(".write-prosemirror")?.focus()); return; }
     if (id === "cover") {
-      settingsRef.current?.setAttribute("open", ""); setPublishOpen(false);
+      setPublishOpen(false);
       queueMicrotask(() => coverRef.current?.querySelector<HTMLElement>("select, input, button")?.focus());
       return;
     }
@@ -272,8 +270,8 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
       </article>
 
       <aside className="write-settings-rail">
-        <details ref={settingsRef}>
-          <summary>公開設定</summary>
+        <section className="write-settings-panel" aria-labelledby="write-settings-title">
+          <h2 id="write-settings-title">記事の設定</h2>
           <fieldset disabled={actionBusy} className="write-settings-fields">
             <label>カテゴリ<select ref={categoryRef} value={draft.categorySlug ?? ""} onChange={(event) => patchDraft({ categorySlug: event.target.value || undefined })}><option value="">選択してください</option>{categories.map((category) => <option key={category.slug} value={category.slug}>{category.labelJa} / {category.labelEn}</option>)}</select></label>
             <label>記事URL<input ref={slugRef} value={draft.slug} readOnly={guide.status !== "DRAFT"} maxLength={160} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" onChange={(event) => patchDraft({ slug: event.target.value.toLowerCase() })} />{guide.status !== "DRAFT" ? <span className="write-help">初回公開後のURLは変更できません。</span> : null}</label>
@@ -282,7 +280,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
             <fieldset ref={coverRef}><legend>カバー写真（任意）</legend><WriteCoverField articleId={guide.id} cover={draft.cover} initialAssets={assets} onChange={(cover) => patchDraft({ cover })} onBusy={media} beforeRevisionMutation={flush} onRevoked={adoptGuide} onConflict={() => queue.freezeConflict()} /></fieldset>
             {products.length ? <fieldset><legend>関連する体験（最大3件）</legend>{products.map((product) => <label key={product.id} className="write-check"><input type="checkbox" checked={draft.draftProductLinks.some((link) => link.productId === product.id)} disabled={!draft.draftProductLinks.some((link) => link.productId === product.id) && draft.draftProductLinks.length >= 3} onChange={(event) => toggleProduct(product, event.target.checked)} />{product.title}</label>)}</fieldset> : <p className="write-help">関連付けられる公開中の体験はありません。記事だけでも作成・公開できます。</p>}
           </fieldset>
-        </details>
+        </section>
       </aside>
     </div>
 
