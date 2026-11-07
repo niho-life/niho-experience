@@ -216,3 +216,8 @@ Cloud Run ingress は両環境とも `internal-and-cloud-load-balancing`。`run.
 `STG_HOST_SERVICE_URL`、staging の Google OAuth redirect、Stripe TEST webhook、Scheduler URI/OIDC audience を正規 origin にそろえる。旧 run.app の OAuth redirect は移行確認後に削除する。Guide Admin の Cloud Run audience のように Google のサービス認証が明示的に run.app を使う設定は別であり、機械的に書き換えない。
 
 受入は、通常の Chrome から staging 予約入力→Stripe TEST決済→確定→取消／返金を行い、偽装ヘッダー付きも含む直 origin 拒否、候補 POST 拒否、正規経路でのログイン／メール／webhook／ジョブを確認する。
+### 予約受付の開始・停止
+
+`PROD_BOOKINGS_ENABLED` は未設定または `false` で停止、`true` で受付。`PROD_GUEST_BOOKING_ENABLED=true` とホスト機能が必須で、機能別の依存設定も通常どおり検証する。公開商品の価格・日程・販売者・受取口座・集合案内、staging の決済／取消／返金、専用 LIVE webhook とメール、origin 制限を受け入れた後に設定する。
+
+切替は公式 workflow の candidate → readback → promote で行う。候補作成時と promote 時に switch を同じ値で照合するため、変数を書き換えただけでは既存 revision の受付は変わらず、異なる値で作った候補の promote も止まる。緊急停止も `false` にして停止用候補を配備する。候補の専用 edge は読み取りのみとし、開始前の受付経路にはしない。
