@@ -1,6 +1,6 @@
 # 本番候補の配備と公開ゲート
 
-対象: [#5](https://github.com/niho-life/niho-experience/issues/5)、[#15](https://github.com/niho-life/niho-experience/issues/15)、[#92](https://github.com/niho-life/niho-experience/issues/92)、[#84](https://github.com/niho-life/niho-experience/issues/84)（機能のフラグ）。2026-11-01 更新。**販売開始、検索公開、外部提供者登録、ホストのカレンダーは別々に受入する。**
+対象: [#5](https://github.com/niho-life/niho-experience/issues/5)、[#15](https://github.com/niho-life/niho-experience/issues/15)、[#92](https://github.com/niho-life/niho-experience/issues/92)、[#84](https://github.com/niho-life/niho-experience/issues/84)（機能のフラグ）。2026-11-08 更新。**販売開始、検索公開、外部提供者登録、ホストのカレンダーは別々に受入する。**
 
 ## 固定する構成
 
@@ -221,3 +221,11 @@ Cloud Run ingress は両環境とも `internal-and-cloud-load-balancing`。`run.
 `PROD_BOOKINGS_ENABLED` は未設定または `false` で停止、`true` で受付。`PROD_GUEST_BOOKING_ENABLED=true` とホスト機能が必須で、機能別の依存設定も通常どおり検証する。公開商品の価格・日程・販売者・受取口座・集合案内、staging の決済／取消／返金、専用 LIVE webhook とメール、origin 制限を受け入れた後に設定する。
 
 切替は公式 workflow の candidate → readback → promote で行う。候補作成時と promote 時に switch を同じ値で照合するため、変数を書き換えただけでは既存 revision の受付は変わらず、異なる値で作った候補の promote も止まる。緊急停止も `false` にして停止用候補を配備する。候補の専用 edge は読み取りのみとし、開始前の受付経路にはしない。
+
+2026-11-08のDinner公開では、保存済みの販売条件での公開と既存NIHO・GetYourGuideとの併売をオーナーが個別に承認した。併売はこの商品だけの例外で、既存枠の停止・同期を受付開始の前提にしない。商品条件と許諾の確認は[登録引き渡し表](content/registration-handoff.md)に記録する。
+
+受付開始の配備は [candidate run 42387874462](https://github.com/niho-life/niho-experience/actions/runs/42387874462) → [promote run 42388212552](https://github.com/niho-life/niho-experience/actions/runs/42388212552)。SHA `306613ac0228a33dab1da93eadba911f39c65a21`、revision `niho-experience-00038-but`、実行用digest `sha256:191a4c8b99d5ed3cee19cdf5b93ab1909d936fe5b22f289b931e4549b69da0ae`。100% traffic、`BOOKINGS_ENABLED=true`、`EXPERIENCE_GUEST_BOOKING_ENABLED=true`、正規SITE_URL、制限済みingressを読戻した。通常Chromeの本番予約フォームで初回11月14日18時・定員8の選択と、大人1名＋子ども1名の合計42,000円を確認した。本番での実決済は行わず、決済〜取消・返金・精算の通し確認はStripeサンドボックスで完了している。
+
+ADR 0002・0003への移行後は、成立済み予約・返金・精算をExperienceの `/host/bookings`・`/host/sales` と専用DBで追う。この運用を、上に残る旧NIHO正本の切戻し説明より優先する。個別商品の緊急停止はOWNER画面の「販売を停止」で新しい販売を止める。既存予約を自動で取り消したり、公開snapshot・口座・Stripe webhook・メール設定を削除したりしない。
+
+全サイトの受付を止める場合は `PROD_BOOKINGS_ENABLED=false` の公式候補を確認して昇格する。配備を待てない障害時は、停止設定を受け入れ済みの直前revision `niho-experience-00035-faj`（SHA `91f26401ac5583c4d16bc5689727a5b2b6cfbd85`）へtrafficを戻す。これは同じDB・Webhook・返金と通知の処理を維持し、ゲストの新規受付だけを止められる版である。停止後は100% traffic、受付OFF、公開商品の表示、成立済み予約と返金導線を読戻し、時刻・SHA・操作を #15 に記録する。再開も受付ONの候補を公式手順で再確認する。
