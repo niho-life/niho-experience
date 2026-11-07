@@ -211,7 +211,7 @@ NIHO追加API → Editor / Experience追加API → 相互認証と合成の負�
 
 Cloud Run ingress は両環境とも `internal-and-cloud-load-balancing`。`run.app` に CF ヘッダーを偽装しても公開経路にはならない。ALB IP の直アクセスもクライアント証明書なしでは拒否する。証明書検証を省略した疎通確認は受入に数えない。
 
-候補専用 origin は `experience-candidate.niho.life` と `experience-stg-candidate.niho.life`。各 NEG が固定 `candidate` タグを参照する。Cloudflare の専用ルールで GET/HEAD 以外を拒否し、候補から予約・返金・設定変更は実行できない。workflow は候補作成後に alias を設定し、固定の run タグと alias が両方とも対象 revision を指すことを `scripts/deploy/edge-route.mjs` で照合する。alias が別候補へ移っていたら promote は止まる。環境ごとの concurrency は継続し、既存の安定 traffic は候補作成で動かさない。
+候補専用 origin は `experience-candidate.niho.life` と `experience-stg-candidate.niho.life`。各 NEG が固定 `candidate` タグを参照する。Cloudflare の専用ルールで GET/HEAD 以外を拒否し、候補から予約・返金・設定変更は実行できない。workflow は候補作成後に alias を設定し、固定の run タグと alias が両方とも対象 revision を指すことを workflow 内の readback で照合する。alias が別候補へ移っていたら promote は止まる。環境ごとの concurrency は継続し、既存の安定 traffic は候補作成で動かさない。
 
 `STG_HOST_SERVICE_URL`、staging の Google OAuth redirect、Stripe TEST webhook、Scheduler URI/OIDC audience を正規 origin にそろえる。旧 run.app の OAuth redirect は移行確認後に削除する。Guide Admin の Cloud Run audience のように Google のサービス認証が明示的に run.app を使う設定は別であり、機械的に書き換えない。
 

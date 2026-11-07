@@ -320,7 +320,19 @@ jobs:
             state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
           fi
           immutable_tag="$(jq -r --arg revision "$REVISION" '[.status.traffic[] | select(.revisionName == $revision and ((.tag // "") | test("^(cand-|candidate-).+"))) | .tag][0] // empty' <<< "$state")"
-          url="$(EDGE_TARGET=stg EDGE_REVISION="$REVISION" EDGE_TAG="$immutable_tag" node scripts/deploy/edge-route.mjs <<< "$state")"
+          # EDGE_CANDIDATE_READBACK_BEGIN
+          jq -e --arg service "$SERVICE" --arg environment "host-staging" --arg revision "$REVISION" --arg tag "$immutable_tag" '
+            . as $state |
+            .metadata.name == $service and .metadata.labels.app == "niho-experience" and
+            .metadata.labels.env == $environment and
+            .metadata.annotations["run.googleapis.com/ingress"] == "internal-and-cloud-load-balancing" and
+            ($revision | length) > 0 and ($tag | test("^(cand-|candidate-)[a-z0-9-]+$")) and
+            all([$tag, "candidate"][]; . as $name |
+              [$state.status.traffic[] | select(.tag == $name)] |
+              length == 1 and .[0].revisionName == $revision)
+          ' <<< "$state" >/dev/null
+          # EDGE_CANDIDATE_READBACK_END
+          url=https://experience-stg-candidate.niho.life
           {
             echo "revision=$REVISION"
             echo "digest=$DIGEST"
