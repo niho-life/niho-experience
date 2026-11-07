@@ -5,15 +5,18 @@
 
 ## Dinnerの本番登録・受入（2026-11-08）
 
-過去のstaging仮値とは別に、Experienceの本番DBへDinnerの下書きを保存した。現時点では未公開で、受付も `BOOKINGS_ENABLED=false`。公開条件のサーバー検証は不足0件だが、公開への同意操作と既存チャネルとの併売方針の最終確認を待っている。過去の併売承認と現在のAGENTS.mdの指示が異なるため、併売の扱いは今回の回答で確定する。
+過去のstaging仮値とは別に、Experienceの本番DBへDinnerを登録した。2026-11-08にオーナーから保存済みの原稿・許諾済み写真6枚・販売条件での公開について実行時の同意を受け、ホスト画面で公開した。同時に既存NIHO・GetYourGuideとの併売を再承認し、既存枠の停止・同期を受付開始の条件にしないことを確認した。公式候補配備と本番昇格を完了し、予約受付を開始した。
 
 - 毎週土日18:00開始はオーナー回答で確認した。本番保存値は2026-11-14〜2027-02-07の26枠、各120分・定員8名・受付は開始48時間前まで。
+- 公開予約の対象は日本時間の当日から89日先までで、登録済みの2月6日・7日枠も対象期間に入ると表示される。初回11月14日18時・定員8の選択と、大人1名＋子ども1名の合計¥42,000を本番の通常Chromeで確認した。
 - 大人1人¥30,000、子ども0〜17歳¥12,000、大人同伴必須。最少申込・課金・催行人数は1、1組上限は8。開始24時間前まで無料取消、以後返金なし、決済成立後に即時確定。
 - 日英本文・参加条件・天候中止や遅刻の説明を保存し、英語原稿の確認を記録した。特定の担当者・参加者や演奏を保証せず、メニューは季節により変わる。食物アレルギーへの対応はできない旨を表示する。
 - NIHO kamakuraの実受取口座を照合し、決済・入金が利用可能であることを確認した。OWNERによる口座利用同意と、サポートOFF・新規予約の合計手数料10%（決済費用込み）・取消後の未返還決済費用はNIHO負担・過去予約へ遡及しない条件でのサポート規約への同意を、個別のオーナー回答に基づいて保存した。口座参照や個人の連絡先は公開しない。
 - 写真のExperience利用許可に加え、人物の掲載許諾をオーナーへ確認した。公開用6枚と日英altを本番下書きへ保存した。入口写真・正確な到着案内は予約者向け集合案内に保存し、公開ギャラリーへ出さない。取得画像は1024px幅で、推奨解像度の原画像取得は未実施（[写真の必要条件](photo-requirements.md)）。
 - 本番専用のStripe制限付きキーとWebhook、メール、管理者・OWNERの認証を設定済み。ライブキーでCheckout作成・未決済の即時失効、Webhookの正しい署名204／不正署名400を確認した。実決済は行っていない。
 - stagingの通常ブラウザ経路で、予約・Stripeテスト決済・確定通知・予約者による取消・全額返金・返金通知・精算を受け入れた。決済費用はStripe手数料¥1,080＋税¥108、補填Transferは各予約1回だけで、再照合しても増えない。
+
+公開URLは [Kamakura Community Dinner with Locals](https://experience.niho.life/experiences/community-dinner-with-locals)。[candidate](https://github.com/niho-life/niho-experience/actions/runs/42387874462) → [promote](https://github.com/niho-life/niho-experience/actions/runs/42388212552)で、SHA `306613ac0228a33dab1da93eadba911f39c65a21`・revision `niho-experience-00038-but`を100%へ昇格した。`BOOKINGS_ENABLED=true`、ゲスト予約とホスト機能ON、正規SITE_URL、制限済みingressを実環境から読戻し確認した。
 
 現在値の一覧は[登録引き渡し表](registration-handoff.md)。技術受入の証跡は [#471](https://github.com/niho-life/niho-experience/issues/471#issuecomment-6708625143)・[#472](https://github.com/niho-life/niho-experience/issues/472#issuecomment-6708601329)。以下の過去の決定・掲載元調査・staging仮値は履歴であり、現在の保存状態はこの節を優先する。
 
@@ -48,7 +51,7 @@
 
 | コード | 商品案（仮題） | 提供者 | 必要な連携 | 候補 | 提供可否 | 掲載許諾 | 条件確定 | 公開可能 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| P-01 | Kamakura Community Dinner with Locals | NIHO kamakura（既存拠点） | Experience API 1.0 | 済 | 済（既存チャネルで販売中） | 済（自作写真・人物許諾） | 本番下書き保存済み（上の受入節） | 公開同意・併売方針を最終確認中、受付OFF |
+| P-01 | Kamakura Community Dinner with Locals | NIHO kamakura（既存拠点） | Experience API 1.0 | 済 | 済（既存チャネルと併売） | 済（自作写真・人物許諾） | 本番保存・公開への同意済み（上の受入節） | 本番公開・予約受付開始済み |
 | P-02 | Kamakura Coffee Roasting Workshop | NIHO kamakura（既存拠点） | 連携A | 済 | 試 | 済（オーナー） | 試 | テストサイトのみ |
 | P-03 | Zazen at Engakuji Temple, Kamakura | Synk LLC・円覚寺（NIHO会員の企画） | 連携B | 済 | 済（登録予定） | 済（オーナー） | 試 | テストサイトのみ |
 | P-04 | Kintsugi-Inspired Bowl Mending, Kamakura | 継ぎ師 ゆきの（YUKINO Restorer） | 連携B | 済 | 試 | 済（オーナー） | 試 | テストサイトのみ |
