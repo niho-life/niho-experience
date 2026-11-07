@@ -21,7 +21,7 @@ import { NOTIFICATION_ADDRESS_TEXT, previewNotificationAddress } from "@/host/no
 import { loadNotificationAddress } from "@/host/notification-address-server";
 import { config } from "@/lib/config";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
-import { HOST_LOGOUT_PATH } from "@/lib/host/routes";
+import { HOST_LOGOUT_PATH, withProvider } from "@/lib/host/routes";
 import type { HostSession } from "@/lib/host/session";
 import { isHostMock } from "@/lib/host/server";
 import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
@@ -172,6 +172,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         preview={isHostMock()}
         notificationAddress={notificationAddress}
         payoutPanel={payoutPanel}
+        bookingGuidesHref={config.experienceHostPublicationApiEnabled ? withProvider("/host/booking-guides", provider.id) : null}
         account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} />{provider.memberRole === "OWNER" && config.hostArticleLinksEnabled ? <div className="mt-3.5"><HostArticleLinksPanel providerId={provider.id} /></div> : null}<div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
       />
     </HostPageBody>

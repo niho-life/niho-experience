@@ -2,9 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { hostAccounts } from "@/lib/experience/store-server";
 import { clearLinkBindingCookie, clearReturnPathCookie, isOpaqueSecret, linkBindingHash, nowUtc, readSingleFieldForm, returnPathFromCookie, setAccountSessionCookie } from "@/lib/host/accounts";
+import { recordHostAccountLoginEmail } from "@/lib/host/login-email";
 import { forgetHostPushConnection } from "@/lib/host/push/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
-import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, HOST_LOGIN_LINK_PATH, withQuery } from "@/lib/host/routes";
+import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, HOST_INVITATIONS_PATH, HOST_LOGIN_LINK_PATH, withQuery } from "@/lib/host/routes";
 import { hostNotFound, noStoreJson, siteOrigin } from "@/lib/host/server";
 import { ACCOUNT_SESSION_COOKIE, LINK_BINDING_COOKIE, RETURN_PATH_COOKIE } from "@/lib/host/session";
 
@@ -107,6 +108,18 @@ export async function POST(request: NextRequest) {
     return noStoreJson({ error: "unavailable" }, 503);
   }
   if (opened.kind !== "ok") return linkInvalid();
+
+  // ホストへのメールの宛先 (#194): the address the link was sent to is now proven; it becomes the sign-in's copy, as the
+  // NIHO login copies NIHO's verified address. Only while host mail is on; the sign-in never waits on it failing.
+  if (config.hostMailEnabled) {
+    try {
+      const signedIn = await store.readSession({ sessionToken: opened.sessionToken, nowUtc: nowUtc(now) });
+      const returnTo = returnPathFromCookie(request.cookies.get(RETURN_PATH_COOKIE)?.value);
+      if (signedIn) await recordHostAccountLoginEmail({ hostAccountId: signedIn.hostAccountId, email: signedIn.email, invitation: returnTo?.startsWith(`${HOST_INVITATIONS_PATH}/`) === true });
+    } catch (error) {
+      console.error(`[host-auth] sign-in address not copied: ${error instanceof Error ? error.name : "unknown error"}`);
+    }
+  }
 
   // The session this browser held before ends, with its devices' push (another account on a shared device, or the same
   // host signing in again). Best effort: the new session is open either way.

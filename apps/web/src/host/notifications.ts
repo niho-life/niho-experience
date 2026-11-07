@@ -109,7 +109,7 @@ export function notificationPanelView(settings: HostNotificationSettings | null,
   if (source === "error") return { kind: "error", text: NOTIFICATION_LOAD_FAILED_TEXT, preparing: false };
   const addresses = settings.email.addresses.filter((address) => address.trim() !== "");
   const addressText =
-    addresses.length === 0 ? "NIHO からの通知は、NIHO アカウントの確認済みのメールに届きます" : addresses.length === 1 ? "NIHO からの通知はこのメールに届きます" : "NIHO からの通知はこれらのメールに届きます";
+    addresses.length === 0 ? "NIHO からの通知は、ログインで確認したメールアドレスに届きます" : addresses.length === 1 ? "NIHO からの通知はこのメールに届きます" : "NIHO からの通知はこれらのメールに届きます";
   return { kind: "owner", preparing, addresses, addressText, rows: notificationRows(settings.items) };
 }
 

@@ -19,7 +19,7 @@ export interface HostNotificationAddressView {
 }
 
 export const NOTIFICATION_ADDRESS_TEXT = {
-  login: "以前に確認したNIHOアカウントのメールです。",
+  login: "ログインで確認したメールアドレスです。",
   chosen: "あなたが設定したメールです。",
   none: "まだ宛先がありません。メールアドレスを入力して確認すると、予約などの通知を受け取れます。",
   pending: (address: string) => `${address} に確認のメールを送りました。メールのリンクを開くと、宛先がこのアドレスに変わります（1 時間有効）。`,

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HOST_SURFACE, consoleButtonClass } from "./host-ui";
 import { HostPageBody, PageHead } from "./ui";
 import { HostSharedPhotoOffer } from "./HostSharedPhoto";
+import { HostConfirmDialog } from "./HostConfirmDialog";
 import {
   asPublicationPrice,
   publicationTermsForm,
@@ -267,6 +268,9 @@ export function HostPublicationWorkspace({
   const [sellerConfirmed, setSellerConfirmed] = useState(false);
   const [publicationPhotoRightsConfirmed, setPublicationPhotoRightsConfirmed] = useState(false);
   const [createDraftRestored, setCreateDraftRestored] = useState(false);
+  /** 公開・停止 waiting for its confirmation in the page's dialog. */
+  const [stateConfirm, setStateConfirm] = useState<"publish" | "stop" | null>(null);
+  const stateConfirmStay = useRef<HTMLButtonElement>(null);
   const japaneseSourceRef = useRef<LocaleManuscript>(blankJapanese);
   const englishDraftRef = useRef<{ title: string; content: Record<string, unknown> }>({ title: "", content: blankContent });
 
@@ -685,10 +689,12 @@ export function HostPublicationWorkspace({
       setError("販売者への確認方法、販売者確認済み、写真掲載権利確認済みをすべて確認してください。");
       return;
     }
-    if (action === "publish" && !window.confirm(adminDraft
-      ? "販売者への確認と公開条件を記録し、事務局の代理公開として公開しますか？"
-      : "掲載条件を確認し、この商品を公開します。公開内容と販売条件に同意しますか？")) return;
-    if (action === "stop" && !window.confirm("この商品の新しい予約を停止しますか？")) return;
+    // The page's own dialog (HostConfirmDialog), not the browser's confirm(): nothing happens until its button is pressed.
+    setStateConfirm(action);
+  }
+
+  async function runStateChange(action: "publish" | "stop") {
+    if (!product || dirty || busy) return;
     setBusy(true); setError(""); setNotice("");
     try {
       if (adminDraft && action === "stop") throw new Error("事務局は公開済み商品の停止を操作できません。");
@@ -1061,5 +1067,20 @@ export function HostPublicationWorkspace({
     </section>
     </fieldset>
     <section className={`${HOST_SURFACE} mt-4 p-4 md:p-6`}><h2 className="font-extrabold">開催日程</h2><p className="mt-1 text-sm text-ink-soft">日程と定員はカレンダーで登録します。商品を保存してから開催枠を追加してください。</p><Link className={`${consoleButtonClass("secondary")} mt-3 inline-flex`} href={calendarHref}>カレンダーを開く</Link></section>
+    {stateConfirm ? (
+      <HostConfirmDialog
+        title={stateConfirm === "stop" ? "新しい予約を停止しますか？" : adminDraft ? "事務局の代理公開として公開しますか？" : "この商品を公開しますか？"}
+        description={stateConfirm === "stop"
+          ? "この商品の新しい予約を停止します。受け付けた予約はそのまま残ります。"
+          : adminDraft
+            ? "販売者への確認と公開条件を記録し、事務局の代理公開として公開します。"
+            : "掲載条件を確認し、この商品を公開します。公開内容と販売条件に同意します。"}
+        focusRef={stateConfirmStay}
+        stayRef={stateConfirmStay}
+        confirm={<button type="submit" className={consoleButtonClass("primary")}>{stateConfirm === "stop" ? "停止する" : "同意して公開する"}</button>}
+        onConfirm={() => { const action = stateConfirm; void runStateChange(action); }}
+        onClose={() => setStateConfirm(null)}
+      />
+    ) : null}
   </HostPageBody>;
 }

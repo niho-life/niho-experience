@@ -125,7 +125,7 @@ describe("notificationPanelView", () => {
 
   it("names where the mail goes when no address is listed, or several", () => {
     const none = notificationPanelView({ email: { addresses: [" "] }, items: [] }, "OWNER", "preview");
-    expect(none).toMatchObject({ addresses: [], addressText: "NIHO からの通知は、NIHO アカウントの確認済みのメールに届きます" });
+    expect(none).toMatchObject({ addresses: [], addressText: "NIHO からの通知は、ログインで確認したメールアドレスに届きます" });
     const two = notificationPanelView({ email: { addresses: ["a@example.com", "b@example.com"] }, items: [] }, "OWNER", "preview");
     expect(two).toMatchObject({ addresses: ["a@example.com", "b@example.com"], addressText: "NIHO からの通知はこれらのメールに届きます" });
   });
