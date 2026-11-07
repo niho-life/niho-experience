@@ -13,7 +13,7 @@
 | GitHub | `production` environment は `main` のみ。owner決定（2026-11-03）によりrequired reviewerは不要。起動者IDと再実行者をworkflowで検査し、WIFも本人IDへ限定。`PRODUCTION_DEPLOY_ENABLED=true` は設定が揃うまで付けない |
 | 初期revision | `EXPERIENCE_API_MODE=http`、`EXPERIENCE_PUBLIC_API_VERSION=1.0`、`EXPERIENCE_GUIDE_PUBLIC_SOURCE=static`、`SITE_URL=https://experience.niho.life`、`NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life`、`SITE_INDEXING=allow`（オーナー決定 2026-11-07。それまでは `block`）、`BOOKINGS_ENABLED=false`、`HOST_SIGNUP_MODE=pilot`、`NIHO_HOST_START_URL=https://niho.life/experiences/provider`、`GUIDE_EDITOR_SITE_ORIGIN=https://editor.niho.life`、`HOST_CONSOLE_ENABLED=false`。`MOCK_CATALOG` と `UMAMI_WEBSITE_ID` は渡さない |
 
-初期pilotでは既存の `niho-app-prd` にCloud Runサービスと限定した配備IDを足し、既存のglobal external Application Load BalancerとCloudflare proxyを再利用する。新規プロジェクト作成と新しいロードバランサーは不要。GCP project Owner、請求、API有効化、クォータの管理境界は共有する一方、GitHub deployerのCloud Run Adminは `niho-experience` サービスだけに付け、既存アプリのサービス・runtime identity・DB/Secretsへ権限を与えない（[Cloud Runのリソース単位IAM](https://docs.cloud.google.com/run/docs/securing/managing-access)）。売上や取り扱いデータが増える、組織ポリシー・障害範囲・請求分離が必要になる段階では専用GCP projectへ移行する。Googleは Cloud Run domain mapping をproductionに推奨していないため、DNS onlyのdomain mappingは採らない。Cloud Runは候補段階で公開 `run.app` のrevision URLを使い、販売前にはALB経由だけを受けるingressと候補revisionの検証経路を整える。プレビュー用deployerに本番権限は付けない。
+初期pilotでは既存の `niho-app-prd` にCloud Runサービスと限定した配備IDを足し、既存のglobal external Application Load BalancerとCloudflare proxyを再利用する。新規プロジェクト作成と新しいロードバランサーは不要。GCP project Owner、請求、API有効化、クォータの管理境界は共有する一方、GitHub deployerのCloud Run Adminは `niho-experience` サービスだけに付け、既存アプリのサービス・runtime identity・DB/Secretsへ権限を与えない（[Cloud Runのリソース単位IAM](https://docs.cloud.google.com/run/docs/securing/managing-access)）。売上や取り扱いデータが増える、組織ポリシー・障害範囲・請求分離が必要になる段階では専用GCP projectへ移行する。Googleは Cloud Run domain mapping をproductionに推奨していないため、DNS onlyのdomain mappingは採らない。Cloud RunはALB経由だけを受けるingressとし、候補も読み取り専用の専用edge経路で確認する。プレビュー用deployerに本番権限は付けない。
 
 ## 初回準備（本番設定の確認後）
 
@@ -204,3 +204,15 @@ Admin代理公開は、NIHO本番の `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN=https:
 NIHO追加API → Editor / Experience追加API → 相互認証と合成の負例確認 → ホスト入口 → 公開元切替の順で開く。カテゴリ/writer管理には、NIHO Admin BFFが配備済みでExperienceの限定Guide Admin APIを呼べる状態を先に確認し、`GUIDE_ADMIN_API_ENABLED` はNIHOの正規runtime service accountだけを許可してから開く。writer解除・取消・OWNER変更・体験停止の次読取、既存カテゴリ停止後の記事維持、公開停止後の写真404、依存障害での関連表示非表示を確認する。owner指示により画面受入・実機操作は省略できる。Secret値の用意は各repoのowner専用手順に従い、AIが値を取得・表示しない。
 
 公開元flagをOFFに戻すと新revisionは従来のstaticになる。既存database公開元へ戻す場合は既存runbookの固定revision切戻しを使う。公開記事・旧下書き・招待履歴を消さない。新しい定期job・Schedulerは追加しない。
+
+### 予約受付前の edge と候補の経路（#471）
+
+正規 origin は本番 `https://experience.niho.life`、staging `https://experience-stg.niho.life`。Cloudflare proxy → niho.life 専用の Authenticated Origin Pull 証明書を検証する既存 ALB → 同一環境の serverless NEG → Cloud Run の順に通す。staging の backend service と NEG は `niho-app-stg` に置き、既存の `niho-app-prd` frontend から参照する。アプリ・DB・Stripe の環境は混ぜない。
+
+Cloud Run ingress は両環境とも `internal-and-cloud-load-balancing`。`run.app` に CF ヘッダーを偽装しても公開経路にはならない。ALB IP の直アクセスもクライアント証明書なしでは拒否する。証明書検証を省略した疎通確認は受入に数えない。
+
+候補専用 origin は `experience-candidate.niho.life` と `experience-stg-candidate.niho.life`。各 NEG が固定 `candidate` タグを参照する。Cloudflare の専用ルールで GET/HEAD 以外を拒否し、候補から予約・返金・設定変更は実行できない。workflow は候補作成後に alias を設定し、固定の run タグと alias が両方とも対象 revision を指すことを `scripts/deploy/edge-route.mjs` で照合する。alias が別候補へ移っていたら promote は止まる。環境ごとの concurrency は継続し、既存の安定 traffic は候補作成で動かさない。
+
+`STG_HOST_SERVICE_URL`、staging の Google OAuth redirect、Stripe TEST webhook、Scheduler URI/OIDC audience を正規 origin にそろえる。旧 run.app の OAuth redirect は移行確認後に削除する。Guide Admin の Cloud Run audience のように Google のサービス認証が明示的に run.app を使う設定は別であり、機械的に書き換えない。
+
+受入は、通常の Chrome から staging 予約入力→Stripe TEST決済→確定→取消／返金を行い、偽装ヘッダー付きも含む直 origin 拒否、候補 POST 拒否、正規経路でのログイン／メール／webhook／ジョブを確認する。

@@ -132,7 +132,7 @@ jobs:
           test "$CORE_READY" = true
           test "$DEPLOYER" = experience-host-stg-deployer@niho-app-stg.iam.gserviceaccount.com
           [[ "$WIF" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/experience-host-staging/providers/github$ ]]
-          [[ "$SITE_URL" =~ ^https://niho-experience-host-stg-[a-z0-9-]+\.a\.run\.app$ || "$SITE_URL" =~ ^https://niho-experience-host-stg-[0-9]+\.asia-northeast1\.run\.app$ ]]
+          test "$SITE_URL" = https://experience-stg.niho.life
           test "$CLOUDSQL" = niho-app-stg:asia-northeast1:niho-app-db-stg
           [[ "$SESSION_REF" =~ ^experience-stg-host-session:[1-9][0-9]*$ ]]
           [[ "$FIREBASE_REF" =~ ^experience-stg-niho-firebase-web-api-key:[1-9][0-9]*$ ]]
@@ -208,7 +208,7 @@ jobs:
           bookings=false
           if [ "$GUEST_BOOKING" = true ]; then bookings=true; fi
           state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
-          jq -e --arg url "$SITE_URL" '((.metadata.annotations["run.googleapis.com/urls"] // "[]") | fromjson | index($url)) != null' <<< "$state" >/dev/null
+          test "$(jq -r '.metadata.name' <<< "$state")" = niho-experience-host-stg
           test "$(jq -r '.metadata.labels.app' <<< "$state")" = niho-experience
           test "$(jq -r '.metadata.labels.env' <<< "$state")" = host-staging
           traffic="$(jq -c '[.status.traffic[] | select((.percent // 0) > 0) | {revisionName,percent}] | sort_by(.revisionName)' <<< "$state")"
@@ -224,7 +224,7 @@ jobs:
               --image "${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/web@${PUSHED_DIGEST}" \
               --service-account "$RUNTIME" --execution-environment gen2 \
               --port 8080 --cpu 1 --memory 512Mi --min-instances 0 --max-instances 2 \
-              --no-traffic --tag "$CANDIDATE_TAG" \
+              --no-traffic --tag "$CANDIDATE_TAG" --ingress internal-and-cloud-load-balancing \
               --network default --subnet default --vpc-egress private-ranges-only \
               --set-cloudsql-instances "$CLOUDSQL" \
               --set-env-vars "EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://app-stg.niho.life,SITE_URL=${SITE_URL},SITE_INDEXING=block,BOOKINGS_ENABLED=${bookings},HOST_SIGNUP_MODE=pilot,HOST_CONSOLE_ENABLED=true,NIHO_HOST_START_URL=https://app-stg.niho.life/experiences/provider,GUIDE_EDITOR_SITE_ORIGIN=https://editor.niho.life,DEPLOY_COMMIT_SHA=${SHA}${FLAG_ENV:+,$FLAG_ENV}" \
@@ -315,6 +315,12 @@ jobs:
             printf '::error::Revision %s has no valid tagged Cloud Run URL (url=%s).\n' "$REVISION" "$url" >&2
             exit 1
           fi
+          if [ "$ACTION" = candidate ]; then
+            gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" --update-tags "candidate=$REVISION" --quiet
+            state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
+          fi
+          immutable_tag="$(jq -r --arg revision "$REVISION" '[.status.traffic[] | select(.revisionName == $revision and ((.tag // "") | test("^(cand-|candidate-).+"))) | .tag][0] // empty' <<< "$state")"
+          url="$(EDGE_TARGET=stg EDGE_REVISION="$REVISION" EDGE_TAG="$immutable_tag" node scripts/deploy/edge-route.mjs <<< "$state")"
           {
             echo "revision=$REVISION"
             echo "digest=$DIGEST"
@@ -330,28 +336,17 @@ jobs:
             echo "Candidate created with ${sales} and indexing blocked."
             echo "Feature flags: ${FLAG_SUMMARY}"
           } >> "$GITHUB_STEP_SUMMARY"
-      # ID tokens expire quickly; mint immediately before the authenticated GETs.
-      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
-        id: smoke_auth
-        with:
-          workload_identity_provider: ${{ vars.STG_HOST_WIF_PROVIDER }}
-          service_account: ${{ vars.STG_HOST_DEPLOY_SERVICE_ACCOUNT }}
-          token_format: id_token
-          id_token_audience: ${{ vars.STG_HOST_SERVICE_URL }}
-          id_token_include_email: true
-          create_credentials_file: false
-          export_environment_variables: false
+      # The mTLS edge and restricted origin protect this public read-only candidate route.
       - name: Smoke candidate without logging login responses
         env:
           URL: ${{ steps.candidate.outputs.url }}
-          ID_TOKEN: ${{ steps.smoke_auth.outputs.id_token }}
         run: |
           for path in / /host; do
-            curl -fsS --retry 4 --retry-all-errors --max-time 30 -H "Authorization: Bearer $ID_TOKEN" -o /dev/null "${URL}${path}"
+            curl -fsS --retry 4 --retry-all-errors --max-time 30 -o /dev/null "${URL}${path}"
           done
-          robots="$(curl -fsS --max-time 30 -H "Authorization: Bearer $ID_TOKEN" "${URL}/robots.txt")"
+          robots="$(curl -fsS --max-time 30 "${URL}/robots.txt")"
           grep -qF 'Disallow: /' <<< "$robots"
-          host_page="$(curl -fsS --max-time 30 -H "Authorization: Bearer $ID_TOKEN" "${URL}/host")"
+          host_page="$(curl -fsS --max-time 30 "${URL}/host")"
           grep -qF 'href="/host/auth/login"' <<< "$host_page"
           # Authentication/Google acceptance uses the stable origin only, after promotion.
       - name: Promote exact revision and verify stable origin with rollback
