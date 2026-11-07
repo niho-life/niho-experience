@@ -30,9 +30,9 @@ async function logoutExperienceSession(request: NextRequest) {
   const response = seeOther(config.hostPwaEnabled ? HOST_LAUNCH_PATH : HOST_INTRO_PATH);
   clearAccountSessionCookie(response);
   clearLinkBindingCookie(response);
+  clearLoginCookie(response);
   // A NIHO login's cookies from before the switch go too.
   clearSessionCookie(response);
-  clearLoginCookie(response);
   return response;
 }
 
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 
   // The installed app stays inside its own pages (#177).
   const response = seeOther(session?.surface === "app" ? HOST_LAUNCH_PATH : HOST_INTRO_PATH);
-  clearSessionCookie(response);
   clearLoginCookie(response);
+  clearSessionCookie(response);
   return response;
 }

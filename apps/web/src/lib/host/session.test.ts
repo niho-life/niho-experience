@@ -144,6 +144,11 @@ describe("login cookie", () => {
     expect(decodeLoginState(loginSealer, sealed, NOW + 10 * MIN)).toBeNull();
   });
 
+  it("carries the already allowlisted writer return path through NIHO", () => {
+    const writer = { ...login, returnPath: "/write/article_1/preview" };
+    expect(decodeLoginState(loginSealer, encodeLoginState(loginSealer, writer), NOW)).toEqual(writer);
+  });
+
   it("carries a sign-in started inside the installed app, and nothing for older login cookies", () => {
     const app = { ...login, surface: "app" as const };
     expect(decodeLoginState(loginSealer, encodeLoginState(loginSealer, app), NOW)).toEqual(app);

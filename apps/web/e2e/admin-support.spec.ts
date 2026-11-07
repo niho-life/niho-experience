@@ -27,7 +27,7 @@ test("admin has a separate session and ordinary hosts cannot enter", async ({ pa
   await expect(page.getByRole("heading", { level: 1, name: "予約支援" })).toBeVisible();
   const cookie = (await context.cookies()).find((item) => item.name === ADMIN_COOKIE);
   expect(cookie).toMatchObject({ path: "/admin", httpOnly: true, secure: true, sameSite: "Lax" });
-  expect((await context.cookies()).find((item) => item.name === "__Secure-niho_host_session")?.path).toBe("/host");
+  expect((await context.cookies()).find((item) => item.name === "__Secure-niho_host_session")?.path).toBe("/");
   const headers = (await page.goto("/admin/bookings"))!.headers();
   expect(headers["cache-control"]).toContain("no-store");
   expect(headers["x-robots-tag"]).toContain("noindex");

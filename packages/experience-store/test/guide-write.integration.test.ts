@@ -305,6 +305,8 @@ describe("PostgreSQL OWNER guide writes", { skip: databaseUrl === undefined ? "T
       );
 
       const afterFirst = await repository.getArticle(actorId, created.id);
+      assert.equal(afterFirst.currentPublication?.sourceRevision, confirmedCover.revision);
+      assert.equal(afterFirst.revision, confirmedCover.revision + 1);
       const privateEdit = await repository.saveDraft(actorId, created.id, {
         slug: afterFirst.slug,
         title: "A private newer draft",
@@ -312,6 +314,7 @@ describe("PostgreSQL OWNER guide writes", { skip: databaseUrl === undefined ? "T
         categorySlug: "culture",
         content: afterFirst.content,
       }, afterFirst.revision);
+      assert.equal(privateEdit.currentPublication?.sourceRevision, confirmedCover.revision);
       assert.equal((await repository.getPublicArticleBySlug(created.slug))?.title, first.title);
       const second = await repository.commitPublication(actorId, created.id, {
         expectedRevision: privateEdit.revision,

@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { exchangeCode } from "@/lib/host/niho-auth";
 import { loginStatesMatch } from "@/lib/host/pkce";
-import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostInvitationPath, hostPreparationPath, withProvider, withQuery, type LoginErrorReason } from "@/lib/host/routes";
+import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostInvitationPath, hostPreparationPath, hostReturnPathOrNull, withProvider, withQuery, type LoginErrorReason } from "@/lib/host/routes";
 import { clearLoginCookie, hostNotFound, loginSealer, nihoAuthDeps, seeOther, setSessionCookie } from "@/lib/host/server";
 import { decodeLoginState, LOGIN_COOKIE, startSession } from "@/lib/host/session";
 
@@ -36,7 +36,8 @@ export async function GET(request: NextRequest) {
   const now = Date.now();
   // Only a sign-in started inside the installed app makes an app session (#177).
   const session = startSession({ accessToken, accessTokenExpiresAt, refreshToken, connectionId, connectionExpiresAt, displayName, iconUrl, ...(login.surface === "app" ? { surface: "app" as const } : {}) }, now);
-  const response = seeOther(login.invitationId ? hostInvitationPath(login.invitationId) : login.preparationCaseId ? hostPreparationPath(login.preparationCaseId) : withProvider(HOST_HOME_PATH, login.providerId));
+  const returnPath = hostReturnPathOrNull(login.returnPath);
+  const response = seeOther(login.invitationId ? hostInvitationPath(login.invitationId) : login.preparationCaseId ? hostPreparationPath(login.preparationCaseId) : returnPath ?? withProvider(HOST_HOME_PATH, login.providerId));
   clearLoginCookie(response);
   try {
     setSessionCookie(response, session, now);

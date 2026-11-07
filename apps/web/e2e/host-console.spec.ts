@@ -51,7 +51,7 @@ test("a host signs in from /host, switches provider, opens a section and signs o
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
   await expect(page.getByText("Preview with sample data")).toHaveCount(0);
   const cookie = (await context.cookies()).find((c) => c.name === SESSION_COOKIE);
-  expect(cookie).toMatchObject({ path: "/host", httpOnly: true, secure: true, sameSite: "Lax" });
+  expect(cookie).toMatchObject({ path: "/", httpOnly: true, secure: true, sameSite: "Lax" });
 
   const headers = (await page.goto("/host/home"))!.headers();
   expect(headers["cache-control"]).toContain("no-store");

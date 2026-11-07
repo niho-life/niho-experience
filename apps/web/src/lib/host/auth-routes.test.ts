@@ -111,7 +111,7 @@ describe("login and callback (http mode)", () => {
     const cookies = setCookies(response);
     expect(cookies.get(LOGIN_COOKIE)?.attributes).toMatch(/Max-Age=0/);
     const session = cookies.get(SESSION_COOKIE)!;
-    expect(session.attributes).toMatch(/Path=\/host;/);
+    expect(session.attributes).toMatch(/Path=\/;/);
     expect(session.attributes).toMatch(/Max-Age=2592000/);
     expect(session.value).not.toContain("id-1");
     expect(openSession(session.value)).toMatchObject({ refreshToken: "refresh-1", accessToken: "web-access-1", connectionId: "conn_1", displayName: "合成 ホスト" });

@@ -38,10 +38,10 @@ describe("the Privacy footer link", () => {
     expect(privacyFooterLink("ja")).toEqual({ href: "/privacy", label: "プライバシー" });
   });
 
-  it("is in the English footer after the fixed links, with the guides and writers links before it when they exist", async () => {
+  it("is in the English footer after the fixed links, with the same-origin writer link always present", async () => {
     const plain = links(renderToStaticMarkup(await RootLayout({ children: createElement("p", null, "page") })));
     expect(plain.at(-1)).toEqual(["/privacy", "Privacy"]);
-    expect(plain.map(([href]) => href)).toEqual(["/experiences", "/host", "/help", "/privacy"]);
+    expect(plain.map(([href]) => href)).toEqual(["/experiences", "/host", "/help", "/write", "/privacy"]);
     state.hasGuides = true;
     state.config = { ...state.config, guideEditorSiteOrigin: "https://editor.example" };
     try {

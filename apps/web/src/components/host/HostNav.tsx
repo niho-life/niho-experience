@@ -23,7 +23,7 @@ const NAV_ICONS: Record<(typeof HOST_NAV)[number]["href"], HostIconName> = {
 
 /** The traveler site has its own root layout: a plain link, so the browser loads it as a new page. */
 const TRAVELER_SITE_PATH = "/experiences";
-/** Articles are written on editor.niho.life with the same NIHO account; the console only links there (#254). */
+/** Experience-owned article writer, on the same origin and the same host session. */
 const EDITOR_LINK_LABEL = "記事を書く";
 
 const FOOT_LINK = "flex h-[34px] items-center gap-2 rounded-[10px] px-2.5 text-[0.78125rem] font-bold text-ink-soft hover:bg-sand hover:text-ink";
@@ -34,7 +34,7 @@ export interface HostChromeProps {
   providers: readonly HostConsoleChoice[];
   /** NIHO's own app (NEXT_PUBLIC_NIHO_WEB_ORIGIN). */
   nihoAppUrl: string;
-  /** editor.niho.life, where articles are written (#254). Empty hides 記事を書く. */
+  /** Same-origin writer path. */
   editorUrl?: string;
 }
 
