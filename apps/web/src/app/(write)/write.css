@@ -79,7 +79,9 @@
 .write-rail { min-width: 0; border: 1px solid var(--color-line); border-radius: .35rem; background: white; box-shadow: 0 1.5rem 4rem rgb(28 28 26 / .06); }
 .write-language-note { margin: 2rem clamp(1.5rem, 6vw, 4.75rem) 2.5rem; border-left: 4px solid var(--color-leaf); padding-left: .85rem; color: var(--color-ink-soft); font-size: .9rem; }
 .write-title-label { display: block; margin: 0 clamp(1.5rem, 6vw, 4.75rem) .35rem; color: var(--color-muted); font-size: .8rem; font-weight: 900; }
-.write-title-input { display: block; width: calc(100% - 2 * clamp(1.5rem, 6vw, 4.75rem)); min-height: 5rem; margin-inline: clamp(1.5rem, 6vw, 4.75rem); border: 0; background: transparent; padding: .25rem 0; font-family: var(--font-display); font-size: clamp(2.35rem, 5vw, 4rem); line-height: 1.08; }
+.write-title-input { display: block; width: calc(100% - 2 * clamp(1.5rem, 6vw, 4.75rem)); min-height: 5rem; margin-inline: clamp(1.5rem, 6vw, 4.75rem); resize: none; field-sizing: content; border: 0; background: transparent; padding: .25rem 0; color: var(--color-ink); font-family: var(--font-display); font-size: clamp(2.35rem, 5vw, 4rem); font-weight: 400; line-height: 1.08; letter-spacing: -.025em; }
+.write-title-input::placeholder { color: #aaa9a2; }
+.write-title-input:focus { outline: 0; }
 .write-title-input:focus-visible { border-radius: .2rem; outline: 3px solid var(--color-moss); outline-offset: .35rem; }
 .write-body-field { position: relative; margin-top: 1.75rem; }
 .write-toolbar { position: sticky; z-index: 10; top: 4.25rem; display: flex; flex-wrap: wrap; gap: .25rem; border-block: 1px solid var(--color-line); background: rgb(255 255 255 / .96); padding: .4rem clamp(1rem, 4vw, 3rem); }
