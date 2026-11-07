@@ -47,4 +47,15 @@ describe("Experience settlement net amounts", () => {
       compensationAmount: null,
     }), { hostNet: null, nihoNet: null });
   });
+
+  it("covers the charged Stripe fee and its tax exactly once after a full refund", () => {
+    for (const feePayer of ["ACCOUNT", "APPLICATION"] as const) {
+      assert.deepEqual(calculateSettlementNetAmounts({
+        grossAmount: 10_000, successfulRefundAmount: 10_000,
+        applicationFeeAmount: 1_500, applicationFeeRefunded: 1_500,
+        processingFeeAmount: 396, feePayer,
+        compensationAmount: feePayer === "ACCOUNT" ? 396 : 0,
+      }), { hostNet: 0, nihoNet: -396 });
+    }
+  });
 });

@@ -121,6 +121,50 @@ describe("Experience actual settlement evidence", () => {
     assert.equal(evidence.issueCode, "refund_history_truncated");
   });
 
+  it("includes Stripe's charged tax in processing cost after a full refund without counting the Application Fee twice", async () => {
+    const stripe = settlementStripe({
+      paymentIntents: { retrieve: async () => ({ id: PI, metadata: { booking_id: BOOKING_ID }, latest_charge: {
+        id: "ch_SampleCharge0001", payment_intent: PI, amount: 10_000, currency: "jpy",
+        balance_transaction: { id: "txn_SampleBalance0001", fee: 1_896, currency: "jpy", fee_details: [
+          { amount: 36, currency: "jpy", type: "tax" },
+          { amount: 360, currency: "jpy", type: "stripe_fee" },
+          { amount: 1_500, currency: "jpy", type: "application_fee" },
+        ] },
+        application_fee: { id: "fee_SampleApplication1", amount: 1_500, amount_refunded: 1_500 },
+      } }) },
+      refunds: { list: async () => ({ data: [{ id: "re_SampleRefund0001", amount: 10_000, currency: "jpy", status: "succeeded" }], has_more: false }) },
+    });
+    const evidence = await readBookingSettlement({
+      publicBookingId: BOOKING_ID, connectedAccountId: ACCOUNT, paymentIntentId: PI,
+      expectedGrossAmount: 10_000, expectedCurrency: "JPY", stripe,
+    });
+    assert.equal(evidence.processingFeeAmount, 396);
+    assert.equal(evidence.applicationFeeAmount, 1_500);
+    assert.equal(evidence.applicationFeeRefunded, 1_500);
+    assert.equal(evidence.successfulRefundAmount, 10_000);
+    assert.equal(evidence.issueCode, null);
+  });
+
+  it("still rejects a tax breakdown whose total or currency does not match the charged fee", async () => {
+    for (const tax of [{ amount: 36, currency: "jpy" }, { amount: 0, currency: "usd" }]) {
+      const stripe = settlementStripe({ paymentIntents: { retrieve: async () => ({ id: PI, metadata: { booking_id: BOOKING_ID }, latest_charge: {
+        id: "ch_SampleCharge0001", payment_intent: PI, amount: 10_000, currency: "jpy",
+        balance_transaction: { id: "txn_SampleBalance0001", fee: 1_860, currency: "jpy", fee_details: [
+          { amount: 1_500, currency: "jpy", type: "application_fee" },
+          { amount: 360, currency: "jpy", type: "stripe_fee" },
+          { ...tax, type: "tax" },
+        ] },
+        application_fee: { id: "fee_SampleApplication1", amount: 1_500, amount_refunded: 0 },
+      } }) } });
+      const evidence = await readBookingSettlement({
+        publicBookingId: BOOKING_ID, connectedAccountId: ACCOUNT, paymentIntentId: PI,
+        expectedGrossAmount: 10_000, expectedCurrency: "JPY", stripe,
+      });
+      assert.equal(evidence.processingFeeAmount, null);
+      assert.equal(evidence.issueCode, "processing_fee_breakdown_mismatch");
+    }
+  });
+
   it("marks an unsupported connected-account fee payer for review instead of guessing", async () => {
     const stripe = settlementStripe({ accounts: { retrieve: async () => ({ id: ACCOUNT, controller: { fees: { payer: "account_on_behalf_of" } } }) } });
     const evidence = await readBookingSettlement({
