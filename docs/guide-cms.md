@@ -78,6 +78,8 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 
 `/write` で実書込みを始めた後は `static` へ戻さない。切戻しはデータを消さず、同じDB schemaとpublicationを読める既知のrevisionへトラフィックを戻す。`DATABASE_GUIDE_PUBLICATIONS_ENABLED` と `EDITOR_PUBLICATIONS_ENABLED` は相互排他で、未設定・不正・同時ONは配備前に失敗させる。
 
+staging の公式 workflow は実行者がオーナーなら GitHub environment `host-staging-owner`、それ以外なら `host-staging` の `STG_*` 変数を読む。公開元を変える際は両 environment の `STG_EDITOR_PUBLICATIONS_ENABLED=false`、`STG_DATABASE_GUIDE_PUBLICATIONS_ENABLED=true`、`STG_GUIDE_MEDIA_BUCKET=<専用private bucket>` をそれぞれ読戻す。候補 Cloud Run revision の `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` とbucket名に加え、候補URLで `UNLISTED` 記事が一覧・トップ・sitemapへ出ないことを確認してからpromoteする。一方のenvironmentだけを更新すると、成功した候補でも旧editor公開元のままになり得る。
+
 ### `kamakura-after-4-pm` の非公開移行
 
 trusted Studio の既存 `niho-experience` checkoutをcurrent directoryにし、既存 `niho-app` checkoutの公式bastion wrapperからだけ実行する。wrapperが子processへ渡すNIHO管理DB用`DATABASE_URL`はscript内で環境、localhost tunnel、管理DB名と管理userを照合し、資格情報を保持したまま同じinstanceのExperience DB名へ差し替える。URLや資格情報は出力しない。`EXPERIENCE_DATABASE_URL`を手入力・exportする経路は使わない。
