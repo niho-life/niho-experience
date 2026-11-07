@@ -173,7 +173,7 @@ jobs:
           digest="$(sed -nE 's/.*digest: (sha256:[0-9a-f]{64}).*/\1/p' <<< "$push_output" | tail -n1)"
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - name: Deploy candidate with sales disabled and search indexing allowed
+      - name: Deploy candidate behind the protected edge with search indexing allowed
         id: candidate
         env:
           FLAG_ENV: ${{ steps.flags.outputs.env }}
@@ -208,7 +208,7 @@ jobs:
           gcloud run deploy "$SERVICE" \
             --project "$PROJECT_ID" --region "$REGION" --image "$image" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --no-invoker-iam-check --port 8080 --cpu 1 --memory 512Mi \
+            --no-invoker-iam-check --ingress internal-and-cloud-load-balancing --port 8080 --cpu 1 --memory 512Mi \
             --min-instances 0 --max-instances 2 --no-traffic --tag "$tag" \
             --set-env-vars "$env_vars" "${runtime_options[@]}" \
             --labels "app=niho-experience,env=production,commit=${GITHUB_SHA:0:12}" --quiet
@@ -217,6 +217,21 @@ jobs:
           url="$(jq -r --arg tag "$tag" '.status.traffic[] | select(.tag == $tag) | .url' <<< "$state")"
           tagged_revision="$(jq -r --arg tag "$tag" '.status.traffic[] | select(.tag == $tag) | .revisionName' <<< "$state")"
           test -n "$revision" && test -n "$url" && test "$revision" = "$tagged_revision"
+          gcloud run services update-traffic "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --update-tags "candidate=$revision" --quiet
+          state="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
+          # EDGE_CANDIDATE_READBACK_BEGIN
+          jq -e --arg service "$SERVICE" --arg environment "production" --arg revision "$revision" --arg tag "$tag" '
+            . as $state |
+            .metadata.name == $service and .metadata.labels.app == "niho-experience" and
+            .metadata.labels.env == $environment and
+            .metadata.annotations["run.googleapis.com/ingress"] == "internal-and-cloud-load-balancing" and
+            ($revision | length) > 0 and ($tag | test("^(cand-|candidate-)[a-z0-9-]+$")) and
+            all([$tag, "candidate"][]; . as $name |
+              [$state.status.traffic[] | select(.tag == $name)] |
+              length == 1 and .[0].revisionName == $revision)
+          ' <<< "$state" >/dev/null
+          # EDGE_CANDIDATE_READBACK_END
+          url=https://experience-candidate.niho.life
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           {
@@ -417,6 +432,19 @@ jobs:
           tag="${tag:0:22}"
           url="$(jq -r --arg tag "$tag" --arg revision "$CANDIDATE_REVISION" '.status.traffic[] | select(.tag == $tag and .revisionName == $revision) | .url' <<< "$state")"
           test -n "$url" && test "$url" != null
+          # EDGE_CANDIDATE_READBACK_BEGIN
+          jq -e --arg service "$SERVICE" --arg environment "production" --arg revision "$CANDIDATE_REVISION" --arg tag "$tag" '
+            . as $state |
+            .metadata.name == $service and .metadata.labels.app == "niho-experience" and
+            .metadata.labels.env == $environment and
+            .metadata.annotations["run.googleapis.com/ingress"] == "internal-and-cloud-load-balancing" and
+            ($revision | length) > 0 and ($tag | test("^(cand-|candidate-)[a-z0-9-]+$")) and
+            all([$tag, "candidate"][]; . as $name |
+              [$state.status.traffic[] | select(.tag == $name)] |
+              length == 1 and .[0].revisionName == $revision)
+          ' <<< "$state" >/dev/null
+          # EDGE_CANDIDATE_READBACK_END
+          url=https://experience-candidate.niho.life
           echo "url=$url" >> "$GITHUB_OUTPUT"
           {
             echo "Verified existing revision: ${CANDIDATE_REVISION}"
