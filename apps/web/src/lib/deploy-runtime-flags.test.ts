@@ -20,6 +20,7 @@ interface Item {
   optional?: boolean;
 }
 interface Flag {
+  id?: string;
   env: string;
   variable: string;
   value?: string;
@@ -75,7 +76,8 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED: "articleAuthorityApiEnabled",
   GUIDE_ADMIN_API_ENABLED: "guideAdminApiEnabled",
   EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED: "hostArticleLinksEnabled",
-  EXPERIENCE_GUIDE_PUBLIC_SOURCE: "guidePublicSource",
+  EDITOR_GUIDE_PUBLICATIONS: "guidePublicSource",
+  DATABASE_GUIDE_PUBLICATIONS: "guidePublicSource",
   EXPERIENCE_GUIDE_APP_CARDS_ENABLED: "guideAppCardsEnabled",
   EXPERIENCE_GUEST_BOOKING_ENABLED: "guestBookingEnabled",
   EXPERIENCE_GUEST_MAIL_ENABLED: "guestMailEnabled",
@@ -113,7 +115,8 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_AIRBNB_GOOGLE_OBSERVATION_ENABLED: "airbnbGoogleObservationEnabled",
 };
 
-const byEnv = new Map(FLAGS.map((flag) => [flag.env, flag]));
+const flagId = (flag: Flag) => flag.id ?? flag.env;
+const byId = new Map(FLAGS.map((flag) => [flagId(flag), flag]));
 
 /** The flag's own variables: on, with every setting and Secret reference it takes. */
 function varsOf(target: Target, flag: Flag): Vars {
@@ -126,10 +129,10 @@ function varsOf(target: Target, flag: Flag): Vars {
 }
 
 /** The flag and every flag it needs (the first of an "A|B"), each with its variables. */
-function closure(target: Target, env: string, seen = new Set<string>()): Vars {
-  if (seen.has(env)) return {};
-  seen.add(env);
-  const flag = byEnv.get(env)!;
+function closure(target: Target, id: string, seen = new Set<string>()): Vars {
+  if (seen.has(id)) return {};
+  seen.add(id);
+  const flag = byId.get(id)!;
   let vars = varsOf(target, flag);
   for (const need of flag.needs ?? []) {
     const first = need.split("|")[0]!;
@@ -216,19 +219,38 @@ describe("the deploy workflows' feature flags", () => {
   });
 
   it("requires current authority before switching the publication source", () => {
-    const vars = closure("prod", "EXPERIENCE_GUIDE_PUBLIC_SOURCE");
+    const vars = closure("prod", "EDITOR_GUIDE_PUBLICATIONS");
     vars.PROD_ARTICLE_AUTHORITY_API_ENABLED = "false";
     expect(resolve("prod", vars).problems.join(" ")).toContain("EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED");
-    const enabled = resolve("prod", closure("prod", "EXPERIENCE_GUIDE_PUBLIC_SOURCE"));
+    const enabled = resolve("prod", closure("prod", "EDITOR_GUIDE_PUBLICATIONS"));
     expect(enabled.env.EXPERIENCE_GUIDE_PUBLIC_SOURCE).toBe("editor");
     expect(enabled.env.GUIDE_EDITOR_API_HANDLE).toBe("exp");
     expect(enabled.secrets.GUIDE_EDITOR_API_TOKEN).toMatch(/:[1-9][0-9]*$/);
   });
 
+  it("configures the database Guide source with its private media bucket and refuses either source conflict", () => {
+    const enabled = resolve("prod", closure("prod", "DATABASE_GUIDE_PUBLICATIONS"));
+    expect(enabled.problems).toEqual([]);
+    expect(enabled.on).toContain("DATABASE_GUIDE_PUBLICATIONS");
+    expect(enabled.env.EXPERIENCE_GUIDE_PUBLIC_SOURCE).toBe("database");
+    expect(enabled.env.GUIDE_MEDIA_BUCKET).toBe(SETTING.bucketName);
+    expect(resolveConfig(revision("prod", enabled)).guidePublicSource).toBe("database");
+
+    const missing = closure("prod", "DATABASE_GUIDE_PUBLICATIONS");
+    delete missing.PROD_GUIDE_MEDIA_BUCKET;
+    expect(resolve("prod", missing).problems.join(" ")).toContain("PROD_GUIDE_MEDIA_BUCKET");
+    const invalid = { ...closure("prod", "DATABASE_GUIDE_PUBLICATIONS"), PROD_GUIDE_MEDIA_BUCKET: "Not A Bucket" };
+    expect(resolve("prod", invalid).problems.join(" ")).toContain("PROD_GUIDE_MEDIA_BUCKET");
+
+    const both = { ...closure("prod", "EDITOR_GUIDE_PUBLICATIONS"), ...closure("prod", "DATABASE_GUIDE_PUBLICATIONS") };
+    const problems = resolve("prod", both).problems.join("\n");
+    expect(problems).toContain("EDITOR_GUIDE_PUBLICATIONS (PROD_EDITOR_PUBLICATIONS_ENABLED) conflicts with DATABASE_GUIDE_PUBLICATIONS (PROD_DATABASE_GUIDE_PUBLICATIONS_ENABLED)");
+  });
+
   it("requires the Editor publication source before exposing app cards", () => {
     const vars = closure("prod", "EXPERIENCE_GUIDE_APP_CARDS_ENABLED");
     vars.PROD_EDITOR_PUBLICATIONS_ENABLED = "false";
-    expect(resolve("prod", vars).problems.join(" ")).toContain("EXPERIENCE_GUIDE_PUBLIC_SOURCE");
+    expect(resolve("prod", vars).problems.join(" ")).toContain("EDITOR_GUIDE_PUBLICATIONS");
     const enabled = resolve("prod", closure("prod", "EXPERIENCE_GUIDE_APP_CARDS_ENABLED"));
     expect(resolveConfig(revision("prod", enabled)).guideAppCardsEnabled).toBe(true);
   });
@@ -336,7 +358,7 @@ describe("the deploy workflows' feature flags", () => {
   });
 
   it("covers every flag of the table with a config setting", () => {
-    expect(FLAGS.map((flag) => flag.env).sort()).toEqual(Object.keys(CONFIG_KEY).sort());
+    expect(FLAGS.map(flagId).sort()).toEqual(Object.keys(CONFIG_KEY).sort());
     expect(new Set(FLAGS.map((flag) => flag.variable)).size).toBe(FLAGS.length);
   });
 
@@ -351,11 +373,12 @@ describe("the deploy workflows' feature flags", () => {
   for (const target of ["stg", "prod"] as const) {
     it(`${target}: each flag with what it needs starts the server and turns on in resolve-config`, () => {
       for (const flag of FLAGS) {
-        const resolved = resolve(target, closure(target, flag.env));
-        expect(resolved.problems, flag.env).toEqual([]);
-        expect(resolved.on, flag.env).toContain(flag.env);
+        const id = flagId(flag);
+        const resolved = resolve(target, closure(target, id));
+        expect(resolved.problems, id).toEqual([]);
+        expect(resolved.on, id).toContain(id);
         const config = resolveConfig(revision(target, resolved));
-        expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(flag.value ?? true);
+        expect(config[CONFIG_KEY[id]!], id).toBe(flag.value ?? true);
       }
     });
 
@@ -365,9 +388,9 @@ describe("the deploy workflows' feature flags", () => {
       const vars = Object.assign({}, ...compatible.map((flag) => varsOf(target, flag))) as Vars;
       const resolved = resolve(target, vars);
       expect(resolved.problems).toEqual([]);
-      expect(resolved.on).toEqual(compatible.map((flag) => flag.env));
+      expect(resolved.on).toEqual(compatible.map(flagId));
       const config = resolveConfig(revision(target, resolved));
-      for (const flag of compatible) expect(config[CONFIG_KEY[flag.env]!], flag.env).toBe(flag.value ?? true);
+      for (const flag of compatible) expect(config[CONFIG_KEY[flagId(flag)]!], flagId(flag)).toBe(flag.value ?? true);
       // The jobs are called by their own service accounts on the stable URL.
       expect(config.hostPushJobEnabled).toBe(true);
       expect(resolved.env).toMatchObject({
@@ -386,23 +409,23 @@ describe("the deploy workflows' feature flags", () => {
       for (const flag of FLAGS) {
         for (const need of flag.needs ?? []) {
           if (CAPABILITIES.includes(need)) continue;
-          const vars = { ...closure(target, flag.env) };
-          for (const one of need.split("|")) vars[`${PREFIX[target]}_${byEnv.get(one)!.variable}`] = "false";
+          const vars = { ...closure(target, flagId(flag)) };
+          for (const one of need.split("|")) vars[`${PREFIX[target]}_${byId.get(one)!.variable}`] = "false";
           const { problems } = resolve(target, vars);
-          expect(problems.some((problem) => problem.includes(flag.env) && need.split("|").every((one) => problem.includes(one))), `${flag.env} needs ${need}`).toBe(true);
+          expect(problems.some((problem) => problem.includes(flagId(flag)) && need.split("|").every((one) => problem.includes(one))), `${flagId(flag)} needs ${need}`).toBe(true);
         }
       }
     });
   }
 
   it("refuses Experience host accounts with a flag that sends the NIHO host access token, as resolve-config does (ADR 0003)", () => {
-    const accounts = byEnv.get("EXPERIENCE_HOST_ACCOUNTS_ENABLED")!;
+    const accounts = byId.get("EXPERIENCE_HOST_ACCOUNTS_ENABLED")!;
     expect(accounts.conflicts).toEqual(expect.arrayContaining([
       "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_TRANSLATE_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED",
     ]));
     for (const target of ["stg", "prod"] as const) {
       for (const conflict of accounts.conflicts!) {
-        const other = byEnv.get(conflict)!;
+        const other = byId.get(conflict)!;
         const both = { ...closure(target, conflict), ...closure(target, accounts.env) };
         const { problems } = resolve(target, both);
         expect(problems, conflict).toContain(`EXPERIENCE_HOST_ACCOUNTS_ENABLED (${PREFIX[target]}_HOST_ACCOUNTS_ENABLED) conflicts with ${conflict} (${PREFIX[target]}_${other.variable})`);
@@ -465,8 +488,9 @@ describe("the deploy workflows' feature flags", () => {
 
   it("production: every flag needs enable_host_calendar=true (the host console and its database)", () => {
     for (const flag of FLAGS) {
-      const { problems } = resolve("prod", closure("prod", flag.env), false);
-      expect(problems.some((problem) => problem.includes("enable_host_calendar=true")), flag.env).toBe(true);
+      const id = flagId(flag);
+      const { problems } = resolve("prod", closure("prod", id), false);
+      expect(problems.some((problem) => problem.includes("enable_host_calendar=true")), id).toBe(true);
     }
   });
 

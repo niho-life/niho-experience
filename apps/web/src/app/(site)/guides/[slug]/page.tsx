@@ -55,6 +55,6 @@ export default async function GuidePage({ params, searchParams }: Props) {
     if (target) redirect(target);
     notFound();
   }
-  const { guide, draft, editorialPreview } = found;
-  return <GuideArticle guide={guide} variant={draft ? "draft" : editorialPreview ? "editorial-preview" : "published"} query={await searchParams} />;
+  const { guide, draft } = found;
+  return <GuideArticle guide={guide} variant={draft ? "draft" : "published"} query={await searchParams} />;
 }

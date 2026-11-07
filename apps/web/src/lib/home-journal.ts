@@ -13,8 +13,8 @@ export type HomeJournalItem = Readonly<{
   title: string;
   description: string;
   topic: HomeJournalTopic | null;
-  /** "Draft" (shown from a preview draft), "Editorial preview" (an unlisted guide the home features) or none. */
-  badge: "Draft" | "Editorial preview" | null;
+  /** "Draft" in the mock preview, or none. */
+  badge: "Draft" | null;
   /** The guide's hero when its path is safe; without one the card shows the topic on sand. */
   image: Readonly<{ src: string; alt: string }> | null;
   readMinutes: number;
@@ -35,11 +35,11 @@ export function homeJournalTopic(guide: Guide): HomeJournalTopic | null {
 const topicOrder = (guide: Guide) => guide.category?.displayOrder ?? GUIDE_PILLARS.findIndex((pillar) => pillar.key === guide.pillar);
 
 /**
- * The home journal: the featured guide first (when the home features one), then the catalog order, up to the limit. Topics
- * are the distinct ones among the shown cards, in the CMS display order or the pillar order.
+ * The home journal follows the public catalog order, up to the limit. Topics are the distinct ones among the shown cards,
+ * in the CMS display order or the pillar order.
  */
-export function homeJournal(guides: readonly Guide[], { featured = null, draftSlugs = [] }: { featured?: Guide | null; draftSlugs?: readonly string[] } = {}): HomeJournal {
-  const ordered = featured ? [featured, ...guides.filter((guide) => guide.slug !== featured.slug)] : [...guides];
+export function homeJournal(guides: readonly Guide[], { draftSlugs = [] }: { draftSlugs?: readonly string[] } = {}): HomeJournal {
+  const ordered = [...guides];
   const shown = ordered.slice(0, HOME_JOURNAL_LIMIT);
   const items = shown.map((guide): HomeJournalItem => {
     const date = guide.checkedAt ?? guide.updatedAt;
@@ -50,7 +50,7 @@ export function homeJournal(guides: readonly Guide[], { featured = null, draftSl
       // A lead-less editor publication shows the opening of its body instead (guideSummary).
       description: guideSummary(guide),
       topic: homeJournalTopic(guide),
-      badge: draftSlugs.includes(guide.slug) ? "Draft" : guide.unlisted ? "Editorial preview" : null,
+      badge: draftSlugs.includes(guide.slug) ? "Draft" : null,
       image: src && guide.hero ? { src, alt: guide.hero.alt } : null,
       readMinutes: guideReadMinutes(guide),
       dateKind: guide.checkedAt ? "Checked" : "Updated",

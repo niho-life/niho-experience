@@ -70,7 +70,7 @@ describe("the guide catalog", () => {
     state.isPreview = false;
     expect(await guideCatalog()).toEqual({ source: "static", guides: [], draftSlugs: [], draftProblems: [] });
     expect(await indexableGuides()).toEqual([]);
-    expect(await findGuide("kamakura-after-4-pm")).toMatchObject({ draft: false, unlisted: true, editorialPreview: true, guide: { slug: "kamakura-after-4-pm" } });
+    expect(await findGuide("kamakura-after-4-pm")).toBeNull();
     expect(state.read).not.toHaveBeenCalled();
   });
 
@@ -137,6 +137,18 @@ describe("the guide catalog", () => {
     state.repository.listPublicArticles.mockRejectedValue(new Error("database unavailable"));
     await expect(guideCatalog()).rejects.toThrow("database unavailable");
     expect(state.read).not.toHaveBeenCalled();
+  });
+
+  it("hides database failures only from pages where guides are optional", async () => {
+    state.config = { guideDraftsDir: null, guidePublicSource: "database" };
+    state.isPreview = false;
+    state.repository.listPublicArticles.mockRejectedValue(new Error("database unavailable"));
+    const { guideCatalogForSite } = await import("./guide-registry");
+
+    await expect(guideCatalogForSite()).resolves.toEqual({
+      source: "database", guides: [], draftSlugs: [], draftProblems: [],
+    });
+    await expect(guideCatalog()).rejects.toThrow("database unavailable");
   });
 
   it("rechecks only guides related to this experience with bounded concurrency", async () => {

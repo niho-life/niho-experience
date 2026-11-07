@@ -175,7 +175,7 @@ Admin代理公開は、NIHO本番の `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN=https:
 | 表示 | 本番候補で mock/pilot fixture が出ず、`/preview/states` と `/preview/checkout` が404。公開APIは掲載済みだけ。モバイル・デスクトップと主要エラー表示、商品原稿・写真許諾を確認 |
 | 予約・販売 | 合成提供者と Stripe test の掲載→予約→決済→確定→予約一覧→売上→返金、販売者/口座/条件、停止・期限切れ・再送を確認。P-01/02の実条件、サポート窓口、販売開始判断者が確定してから `BOOKINGS_ENABLED=true` と NIHO側受付を開く |
 | 検索 | canonical・sitemap・robots、公開原稿と写真、計測の公表が揃ってから `SITE_INDEXING=allow`。販売開始とは別に判断。**オーナー決定（2026-11-07）で開いた**。本番は Umami・GA4 とも未設定で、公表が要る計測は無い（入れる時は下の「計測」の順で公表を先に行う）。体験詳細の canonical は NIHO 側の `EXPERIENCE_SITE_PUBLIC_ORIGIN` の切替までは NIHO の企画ページを指す |
-| Guide CMS公開元 | [Guide CMSのdatabase flagゲート](guide-cms.md#database-flagを開く前のゲート)をstagingで満たし、migration/bucket/NIHO editor auth/移行件数を照合してから、専用の配備変更でだけ `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database`。DB/storage障害時にstaticへ戻らないこと、CloudflareがHTML・sitemap・mediaをcacheしないことを確認。切戻しはデータを消さず`static`の新revision。`EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor`（#252・editor v1 契約に合わせ済み）は editor.niho.life の公開（設計の段階 3）が本番で使え、`api.editor.niho.life` が開き、カテゴリの扱いのオーナー判断（[残る差](guide-cms.md#v1-に合わせた記録と残る差epic-251)）が済むまで有効化せず、`GUIDE_EDITOR_API_*` の Secret Manager・workflow 配線もそれまで行わない（`GUIDE_EDITOR_API_TOKEN` は editor の面の資格で期限があるので、払い出しと入れ替えの運用も先に決める）。書き手の入口の `GUIDE_EDITOR_SITE_ORIGIN=https://editor.niho.life` は公開元と独立で、editor.niho.life が本番で開けることを確かめてから渡す。開くときは [editor 公開APIの切替](guide-cms.md#切替切戻し) をstagingで満たし、Cloudflareが `/guides*`（`/guides/preview` を含む）と sitemap を cacheしないことを確認。切戻しは `database` か `static` の新revision |
+| Guide CMS公開元 | [database flagゲート](guide-cms.md#database-flagを開く前のゲート)をstagingで満たし、migration、private bucket、現行ホストログインのactive OWNER、移行件数を照合してから `DATABASE_GUIDE_PUBLICATIONS_ENABLED=true`。これは `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` と専用 `GUIDE_MEDIA_BUCKET` を一緒に設定する。`EDITOR_PUBLICATIONS_ENABLED`とは相互排他で、未設定・不正・競合は認証前の配備検査で止める。実DB/非公開画像で再訪・公開更新・停止・権限失効・写真取消、UNLISTEDの直URL/noindexと一覧/sitemap除外、DB/画像障害、Cloudflare bypassを確認する。書込み開始後の切戻しは`static`ではなく、同じDB revisionを読める既知revisionへのtraffic rollbackとする。旧editor公開元の撤去は#480 |
 | 外部提供者 | 連携B #19123 の登録・権限・口座・売上の受入後にだけ `HOST_SIGNUP_MODE=open` |
 | ホストの画面 | NIHO 側の接続（niho-app #19282、#19283）の本番配備と [#92](https://github.com/niho-life/niho-experience/issues/92) の受入の後にだけ `enable_host_calendar=true` の候補を昇格する |
 | 計測 | NIHOのプライバシーポリシーに Umami Cloud の送信内容・目的・保存期間を追記し、同意方針の確認後だけ `UMAMI_WEBSITE_ID` を設定。previewには設定しない |
@@ -195,6 +195,7 @@ Admin代理公開は、NIHO本番の `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN=https:
 | `GUIDE_ADMIN_API_ENABLED` | NIHO Admin BFFからの限定writer/category管理API | ホストの画面・DB、`GUIDE_ADMIN_AUDIENCE`（Cloud Run service URL）、`GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL`（NIHO API runtime SA 1つ） |
 | `HOST_ARTICLE_LINKS_ENABLED` | ホスト設定のNIHO正本への招待・取消 | ホスト画面、`NIHO_ARTICLE_AUTHORITY_ORIGIN`、`NIHO_ARTICLE_LINKS_AUDIENCE` |
 | `EDITOR_PUBLICATIONS_ENABLED` | 公開元を`editor`へ切替 | DB、authority API、`GUIDE_EDITOR_API_BASE_URL`、`GUIDE_EDITOR_API_TOKEN_REF`の固定数値版、`GUIDE_EDITOR_ASSET_ORIGIN` |
+| `DATABASE_GUIDE_PUBLICATIONS_ENABLED` | 公開元をExperience DBへ切替 | DB、専用private bucket名の`GUIDE_MEDIA_BUCKET`。`EDITOR_PUBLICATIONS_ENABLED`と同時ON不可 |
 | `GUIDE_APP_CARDS_ENABLED` | NIHOライブラリ向けの公開summary | `EDITOR_PUBLICATIONS_ENABLED=true`。著者が`extras.app`を選んだlive公開版だけ。[記事カード契約](guide-app-cards.md) |
 
 書き手の入口の `GUIDE_EDITOR_SITE_ORIGIN=https://editor.niho.life` はどのflagにも属さない固定値で、表には載せない。stagingとproductionのworkflowが全revisionに設定し、読戻しで値を照合する（flagがすべてOFFの本番revisionでも、表の名前として余分扱いにならない）。
@@ -203,7 +204,7 @@ Admin代理公開は、NIHO本番の `APP_CONNECT_EXPERIENCE_ADMIN_ORIGIN=https:
 
 NIHO追加API → Editor / Experience追加API → 相互認証と合成の負例確認 → ホスト入口 → 公開元切替の順で開く。カテゴリ/writer管理には、NIHO Admin BFFが配備済みでExperienceの限定Guide Admin APIを呼べる状態を先に確認し、`GUIDE_ADMIN_API_ENABLED` はNIHOの正規runtime service accountだけを許可してから開く。writer解除・取消・OWNER変更・体験停止の次読取、既存カテゴリ停止後の記事維持、公開停止後の写真404、依存障害での関連表示非表示を確認する。owner指示により画面受入・実機操作は省略できる。Secret値の用意は各repoのowner専用手順に従い、AIが値を取得・表示しない。
 
-公開元flagをOFFに戻すと新revisionは従来のstaticになる。既存database公開元へ戻す場合は既存runbookの固定revision切戻しを使う。公開記事・旧下書き・招待履歴を消さない。新しい定期job・Schedulerは追加しない。
+公開元flagをOFFにすると空のstatic経路になるため、`/write`で実書込みを始めた環境の切戻しには使わない。既存runbookで、同じDB schemaとpublicationを読める固定revisionへtrafficを戻す。公開記事・旧下書き・招待履歴を消さない。新しい定期job・Schedulerは追加しない。
 
 ### 予約受付前の edge と候補の経路（#471）
 

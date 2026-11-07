@@ -27,7 +27,7 @@
 | 設定 | 用途 |
 | --- | --- |
 | `EXPERIENCE_DATABASE_URL` | 体験専用 PostgreSQL。NIHOapp の業務 DB とは分離する |
-| `EXPERIENCE_GUIDE_PUBLIC_SOURCE` | `database` のときだけGuide CMSのcurrent publicationを、`editor` のときだけ editor.niho.life の公開API（#252・editor v1 契約）を公開SSRへ接続する。http mode限定・既定`static`。2026-11-07 のオーナー判断で目標は `database`（#479）、`editor` は開かずに撤去する（#480） |
+| `EXPERIENCE_GUIDE_PUBLIC_SOURCE` | `database` のときだけGuide CMSのcurrent publicationを公開SSRへ接続する。公式配備では `DATABASE_GUIDE_PUBLICATIONS_ENABLED=true` からのみ設定し、専用 `GUIDE_MEDIA_BUCKET` とDBを必須にする。http mode限定・未設定時は空のstatic経路（mockだけ合成sample）。`editor` は旧経路で、`EDITOR_PUBLICATIONS_ENABLED`との同時ONを配備前に拒否し、#480で撤去する |
 | `GUIDE_MEDIA_BUCKET` | Guideのprivate JPEG bucket。database公開元では必須。名前・object keyを公開レスポンスへ出さない |
 | `GUIDE_EDITOR_API_BASE_URL` / `GUIDE_EDITOR_API_HANDLE` / `GUIDE_EDITOR_API_TOKEN` | editor公開元では3つとも必須（無ければ起動失敗）。base URL は版のパスを含む https（loopback の http だけ例外）。handle は `exp` のみ。token は server-only の秘密（editor の面の資格。期限あり）で、公開出力・ログへ出さない。[Guide CMS](guide-cms.md#editorniholife-の公開-api-を読む252-253editor-v1-契約) |
 | `GUIDE_EDITOR_ASSET_ORIGINS` | 任意。editor の写真を配信する https origin のカンマ区切り。未設定なら base URL の origin だけ |
@@ -72,7 +72,7 @@ Experience はNIHOと同じSMTP事業者・共有資格情報を使うが、送�
 
 **送信ドメインの確認結果（2026-11-07、DNS の読み取りのみ）**：From は `info@niho.life`（staging の `STG_MAIL_FROM`。本番の `PROD_MAIL_FROM` は未設定）。`niho.life` は SPF が `v=spf1 include:_spf.google.com ~all`（Google Workspace だけを許可）、DKIM は selector `google` の公開鍵あり、DMARC は `v=DMARC1; p=none; adkim=r; aspf=r; pct=100`（レポート宛先 `rua` なし）。NIHO の SMTP 事業者が Google Workspace（`smtp.gmail.com` / SMTP リレー）なら SPF・DKIM とも From のドメインで揃う。**別の事業者で送っているなら、SPF には含まれず、DKIM の署名も From のドメインと揃わない可能性があり、DMARC が `none`（何もしない指定）でも迷惑メール判定や拒否の危険が残る**。SMTP の接続先は共有資格情報の中にあり、このリポでは確認できないため、NIHO 側（共通ドメインの管理者）に次を確認する：①送信に使う事業者と、そこが From ドメインで DKIM 署名しているか ②SPF にその事業者を含めるか ③DMARC に `rua=` を付けて集計レポートを受け、揃っていることを見てから `p=quarantine` を検討する。いずれも共通ドメインの DNS 変更なので、この Issue では行わない。
 
-Guide CMSの公開切替は販売正本の切替と分離する。まずstagingでmigration、private bucket、NIHO editor auth、category/article/publication移行、権限失効・停止・UNLISTED・画像取消を合成データで受け入れる。次に `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` の候補revisionで、SSR/metadata/sitemapが次requestに反映されること、static記事が混在しないこと、公開catalogとの体験link交差、mediaの404/503/no-storeを確認する。受入前は`static`を維持し、editorだけの有効化を公開元切替とみなさない。`EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` は editor.niho.life の公開（設計の段階 3）が本番で使えるまで有効化しない。Secret Manager と配備 workflow への配線もそれまで行わない。
+Guide CMSの公開切替は販売正本の切替と分離する。まずstagingでmigration、private bucket、現行ホストログインのactive OWNER、category/article/publication移行を受け入れる。`kamakura-after-4-pm` のopsはsynthetic DBとdry-runを先に通し、実値をrepo・CI・ログへ出さない。次にdatabase候補revisionで、再訪、公開更新、停止、権限失効、写真取消、PUBLIC/UNLISTED、home/list/detail/sitemap、公開catalogとの体験link交差を確認する。DB障害ではトップ・体験詳細・予約入口を維持して記事枠だけ隠し、`/guides`と詳細は再試行面、sitemapは失敗する。画像障害はmedia routeの503/no-storeで、いずれもstaticへfallbackしない。CloudflareのHTML・`/guides*`・sitemap・mediaはbypassする。実書込み開始後はstaticへ戻さず、DB互換の既知revisionへtraffic rollbackする。
 
 ## ホスト販売の残作業
 

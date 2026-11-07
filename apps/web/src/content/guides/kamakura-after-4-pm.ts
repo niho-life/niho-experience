@@ -1,6 +1,6 @@
-import type { Guide } from "./types";
+import type { Guide } from "./types.ts";
 
-/** Direct-link editorial preview of #147. Remove `unlisted` only after the full editorial and photo review. */
+/** Legacy #147 source retained only for the private, idempotent Experience DB ops import. */
 export const kamakuraAfter4Pm: Guide = {
   slug: "kamakura-after-4-pm",
   unlisted: true,

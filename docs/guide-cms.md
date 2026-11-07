@@ -4,7 +4,7 @@
 
 オーナー判断で、記事は experience.niho.life の `/write` で書き、正本は Experience DB に戻す。editor.niho.life から Experience への公開は止める。体験の OWNER は NIHO のライター権限なしで書ける。OWNER 以外のライターは NIHO のライター権限と記事連携を使う。決定の全体は [ADR 0002 ガイド記事](adr/0002-guide-content.md)の「2026-11-07」を正とする。
 
-この文書の「現在の経路（2026-11-03）」と editor 公開 API の節は、#477〜#480 が入るまでの現状の記録。Store の書込みは #477、`/write` の画面は #478、公開元の `database` への切替は #479、editor 経路の撤去は #480 で直す。下の旧 Experience 内 CMS の節（非公開写真・公開SSR・database flag のゲート・本文写真・関連体験）は、#477 で書込みを戻すときの設計の参照に使う。
+Store の書込みは #477、`/write` の画面は #478 で戻り、#479 で公開元を Experience DB へ切り替える配備境界と旧静的記事の移行手順を確定した。editor 公開 API・旧 authority の撤去は #480 の範囲であり、本Issueではコードを消さない。ただし新しい公開・切戻しの正本には使わない。
 
 ## Store の現行書込み境界（#477）
 
@@ -12,18 +12,18 @@
 
 下書きは空のタイトル・未完成の表紙・日本語メモを保存できる。公開時だけ英語宣言、タイトル、見出し・本文、カテゴリ、写真の Web 掲載確認を検査し、封印済み版を新規に作る。公開済み記事の下書きを更新しても表示中の版は変わらない。公開処理の同一 OWNER・同一 revision・同一公開範囲での直後の再送は同じ版を返す。運営停止 `OPS_STOPPED` は通常の停止と別状態で、監査付き運用手順による解除までは OWNER が公開できない。詳細は [Store README](../packages/experience-store/README.md) を参照。
 
-## 現在の経路（2026-11-03、#254 / #255）
+## 現在の経路（2026-11-08、#479）
 
-記事はEditorクラウドで作成・公開する。Experienceの旧`/editor`認証・書込・下書きAPIは410で閉じ、入口は`/write`から固定Editorへ移動する。旧Storeの保存済み下書き・grant・招待・公開版は削除しないが、旧writer grantや招待台帳を現在権限の根拠にしない。
+記事は Experience の `/write` と現行 `GuideRepository` で作成・公開し、Experience DB の current sealed publication を旅行者向けSSRの正本にする。`/write` はホスト画面と同じ現行ログインを使い、毎操作で記事提供者の active OWNER membershipを確認する。旧writer grantや招待台帳、editor app-connect、静的モジュールを現在権限や公開のfallbackにしない。
 
-NIHOがライター招待と現在の役割・記事連携同意を所有し、Experienceは現在のStore OWNER・公開体験と合わせて関連表示を毎読取で判定する。取消・writer解除・OWNER変更・体験停止・authority障害では関連表示だけを隠し、記事本文は保持する。ホスト設定の招待・取消はNIHO BFFへ送り、Experienceに同意を保存しない。商品・予約・顧客・売上への権限は生まれない。
+非OWNER writerと記事連携の招待・同意・取消はNIHOが正本であり #481 で接続する。#479 の切替では現在OWNERだけをwriterとして受け入れる。OWNER変更・体験停止では関連表示を次要求から隠すが、封印済み記事本文は保持する。商品・予約・顧客・売上への権限は生まれない。
 
-現在activeなカテゴリは公開APIと公開条件宣言に載せ、Editorで選ぶ。公開直前にも現在性を確認し、表示名・順序・revisionを公開snapshotへ固定する。停止済みカテゴリの過去記事は残す。最新のowner決定により、Experience向けもカバー写真とリードは任意で、入力された値の長さ・画像形式・掲載許諾は検証する。
+現在activeなカテゴリは`/write`で選ぶ。公開直前にも現在性を確認し、表示名・順序を公開snapshotへ固定する。停止済みカテゴリの過去記事は残す。カバー写真とリードは任意で、入力された値の長さ・画像形式・掲載許諾は検証する。
 
-契約・設定・段階配備は[記事連携契約](editor-article-authority.md)を正とする。以下の旧Experience内CMS・grant/outbox・`/editor`の記述は保存済みデータと過去実装の履歴で、新規執筆・認可経路として使わない。
+現行の契約・設定・段階配備はこの文書のStore境界とdatabase gateを正とする。以下の旧grant/outbox・editor公開APIの節は保存済みデータと過去実装の履歴で、新規執筆・認可経路として使わない。
 
 
-> 2026-11-06: 旧 `/editor` の画面・API・認証・TipTapエディタと、その設定（`EDITOR_CONSOLE_ENABLED`・`EDITOR_SESSION_SECRET`・`NIHO_EXPERIENCE_EDITOR_ORIGIN`）のコード、api-clientの`editor-auth`（仮契約）を撤去した（#251）。`/editor` は1つのルート（`apps/web/src/app/editor/[[...path]]/route.ts`）が引き受け、`/editor/api/**` と `/editor/auth/**` はどのメソッドにも410（本文を読まず、OAuthのcode/stateを渡さず、セッション・DBに触れない）、それ以外のページは `/write` へ307で送る。保存済みの下書き・版・写真・公開版のテーブルとmigration、DB公開元（`EXPERIENCE_GUIDE_PUBLIC_SOURCE=database`）の読取り、Guide Admin（カテゴリ・writer設定）は残している。Storeの書込みメソッド（`GuideRepository` の下書き・公開・招待・写真）も撤去した。`GuideRepository` に残るのは公開の読取り（カテゴリ・公開記事・公開メディア）だけで、テーブルとmigrationは保持している。以下の節に出る `commitPublication` などのStoreメソッド名は過去実装の記録である。
+> 2026-11-06 の #251 では一度 Store 書込みを撤去したが、2026-11-08 時点では #477 で OWNER 向け `GuideRepository` 書込みが復元済みである。旧 `/editor` の410と保存済み履歴は残す。editor 公開API等の完全撤去は #480。
 > 2026-11-03: Experience内の旧 `/editor` は読み書き・認証APIを410で閉じ、画面入口だけ`/write`へ移した。以下のdatabase CMS節は既存データと切戻し判断の記録であり、現在のwriter権限や記事連携の根拠ではない。現在の責任分界は [Editor記事authority](editor-article-authority.md) を正とする。
 
 [#215](https://github.com/niho-life/niho-experience/issues/215) では英語記事に任意のカバー写真を1枚だけ設定し、[#216](https://github.com/niho-life/niho-experience/issues/216) で同じ非公開asset境界を本文写真へ拡張した。[#189](https://github.com/niho-life/niho-experience/issues/189) は公開SSRと公開画像配信を実装するが、`EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` まで既存の静的表示を維持し、公開 media route は404のままにする。
@@ -41,7 +41,7 @@ NIHOがライター招待と現在の役割・記事連携同意を所有し、E
 
 ## 配備ゲート
 
-`EDITOR_CONSOLE_ENABLED` は NIHO 側の editor app-connect と受入が完了するまで既定値 `false` を維持する。bucket が未設定のまま editor を開いた場合、upload/read は `503 media_storage_unavailable` とし、mock成功やローカル保存へ fallback しない。
+旧 `EDITOR_CONSOLE_ENABLED` / editor app-connect はこのゲートに使わない。現行 `/write` とホストログインを候補revisionで受け入れる。bucket が未設定なら `DATABASE_GUIDE_PUBLICATIONS_ENABLED` の配備前検査で止め、実行中にstorageを読めない場合は公開画像routeを503とし、mock成功やローカル保存へfallbackしない。
 
 editor を受け入れる候補 revision では、次を先に満たす。
 
@@ -54,7 +54,7 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 
 ## 公開SSRと画像配信（#189）
 
-- http modeで `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` を明示したときだけDB publicationを公開元にする。`EXPERIENCE_DATABASE_URL` または `GUIDE_MEDIA_BUCKET` が無ければ起動時に失敗し、静的記事・mock・ローカル画像へfallbackしない。flag off/mockは従来の静的記事とpreviewを維持する。
+- http modeで `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` を明示したときだけDB publicationを公開元にする。公式配備では `DATABASE_GUIDE_PUBLICATIONS_ENABLED=true` がこの値と専用 `GUIDE_MEDIA_BUCKET` を同時に設定する。`EXPERIENCE_DATABASE_URL` またはbucketが無ければ配備前と起動時に失敗し、静的記事・mock・ローカル画像へfallbackしない。http/static の `PUBLISHED_GUIDES` は空で、mockだけが合成 `SAMPLE_GUIDES` を使う。
 - 一覧は現在のsealed `PUBLIC` publicationだけ、詳細は`PUBLIC`または直URLを知る`UNLISTED`だけを読む。draft、`STOPPED`、過去publicationは公開しない。database modeでは静的記事をunionしない。
 - `/api/public/guides/media/{assetId}` は匿名GETだけを持つ。現在`PUBLISHED`の記事のcurrent publicationにsnapshotされた、現在`READY`のassetだけをprivate bucketからJPEGとして返す。object key・bucket名・署名URLをレスポンスへ出さない。unknown、old publication、`REVOKED`は404、bucket/DB/read異常とbyte不一致は503とする。
 - JPEG応答は `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex` とする。HTML・metadata・sitemapもrequestごとにDBを読み、ISR、Nextの永続cache、CDN HTML/media cacheを使わない。React `cache` は同一request内の重複読取だけに使う。
@@ -69,13 +69,59 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 
 ## database flagを開く前のゲート
 
-1. `0005`、`0008`、`0009`、両方の`0010`、`0011`、`0012`を含む全migrationをファイル名順にstagingへ適用し、category、writer/provider authority、article、asset、publicationを非公開の移行手順で投入する。#147 の限定公開URLを維持する場合、同じslugの `UNLISTED` 公開版へ移し、切替後も直接URLがnoindexで読めることを確認する。実ID・未公開原稿・object keyをGit、CI、公開ログへ残さない。
+1. `0067_guide_provider_ownership.sql` までの全migrationをファイル名順にstagingへ適用する。現行ホストログインで対象提供者の active OWNER を確認し、category、article、asset、publicationを実DBへ投入する。`kamakura-after-4-pm` は下記opsをまずdry-runし、同じtransactionで `guide_legacy_slug_reservations` を外して `UNLISTED` 初版を作る。実provider/OWNER ID・DB URL・object keyをGit、CI、公開ログへ残さない。
 2. private bucketのUniform bucket-level access、Public access prevention、runtime SA限定IAM、`GUIDE_MEDIA_BUCKET`を確認する。bucket CORS、公開ACL、公開CDNは作らない。
-3. NIHO editor app-connect/auth（niho-app #19459/#19462）のstaging受入を完了し、writer/provider権限失効、公開、更新、停止、UNLISTEDを確認する。editorの有効化とpublic sourceの切替は別々に判断する。
-4. 合成記事でPUBLIC/UNLISTED/draft/STOPPED、category順、初回公開日と更新日、canonical/Article JSON-LD/noindex、home/list/detail/footer/sitemap、体験との双方向linkを確認する。静的記事がdatabase集合へ混ざらず、DB停止時に静的fallbackしないことも確認する。
-5. 合成JPEGでcover/本文、過去publication、権利取消直後の404、storage異常の503、全no-store header、HTML/JSON/logにobject keyが無いことを確認する。Cloudflareは`/guides*`、公開media route、HTML、sitemapをbypassする。
+3. stagingの現行ホストログインから active OWNER が新規保存・再訪・公開・公開後更新・通常停止を行えること、membership失効直後は読書きできないことを確認する。旧editor app-connectは受入条件にしない。
+4. 実DBの `PUBLIC` / `UNLISTED` / draft / `STOPPED` を確認する。`UNLISTED` は直URLが200かつnoindexで、一覧・トップ・フッター・sitemap・関連記事から除外される。静的記事や合成sampleがhttpの一覧・直URL・トップ・sitemapへ混ざらないことを確認する。
+5. 非公開bucketの実画像でcover/本文、再訪、公開更新、過去publication、写真権利取消直後の404を確認する。画像/storage障害は画像routeだけ503/no-store、DB障害はトップ・体験詳細・予約入口を維持して記事枠だけ隠し、`/guides` と詳細は再試行面、sitemapは失敗とする。どこにも静的fallbackしない。
+6. Cloudflareは`/guides*`、公開media route、HTML、sitemapをbypassし、`CF-Cache-Status` がHITでないことを確認する。HTML/JSON/logにbucket/object keyや非公開入力を出さない。
 
-切戻しは新しいrevisionで `EXPERIENCE_GUIDE_PUBLIC_SOURCE=static` に戻す。DB publication/assetを削除せず、editor flagや検索公開を同時に開閉したことにしない。
+`/write` で実書込みを始めた後は `static` へ戻さない。切戻しはデータを消さず、同じDB schemaとpublicationを読める既知のrevisionへトラフィックを戻す。`DATABASE_GUIDE_PUBLICATIONS_ENABLED` と `EDITOR_PUBLICATIONS_ENABLED` は相互排他で、未設定・不正・同時ONは配備前に失敗させる。
+
+### `kamakura-after-4-pm` の非公開移行
+
+trusted Studio の既存 `niho-experience` checkoutをcurrent directoryにし、既存 `niho-app` checkoutの公式bastion wrapperからだけ実行する。wrapperが子processへ渡すNIHO管理DB用`DATABASE_URL`はscript内で環境、localhost tunnel、管理DB名と管理userを照合し、資格情報を保持したまま同じinstanceのExperience DB名へ差し替える。URLや資格情報は出力しない。`EXPERIENCE_DATABASE_URL`を手入力・exportする経路は使わない。
+
+先に公式migration runnerで`0067_guide_provider_ownership.sql`まで適用する。実provider/OWNER IDはechoしない`read`で受け、shell history、env file、Git、CI、公開ログへ置かない。下記の`GUIDE_TARGET_ENV`と`GUIDE_TARGET_PROJECT`は`stg` / `niho-app-stg`または`prd` / `niho-app-prd`の対応する組だけを使う。引数なしはcategory作成を含む全transactionをrollbackするdry-run、`--apply`はproject名の明示確認が一致した場合だけcommitする。出力は結果と関連体験件数だけでIDを出さない。
+
+```sh
+# trusted Studioの既存checkoutだけを使う。以下はstagingの組。productionでは両方をprdの組にする。
+GUIDE_TARGET_ENV=stg
+GUIDE_TARGET_PROJECT=niho-app-stg
+NIHO_APP_CHECKOUT=/absolute/path/to/existing/niho-app
+
+CONFIRM_EXPERIENCE_DB_MIGRATE="$GUIDE_TARGET_PROJECT" \
+  "$NIHO_APP_CHECKOUT/scripts/dev/niho-db.sh" "$GUIDE_TARGET_ENV" --via-bastion -- \
+  node scripts/gcp/apply-experience-db-migrations.mjs
+
+printf 'Guide provider ID: ' >&2
+IFS= read -r -s GUIDE_IMPORT_PROVIDER_ID
+printf '\nGuide OWNER ID: ' >&2
+IFS= read -r -s GUIDE_IMPORT_OWNER_ID
+printf '\n' >&2
+export GUIDE_IMPORT_PROVIDER_ID GUIDE_IMPORT_OWNER_ID
+export GUIDE_IMPORT_CATEGORY_SLUG=evenings
+
+# 1. dry-run: article、reservation、categoryの変更をすべてrollbackする
+"$NIHO_APP_CHECKOUT/scripts/dev/niho-db.sh" "$GUIDE_TARGET_ENV" --via-bastion -- \
+  node scripts/gcp/import-kamakura-after-4-pm-guide.mts
+
+# 2. apply: wrapperが設定するNIHO_DB_ENVとこのproject確認が両方一致する必要がある
+export CONFIRM_EXPERIENCE_GUIDE_IMPORT="$GUIDE_TARGET_PROJECT"
+"$NIHO_APP_CHECKOUT/scripts/dev/niho-db.sh" "$GUIDE_TARGET_ENV" --via-bastion -- \
+  node scripts/gcp/import-kamakura-after-4-pm-guide.mts --apply
+
+# 3. 同じapplyを再実行し、上書きせずverifiedになることを確認する
+"$NIHO_APP_CHECKOUT/scripts/dev/niho-db.sh" "$GUIDE_TARGET_ENV" --via-bastion -- \
+  node scripts/gcp/import-kamakura-after-4-pm-guide.mts --apply
+
+unset GUIDE_IMPORT_PROVIDER_ID GUIDE_IMPORT_OWNER_ID GUIDE_IMPORT_CATEGORY_SLUG
+unset CONFIRM_EXPERIENCE_GUIDE_IMPORT GUIDE_TARGET_ENV GUIDE_TARGET_PROJECT NIHO_APP_CHECKOUT
+```
+
+これはカテゴリ管理の通常APIではなく、既存静的記事から初期公開データを一度だけ移す非公開ops transactionである。指定categoryが無い場合に自動作成できるのは`evenings`だけで、`Evenings` / `夕方・夜` / 表示順20 / active / revision 1としてarticleと同じtransactionに入れる。dry-runではcategoryも残らない。既存のactive `evenings`は更新せずそのままsnapshotに使い、inactiveまたは別slugの自動作成要求は変更前に拒否する。
+
+scriptは元の静的モジュールからtitle、description、本文、author、2026-10-29の初回公開日、slug、checkedOnを取り、FAQを本文末尾へ変換する。現在公開中で同じ提供者に属する関連体験だけをsnapshotへ結ぶ。再実行は既存のimmutable初版を照合して `verified` を返し、差異があれば上書きしない。
 
 ## 本文写真（#216）
 
@@ -242,7 +288,7 @@ experience が受信時に再確認するのは安全に関わるもの（英語
 
 1. 段階 3 の editor 公開 API が staging で使えることを確認し、合成記事で live / unlisted / 公開停止 / 更新 / 410、ETag の 304、401 の失敗、10分の stale 上限、プレビューの 404 と no-store を確認する。
 2. 専用の配備変更で `EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` と上の設定を渡す。トークンは Secret Manager から渡し、公開出力に出さない。editor 側で `EDITOR_DESTINATION_DECLARATIONS` にこのサイトの宣言の URL を設定し、`EDITOR_FACE_CREDENTIALS` に `exp` の資格（SHA-256・期限）を入れる。
-3. 切戻しは新しい revision で `EXPERIENCE_GUIDE_PUBLIC_SOURCE` を `database`（受入済みの場合）か未設定（`static`）へ戻す。editor 側のデータは消さない。
+3. 切戻しは `database` を読める既知revisionへ戻す。実書込み開始後は未設定（`static`）へ戻さず、editor側とDBのデータも消さない。
 
 ### ローカルで確かめる
 

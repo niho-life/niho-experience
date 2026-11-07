@@ -104,11 +104,11 @@ test("the footer links to the guides while some exist, and unknown guides are no
 test("the home journal follows the experience cards, and the experience list keeps three guide cards", async ({ page }) => {
   await page.goto("/");
   const journal = page.getByRole("region", { name: "Kamakura Journal" });
-  // The editorial preview leads, then the three samples and the draft fixture (server HTML, before any filtering).
+  // Only the three synthetic samples and the draft fixture exist in mock (server HTML, before filtering).
   const cards = journal.locator('a[href^="/guides/"]');
-  await expect(cards).toHaveCount(5);
-  await expect(cards.first()).toHaveAttribute("href", "/guides/kamakura-after-4-pm");
-  await expect(cards.first()).toContainText("Editorial preview");
+  await expect(cards).toHaveCount(4);
+  await expect(journal.locator('a[href="/guides/kamakura-after-4-pm"]')).toHaveCount(0);
+  await expect(journal.getByText("Editorial preview", { exact: true })).toHaveCount(0);
   await expect(journal.getByRole("link", { name: "See all", exact: true })).toHaveAttribute("href", "/guides");
   const handsOn = journal.getByRole("button", { name: "Hands-on", exact: true });
   await handsOn.click();
@@ -116,7 +116,7 @@ test("the home journal follows the experience cards, and the experience list kee
   await expect(cards).toHaveCount(1);
   await expect(cards.first()).toHaveAttribute("href", "/guides/sample-rainy-day-in-kamakura");
   await journal.getByRole("button", { name: "All", exact: true }).click();
-  await expect(cards).toHaveCount(5);
+  await expect(cards).toHaveCount(4);
   const homeOrder = await page.locator("#home-cards-v1, #home-guides-heading, #host-band-heading-v1").evaluateAll((nodes) => nodes.map((node) => node.id));
   expect(homeOrder).toEqual(["home-cards-v1", "home-guides-heading", "host-band-heading-v1"]);
   await expect(page.locator("#featured-heading-v1, #strips-heading-v1, #numbers-heading-v1, #walk-heading-v1")).toHaveCount(0);
