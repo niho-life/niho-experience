@@ -8,9 +8,9 @@ PostgreSQL is the source of truth for provider-scoped experience products, recur
 - Guest booking and worker methods take `ProviderScope`. The server route or worker must establish that provider scope before calling the store. Every SQL statement also filters by `provider_id`.
 - Calendar storage accepts only an opaque calendar ID and interval boundaries. Event titles, descriptions, attendees, and OAuth credentials have no columns or API fields here.
 - Stripe signatures and API calls stay outside this package. `confirmBookingPayment` accepts only a previously verified event and provides event deduplication, an append-only ledger entry, and an outbox message in the same transaction.
-- Guides are written in the Editor (editor.niho.life). The legacy in-Experience CMS write methods (drafts, publication, link invitations, photos) were removed from `GuideRepository` in #251; their tables and migrations are kept for audit and rollback. `GuideAdminRepository` (categories, writer grants) and `ArticleAuthorityRepository` are unchanged.
-- `GuideRepository` now only reads: `listActiveCategories`, `getPublicArticleBySlug`, `listPublicArticles`, and the server-only `getPublicMediaAsset` (used by the `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` source). Public reads select only a sealed `current_publication_id` of a `PUBLISHED` article and never select draft columns. `UNLISTED` is public to anyone who knows its slug, must be emitted as `noindex`, and is excluded from `listPublicArticles`.
-- Public product links are re-checked on every read: the product must remain `PUBLISHED`, its slug must identify exactly one product, and the recorded link creator's permission basis (provider `OWNER`/`EDITOR`, or an accepted link invitation plus an active link membership and writer grant) must remain active. Public media omits an asset after it becomes `REVOKED`; object keys never enter browser DTOs.
+- Experience-owned provider guides are written through the private `/write` flow. `GuideRepository` write methods take an authenticated actor ID, then re-check and lock that actor's current active `OWNER` membership for the article's provider on every draft, publication, stop, and private-media operation. Every current active OWNER of that provider may read and change the article; EDITOR, VIEWER, and another provider may not. `creator_niho_user_id`, sealed publication actors, photo creators, and the user-entered public author snapshot are immutable history. A future NIHO identity transition must resolve a verified actor identity and current membership without rewriting that history and must never infer identity by email. WRITER creation, writer grants, invitations, and guide-product-link memberships are intentionally not part of this write path.
+- Public reads select only a sealed `current_publication_id` of a `PUBLISHED` article and never select draft columns. `UNLISTED` is public to anyone who knows its slug, must be emitted as `noindex`, and is excluded from `listPublicArticles`.
+- Public product links are re-checked on every read: the sealed publication must have a `PROVIDER` subject matching the link provider, `permission_basis` must be `PROVIDER_MEMBERSHIP`, the recorded link actor must still be that provider's active `OWNER`, and the product must remain `PUBLISHED` with an unambiguous slug. Historical WRITER grants, invitations, link memberships, EDITOR roles, and links for another provider never authorize a public link. Public media omits an asset after it becomes `REVOKED`; object keys never enter browser DTOs.
 - Guide `content` is a selected JSON object containing Markdown and public author metadata, never rendered HTML. This package does not render it.
 
 ## Migrations
@@ -21,11 +21,38 @@ Both `0010_guide_body_media.sql` and `0010_shared_inventory.sql` exist. Apply bo
 
 `0040_experience_publication.sql` adds the #330/#369 publication source of truth without changing the legacy product status or any booking/transaction row. `experience_products` remains the expected-version editable draft. Every public update is copied into an immutable `experience_product_publications` row, while `experience_product_publication_states` keeps OWNER stop intent and operations suspension separately. Operations suspension sets `owner_resume_required`; clearing it never republishes until a current OWNER explicitly publishes again. `provider_publication_readiness` is a server-only projection of current OWNER/account/Connect/seller/consent checks; future observations and validity windows longer than ten minutes are rejected. Public list/detail reads require a non-expired matching projection and an active OWNER and otherwise return nothing. Their content is an explicit traveler allowlist, and never returns account/internal version references or the meeting address, access, entrance instructions, map URL, or host user IDs. The repository accepts manuscript/photo booleans only from the authenticated server-side page validator; they are not browser fields. The old NIHO catalog/checkout switch and `experience_products.status` are intentionally unchanged until the public-route rollout is accepted.
 
-`0005_guide_cms.sql` additively creates guide categories, accepted writer/link grants, creator-private article drafts, sealed publication snapshots, and publication-scoped product links. Category and article slugs are stable identities; an article slug becomes immutable after its first publication. Category labels and order are copied into every publication so later category edits or deactivation do not rewrite history. The (since removed, #251) `GuideRepository.commitPublication` inserted the snapshot and authorized links, sealed it, and switched `current_publication_id` in one transaction. Public link reads also require the product to remain `PUBLISHED` and the recorded link creator's permission basis to remain active.
+`0005_guide_cms.sql` additively creates guide categories, historical writer/link grants, article drafts, sealed publication snapshots, and publication-scoped product links. Category and article slugs are stable identities; an article slug becomes immutable after its first publication. Category labels and order are copied into every publication so later category edits or deactivation do not rewrite history. Restored `GuideRepository.commitPublication` inserts the snapshot and OWNER-authorized same-provider links, snapshots media, seals the publication, and switches `current_publication_id` in one transaction. A retry by the same actor with the immediately previous revision returns that same sealed publication when its source revision and visibility match; it does not insert another snapshot. Other stale requests conflict.
 
-`0008_guide_link_invitations.sql` additively creates the provider/writer consent state machine after calendar `0006` and channel `0007`. Invitation transitions serialize on the provider/writer pair, then lock invitation, owner, writer-grant, and projection rows in that order. Public link reads require both an active accepted link projection and a current writer grant, so either provider revocation or writer-grant loss hides links without removing the public article body.
+`0008_guide_link_invitations.sql` additively creates the historical provider/writer consent state machine after calendar `0006` and channel `0007`. Those rows remain for audit and rollback, but current public guide links do not use them: only same-provider `PROVIDER_MEMBERSHIP` links whose recorded actor remains an active OWNER are shown.
 
 `0009_guide_media.sql` adds private cover assets, draft cover fields, and immutable publication-media snapshots. Asset identity/object location cannot change; rights can only advance from `UPLOADING` to `READY`/`REVOKED`, or from `READY` to `REVOKED`. Storage bytes remain outside PostgreSQL and object keys never enter browser DTOs.
+
+`0067_guide_provider_ownership.sql` keeps article creator and sealed actor history immutable while allowing any current active provider OWNER to manage a provider article. It records the actual current uploader separately, permits incomplete title/cover text only in a draft, and adds the private `OPS_STOPPED` state. Publication snapshots still require complete non-empty public fields.
+
+An operations stop remains an authenticated operations procedure, not an OWNER Store method. After resolving the exact article ID and recording the operator, reason, contact, and timestamp in the private operations audit log, execute the following as a parameterized transaction with the migration/operations identity (zero updated rows means it was not currently published):
+
+```sql
+BEGIN;
+SELECT id FROM guide_articles WHERE id = $1 FOR UPDATE;
+UPDATE guide_articles
+   SET status = 'OPS_STOPPED', current_publication_id = NULL,
+       ops_stop_reason = $2, ops_stop_contact = $3,
+       revision = revision + 1, updated_at = clock_timestamp()
+ WHERE id = $1 AND status = 'PUBLISHED';
+COMMIT;
+```
+
+Releasing an operations stop is a separate audited action and does not republish. Record the releasing operator and resolution in the private operations audit log, then execute this parameterized transaction; the provider OWNER may publish only after the state becomes voluntary `STOPPED`:
+
+```sql
+BEGIN;
+SELECT id FROM guide_articles WHERE id = $1 FOR UPDATE;
+UPDATE guide_articles
+   SET status = 'STOPPED', ops_stop_reason = NULL, ops_stop_contact = NULL,
+       revision = revision + 1, updated_at = clock_timestamp()
+ WHERE id = $1 AND status = 'OPS_STOPPED';
+COMMIT;
+```
 
 `0020_provider_notification_preferences.sql` additively stores 設定 › 通知 (#109): one row per provider and stoppable notification (`GUEST_MESSAGE`, `DAY_BEFORE_SUMMARY`, `NEW_REVIEW`). A missing row means on, so existing providers need no backfill. `ProviderNotificationSettings.get`/`update` require a current OWNER membership that the server-established NIHO role ceiling does not cap; product operators never qualify. Senders call `enabledFor(providerId, key)` before a push or an email; the four locked notifications always answer true. No addresses, names or message text are stored. The runtime role needs SELECT/INSERT/UPDATE on the table.
 
@@ -105,4 +132,4 @@ Schedule rules use optimistic versions. Booking hold creation derives the reques
 
 ## Tests
 
-`npm test` runs tests that do not require a database. When `TEST_DATABASE_URL` points to a disposable PostgreSQL database, integration tests create and drop isolated schemas. They exercise concurrent capacity enforcement and, for guides, the remaining public reads over SQL-inserted rows: current sealed publications only, unlisted/listed reads, category snapshots, public-link permission rechecks, and READY-only public media.
+`npm test` runs tests that do not require a database. When `TEST_DATABASE_URL` points to a disposable PostgreSQL database, integration tests create and drop isolated schemas. Guide tests cover current sealed public reads plus the provider OWNER lifecycle: creator-private create/save, optimistic conflicts, immutable publication updates, stop, current-membership revocation, same-provider links, and private-to-published media.
