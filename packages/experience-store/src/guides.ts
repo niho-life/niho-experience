@@ -117,6 +117,7 @@ export interface GuideArticleRecord {
   readonly currentPublication?: {
     readonly id: number;
     readonly number: number;
+    readonly sourceRevision: number;
     readonly visibility: GuidePublicationVisibility;
     readonly publishedAtUtc: string;
   };
@@ -185,6 +186,7 @@ const ARTICLE_COLUMNS = `
   a.status, a.ops_stop_reason, a.ops_stop_contact, a.revision,
   a.created_at, a.updated_at, p.id AS current_publication_id,
   p.publication_number AS current_publication_number,
+  p.source_revision AS current_publication_source_revision,
   p.visibility AS current_publication_visibility,
   p.published_at AS current_publication_published_at,
   (SELECT coalesce(
@@ -415,6 +417,7 @@ function articleFromRow(row: DbRow): GuideArticleRecord {
           currentPublication: {
             id: currentPublicationId,
             number: integerValue(row, "current_publication_number"),
+            sourceRevision: integerValue(row, "current_publication_source_revision"),
             visibility: stringValue(row, "current_publication_visibility") as GuidePublicationVisibility,
             publishedAtUtc: isoValue(row, "current_publication_published_at"),
           },
