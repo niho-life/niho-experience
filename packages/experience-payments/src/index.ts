@@ -646,7 +646,9 @@ export async function readBookingSettlement(input: ReadBookingSettlementInput): 
         }
         if (detail.type === "application_fee") {
           applicationFeeDetailTotal += amount;
-        } else if (detail.type === "stripe_fee" || detail.type === "payment_method_passthrough_fee") {
+        } else if (detail.type === "stripe_fee" || detail.type === "payment_method_passthrough_fee" || detail.type === "tax") {
+          // Stripe's transaction-level tax on its fees is part of the observed processing cost, including
+          // after a refund. Use the charged amount; never infer a tax rate or include our Application Fee.
           processingFeeDetailTotal += amount;
         } else {
           // Unknown fee categories (for example withheld taxes) need an explicit settlement policy.
