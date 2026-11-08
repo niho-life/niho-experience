@@ -154,7 +154,7 @@ export function parseGuideInline(text: string, line: number, inLink = false): Gu
     if (char === "*") {
       let run = 1;
       while (text[i + run] === "*") run++;
-      // Text that is both bold and italic, as editor.niho.life projects it: `***both***`, `***both** italic*`,
+      // Text that is both bold and italic: `***both***`, `***both** italic*`,
       // `***both* bold**`, `**bold *both***`, `*italic **both***`. Bold is the outer mark when both close together.
       if (top().type === "strong-em") {
         const frame = top();

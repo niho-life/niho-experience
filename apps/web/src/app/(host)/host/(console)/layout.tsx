@@ -83,7 +83,7 @@ export default async function HostConsoleLayout({ children }: { children: React.
     if (!accessFingerprint) return <main className={HOST_PAGE}>{appGuard}<HostPageBody><ProvidersProblem status="error" /></HostPageBody></main>;
   }
   const shell = (
-    <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} editorUrl="/write" preview={isHostMock()}>
+    <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} writePath="/write" preview={isHostMock()}>
       {load.status === "ok" ? (
         <>
           {config.hostPwaEnabled ? <HostSharedPhotoNotice /> : null}

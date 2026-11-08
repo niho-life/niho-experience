@@ -62,6 +62,11 @@ export function toProviderChoice({ id, displayName, memberRole }: HostProviderCh
   return { kind: "MEMBER", id, displayName: displayName.trim(), memberRole };
 }
 
+/** The writer currently accepts an account with at least one OWNER provider. */
+export function hasOwnerMembership(providers: readonly HostConsoleChoice[]): boolean {
+  return providers.some((provider) => provider.kind === "MEMBER" && provider.memberRole === "OWNER");
+}
+
 /** The provider to open: the one asked for if this account has it, else the first. */
 export function selectProvider<T extends { id: string }>(providers: readonly T[], requestedId: string | null): { provider: T | null; requestedMissing: boolean } {
   const requested = requestedId ? providers.find((provider) => provider.id === requestedId) : undefined;

@@ -4,7 +4,7 @@
 
 オーナー判断で、記事は experience.niho.life の `/write` で書き、正本は Experience DB に戻す。editor.niho.life から Experience への公開は止める。体験の OWNER は NIHO のライター権限なしで書ける。OWNER 以外のライターは NIHO のライター権限と記事連携を使う。決定の全体は [ADR 0002 ガイド記事](adr/0002-guide-content.md)の「2026-11-07」を正とする。
 
-Store の書込みは #477、`/write` の画面は #478 で戻り、#479 で公開元を Experience DB へ切り替える配備境界と旧静的記事の移行手順を確定した。editor 公開 API・旧 authority の撤去は #480 の範囲であり、本Issueではコードを消さない。ただし新しい公開・切戻しの正本には使わない。
+Store の書込みは #477、`/write` の画面と入口は #478 で追加済み。#479 で公開元をExperience DBへ切り替える配備境界と旧静的記事の移行手順を確定した。#480 では旧Editor公開API・プレビュー・関連設定を撤去し、保存済みDBデータは保持する。非OWNER writerの権限と招待同意フローは #481 が残っている。
 
 ## Store の現行書込み境界（#477）
 
@@ -20,20 +20,19 @@ Store の書込みは #477、`/write` の画面は #478 で戻り、#479 で公�
 
 現在activeなカテゴリは`/write`で選ぶ。公開直前にも現在性を確認し、表示名・順序を公開snapshotへ固定する。停止済みカテゴリの過去記事は残す。カバー写真とリードは任意で、入力された値の長さ・画像形式・掲載許諾は検証する。
 
-現行の契約・設定・段階配備はこの文書のStore境界とdatabase gateを正とする。以下の旧grant/outbox・editor公開APIの節は保存済みデータと過去実装の履歴で、新規執筆・認可経路として使わない。
+現行の契約・設定・段階配備はこの文書のStore境界とdatabase gateを正とする。旧grant/outboxは保存済みデータと過去実装の履歴であり、新規執筆・認可経路には使わない。
 
 
-> 2026-11-06 の #251 では一度 Store 書込みを撤去したが、2026-11-08 時点では #477 で OWNER 向け `GuideRepository` 書込みが復元済みである。旧 `/editor` の410と保存済み履歴は残す。editor 公開API等の完全撤去は #480。
-> 2026-11-03: Experience内の旧 `/editor` は読み書き・認証APIを410で閉じ、画面入口だけ`/write`へ移した。以下のdatabase CMS節は既存データと切戻し判断の記録であり、現在のwriter権限や記事連携の根拠ではない。現在の責任分界は [Editor記事authority](editor-article-authority.md) を正とする。
+> 2026-11-08: #477でOWNER向け`GuideRepository`書込み、#478で`/write`画面とサイト内入口、#479でDB公開元を導入した。#480は旧`/editor`を410のまま維持しつつEditor向け公開・preview API、設定、CI経路を撤去する。保存済みDBデータは保持する。非OWNER writer連携は#481で扱う。
 
 [#215](https://github.com/niho-life/niho-experience/issues/215) では英語記事に任意のカバー写真を1枚だけ設定し、[#216](https://github.com/niho-life/niho-experience/issues/216) で同じ非公開asset境界を本文写真へ拡張した。[#189](https://github.com/niho-life/niho-experience/issues/189) は公開SSRと公開画像配信を実装するが、`EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` まで既存の静的表示を維持し、公開 media route は404のままにする。
 
 ## データと権利の境界
 
-- ブラウザは認証済み `/editor` API へ JPEG または PNG を送る。GCS の署名 URL、bucket 名、object key、GCS URL、原本は受け取らない。
+- `/write` はホストと同じExperienceログインを使い、JPEG/PNGをExperience経由でprivate bucketに保存する。ブラウザへ署名URL、bucket名、object key、GCS URL、原本は渡さない。
 - server は入力を 10MB・16MP・各辺 12,000px までの単一画像に制限し、magic と decode 結果を検査する。orientation を適用し、長辺 2400px 以内の sRGB JPEG に再エンコードする。EXIF・ICCその他の metadata と原本は保存しない。
 - HEIC は production Linux の対応を契約していないため非対応とし、JPEG/PNGへの変換を案内する。対応していない形式を黙って受け入れない。
-- asset ID は UUID v4 の不透明IDで、article と creator に固定する。状態は `UPLOADING` → `READY` または `REVOKED`。認証済み画像 read も毎回 editor session、記事所有、現在の writer/provider authority、asset scope、`READY` を再検査し `private, no-store` で返す。
+- asset ID は UUID v4 の不透明IDで、article と creator に固定する。状態は `UPLOADING` → `READY` または `REVOKED`。認証済み画像 read も毎回ホストsession、現在OWNER、記事とassetのscope、`READY` を再検査し `private, no-store` で返す。
 - draft が持つのは asset ID、英語 alt、公開クレジット、Web掲載確認だけ。SNS・OG利用の同意には使わない。
 - 公開時は記事行と asset を同じ transaction で lock し、revision、所有、article/creator scope、`READY`、Web掲載確認、非失効を再検査する。`guide_publication_media` に表示情報を snapshot してから publication を seal する。失敗時は記事 draft と旧公開版を維持する。
 - 公開 read は snapshot に加えて現在の asset が `READY` の場合だけ cover metadata を返す。権利取消または公開停止後は返さない。publication snapshot 自体は監査用に変更しない。
@@ -41,9 +40,9 @@ Store の書込みは #477、`/write` の画面は #478 で戻り、#479 で公�
 
 ## 配備ゲート
 
-旧 `EDITOR_CONSOLE_ENABLED` / editor app-connect はこのゲートに使わない。現行 `/write` とホストログインを候補revisionで受け入れる。bucket が未設定なら `DATABASE_GUIDE_PUBLICATIONS_ENABLED` の配備前検査で止め、実行中にstorageを読めない場合は公開画像routeを503とし、mock成功やローカル保存へfallbackしない。
+現行 `/write` とホストログインを候補revisionで受け入れる。bucket が未設定なら `DATABASE_GUIDE_PUBLICATIONS_ENABLED` の配備前検査で止め、実行中にstorageを読めない場合は公開画像routeを503とし、mock成功やローカル保存へfallbackしない。
 
-editor を受け入れる候補 revision では、次を先に満たす。
+database公開元を受け入れる候補 revision では、次を先に満たす。
 
 1. 専用 GCS bucket を作り、Uniform bucket-level access を有効化し、Public access prevention を `enforced` にする。allUsers / allAuthenticatedUsers と object ACL は使わない。
 2. Cloud Run runtime service account だけに、その bucket に限定した `roles/storage.objectUser`（object create/get/deleteに必要）を付与する。deployer、GitHub Actions、preview、ブラウザには付与しない。
@@ -61,11 +60,9 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 - coverと本文figureのURLはopaque asset IDのrouteだけ。Markdownの内部asset参照は現在READYのsnapshot placementと交差したものだけ解決し、取消直後の次requestで画像を消す。Web掲載確認をSNS/OG許諾へ拡張せず、DB写真はOG metadataと`Article.image`へ出さない。
 - 記事→体験はpublication linkの現在権限、現在`PUBLISHED` productと現在slugを再評価し、さらに旅行者向け公開catalogと交差する。体験→記事も同じ現在有効linkを持つ`PUBLIC` publicationだけを使う。
 
-## 関連体験への招待 API（#190）
+## 非OWNER writerとの記事連携（#481）
 
-記事連携のcanonical stateはNIHOが持つ。writer本人はEditorの`/account` BFFからNIHOのrolesと招待を読み、明示的に承諾・辞退する。ホストは既存host sessionを使うExperience BFFからNIHOの`/api/experience-guide-links/providers/{providerId}`を呼び、招待一覧・メール招待・取消を行う。BFFは本人の不透明なhost access tokenとExperience runtimeのGoogle ID tokenを両方送り、NIHOがStoreの現在OWNERをサービスAPIで再確認する。Experienceはprovider行の`ownerUserId`からactorを推測せず、招待stateを保存しない。旧`guide_writer_grants`と`guide_link_invitations`は履歴として残すが、現在権限へfallbackしない。
-
-公開候補と公開時検査は、NIHOの現在writer/ACCEPTED link、Storeの現在OWNER membership、現在`PUBLISHED`の商品を毎回交差する。公開読取でもEditorの公開版authorityを起点に同じ検査を繰り返し、失効・取消・OWNER変更・商品停止・依存障害の次要求から関連slugだけを外す。本文の公開状態は維持する。内部IDはサービス間に閉じ、公開DTOにはprovider表示名、記事表示名、slug以外のID・メールを出さない。
+記事連携の正本はNIHO。ホストのExperience画面から現在のNIHO権限へ招待・取消を中継し、writerはNIHOログイン後に `/write` で承諾・辞退する。#481ではこの非OWNER経路を実装する。Experience DBのcurrent OWNER確認は引き続き `/write` の権限境界とし、writer権限を体験の予約・顧客・売上へ広げない。旧`guide_writer_grants`と`guide_link_invitations`は履歴として残し、現在権限には使わない。
 
 ## database flagを開く前のゲート
 
@@ -76,9 +73,9 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 5. 非公開bucketの実画像でcover/本文、再訪、公開更新、過去publication、写真権利取消直後の404を確認する。画像/storage障害は画像routeだけ503/no-store、DB障害はトップ・体験詳細・予約入口を維持して記事枠だけ隠し、`/guides` と詳細は再試行面、sitemapは失敗とする。どこにも静的fallbackしない。
 6. Cloudflareは`/guides*`、公開media route、HTML、sitemapをbypassし、`CF-Cache-Status` がHITでないことを確認する。HTML/JSON/logにbucket/object keyや非公開入力を出さない。
 
-`/write` で実書込みを始めた後は `static` へ戻さない。切戻しはデータを消さず、同じDB schemaとpublicationを読める既知のrevisionへトラフィックを戻す。`DATABASE_GUIDE_PUBLICATIONS_ENABLED` と `EDITOR_PUBLICATIONS_ENABLED` は相互排他で、未設定・不正・同時ONは配備前に失敗させる。
+`/write` で実書込みを始めた後は `static` へ戻さない。切戻しはデータを消さず、同じDB schemaとpublicationを読める既知のrevisionへトラフィックを戻す。`DATABASE_GUIDE_PUBLICATIONS_ENABLED` が未設定・不正なら配備前に失敗させる。
 
-staging の公式 workflow は実行者がオーナーなら GitHub environment `host-staging-owner`、それ以外なら `host-staging` の `STG_*` 変数を読む。公開元を変える際は両 environment の `STG_EDITOR_PUBLICATIONS_ENABLED=false`、`STG_DATABASE_GUIDE_PUBLICATIONS_ENABLED=true`、`STG_GUIDE_MEDIA_BUCKET=<専用private bucket>` をそれぞれ読戻す。候補 Cloud Run revision の `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` とbucket名に加え、候補URLで `UNLISTED` 記事が一覧・トップ・sitemapへ出ないことを確認してからpromoteする。一方のenvironmentだけを更新すると、成功した候補でも旧editor公開元のままになり得る。
+staging の公式 workflow は実行者がオーナーなら GitHub environment `host-staging-owner`、それ以外なら `host-staging` の `STG_*` 変数を読む。公開元を変える際は両 environment の `STG_DATABASE_GUIDE_PUBLICATIONS_ENABLED=true`、`STG_GUIDE_MEDIA_BUCKET=<専用private bucket>` をそれぞれ読戻す。候補 Cloud Run revision の `EXPERIENCE_GUIDE_PUBLIC_SOURCE=database` とbucket名に加え、候補URLで `UNLISTED` 記事が一覧・トップ・sitemapへ出ないことを確認してからpromoteする。
 
 ### `kamakura-after-4-pm` の非公開移行
 
@@ -174,179 +171,6 @@ NIHO callerは次を守る。
 
 NIHO側のADMIN UI、招待、outboxはこのリポジトリでは実装しない。
 
-## editor.niho.life の公開 API を読む（#252 #253・editor v1 契約）
+## 旧Editor経路の撤去（#480）
 
-[#252](https://github.com/niho-life/niho-experience/issues/252) は `/guides`・`/guides/{slug}`・トップの Kamakura Journal・体験詳細の関連記事・sitemap の読み取り元に editor.niho.life の公開 API を足し、[#253](https://github.com/niho-life/niho-experience/issues/253) は下書きのプレビューと発信先の条件の宣言を足す（Epic #251、editor 設計 §8・§9）。**editor 公開（設計 §14 の段階 3）が本番で使えるまで、どの環境でも `EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` を有効にしない。** 記事の正本を editor に置く判断は [ADR 0002](adr/0002-guide-content.md) の「2026-10-30」。
-
-契約は niho-editor の v1 で確定した（正本: `docs/security/editor-publish-api-v1.md` と型・検証・合成例の `packages/editor-publish-contract`）。当初は設計文書からの**仮契約**で実装していたが、このリポの読み取り側を v1 に合わせた（Epic #251）。パス・項目名・形の読み取りは `apps/web/src/lib/editor-publication/contract.ts` の1ファイルに閉じ込めてあり、契約が変わるときはまずこのファイルとテスト（`contract.test.ts`、fixture）を直す。
-
-`GUIDE_EDITOR_API_*` の Secret Manager・配備 workflow への配線は、公式配備の flag 表（`scripts/deploy/runtime-flags.mjs`）の `EDITOR_PUBLICATIONS_ENABLED` にある（既定OFF。`EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor`、base URL、token の Secret 参照、handle は `exp` 固定。[production-deploy.md](production-deploy.md)「機能のフラグ」）。本番で ON にするのは、editor 公開が本番で使えるようになってからである。NIHO の面の資格は、現行の editor では不透明な Bearer 資格（editor 側に SHA-256・audience `exp`・期限だけを置く暫定の方式。署名つきのサービス間 token の契約ができるまで）で、これまでの固定の `Authorization: Bearer ${GUIDE_EDITOR_API_TOKEN}` のまま読める。ただし**資格には期限がある**。期限切れ・失効・再発行前の旧資格は 401 で、キャッシュがあっても必ず失敗させる（下記）。資格の払い出しと期限切れ前の入れ替えは配備の運用に入れる。`api.editor.niho.life` の DNS・ALB は別作業。
-
-### 契約（editor v1）
-
-- base URL は設定値 `GUIDE_EDITOR_API_BASE_URL`（版のパスを含む。editor は `https://api.editor.niho.life/v1`）。以下 `{base}`。handle は `exp`（NIHO Experience の予約語。面の資格は自分の面の handle だけ読める）。
-- `GET {base}/exp/published.json?limit=100&include=unlisted[&cursor=…]` → `{ "contractVersion": "1", "items": [ListItem, …], "nextCursor": string | null }`（`updatedAt` の新しい順、同時刻は `id` の昇順）。`nextCursor` が null になるまで辿る。`include=unlisted` を付けたときだけ限定公開が載る。
-- `GET {base}/exp/published/{id}.json` → ListItem ＋ `blocks`・`markdown`・`assets`・`contractVersion`。公開をやめた記事は 410（`movedTo` が付くことがあるが使わない）、未知・資格なしは 404。
-- `GET {base}/preview/{token}.json` → 下書き（PublishedDoc ＋ `preview`）。token は `pv_` ＋ base64url 43 文字で、有効期限は発行から 15 分以内。
-- 認証は `Authorization: Bearer ${GUIDE_EDITOR_API_TOKEN}`。`ETag` / `If-None-Match` を使う。`403` は使われず、資格のない handle は 404、資格なし・期限切れは 401。エラーの本体は `{ "error": { "code", "requestId", "retryable" } }`。
-
-| 型 | 項目 | 受け取り方 |
-| --- | --- | --- |
-| 一覧の本体 | `contractVersion` | `"1"` 以外・欠落は**応答全体**を契約違反として失敗させる。`items` が配列でない、100件超、`nextCursor` が null でも `^[A-Za-z0-9._~-]{1,512}$` でもない場合も同じ |
-| ListItem | `id` | 不透明ID（editor は UUID）。`^[A-Za-z0-9_-]{1,128}$` |
-| | `slug` | 小文字英数字と単一ハイフン、80文字以下（editor の上限は160。80超はこのサイトでは読み飛ばす）。`preview` は `/guides/preview` と衝突するため拒否 |
-| | `dest` | `exp` 以外は読み飛ばす（理由 `dest is not exp` をログに出す）。欠けも読み飛ばす |
-| | `range` | `live`（一覧・sitemap・体験導線に出す）か `unlisted`（直URLだけ・noindex）。欠け・未知値は契約違反 |
-| | `lang` | `en` 以外は読み飛ばす（editor は `ja` も流せる） |
-| | `title` / `lead` | `title` は必須・110文字以下。`lead` は null・空を読み飛ばし、160文字以下（`GUIDE_LIMITS`）。`lead` は記事の description |
-| | `cover` | null か Asset。null は表紙なし |
-| | `category` | `string \| null`。**null は読み飛ばす**（このサイトの公開条件でカテゴリは必須）。文字列は slug の形（小文字英数字とハイフン、80文字以下）だけ受け、表示名は slug から導く（`day-trips` → `Day trips`）。並び順は付かず最後（1000）。**editor にカテゴリの入力欄ができるまで editor 起点の新規記事はここを通らない**（下の「残る差」） |
-| | `author` | `{ name, handle \| null, url \| null }`。`name` だけ使う。`handle`・`url` は読むが保持も表示もしない |
-| | `publishedAt` / `updatedAt` | ISO 8601 の日時。表示とsitemapは日付部（`slice(0, 10)`）。`updatedAt` は「いまの公開版を公開した時刻」（下書きの編集では動かない） |
-| | `canonicalUrl` | 受け取っても信頼しない。canonical は常に `SITE_URL` + `/guides/{slug}` |
-| | `related` | 体験slugの形のものを重複除去して使う（申告で、認可の根拠にならない）。一覧の値を正とし、本文の取得結果からは読まない |
-| | `version`・`extras` | 使わない |
-| Full | ListItem ＋ `markdown`、`blocks`、`assets`、`contractVersion` | 本文は `markdown`（editor の AST の投影）を既存の safe Markdown renderer で描画する。`blocks` は配列であることだけ確かめ、中身は読まない。HTML文字列は受けない。`id`・`dest`（`exp`）・`contractVersion`（`"1"`）が一覧と合わない記事は読み飛ばす |
-| Asset | `{ id, url, contentType, bytes, sha256, alt, credit \| null }` | `url` は https かつ許可 origin だけ。**寸法も `licensed` も契約に無い**（下の「写真」）。`alt` は空文字がありうる。`credit` は写真直下のキャプションに使う |
-| Preview | `title`・`markdown` だけ必須 | 他は欠けても不正でもよい（`preview.expiresAt` は読まない）。`dest` または `preview.dest` が `exp` 以外なら 404、`contractVersion` が `"1"` でなければ書き手に理由を返す |
-
-一覧の項目（とくに `range`）は一覧を正とし、本文の取得結果は本文だけに使う。本文を `updatedAt` ごとに保持しても、古い `range` で表示しない。
-
-#### 写真
-
-editor の Asset には寸法と共有の権利の宣言が無い。このサイトでは次のように扱う（掲載許諾の規則は落とさない）。
-
-- **`licensed` は常に false**。従来の「`true` の明示宣言だけが OG・`Article.image` を許す」規則を保つので、editor 記事の表紙は記事ページにだけ出て、OG 画像と構造化データの `image` には出ない。editor の公開条件の `cover.consent`（掲載許諾）は「ページに載せてよい」の確認で、共有（OG・構造化データ）の権利とは分けて扱う。
-- 寸法が無いので表紙は名目の 1600×900 で描く（`EDITOR_COVER_ASSUMED_SIZE`）。実画像の比率は `h-auto` が使うが、16:9 でない画像は読み込み後にレイアウトがずれうる。
-- `alt` が空の表紙は装飾画像として扱う。`sha256`・`bytes`・`contentType` は形を確かめるだけで、画像の複製や検証はしない（写真は許可 origin から直接読む）。
-
-#### 著者
-
-editor の著者は `{ name, handle, url }` で、`role`・`bio` が無い。表示は名前だけ（`name · Published`、フッターも名前のみ）、Article JSON-LD の `author` も名前だけ（`jobTitle` は役割があるときだけ）。静的・database の記事は従来どおり役割と紹介文が必須。
-
-### 設定
-
-| 設定 | 内容 |
-| --- | --- |
-| `EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` | http mode 限定。mock mode では選べず `static` のまま |
-| `GUIDE_EDITOR_API_BASE_URL` | 必須。https のみ（ローカルの fixture 用に loopback の http だけ例外）。末尾 `/` は除く |
-| `GUIDE_EDITOR_API_HANDLE` | 必須。`exp` のみ（このサイトは面 `exp`。他の handle は発信先が `site` になり1件も読めないため、起動時に失敗させる） |
-| `GUIDE_EDITOR_API_TOKEN` | 必須。server-only の秘密。`NEXT_PUBLIC_*`・HTML・JSON-LD・ログ・エラーへ出さない。editor の面の資格（`exp`）。期限と入れ替えは配備の運用 |
-| `GUIDE_EDITOR_ASSET_ORIGINS` | 任意。写真を配信する https origin のカンマ区切り。未設定なら base URL の origin だけ（editor の写真は別の origin から配られるので、実際には明示する） |
-
-必須の3つのどれかが無い、または形が不正なら起動時に失敗する。static・mock・ローカル画像へ黙って fallback しない。
-
-### 表示と取得の振る舞い
-
-- editor 時は静的 `PUBLISHED_GUIDES`・mock sample・下書き・既存の unlisted editorial preview を一切使わない（同一 slug の二重表示なし）。`/guides` は database と同じくカテゴリ棚で並べる。
-- 一覧を `nextCursor` が null になるまで辿り（1ページ100件、最大50ページ。超過・同じ cursor の再出現は契約違反で失敗）、`live` の本文を同時6件までで取得して記事にする。初期HTMLに本文・metadata・JSON-LD が出る。
-- 応答はインスタンスごとのメモリに URL 単位で持つ。30秒以内は再取得せず、その後は `If-None-Match` で再検証し 304 なら再利用する。本文は一覧の `updatedAt` が同じ間は取得しない。Next の data cache は使わない（`cache: "no-store"`）。タイムアウト5秒、一覧（1ページ）2MB・本文/プレビュー1MBの上限。再ビルドなしで公開・更新・停止が次の再検証で反映される。
-- ネットワーク障害・タイムアウト・5xx・429 のときだけ、最後に確認した版を最大10分まで返す（失敗後30秒は再試行せず待たせない）。10分を超えたら記事ページ・`/guides`・sitemap は失敗する。フッターのリンク・トップの Journal・体験一覧と詳細の関連記事だけは記事を隠して表示を続け、予約導線を巻き込まない。
-- 401/403 は「記事が無い」ではなく設定・認証の不具合として、キャッシュがあっても必ず失敗させる。**一覧の 404/410 も同じ**（v1 は資格のない handle を 404 にするため、「記事が0件」と区別できない）。
-- 1記事の契約違反、slug 不正・予約語・重複（新しい方を残す）、category が null・slug の形でない、Markdown が subset 外、図・カバー・資産の URL が https の許可 origin でない、`niho-guide-asset:` 参照、本文の 410/404 は、その記事だけを読み飛ばし、`console.error` に ID・slug・理由（項目名だけ）を出す。本文・トークン・URL・クエリは出さない。
-- `CONFIRM` の印は既存のパーサーどおり描画する（受信時の拒否条件にはしない。公開前の条件として宣言する）。
-- 一覧に無い `/guides/{slug}`（公開停止・未公開・綴り違い）は、slug が妥当で `/guides` に記事があれば `/guides` へ 307 で転送する（再公開は同じ URL なので恒久転送にしない）。`/guides` が空なら 404。不正な形の slug は通信せず 404。editor が返す `movedTo`（NIHO の別の面へ移した記事の 410）は使わない。
-- `unlisted` は直URLだけで読め、`noindex, nofollow`。一覧・sitemap・トップ・体験導線には出さない。
-
-### 本文（Markdown と囲み）
-
-editor の本文は AST が正本で、`markdown` はその投影（`##` `###`、段落、`-` / `1.`、独立した行の `![alt](src "caption")`、`:::note` … `:::`、`**` `*` `[text](href)` `[CONFIRM: …]`、句読点の `\` エスケープ）。この範囲は `lib/guide-markdown.ts` が受ける範囲に合わせて作られており、editor の囲み（`note`）は `:::note`（段落と箇条書きだけ）に投影され、experience では `note` ブロックとして描画される。引用は段落に、区切り線は省略、取り消し線・コードは素のテキストに投影される（見た目の意味が消えるので、宣言で受けないと伝える）。editor の合成例の `markdown` をそのまま `parseGuideMarkdown` に通すテストで固定してある（`markdown-compat.test.ts`）。
-
-囲み・エスケープ・`%28` を含む URL は既存のパーサーでそのまま通ったが、editor が太字かつ斜体の文字に出す `***both***`（と `***a** b*`・`***a* b**`・`**a *b***`・`*a **b***`）だけは拒否され、記事ごと読み飛ばされていた。そのため `lib/guide-markdown.ts` がこれらを受けるようにした（同時に閉じるときは太字が外側）。パーサーは静的・database の記事と共有なので、これらの記法はそちらでも書ける（以前は拒否）。`****`・空白つきの `***`・閉じていない `***` は従来どおり拒否（fail-closed）。
-
-### プレビュー（#253）
-
-- `/guides/preview?token=…` は `GET {base}/preview/{token}.json` をキャッシュなし・同じ認証で読み、通常の記事ページと同じ部品（`components/pages/GuideArticle.tsx`）で描画する。「Preview from editor.niho.life · not published · link expires soon」を出し、JSON-LD は出さない。
-- トークンなし・形式不正（`^pv_[A-Za-z0-9_-]{43}$` 以外）・失効（404/410）・source が editor 以外は 404。401/403・5xx・タイムアウトは 500 で、古い下書きは返さない。
-- 下書きは条件を満たさなくてよい（リード・カバー・カテゴリ・著者・関連体験の欠けは既定値で埋める）。安全性の検査は公開版と同じで、Markdown が通らなければ行番号つきの理由を 200 で返す（トークンを持つ書き手向け）。
-- 応答は `Cache-Control: private, no-store`、`X-Robots-Tag: noindex, nofollow`、`Referrer-Policy: no-referrer`、metadata の robots も noindex。robots.txt は `/guides/preview?` を disallow する（`/guides/preview-…` という slug は塞がない）。sitemap・一覧・内部リンクにプレビューURLを出さず、計測（Umami）は対象外のパスとして送らない。
-- **トークンの取り扱い注意**：トークンは URL のクエリにあるため、Cloud Run のリクエストログ（と前段の CDN・proxy のログ）に残りうる。コードでは防げないので、editor 側のトークンは短命・単一記事・読み取り専用を前提にする（v1 は発行から15分以内、1つの page・1つの dest に拘束し、token だけでは読めない）。`next dev` は開発時だけリクエスト URL を端末に表示する。アプリ自身のログ・エラー・例外はトークンとURLを含めない。
-
-### 書き手の入口（#254）
-
-公開サイトのフッター「For writers」とホストの画面の「記事を書く」（PC のサイドバーの下、スマホのアカウントのメニュー。商品運営者には出さない）は、`GUIDE_EDITOR_SITE_ORIGIN` を設定したときだけ出て、その origin へ飛ぶ。値は https の origin だけ（パス・クエリ不可、ローカル開発の loopback の http だけ例外）で、形が不正なら起動時に失敗する。未設定なら両方とも出ない。editor.niho.life がまだ開けない間に壊れたリンクを出さないためで、公開の source flag とは独立している（書き手は公開元の切替より先に editor で書き始められる）。
-
-### 発信先の条件の宣言（#253）
-
-`GET /api/public/guides/publication-requirements` は、editor が「公開の前に」で読む**発信先の宣言**（editor の `DestinationDeclaration`、`schemaVersion: 1`）を返す（source flag に関係なく常に配信、秘密なし、`Cache-Control: public, max-age=300`、`Access-Control-Allow-Origin: *`、`X-Robots-Tag: noindex`）。editor は配備設定 `EDITOR_DESTINATION_DECLARATIONS`（JSON `{"exp": "<この URL>"}`）の https の URL から読む。editor の語彙は閉じていて、**未知の `kind`・未知の欄・型の違いは宣言ごと拒否され、experience は「いまは公開できません」になる**。このサイトの宣言は editor の検証規則を写したテスト（`requirements.test.ts`）で固定してある。
-
-中身は `id: "exp"`、`label`、`host`（`SITE_URL` のホスト）、`path: "guides"`（URL は `https://{host}/guides/{slug}`）、`ranges: ["live", "unlisted"]`、`extras: []`、`accepts`（ブロックは段落・見出し・箇条書き・図・囲み、マークは太字・斜体・リンクだけ）と `requires`。editor の `kind` との対応:
-
-| 条件 | 仮契約の `kind`（旧） | editor v1 の `kind` | 備考 |
-| --- | --- | --- | --- |
-| 英語 | `lang`（`equals: en`） | `lang`（`equals: "en"`） | |
-| カバー（掲載許諾あり） | `cover`（`required`・`requireLicensed`） | `cover`（`consent: true`） | 共有の権利ではなく掲載許諾（上の「写真」） |
-| リード | `lead`（`required`・`maxLength`） | `lead`（`max`） | 上限は `GUIDE_LIMITS`（160） |
-| 題名 | `title`（`maxLength`） | `title`（`max: 110`） | editor#316 で語彙に入った。受信時も 110 文字超は読み飛ばすので、editor の公開前に止める |
-| 写真の代替テキスト | — | `images`（`alt: true`） | 本文の写真とカバーの alt が空でないこと（editor#316） |
-| カテゴリ | `category`（`required`） | `category`（`oneOf` なし） | 入力欄は editor 側に無い（下の「残る差」） |
-| 見出し1つ以上 | `min-headings`（`min`） | `headings`（`min`） | |
-| `CONFIRM` なし | `no-confirm-marker` | `noConfirm` | |
-| 関連体験が掲載中 | `related-experiences-listed`（`lookup`） | **宣言しない**（任意） | オーナー決定（2026-11-07）で関連体験は任意。editor の `relatedLive` は関連体験を 1 件以上要求するため宣言から外した。選んだ関連体験は表示のたびに権限と掲載を再判定する（#255） |
-
-experience が受信時に再確認するのは安全に関わるもの（英語、Markdown subset、https の許可 origin の写真）と、表示の上限（題名110。editor の宣言でも止める）だけで、編集上の条件は editor の公開前チェックに任せる。`title`・`images` の kind を知らない editor は宣言ごと拒否するので、この 2 つは editor#316 の配備後に宣言へ足した。関連体験の再判定（権限・掲載状態）は #255。
-
-### 切替・切戻し
-
-1. 段階 3 の editor 公開 API が staging で使えることを確認し、合成記事で live / unlisted / 公開停止 / 更新 / 410、ETag の 304、401 の失敗、10分の stale 上限、プレビューの 404 と no-store を確認する。
-2. 専用の配備変更で `EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor` と上の設定を渡す。トークンは Secret Manager から渡し、公開出力に出さない。editor 側で `EDITOR_DESTINATION_DECLARATIONS` にこのサイトの宣言の URL を設定し、`EDITOR_FACE_CREDENTIALS` に `exp` の資格（SHA-256・期限）を入れる。
-3. 切戻しは `database` を読める既知revisionへ戻す。実書込み開始後は未設定（`static`）へ戻さず、editor側とDBのデータも消さない。
-
-### ローカルで確かめる
-
-合成 fixture（`apps/web/src/lib/editor-publication/fixtures/editor-publications.json`、`*.example` だけ。v1 の形で、handle は `exp`）を配る fixture サーバーがある。live 3本（うち1本は本文 410）、本文が 410 で `movedTo` つきの1本、unlisted 1本、契約違反の負例（dest 違い・range 欠落・http のカバー・`javascript:` のリンク・不正/予約/重複 slug・外部ホストの図・内部 asset 参照・日本語・category が null・lead が null）、プレビュー用の下書きを含む。
-
-```sh
-node apps/web/scripts/editor-publication-fixture-server.mjs   # http://127.0.0.1:4319/v1
-# 別の端末で（体験の公開APIは無くても記事ページは描画できる）
-EXPERIENCE_API_MODE=http EXPERIENCE_GUIDE_PUBLIC_SOURCE=editor \
-GUIDE_EDITOR_API_BASE_URL=http://127.0.0.1:4319/v1 GUIDE_EDITOR_API_HANDLE=exp \
-GUIDE_EDITOR_API_TOKEN=synthetic-fixture-token-not-a-secret GUIDE_EDITOR_ASSET_ORIGINS=https://assets.editor.example \
-NEXT_PUBLIC_NIHO_WEB_ORIGIN=http://127.0.0.1:4392 SITE_URL=http://127.0.0.1:3000 \
-npm -w @niho-experience/web run dev
-```
-
-サーバーは v1 と同じく、Bearer の不一致を 401、資格のない handle を 404、未知・重複した query や不正な `limit`・`include`・`cursor` を 400 にし、`include=unlisted` が無ければ限定公開を載せず、`nextCursor` でページを返す。`EDITOR_FIXTURE_PAGE_SIZE=4` で1ページの件数を小さくできる（一覧が複数ページになる）。
-
-同じ組み合わせ（fixture サーバー、NIHO の公開 API の合成 mock、http mode のサイト）を Playwright が立てて確かめる：`npm -w @niho-experience/web run test:e2e:guide-editor`（CI の e2e job でも実行。`playwright.guide-editor.config.ts`。1ページ4件で起動するので、ページを辿ることも通る）。一覧と sitemap は live 3本だけ、限定公開は noindex、公開をやめた記事と未知の slug は `/guides` へ 307、不正な slug は 404、初期 HTML に本文・canonical・Article JSON-LD、editor の表紙は `licensed: false` なので OG 画像と JSON-LD の `image` が出ない、著者は名前だけ（`jobTitle` なし）、プレビューは noindex で JSON-LD・canonical なし、失効・別の発信先・トークンなしは 404、条件の宣言、フッターの「For writers」。プレビューの HTML では、Next のルーターが `<script>` に要求された URL（アドレスバーと同じ値）を埋めるのでトークンがそこには現れる。リンク・画像・meta・canonical に出ないことを確かめている。
-
-手で見るときは `/guides`、`/guides/sample-evening-walk`、`/guides/sample-direct-link-only`（noindex）、`/guides/sample-http-cover`（`/guides` へ転送）、`/guides/preview?token=pv_synthetic-preview-not-a-secret-draft-000001`（条件未達の下書き）、`…-000002`（Markdown エラー面）、`…-000003`（別の発信先で 404）、失効のトークン（404）を確かめる。`EDITOR_FIXTURE_STATUS=503` で起動すると障害時の stale を、`EDITOR_FIXTURE_PORT` でポートを変えられる。写真は `*.example` の URL なので読み込まれない。
-
-### v1 に合わせた記録と残る差（Epic #251）
-
-仮契約（niho-docs#40 の本文と設計 §9 からの想定）からの変更点:
-
-| 項目 | 仮契約 | 確定 v1（いまの実装） |
-| --- | --- | --- |
-| 一覧の本体 | `{ items }` | `{ contractVersion, items, nextCursor }`。`contractVersion` が `"1"` でなければ失敗（fail-closed）。ページを辿る |
-| `dest` | `niho-experience` | `exp`（handle も `exp`） |
-| 限定公開 | 一覧に `range: unlisted` で載る | `include=unlisted` を付けたときだけ載る（付けて読む） |
-| 本文 | `markdown` を描画 | 同じ（AST が正本で `markdown` はその投影。`blocks` は読まない） |
-| 認可の失敗 | 401/403 を失敗 | 同じ。加えて資格のない handle は 404 なので一覧の 404/410 も失敗 |
-| 著者・写真 | `author { name, role, bio }`、写真に寸法・`licensed` | `author { name, handle, url }`（名前だけ表示）。写真に寸法・`licensed` が無い（名目寸法・`licensed: false`） |
-| カテゴリ | `{ slug, label, order? }` | `string \| null`を維持し、任意の`categoryDisplay {labelEn,labelJa,displayOrder,revision}`を公開時snapshotとして読む。metadataがない旧版はslug fallback |
-| 認証 | 固定の Bearer | 面の資格（現行 editor では不透明な Bearer。期限あり）。名前・配線は `GUIDE_EDITOR_API_TOKEN` のまま |
-| 公開条件の語彙 | `min-headings`・`no-confirm-marker`・`related-experiences-listed` ほか独自の形 | editor の `DestinationDeclaration`（`headings`・`noConfirm`・`relatedLive` ほか。閉じた語彙） |
-| プレビュー token | `^[A-Za-z0-9_-]{16,256}$` | `^pv_[A-Za-z0-9_-]{43}$` |
-
-**残る差・オーナー判断が要る点**（勝手に緩めていない）:
-
-1. **カテゴリ**：解消済み。EditorはExperienceのactiveカテゴリを公開ごとに読み、選択slugを`category`、英日表示名・順序・revisionを任意の`categoryDisplay` snapshotとして固定する。activeが空、取得失敗、または選択slugが停止済みなら次の公開は503/不許可で、既存公開版とそのsnapshot表示名は維持する。
-2. **共有の権利と OG 画像**：解消済み。editor は著者がカバーに「共有画像にも使う許諾」を付けたときだけ、トップレベルの任意項目 `coverShareable: true` を出す（niho-life/niho-editor#316）。それを `hero.licensed` に写像し、OG・`Article.image` に使う。無い公開版は従来どおり共有しない。
-3. **写真の寸法**：契約に無い。editor のカバーは `hero.sizeAssumed` として名目値で描き、OG 画像には `width`・`height` を出さない。editor が寸法を足せば名目値をやめられる（互換を壊さない追加）。
-4. **著者の役割・紹介文**：解消済み。editor が公開時点の肩書・紹介文をトップレベルの任意項目 `authorProfile { role, bio }` で出し（editor#316）、画面と `Article.author` の `jobTitle`・`description` に使う。`handle`・`url` は使っていない。著者ページを作る判断は別。
-5. **「体験ページに載せる」（`extras.xp`）**：未対応。宣言は `extras: []` で、editor に選択肢を出さない。関連体験を選べば、体験の詳細に記事が出る（従来どおり）。
-6. **`movedTo`**：NIHO の別の面へ移した記事の 410 に付くが、旧 URL から新 URL への転送は実装していない（`/guides` へ 307）。
-7. **`checkedOn`（確認日）**：v1 に無いので editor 記事では表示しない。
-8. **画像の複製と `sha256`**：editor の仕様は「本人のサイトは取り込むときに複製する」だが、面の experience は許可 origin から直接読む。availability は editor の写真置き場に依存する。
-9. **面の資格**：公開本文の既存面資格と、現在権限を読む内部authorityのGoogle ID tokenは用途を分ける。通常公開API key、host token、Photo資格を内部authorityへ流用しない。
-10. **見出しの数え方**：editor の `headings` 条件は `##` と `###` を数えるが、このサイトの目次は `##` が前提。`###` だけの記事は目次が空になりうる（表示は崩れない）。
-11. **未配備**：本番のflag、固定audience、許可runtime service account、origin、Secret/IAM/DNSの配線とstaging受入。
-
-### 契約が変わったときに直す箇所
-
-- `contract.ts`：パス、項目名、`range`・`dest`・`lang` の値、Asset と `licensed`／寸法の写像、カテゴリの読み取り。
-- `client.ts`：認証方式（いまは Bearer）、ページング、410/404 の使い分け。
-- `requirements.ts`：宣言の `kind` と欄（editor 側の閉じた語彙に合わせる。未知はすべて拒否される）。
-- `convert.ts`：表示モデルへの写像（著者・表紙・カテゴリ）。
-- fixture とテスト、この節。
+Experienceはeditor.niho.lifeの公開APIを読まず、Editor向けpreview token、候補・関連記事check API、専用配備flagやorigin設定も持たない。旧 `/editor/*` は410を返す。過去の設計・移行経緯は [ADR 0002](adr/0002-guide-content.md) と [記事authority履歴](editor-article-authority.md) に残す。現行記事の執筆・公開は `/write` とExperience DBで行い、その画面は `test:e2e:write` で確認する。

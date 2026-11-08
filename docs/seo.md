@@ -120,12 +120,6 @@ Server Componentで描画し、JavaScriptなしで次が読める（E2Eの `seo.
 - **公開の範囲**：実 API（`EXPERIENCE_API_MODE=http`）では公開記事だけ。0 本の間は `/guides`・`/guides/{slug}` が 404、sitemap に載せず、フッターのリンクも出さない。mock のプレビューだけ合成のサンプル記事（`samples/`・題名と著者に `(sample)`）を足す。`robots` はほかの公開ページと同じ（検索公開のスイッチが off なら `noindex, nofollow`）。
 - **メタデータ**：`title`・`description`・自己参照の canonical・Open Graph（`type: article`・`publishedTime`・`modifiedTime`）を `<head>` に入れる（`htmlLimitedBots` の対象。`e2e/guides.spec.ts` が Googlebot・GPTBot の UA で確かめる）。OG 画像は `hero.licensed` が true のときだけ。Twitter カードは `summary`。
 - **構造化データ**：`Article`（`headline`・`description`・`url`・`mainEntityOfPage`・`inLanguage: en`・`articleSection`（題名の上の区分＝カテゴリの表示名、無ければ柱の名前。どちらも無ければ出さない）・`author`＝`Person`〔`name`・`jobTitle`（役割）・`description`（紹介。画面の著者欄にあるときだけ）〕・`datePublished`・`dateModified`・`publisher`＝トップの `Organization` と同じ `@id`・名称・URL。`image` は `hero.licensed` のときだけ。`mentions` は記事に予約カードとして実際に出している体験だけを `TouristTrip`〔`name`・`url`〕で、0 件なら出さない）と `BreadcrumbList`（Home › Guides › 題名）。一覧は `BreadcrumbList`（Home › Guides）だけ。FAQ の構造化データ（`FAQPage`）は出さない（Google のリッチリザルトの対象外。画面の FAQ と一致させるだけ）。`Article` は画面にある事実だけなので、プレビューのサンプル記事にも出す（プレビューは `noindex`）。
-- **editor.niho.life の公開版から来る記事**（`GUIDE_PUBLIC_SOURCE=editor`。契約 v1 を `lib/editor-publication/` で読む）：
-  - **description**：リードは任意なので、リードが無い記事は本文の先頭の段落の文字（見出し・写真・箇条書き・囲みは飛ばす）から 160 字以内で作る（`guideSummary`。160 字を超えたら文の区切り（`. ! ?`。体験詳細の `seoDescription` と同じ規則）で、無ければ単語の区切りで切って「…」）。meta description・Open Graph・Twitter・`Article.description`・一覧とトップの記事カードに使う。記事ページの題名の下のリードには使わない（本文の冒頭と同じ文が並ぶため）。
-  - **OG 画像**：カバーに著者が「共有画像にも使う許諾」を付けた（公開版の `coverShareable`）ときだけ `hero.licensed` にする。掲載許諾だけのカバーはページに出すが共有しない。editor の写真には寸法が無く、仮の寸法（`hero.sizeAssumed`）なので、OG 画像の `width`・`height` は出さない（`<img>` の描画は仮の寸法のまま比率は写真どおり）。
-  - **著者**：公開版の `authorProfile`（公開した時点の肩書・紹介文）があれば、肩書を題名の下と構造化データの `jobTitle`、紹介文を「About the author.」と構造化データの `description` に出す。無ければ名前だけ。
-  - **関連記事**：契約に関連記事の欄が無いので、同じカテゴリの他の公開記事（限定公開と自分を除く）を新しい順に最大 3 件出す。コードで置く記事・DB の記事は今のまま（`relatedGuideSlugs` だけ）。
-  - **上限**：slug は契約の上限 160 字まで受ける（コードで置く記事は 80 字のまま）。写真のクレジットは editor の上限 500 字まで受ける。文字数は editor と同じく code point で数える。
 - **sitemap**：公開記事があるときだけ `/guides`（最新の `updatedAt`）と各記事（`lastModified` = `updatedAt`）を足す。プレビューと検索公開 off の sitemap は従来どおり空。
 - **hreflang**：`en` と `x-default`（自分自身）。`ja` は、その記事に `translations.ja` があり**かつ**日本語の記事のページが実在するときだけ足す（`locale-metadata.ts` と同じ考え方）。`/ja/guides` はまだ無い（#59）ので、今はどの記事にも `ja` を出さない。
 
