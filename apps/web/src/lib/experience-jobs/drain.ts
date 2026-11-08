@@ -1,10 +1,10 @@
 import "server-only";
-import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostAccounts, type HostMailOutbox, type HostNotificationAddresses } from "@niho-experience/experience-store";
+import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostAccounts, type HostMailOutbox, type HostNotificationAddresses, type HostNotificationOutbox } from "@niho-experience/experience-store";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { cleanupProviderMedia, type ProviderMediaCleanupCounts, type ProviderMediaCleanupDeps } from "@/lib/experience/provider-media-cleanup";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import type { HostPushKind } from "@/lib/host/push/payload";
-import { hostAddressConfirmationEmail, hostBookingEmail, hostLoginLinkEmail } from "@/lib/mail/host-templates";
+import { hostAddressConfirmationEmail, hostBookingEmail, hostLoginLinkEmail, hostNotificationEmail } from "@/lib/mail/host-templates";
 import { bookingConfirmationEmail, bookingLinkEmail, bookingMeetingGuideEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail, reviewInvitationEmail, supportBookingMessageEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
@@ -233,6 +233,7 @@ export interface ExperienceJobDeps {
   readonly hostMail: {
     readonly outbox: Pick<HostMailOutbox, "claimBookingMails" | "completeBookingMail" | "retryBookingMail" | "claimAddressConfirmations" | "issueAddressConfirmationToken" | "completeAddressConfirmation" | "retryAddressConfirmation">;
     readonly allowed: (providerId: string, kind: HostPushKind) => Promise<boolean>;
+    readonly summaries?: Pick<HostNotificationOutbox, "enqueueDueDayBeforeSummaries">;
   } | null;
   /** Deletes the addresses of hosts whose access ended (#194), whatever the flag: what was kept while it was on still goes. */
   readonly hostAddresses: Pick<HostNotificationAddresses, "purge">;
@@ -624,6 +625,7 @@ async function sendHostAddressConfirmations(deps: ExperienceJobDeps, hostMail: H
 async function sendHostBookingMails(deps: ExperienceJobDeps, hostMail: HostMail): Promise<HostMailCounts> {
   const startedAt = deps.now().getTime();
   const counts = { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 };
+  await hostMail.summaries?.enqueueDueDayBeforeSummaries(deps.now());
   while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.hostMails)) {
     const claim = await hostMail.outbox.claimBookingMails({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.hostMailLeaseSeconds });
     counts.abandoned += claim.abandoned;
@@ -643,7 +645,9 @@ async function sendHostBookingMails(deps: ExperienceJobDeps, hostMail: HostMail)
       counts.skipped += 1;
       continue;
     }
-    const email = hostBookingEmail(parsed.event, { siteUrl: deps.siteUrl });
+    const email = parsed.event.kind === "NEW_BOOKING" || parsed.event.kind === "CANCELLATION" || parsed.event.ota
+      ? hostBookingEmail(parsed.event, { siteUrl: deps.siteUrl })
+      : hostNotificationEmail(parsed.event, { siteUrl: deps.siteUrl });
     const result = await deps.mailer.sendMail({ to: row.to, ...email });
     if (result.ok || result.failure === "permanent") {
       await hostMail.outbox.completeBookingMail(row.id);

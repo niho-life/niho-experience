@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import { StoreAccessDeniedError } from "./errors.ts";
+import { isHostAccountId } from "./host-accounts.ts";
 import type { DbRow } from "./rows.ts";
 import type { CalendarAccess, HostActor, MembershipRole } from "./types.ts";
 import { assertStoreIdentifier } from "./validation.ts";
@@ -37,17 +38,21 @@ export async function requireProductCalendarAccess(
 
 export function effectiveCalendarRole(actor: HostActor, localRole: MembershipRole): MembershipRole | null {
   if (actor.calendarScope === "OPERATOR") return null;
-  const rank = { VIEWER: 1, EDITOR: 2, OWNER: 3 };
+  const rank = { VIEWER: 1, EDITOR: 2, COHOST: 2, OWNER: 3 };
   const ceiling = actor.calendarRoleCeiling;
   return ceiling && rank[ceiling] < rank[localRole] ? ceiling : localRole;
 }
 
 /** A current server-side product ceiling always suppresses stale provider membership. */
-export async function calendarMembershipRole(client: Queryable, actor: HostActor, allowedRoles: readonly MembershipRole[] = ["OWNER", "EDITOR", "VIEWER"]): Promise<MembershipRole | null> {
+export async function calendarMembershipRole(client: Queryable, actor: HostActor, allowedRoles: readonly MembershipRole[] = ["OWNER", "COHOST", "EDITOR", "VIEWER"]): Promise<MembershipRole | null> {
   if (actor.calendarScope === "OPERATOR") return null;
+  const nativeAccount = isHostAccountId(actor.nihoUserId);
   const result = await client.query<DbRow>(
-    `SELECT role FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2
-       AND active=true AND role=ANY($3::text[]) FOR SHARE`,
+    `SELECT m.role FROM provider_memberships m
+       ${nativeAccount ? "JOIN host_accounts a ON a.id=m.niho_user_id AND a.status='ACTIVE'" : ""}
+      WHERE m.provider_id=$1 AND m.niho_user_id=$2
+        AND m.active=true AND m.role=ANY($3::text[])
+      FOR SHARE OF m${nativeAccount ? ",a" : ""}`,
     [actor.providerId, actor.nihoUserId, allowedRoles],
   );
   const role = result.rows[0] ? effectiveCalendarRole(actor, String(result.rows[0].role) as MembershipRole) : null;
@@ -61,6 +66,7 @@ export async function listCalendarProductsForActor(client: Queryable, actor: Hos
     `SELECT p.id,p.public_title,p.seller_display_name,m.role,g.version AS grant_version,g.assignment_label
        FROM experience_products p
        LEFT JOIN provider_memberships m ON m.provider_id=p.provider_id AND m.niho_user_id=$2 AND m.active=true AND $3::boolean
+         AND (m.niho_user_id !~ '^hst_[0-9a-f]{32}$' OR EXISTS (SELECT 1 FROM host_accounts a WHERE a.id=m.niho_user_id AND a.status='ACTIVE'))
        LEFT JOIN product_operator_grants g ON g.provider_id=p.provider_id AND g.product_id=p.id
          AND g.niho_user_id=$2 AND g.active=true AND (g.expires_at IS NULL OR g.expires_at>clock_timestamp())
       WHERE p.provider_id=$1 AND (p.status<>'ARCHIVED' OR $4::boolean) AND (m.provider_id IS NOT NULL OR g.provider_id IS NOT NULL)

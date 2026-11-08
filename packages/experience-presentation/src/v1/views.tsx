@@ -163,10 +163,13 @@ function HostFeatureV1({ model, primitives }: { model: NonNullable<HomeViewModel
 }
 
 export function SiteHeaderV1({ primitives, copy = EN_STATIC_COPY_V1, currentPath, labels = {}, experiencesLink }: { primitives?: Partial<PresentationPrimitivesV1>; copy?: StaticCopyAccessorV1; currentPath?: string; labels?: { brand?: string; experiences?: string; host?: string; help?: string }; experiencesLink?: ReactNode }) {
-  const { Link } = primitivesV1(primitives);
+  const { Link, Image } = primitivesV1(primitives);
   return <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur-md backdrop-saturate-[1.2]">
 <div className="container-page flex h-16 items-center gap-1.5">
-<Link href="/" className="flex shrink-0 items-baseline gap-1.5 font-display text-xl font-semibold tracking-[-0.01em]">{labels.brand ? <span>{labels.brand}</span> : <RichMessageV1 segments={copy.rich("chrome.brandRich")} emphasisClassName="font-normal text-ink-soft max-[359px]:sr-only" />}</Link>
+<Link href="/" className="flex shrink-0 items-center gap-2 font-display text-xl font-semibold tracking-[-0.01em]">
+<span aria-hidden className="relative size-7 shrink-0 sm:size-8"><Image src="/icon.svg" alt="" sizes="32px" priority className="object-contain" /></span>
+<span className="flex items-baseline gap-1.5">{labels.brand ? <span>{labels.brand}</span> : <RichMessageV1 segments={copy.rich("chrome.brandRich")} emphasisClassName="font-normal text-ink-soft max-[479px]:sr-only" />}</span>
+</Link>
 <nav aria-label={copy.text("chrome.main")} className="ml-auto">
 <ul className="flex items-center gap-0.5 text-[0.9375rem] font-bold sm:gap-1">
 <li>{experiencesLink ?? <Link href="/experiences" aria-current={currentPath === "/experiences" ? "page" : undefined} className={`rounded-full px-2.5 py-2 hover:bg-sand sm:px-3 ${currentPath === "/experiences" ? "bg-sand" : ""}`}>{labels.experiences ?? copy.text("chrome.experiences")}</Link>}</li>

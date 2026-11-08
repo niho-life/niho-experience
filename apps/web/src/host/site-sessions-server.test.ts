@@ -4,6 +4,7 @@ import type { HostProvider } from "@/lib/host/providers";
 
 /** ホーム and この回 for the bookings made on this site against a stubbed experience store (#285 slice 8b, #107). */
 const state = vi.hoisted(() => ({
+  config: { guestBookingEnabled: true, guestMailEnabled: true },
   mock: false,
   store: null as null | Record<string, ReturnType<typeof vi.fn>>,
   attendance: null as null | Record<string, ReturnType<typeof vi.fn>>,
@@ -11,6 +12,7 @@ const state = vi.hoisted(() => ({
   providers: { status: "ok", providers: [] } as { status: string; providers?: { id: string; nihoUserId: string; memberRole: string }[] },
 }));
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/config", () => ({ config: state.config }));
 vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => state.store, bookingAttendance: () => state.attendance }));
 vi.mock("@/lib/host/server", () => ({ isHostMock: () => state.mock, readHostSession: async () => state.session, loadHostProviders: async () => state.providers }));
 vi.mock("@/lib/host/session", () => ({ accessTokenUsable: (session: { accessTokenExpiresAt: number }, now: number) => session.accessTokenExpiresAt > now }));
@@ -42,6 +44,7 @@ const KEY = { productId: "tea", offerId: "sample-am", localDate: "2026-11-01", l
 const MARK = { publicBookingId: STORED.publicBookingId, status: "ATTENDED", recordedAtUtc: "2026-11-01T01:20:00.000Z" };
 
 beforeEach(() => {
+  Object.assign(state.config, { guestBookingEnabled: true, guestMailEnabled: true });
   state.mock = false;
   vi.useRealTimers();
   state.store = {
@@ -67,10 +70,9 @@ describe("loadSiteHome", () => {
     expect(JSON.stringify(load)).not.toMatch(/@|\+81|Sample Guest/);
   });
 
-  it("keeps today's screen while closed, for anyone but the owner, and says when the DB fails", async () => {
-    for (const memberRole of ["EDITOR", "COHOST"] as const) {
-      expect(await loadSiteHome({ ...OWNER, memberRole })).toEqual({ status: "closed" });
-    }
+  it("lets a COHOST see sessions without the payment todo, keeps EDITOR closed, and says when the DB fails", async () => {
+    expect(await loadSiteHome({ ...OWNER, memberRole: "EDITOR" })).toEqual({ status: "closed" });
+    expect(await loadSiteHome({ ...OWNER, memberRole: "COHOST" })).toMatchObject({ status: "live", todos: [], sessions: { today: expect.any(Array) } });
     state.store!.listGuestSessionsForHost!.mockRejectedValueOnce(new StoreAccessDeniedError());
     expect(await loadSiteHome(OWNER)).toEqual({ status: "closed" });
     state.store!.listGuestSessionsForHost!.mockRejectedValueOnce(new Error("synthetic outage"));
@@ -106,8 +108,11 @@ describe("loadSiteSession", () => {
     expect(await loadSiteSession(OWNER, { ...QUERY, offer: "not an id" })).toMatchObject({ status: "live", session: null });
   });
 
-  it("keeps today's screen while closed, for anyone but the owner, and says when the DB fails", async () => {
-    expect(await loadSiteSession({ ...OWNER, memberRole: "COHOST" }, QUERY)).toEqual({ status: "closed" });
+  it("lets a COHOST see guest PII/reply without attendance or financial data, and fails closed on revocation/outage", async () => {
+    const cohost = await loadSiteSession({ ...OWNER, memberRole: "COHOST" }, QUERY);
+    expect(cohost).toMatchObject({ status: "live", attendance: false, messages: true, session: { bookings: [{ guest: "Sample Guest", phone: "+81 90 0000 0000", site: { cancellationPolicy: "NONE" } }] } });
+    const cohostSite = cohost.status === "live" ? cohost.session?.bookings[0]?.site : null;
+    expect(cohostSite).not.toHaveProperty("fee"); expect(cohostSite).not.toHaveProperty("payoutYen"); expect(cohostSite).not.toHaveProperty("cancellation");
     state.store!.listGuestBookingsForSession!.mockRejectedValueOnce(new StoreAccessDeniedError());
     expect(await loadSiteSession(OWNER, QUERY)).toEqual({ status: "closed" });
     state.store!.listGuestBookingsForSession!.mockRejectedValueOnce(new Error("synthetic outage"));

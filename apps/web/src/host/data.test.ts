@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   publicationRepository: null as unknown,
   notificationLoad: { status: "preparing" } as import("./notification-settings-server").HostNotificationSettingsLoad,
   notificationCalls: [] as { providerId: string; nihoUserId: string }[],
+  sessionMode: "niho" as "niho" | "experience" | "none",
 }));
 vi.mock("server-only", () => ({}));
 // The experience DB's 通知 (#109) is its own module; here only what it answers.
@@ -28,7 +29,9 @@ vi.mock("@/lib/host/server", async (importActual) => {
   const session = { refreshToken: "r", accessToken: "mock-access-token.data-test", accessTokenExpiresAt: now + 3_600_000, connectionId: "c", connectionExpiresAt: now + 86_400_000, expiresAt: now + 86_400_000, displayName: "サンプル ホスト", iconUrl: null };
   return {
     ...actual,
-    readHostSession: async () => ({ ...session, mockScenario: state.scenario }),
+    readHostSession: async () => state.sessionMode === "none" ? null : state.sessionMode === "experience"
+      ? { kind: "experience", hostAccountId: "hst_00000000000000000000000000000001", mockScenario: undefined }
+      : ({ ...session, kind: "niho", mockScenario: state.scenario }),
     loadHostProviders: async () => ({ status: "ok", providers: state.providers }),
     selectedHostApiClient: async (...args: Parameters<typeof actual.selectedHostApiClient>) => {
       if (state.selectedHostClient) return state.selectedHostClient as Awaited<ReturnType<typeof actual.selectedHostApiClient>>;
@@ -81,6 +84,7 @@ beforeEach(() => {
   state.publicationRepository = null;
   state.notificationLoad = { status: "preparing" };
   state.notificationCalls = [];
+  state.sessionMode = "niho";
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -147,7 +151,7 @@ describe("loadHostConsoleData", () => {
     const items = [{ key: "NEW_BOOKING", enabled: true, locked: true }, { key: "NEW_REVIEW", enabled: false, locked: false }];
     state.notificationLoad = { status: "live", items };
     // Only 設定 asks for them; the other pages never read the DB for them.
-    expect((await loadHostConsoleData(KITCHEN)).settings.notificationSource).toBe("preparing");
+    expect((await loadHostConsoleData(KITCHEN)).settings.notificationSource).toBe("disabled");
     expect(state.notificationCalls).toEqual([]);
     const live = await loadHostConsoleData(KITCHEN, { notifications: true });
     expect(live.settings).toMatchObject({ notifications: { email: { addresses: [] }, items }, notificationSource: "live" });
@@ -157,8 +161,20 @@ describe("loadHostConsoleData", () => {
     expect((await loadHostConsoleData(KITCHEN, { notifications: true })).settings.notificationSource).toBe("error");
     // An editor never reads them.
     state.notificationCalls = [];
-    expect((await loadHostConsoleData(STUDIO, { notifications: true })).settings).toMatchObject({ notifications: null, notificationSource: "preparing" });
+    expect((await loadHostConsoleData(STUDIO, { notifications: true })).settings).toMatchObject({ notifications: null, notificationSource: "forbidden" });
     expect(state.notificationCalls).toEqual([]);
+  });
+
+  it("http: native sessions read notifications, while a missing session is explicitly expired without a synthetic snapshot", async () => {
+    state.config.apiMode = "http";
+    state.sessionMode = "experience";
+    const nativeOwner = provider({ id: KITCHEN.id, displayName: KITCHEN.displayName, memberRole: "OWNER", nihoUserId: "hst_00000000000000000000000000000001" });
+    state.notificationLoad = { status: "live", items: [{ key: "NEW_REVIEW", enabled: true, locked: false }] };
+    expect((await loadHostConsoleData(nativeOwner, { notifications: true })).settings).toMatchObject({ notificationSource: "live", notifications: { email: { addresses: [] } } });
+    state.sessionMode = "none";
+    const expired = (await loadHostConsoleData(nativeOwner, { notifications: true })).settings;
+    expect(expired.notificationSource).toBe("expired");
+    expect(expired.notifications).toBeNull();
   });
 
   it("http: never tries a NIHO provider detail fallback", async () => {

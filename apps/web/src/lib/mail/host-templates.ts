@@ -49,6 +49,23 @@ export function hostBookingEmail(event: HostPushEvent, options: { readonly siteU
   ], "ja");
 }
 
+/** Non-booking host notifications use the same parsed event and minimum facts as Web Push. */
+export function hostNotificationEmail(event: HostPushEvent, options: { readonly siteUrl: string }): RenderedMail {
+  const lines = hostPushLines(event);
+  const rows: (readonly [string, string])[] = [
+    ...(lines.experience ? [["体験", lines.experience] as const] : []),
+    ...(lines.when ? [["日時", lines.when] as const] : []),
+    ...(lines.seats ? [["人数", lines.seats] as const] : []),
+  ];
+  return mail(lines.title, [
+    { kind: "p", text: event.note ?? lines.title },
+    ...(rows.length ? [{ kind: "facts", rows } as const] : []),
+    { kind: "link", lead: "内容はホストの画面で確認できます。", label: "ホストの画面を開く", href: absolute(options.siteUrl, event.url) },
+    { kind: "link", lead: SETTINGS_LEAD, label: "設定 › 通知", href: absolute(options.siteUrl, NOTIFICATION_SETTINGS) },
+    REPLY,
+  ], "ja");
+}
+
 const JST = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
 /**

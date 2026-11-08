@@ -87,14 +87,15 @@ type ProfileSaved = { profile: ProviderProfile; reviewStatus: HostProviderReview
 export async function saveProviderProfile(input: ProviderProfileChange): Promise<HostActionResult<ProfileSaved>> {
   const providerId = nihoIdOrNull(input?.providerId);
   const changed = (field: keyof ProviderProfile) => input?.[field] !== undefined;
+  // Seller disclosure has its own Experience command/CAS contract. The legacy profile action must not bypass it.
+  if (changed("sellerDisclosureUrl")) return invalid;
   for (const field of ["displayName", "bio", "sellerDisclosureUrl"] as const) {
     if (changed(field) && text(input[field], LIMITS[field]) === null) return invalid;
   }
-  if (!providerId || !Object.keys(input ?? {}).some((key) => ["displayName", "bio", "sellerDisclosureUrl"].includes(key))) return invalid;
+  if (!providerId || !Object.keys(input ?? {}).some((key) => ["displayName", "bio"].includes(key))) return invalid;
   const body: ExperienceProviderUpdateRequest = {};
   if (changed("displayName")) body.displayName = input.displayName;
   if (changed("bio")) body.bio = input.bio;
-  if (changed("sellerDisclosureUrl")) body.sellerDisclosureUrl = input.sellerDisclosureUrl?.trim() || null;
   return withLegacyHostMock<ProfileSaved>(async (client) => {
     const result = await client.updateExperienceProvider(providerId, body);
     if (!result.ok) return refused(result);

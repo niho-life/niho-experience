@@ -89,6 +89,7 @@ describe("saveProviderProfile", () => {
     const calls = stubNiho(() => new Response(null, { status: 500 }));
     expect(await saveProviderProfile({ providerId: KITCHEN, bio: "合成の新しい紹介" })).toEqual({ ok: false, message: "この操作は現在のNIHO契約では利用できません。体験の商品・販売条件の変更は新しい体験販売画面から行ってください。" });
     expect(await saveProviderProfile({ providerId: KITCHEN })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+    expect(await saveProviderProfile({ providerId: KITCHEN, sellerDisclosureUrl: "https://example.test/legal" })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
     expect(await saveProviderProfile({ providerId: "../admin", bio: "x" })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
     expect(calls).toEqual([]);
   });

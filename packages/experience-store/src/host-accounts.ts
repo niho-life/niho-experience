@@ -98,12 +98,12 @@ export type HostSessionRevocation =
 
 export type HostAccountChange = "CHANGED" | "UNCHANGED";
 
-/** A provider the /host console may open for a host account (its active OWNER or EDITOR membership). */
+/** A provider the /host console may open for a host account (its active OWNER, COHOST or EDITOR membership). */
 export interface HostAccountProviderMembership {
   readonly providerId: string;
   /** The provider's name from its seller profile when Admin/ops registered one; otherwise the provider ID. */
   readonly displayName: string;
-  readonly memberRole: "OWNER" | "EDITOR";
+  readonly memberRole: "OWNER" | "COHOST" | "EDITOR";
   /** NIHO's legacy Connect lookup key of a registered seller profile; null without one (not needed to sign in). */
   readonly legacyProviderId: string | null;
 }
@@ -386,7 +386,7 @@ export class HostAccounts {
   }
 
   /**
-   * The /host console's providers for an ACTIVE account: its active OWNER and EDITOR memberships, by name, as the NIHO
+   * The /host console's providers for an ACTIVE account: its active OWNER, COHOST and EDITOR memberships, by name, as the NIHO
    * path lists them (ExperiencePublicationRepository.listHostProviders) but without requiring a NIHO seller profile. A
    * suspended or unknown account has none. VIEWER memberships are left out, as on the NIHO path.
    */
@@ -397,14 +397,14 @@ export class HostAccounts {
          FROM provider_memberships m
          JOIN host_accounts a ON a.id = m.niho_user_id AND a.status = 'ACTIVE'
          LEFT JOIN experience_host_seller_profiles p ON p.provider_id = m.provider_id
-        WHERE m.niho_user_id = $1 AND m.active AND m.role IN ('OWNER', 'EDITOR')
+        WHERE m.niho_user_id = $1 AND m.active AND m.role IN ('OWNER', 'COHOST', 'EDITOR')
         ORDER BY COALESCE(p.provider_display_name, m.provider_id) COLLATE "C", m.provider_id COLLATE "C"`,
       [account],
     );
     return found.rows.map((row) => {
       const providerId = text(row, "provider_id");
       const role = row.role;
-      if (role !== "OWNER" && role !== "EDITOR") throw new StoreError("Database returned an invalid role.");
+      if (role !== "OWNER" && role !== "COHOST" && role !== "EDITOR") throw new StoreError("Database returned an invalid role.");
       const name = row.provider_display_name;
       const legacy = row.legacy_provider_id;
       return {

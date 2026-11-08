@@ -312,7 +312,14 @@ export async function createBookingThread(client: PoolClient, booking: { provide
   return threadId;
 }
 
-/** A current OWNER, not capped below OWNER by NIHO and not a product operator (as 設定 › 通知). */
+/** A current OWNER or native COHOST may handle guest questions and booking messages. */
+export async function requireGuestResponder(client: PoolClient, actor: HostActor): Promise<void> {
+  assertStoreIdentifier(actor.providerId, "actor.providerId");
+  assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
+  if (!await calendarMembershipRole(client, actor, ["OWNER", "COHOST"])) throw new StoreAccessDeniedError();
+}
+
+/** Review and rating workflows remain OWNER-only; do not reuse the responder boundary for them. */
 export async function requireOwner(client: PoolClient, actor: HostActor): Promise<void> {
   assertStoreIdentifier(actor.providerId, "actor.providerId");
   assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
@@ -613,7 +620,7 @@ export class GuestQuestionRepository {
     const after = decodeCursor(options.cursor);
     const kind = threadKind(options.kind);
     return withTransaction(this.#pool, async (client) => {
-      await requireOwner(client, actor);
+      await requireGuestResponder(client, actor);
       const result = await client.query<DbRow>(
         `SELECT ${THREAD_COLUMNS},
                 m.id AS m_id, m.author AS m_author, m.source AS m_source, m.body AS m_body, m.body_ja AS m_body_ja,
@@ -644,7 +651,7 @@ export class GuestQuestionRepository {
   async countThreads(actor: HostActor, options: { kind?: GuestThreadKind | null } = {}): Promise<number> {
     const kind = threadKind(options.kind);
     return withTransaction(this.#pool, async (client) => {
-      await requireOwner(client, actor);
+      await requireGuestResponder(client, actor);
       const counted = await client.query<DbRow>(
         `SELECT count(*)::int AS count FROM guest_question_threads t
           WHERE t.provider_id = $1 AND ($2::text IS NULL OR ($2::text = 'BOOKING') = (t.booking_id IS NOT NULL))`,
@@ -658,7 +665,7 @@ export class GuestQuestionRepository {
   async getThread(actor: HostActor, threadId: string): Promise<GuestQuestionThread> {
     const id = uuid(threadId, "threadId");
     return withTransaction(this.#pool, async (client) => {
-      await requireOwner(client, actor);
+      await requireGuestResponder(client, actor);
       const thread = await client.query<DbRow>(
         `SELECT ${THREAD_COLUMNS} FROM ${THREAD_FROM}
           WHERE t.provider_id = $1 AND t.id = $2::uuid`,
@@ -682,7 +689,7 @@ export class GuestQuestionRepository {
   async findBookingThread(actor: HostActor, publicBookingId: string): Promise<GuestBookingThreadStart> {
     const bookingId = uuid(publicBookingId, "publicBookingId");
     return withTransaction(this.#pool, async (client) => {
-      await requireOwner(client, actor);
+      await requireGuestResponder(client, actor);
       const booking = await bookingForThread(client, actor.providerId, bookingId);
       if (!booking) throw new StoreNotFoundError("guest booking");
       return {
@@ -700,7 +707,7 @@ export class GuestQuestionRepository {
   async markThreadRead(actor: HostActor, threadId: string): Promise<void> {
     const id = uuid(threadId, "threadId");
     await withTransaction(this.#pool, async (client) => {
-      await requireOwner(client, actor);
+      await requireGuestResponder(client, actor);
       const result = await client.query(
         "UPDATE guest_question_threads SET host_read_at = COALESCE(host_read_at, clock_timestamp()) WHERE provider_id = $1 AND id = $2::uuid",
         [actor.providerId, id],
@@ -718,7 +725,7 @@ export class GuestQuestionRepository {
     const id = uuid(threadId, "threadId");
     const reply = validReply(input);
     return replying(() => withTransaction(this.#pool, async (client) => {
-      await requireOwner(client, actor);
+      await requireGuestResponder(client, actor);
       const thread = await client.query<DbRow>(
         `SELECT t.booking_id IS NULL OR ${bookingMessagesOpenSql("b")} AS open
            FROM guest_question_threads t
@@ -740,7 +747,7 @@ export class GuestQuestionRepository {
     const bookingId = uuid(publicBookingId, "publicBookingId");
     const reply = validReply(input);
     return replying(() => withTransaction(this.#pool, async (client) => {
-      await requireOwner(client, actor);
+      await requireGuestResponder(client, actor);
       const booking = await bookingForThread(client, actor.providerId, bookingId);
       if (!booking) throw new StoreNotFoundError("guest booking");
       await lockBookingMessages(client, actor.providerId, booking.bookingRowId);

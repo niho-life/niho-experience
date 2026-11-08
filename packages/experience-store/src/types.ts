@@ -7,7 +7,7 @@ import type {
   ScheduleRule,
 } from "@niho-experience/experience-domain";
 
-export type MembershipRole = "OWNER" | "EDITOR" | "VIEWER";
+export type MembershipRole = "OWNER" | "COHOST" | "EDITOR" | "VIEWER";
 export type ProductStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 export type BookingStatus = "HOLD" | "CONFIRMED" | "EXPIRED" | "CANCELLED" | "PAYMENT_REVIEW";
 export type BookingMode = "SEAT" | "PRIVATE_GROUP";
