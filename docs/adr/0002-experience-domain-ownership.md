@@ -18,6 +18,14 @@ Stripe Connect のプラットフォームと、OWNERの販売者口座をNIHO�
 
 体験固有の開催枠・予約・決済正本を `niho-app` に追加しない。NIHO 側の変更は共通アカウントの導線と、本人・販売者口座の限定された参照契約に絞る。秘密を保存する目的で private Git リポジトリを作らない。公開できない業務コードや非公開契約が具体的に発生した時のみ、体験専用の private リポジトリを追加する。外部配布が必要になるまで、同じリポ内の契約 package は npm SDK として公開しない。
 
+## Community Dinner の NIHO 企画ページからの予約（2026-11-08）
+
+オーナーは、NIHO の既存企画ページを残し、Dinner の新規予約を Experience へ統一する方針を選んだ。NIHO のページは商品を明示的に対応付け、Experience 公開 API の開催枠・残席・販売条件を表示し、予約入力は Experience の画面へ進める。Google の予定による受付停止も、Experience の在庫判定を通して同じ受付に効く。NIHO へ開催枠・新規予約・個人情報を複製せず、旧 checkout から新しい Dinner 予約を作らない。
+
+これは旧 `/experiences/provider` の復活や商品・予約移行ではなく、既存企画ページの予約入口の接続である。NIHO にある既存予約の確認・履行・取消／返金は NIHO に残す。同じ企画ページの Tea time は今回の統一に含めず、GetYourGuide との併売も継続する。Experience の単独販売は、この NIHO 側の改修・配備に依存させない。
+
+実装と API 先行・Web 後続の配備は [NIHO #19966](https://github.com/niho-coliving/niho-app/issues/19966) で追う。この決定の記録だけでは、NIHO の受付が切り替わったことを意味しない。反映に失敗しても旧在庫・旧 checkout へ自動で戻さない。
+
 ## 記事の責任分界（2026-11-03、#251 / #254 / #255）
 
 記事本文・画像・下書き・版・公開操作はEditorクラウドへ統一する。NIHOは現在の記事ライター権限と記事連携の招待・同意・取消、Experience Storeはカテゴリと現在の提供者OWNER・公開中体験を所有する。writer grantをExperienceへ複製せず、旧台帳へfallbackしない。Experienceの旧`/editor`認証・書込を閉じ、保存済みデータは保持する。
