@@ -46,8 +46,9 @@ test("設定の通常入口は役割に合う一覧で、providerId を保って
   await expect(main.getByRole("link", { name: /ホスト紹介/ })).toHaveAttribute("href", "/host/profile?providerId=sample-provider-kitchen");
   await expect(main.getByRole("link", { name: /販売者表示/ })).toHaveAttribute("href", "/host/seller?providerId=sample-provider-kitchen");
   await expect(main.getByRole("link", { name: /NIHOサポート/ })).toHaveAttribute("href", "/host/support?hostKind=EXPERIENCE_PROVIDER&hostId=sample-provider-kitchen");
+  await audit(page, "settings index");
 
-  await main.getByRole("link", { name: /通知/ }).click();
+  await main.getByRole("link", { name: /^通知/ }).click();
   await page.waitForURL("**/host/settings?providerId=sample-provider-kitchen&section=notifications");
   await expect(page.getByRole("heading", { level: 1, name: "通知" })).toBeVisible();
   await expect(page.getByRole("link", { name: "設定へ戻る" })).toHaveAttribute("href", "/host/settings?providerId=sample-provider-kitchen");
@@ -60,7 +61,7 @@ test("設定の通常入口は役割に合う一覧で、providerId を保って
   for (const ownerOnly of ["ホスト紹介", "販売者表示", "受取口座", "チーム"]) {
     await expect(main.getByRole("link", { name: new RegExp(ownerOnly) }), ownerOnly).toHaveCount(0);
   }
-  await main.getByRole("link", { name: "通知", exact: true }).click();
+  await main.getByRole("link", { name: /^通知/ }).click();
   await expect(page.getByRole("region", { name: "通知", exact: true })).toContainText("オーナーが変えられます");
   await expect(page.getByRole("button", { name: "宛先を変える", exact: true })).toBeVisible();
   await expect(page.getByRole("switch", { name: "新しいレビュー", exact: true })).toHaveCount(0);

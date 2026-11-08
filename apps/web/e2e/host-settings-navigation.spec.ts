@@ -38,7 +38,7 @@ test("項目別の設定は必要なパネルだけを開き、未保存の入�
   await page.goto("/host/auth/mock-login");
   await page.waitForURL(/\/host\/home/);
   await page.goto("/host/settings?providerId=sample-provider-kitchen");
-  await page.getByRole("link", { name: "提供者情報", exact: true }).click();
+  await page.getByRole("link", { name: /^提供者情報/ }).click();
   const name = page.getByRole("textbox", { name: "掲載名", exact: true });
   await expect(name).toBeVisible();
   await expect(page.getByRole("region", { name: "通知", exact: true })).toHaveCount(0);
