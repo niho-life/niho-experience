@@ -12,10 +12,6 @@
 // to $GITHUB_OUTPUT: `env` and `secrets` for --set-env-vars / --set-secrets, `expected_env`, `expected_secrets` and
 // `names` (every name the table can set) for checking the revision afterwards, and `summary`.
 //
-// GUIDE_EDITOR_SITE_ORIGIN (the writers' entrance, #254) is not in the table: it is independent of every flag, so both
-// workflows set it on every revision (the fixed https://editor.niho.life) and check it there. A name of the table would
-// have to be absent from a revision whose flags are off.
-//
 // To add a flag: one entry in FLAGS and rows in docs/production-deploy.md「機能のフラグ」 and the staging guide. The
 // workflows need no change. apps/web/src/lib/deploy-runtime-flags.test.ts checks each entry against resolve-config.ts.
 //
@@ -94,8 +90,6 @@ export const FLAGS = Object.freeze([
       { env: "EXPERIENCE_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS", variable: "ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS", shape: "serviceAccountList" },
       { env: "NIHO_ARTICLE_AUTHORITY_ORIGIN", variable: "NIHO_ARTICLE_AUTHORITY_ORIGIN", shape: "httpsOrigin" },
       { env: "NIHO_ARTICLE_AUTHORITY_AUDIENCE", variable: "NIHO_ARTICLE_AUTHORITY_AUDIENCE", shape: "httpsUrl" },
-      { env: "EDITOR_ARTICLE_AUTHORITY_ORIGIN", variable: "EDITOR_ARTICLE_AUTHORITY_ORIGIN", shape: "httpsOrigin" },
-      { env: "EDITOR_ARTICLE_AUTHORITY_AUDIENCE", variable: "EDITOR_ARTICLE_AUTHORITY_AUDIENCE", shape: "httpsUrl" },
     ],
     fixed: { EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE: siteUrl },
   },
@@ -118,33 +112,12 @@ export const FLAGS = Object.freeze([
     ],
   },
   {
-    id: "EDITOR_GUIDE_PUBLICATIONS",
-    env: "EXPERIENCE_GUIDE_PUBLIC_SOURCE",
-    variable: "EDITOR_PUBLICATIONS_ENABLED",
-    value: "editor",
-    needs: ["DATABASE", "EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED"],
-    conflicts: ["DATABASE_GUIDE_PUBLICATIONS"],
-    settings: [
-      { env: "GUIDE_EDITOR_API_BASE_URL", variable: "GUIDE_EDITOR_API_BASE_URL", shape: "httpsUrl" },
-      { env: "GUIDE_EDITOR_ASSET_ORIGINS", variable: "GUIDE_EDITOR_ASSET_ORIGIN", shape: "httpsOrigin" },
-    ],
-    secrets: [{ env: "GUIDE_EDITOR_API_TOKEN", variable: "GUIDE_EDITOR_API_TOKEN_REF", stg: "experience-stg-editor-api-token" }],
-    fixed: { GUIDE_EDITOR_API_HANDLE: () => "exp" },
-  },
-  {
     id: "DATABASE_GUIDE_PUBLICATIONS",
     env: "EXPERIENCE_GUIDE_PUBLIC_SOURCE",
     variable: "DATABASE_GUIDE_PUBLICATIONS_ENABLED",
     value: "database",
     needs: ["DATABASE"],
-    conflicts: ["EDITOR_GUIDE_PUBLICATIONS"],
     settings: [{ env: "GUIDE_MEDIA_BUCKET", variable: "GUIDE_MEDIA_BUCKET", shape: "bucketName" }],
-  },
-  {
-    env: "EXPERIENCE_GUIDE_APP_CARDS_ENABLED",
-    variable: "GUIDE_APP_CARDS_ENABLED",
-    needs: ["EDITOR_GUIDE_PUBLICATIONS"],
-    conflicts: ["DATABASE_GUIDE_PUBLICATIONS"],
   },
   {
     env: "EXPERIENCE_GUEST_BOOKING_ENABLED",

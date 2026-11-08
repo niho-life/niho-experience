@@ -20,8 +20,8 @@ export type GuideAuthor = Readonly<{
   /** The writer's real name as shown on the page. */
   name: string;
   /**
-   * Their role, e.g. "Editor, NIHO Experience" or "Host of the community dinner". Required for static and database guides
-   * (lib/guides.ts); an editor.niho.life publication has it only when the writer published one (`authorProfile.role`).
+   * Their role, e.g. "Editor, NIHO Experience" or "Host of the community dinner". Required for static and database
+   * publications; older mock preview drafts may omit it.
    */
   role?: string;
   /** A short first-person or third-person introduction for the article footer. */
@@ -37,8 +37,7 @@ export type GuideHero = Readonly<{
   /** True only when the photo's rights cover sharing (Open Graph, `Article.image`). False shows it on the page only. */
   licensed: boolean;
   /**
-   * The width and height are a stand-in, not the photo's own (editor.niho.life sends no pixel size). The page still lays
-   * the photo out in its own ratio, but a share image must not declare this size.
+   * True when the dimensions above are estimates. Do not publish estimated dimensions as social image metadata.
    */
   sizeAssumed?: true;
   /** Visible credit or context directly below the hero. */
@@ -84,5 +83,4 @@ export type Guide = Readonly<{
   publicFigures?: readonly GuidePublicFigure[];
   translations?: Readonly<{ ja?: GuideTranslation }>;
   /** Server-only provenance used to re-check related experiences on every read. */
-  editorPublication?: Readonly<{ id: string; version: number }>;
 }>;

@@ -305,21 +305,14 @@ export function guidesForExperience(guides: readonly Guide[], experienceSlug: st
   return sortGuides(guides.filter((guide) => guide.relatedExperienceSlugs.includes(experienceSlug))).slice(0, limit);
 }
 
-/**
- * The guide's related guides that exist, in the guide's order. An editor.niho.life publication names none (the contract
- * has no field for it), so one with a category gets the newest other listed guides of that category instead.
- */
+/** The guide's related guides that exist, in the guide's order. */
 export function relatedGuidesOf(guides: readonly Guide[], guide: Guide): Guide[] {
-  if (!guide.relatedGuideSlugs.length && guide.editorPublication && guide.category) {
-    const category = guide.category.slug;
-    return sortGuides(guides.filter((candidate) => candidate.slug !== guide.slug && !candidate.unlisted && candidate.category?.slug === category)).slice(0, GUIDE_LIMITS.relatedGuidesMax);
-  }
   return guide.relatedGuideSlugs.flatMap((slug) => guides.filter((candidate) => candidate.slug === slug && candidate.slug !== guide.slug)).slice(0, GUIDE_LIMITS.relatedGuidesMax);
 }
 
 /**
  * The guide's summary for search and share snippets (meta description, Open Graph, `Article.description`, listings): its
- * description (the lead), or, when it has none (an editor publication's lead is optional), the opening paragraphs of
+ * description (the lead), or, when it has none (when the lead is omitted), the opening paragraphs of
  * the body as plain text, cut to 160 characters at a sentence end, else at a word with "…" (seoDescription). Headings,
  * photos, lists, tables and notes are skipped; links and emphasis keep their words. "" when the body has no paragraph.
  * The lead under the title on the article page stays the description only (the opening paragraph is right below it).

@@ -76,9 +76,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED: "articleAuthorityApiEnabled",
   GUIDE_ADMIN_API_ENABLED: "guideAdminApiEnabled",
   EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED: "hostArticleLinksEnabled",
-  EDITOR_GUIDE_PUBLICATIONS: "guidePublicSource",
   DATABASE_GUIDE_PUBLICATIONS: "guidePublicSource",
-  EXPERIENCE_GUIDE_APP_CARDS_ENABLED: "guideAppCardsEnabled",
   EXPERIENCE_GUEST_BOOKING_ENABLED: "guestBookingEnabled",
   EXPERIENCE_GUEST_MAIL_ENABLED: "guestMailEnabled",
   EXPERIENCE_PUBLICATIONS_ENABLED: "experiencePublicationsEnabled",
@@ -219,17 +217,7 @@ describe("the deploy workflows' feature flags", () => {
     expect(resolve("prod", { PROD_GUIDE_ADMIN_API_ENABLED: "true" }).problems.join(" ")).toContain("PROD_GUIDE_ADMIN_AUDIENCE");
   });
 
-  it("requires current authority before switching the publication source", () => {
-    const vars = closure("prod", "EDITOR_GUIDE_PUBLICATIONS");
-    vars.PROD_ARTICLE_AUTHORITY_API_ENABLED = "false";
-    expect(resolve("prod", vars).problems.join(" ")).toContain("EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED");
-    const enabled = resolve("prod", closure("prod", "EDITOR_GUIDE_PUBLICATIONS"));
-    expect(enabled.env.EXPERIENCE_GUIDE_PUBLIC_SOURCE).toBe("editor");
-    expect(enabled.env.GUIDE_EDITOR_API_HANDLE).toBe("exp");
-    expect(enabled.secrets.GUIDE_EDITOR_API_TOKEN).toMatch(/:[1-9][0-9]*$/);
-  });
-
-  it("configures the database Guide source with its private media bucket and refuses either source conflict", () => {
+  it("configures the database Guide source with its private media bucket", () => {
     const enabled = resolve("prod", closure("prod", "DATABASE_GUIDE_PUBLICATIONS"));
     expect(enabled.problems).toEqual([]);
     expect(enabled.on).toContain("DATABASE_GUIDE_PUBLICATIONS");
@@ -243,17 +231,6 @@ describe("the deploy workflows' feature flags", () => {
     const invalid = { ...closure("prod", "DATABASE_GUIDE_PUBLICATIONS"), PROD_GUIDE_MEDIA_BUCKET: "Not A Bucket" };
     expect(resolve("prod", invalid).problems.join(" ")).toContain("PROD_GUIDE_MEDIA_BUCKET");
 
-    const both = { ...closure("prod", "EDITOR_GUIDE_PUBLICATIONS"), ...closure("prod", "DATABASE_GUIDE_PUBLICATIONS") };
-    const problems = resolve("prod", both).problems.join("\n");
-    expect(problems).toContain("EDITOR_GUIDE_PUBLICATIONS (PROD_EDITOR_PUBLICATIONS_ENABLED) conflicts with DATABASE_GUIDE_PUBLICATIONS (PROD_DATABASE_GUIDE_PUBLICATIONS_ENABLED)");
-  });
-
-  it("requires the Editor publication source before exposing app cards", () => {
-    const vars = closure("prod", "EXPERIENCE_GUIDE_APP_CARDS_ENABLED");
-    vars.PROD_EDITOR_PUBLICATIONS_ENABLED = "false";
-    expect(resolve("prod", vars).problems.join(" ")).toContain("EDITOR_GUIDE_PUBLICATIONS");
-    const enabled = resolve("prod", closure("prod", "EXPERIENCE_GUIDE_APP_CARDS_ENABLED"));
-    expect(resolveConfig(revision("prod", enabled)).guideAppCardsEnabled).toBe(true);
   });
 
   it("opens Experience booking translation with the host console and database without enabling guest sales", () => {
@@ -568,10 +545,9 @@ describe("the deploy workflows' feature flags", () => {
 describe("the deploy workflows", () => {
   const workflow = (name: string) => readFileSync(new URL(`.github/workflows/${name}`, repo), "utf8");
   const WORKFLOWS = [
-    { file: "deploy-production.yml", target: "prod", jobs: ["deploy", "promote"], originReadback: /select\(\.name == "GUIDE_EDITOR_SITE_ORIGIN"\) \| \.value' <<< "\$revision_json"\)" = https:\/\/editor\.niho\.life/ },
-    { file: "deploy-host-staging.yml", target: "stg", jobs: ["deploy"], originReadback: /GUIDE_EDITOR_SITE_ORIGIN:"https:\/\/editor\.niho\.life"/ },
+    { file: "deploy-production.yml", target: "prod", jobs: ["deploy", "promote"] },
+    { file: "deploy-host-staging.yml", target: "stg", jobs: ["deploy"] },
   ] as const;
-  const EDITOR_SITE_ORIGIN = "GUIDE_EDITOR_SITE_ORIGIN";
 
   /** A job's text, from its key to the next job. */
   function job(text: string, name: string): string {
@@ -581,7 +557,7 @@ describe("the deploy workflows", () => {
     return next < 0 ? text.slice(start) : text.slice(start, start + 1 + next);
   }
 
-  for (const { file, target, jobs, originReadback } of WORKFLOWS) {
+  for (const { file, target, jobs } of WORKFLOWS) {
     it(`${file} resolves the flags with the table before authenticating, and checks the revision with its names`, () => {
       const text = workflow(file);
       for (const name of jobs) {
@@ -602,15 +578,6 @@ describe("the deploy workflows", () => {
       }
     });
 
-    it(`${file} sets the writers' entrance origin on every revision and reads it back, as a fixed value outside the table (#254)`, () => {
-      // The entrance is independent of every flag. A name of the table is checked as absent from a revision whose flag is
-      // off, so the origin in the table would fail the readback of any revision the workflow gave it by hand.
-      expect(tableNames()).not.toContain(EDITOR_SITE_ORIGIN);
-      const text = workflow(file);
-      expect(text.split(`${EDITOR_SITE_ORIGIN}=https://editor.niho.life`).length - 1).toBe(1);
-      expect(text).toMatch(originReadback);
-      if (target === "prod") expect(text.match(new RegExp(originReadback.source, "g"))?.length).toBe(jobs.length);
-    });
   }
 
   it("deploy-production.yml opens search indexing and preserves the accepted booking switch in every job (owner 2026-11-07, #141)", () => {

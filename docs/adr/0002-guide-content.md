@@ -61,7 +61,7 @@ database modeの有効化条件・staging受入・切戻しは [Guide CMS](../gu
 
 ### 切り替えの条件
 
-- editor の公開（設計 §14 の段階 3）が本番で使えること。公開 API の契約は niho-editor の v1（`docs/security/editor-publish-api-v1.md`）で確定し、experience の読み取りはこれに合わせた（[Guide CMS](../guide-cms.md#editorniholife-の公開-api-を読む252-253editor-v1-契約)）。残る差（カテゴリの扱いなど）のオーナー判断も切替の前に済ませる。それまでは `static` を既定値のままにし、`editor` は合成 fixture でだけ動かす（`npm -w @niho-experience/web run test:e2e:guide-editor`）。
+- editor の公開（設計 §14 の段階 3）が本番で使えること。公開 API の契約は niho-editor の v1（`docs/security/editor-publish-api-v1.md`）で確定し、experience の読み取りはこれに合わせた。2026-11-07 の判断でこの公開経路は採用しない。旧fixtureとそのE2Eは#480で撤去した。
 - 切替は専用の配備変更で行う。Experience DBへの実書込み開始後は`static`へ戻さず、同じDB schemaとpublicationを読める既知revisionへtrafficを戻す。手順は [Guide CMS](../guide-cms.md#database-flagを開く前のゲート) を正とする。
 
 ### 結果
@@ -94,12 +94,12 @@ database modeの有効化条件・staging受入・切戻しは [Guide CMS](../gu
   - OWNER 以外のライターは、NIHO アカウントのライターとして書く。ライター権限と記事連携（招待・承諾・辞退・取消）の正本は NIHO のまま。ライター側の承諾・辞退は `/write` に置く（#481、niho-coliving/niho-app#19943）。
 - **ログイン**：`/write` はホストの画面と同じログイン・セッションを使い、ログイン方式に依存しない。ホストのログインの本来の形は NIHO ログインで、今の Experience 自前のメールのリンク（[ADR 0003](0003-experience-independence.md)）は一時的。NIHO ログインへ戻すときは、セッションを `/write` にも届く Path=/ に置く（旧 NIHO の session cookie は Path=/host）。OWNER 以外のライターは NIHO ログインへ戻した後に開く。
 - **公開の条件**：英語、題名 110 字以内、有効なカテゴリ、本文に `##` 見出し 1 つ以上、未確認の印（CONFIRM）なし、写真の代替テキストと掲載許諾。カバー・リード・関連体験は任意。関連体験は公開読取のたびに現在の権限と掲載状態で再判定し、失効しても本文は消さない。
-- **将来の引っ越し**：editor.niho.life が広まったら、記事を丸ごと editor へ移せるようにしておく。今は作らない。移すときは一括・片道で、書き出し → editor へ取り込み → 公開元を `editor` へ → experience の書込みを閉じる、の順にする。そのために、記事 ID は不変、slug は公開後に固定、公開版は不変の snapshot、本文は安全な Markdown の部分集合（editor v1 の `markdown` と同じ形）、写真は掲載許諾と共有可否を持つ。
+- **将来の引っ越し**：2026-11-07の判断でeditorへのExperience公開を止め、記事の正本はExperience DBに戻した。この履歴時点では一括・片道の移行案を記録していたが、現在は実装・配備しない。
 
 ### 結果
 
 - 書き手は experience.niho.life だけで、書く・確かめる・公開するを終えられる。公開・更新・停止は再ビルドなしで反映される。
-- 「2026-10-30」で作った editor 公開元・プレビュー用トークン・Editor 向け内部 API・`GUIDE_EDITOR_SITE_ORIGIN` は撤去する（#480）。NIHO の記事連携（`provider-owner`、ホストの招待の中継、NIHO の `check`）は OWNER 以外のライターのために残す。
+- 「2026-10-30」で作ったEditor公開元・preview token・Editor向け内部API・`GUIDE_EDITOR_SITE_ORIGIN` は#480で撤去済み。NIHOの記事連携（`provider-owner`、ホストの招待中継、NIHOの`check`）はOWNER以外のwriter対応（#481）のため残す。
 - 保存済みのデータと表は消さない。
 
 ### 子 Issue

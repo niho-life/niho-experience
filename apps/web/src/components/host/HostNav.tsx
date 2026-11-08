@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef } from "react";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "@/host/nav";
-import { nihoIdOrNull, providerRoleLabel, selectProvider, type HostConsoleChoice, type HostProviderRole } from "@/lib/host/providers";
+import { hasOwnerMembership, nihoIdOrNull, providerRoleLabel, selectProvider, type HostConsoleChoice, type HostProviderRole } from "@/lib/host/providers";
 import { hostSupportPath, HOST_DAILY_NAV, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_NAV, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
 import { HostIcon, type HostIconName } from "./HostIcon";
 import { AccountAvatar, InitialAvatar, type HostAccount } from "./ui";
@@ -24,7 +24,7 @@ const NAV_ICONS: Record<(typeof HOST_NAV)[number]["href"], HostIconName> = {
 /** The traveler site has its own root layout: a plain link, so the browser loads it as a new page. */
 const TRAVELER_SITE_PATH = "/experiences";
 /** Experience-owned article writer, on the same origin and the same host session. */
-const EDITOR_LINK_LABEL = "記事を書く";
+const WRITER_LINK_LABEL = "記事を書く";
 
 const MENU_LINK = "flex min-h-11 items-center gap-2 rounded-[10px] px-2.5 text-[0.8125rem] font-bold text-ink-soft hover:bg-sand hover:text-ink";
 
@@ -34,7 +34,7 @@ export interface HostChromeProps {
   /** NIHO's own app (NEXT_PUBLIC_NIHO_WEB_ORIGIN). */
   nihoAppUrl: string;
   /** Same-origin writer path. */
-  editorUrl?: string;
+  writePath?: string;
 }
 
 /** Tailwind needs to see each possible column class as a complete string. */
@@ -128,7 +128,7 @@ function SidebarProviderSwitcher({ providers }: { providers: readonly HostConsol
  * PC (md and up): the 232px sidebar with the brand, the provider and the daily
  * sections. Settings and the ways out live in the account menu at its foot.
  */
-export function HostSidebar({ account, providers, nihoAppUrl, editorUrl }: HostChromeProps) {
+export function HostSidebar({ account, providers, nihoAppUrl, writePath }: HostChromeProps) {
   const pathname = usePathname();
   const providerId = useProviderId();
   const { provider: current } = selectProvider(providers, providerId);
@@ -164,18 +164,19 @@ export function HostSidebar({ account, providers, nihoAppUrl, editorUrl }: HostC
         </>
       ) : null}
       <div className="mt-auto pt-3">
-        <AccountMenu account={account} providers={providers} nihoAppUrl={nihoAppUrl} editorUrl={editorUrl} variant="sidebar" />
+        <AccountMenu account={account} providers={providers} nihoAppUrl={nihoAppUrl} writePath={writePath} variant="sidebar" />
       </div>
     </header>
   );
 }
 
 /** Both widths use one account menu; the phone variant also owns the modal-like inert behavior. */
-function AccountMenu({ account, providers, nihoAppUrl, editorUrl, variant = "mobile" }: HostChromeProps & { variant?: "mobile" | "sidebar" }) {
+function AccountMenu({ account, providers, nihoAppUrl, writePath, variant = "mobile" }: HostChromeProps & { variant?: "mobile" | "sidebar" }) {
   const pathname = usePathname();
   const providerId = useProviderId();
   const menu = useRef<HTMLDetailsElement>(null);
   const { provider: current } = selectProvider(providers, providerId);
+  const writerHref = writePath && current?.kind !== "OPERATOR" && hasOwnerMembership(providers) ? writePath : undefined;
   const name = account.displayName || "NIHO アカウント";
   const switchable = providers.length > 1 ? current : null;
   const settingsAllowed = current?.kind === "OPERATOR"
@@ -241,9 +242,9 @@ function AccountMenu({ account, providers, nihoAppUrl, editorUrl, variant = "mob
             <HostIcon name="external" className="size-3.5" />
             <span>体験サイトを見る</span>
           </a> : null}
-          {editorUrl && current?.kind !== "OPERATOR" ? <a href={editorUrl} onClick={close} className={MENU_LINK}>
+          {writerHref ? <a href={writerHref} onClick={close} className={MENU_LINK}>
             <HostIcon name="external" className="size-3.5" />
-            <span>{EDITOR_LINK_LABEL}</span>
+            <span>{WRITER_LINK_LABEL}</span>
           </a> : null}
           <a href={nihoAppUrl} onClick={close} className={MENU_LINK}>
             <HostIcon name="external" className="size-3.5" />

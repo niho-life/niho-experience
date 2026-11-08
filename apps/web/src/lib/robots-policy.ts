@@ -2,8 +2,7 @@ import type { MetadataRoute } from "next";
 
 /**
  * Pages that are never crawled: booking input and its return (English and Japanese), the mock-only
- * previews, editor draft previews (`/guides/preview?token=…`; the `?` keeps guides such as
- * `/guides/preview-of-autumn` crawlable), the host console below /host/ (the /host introduction stays
+ * previews, the host console below /host/ (the /host introduction stays
  * public) and the admin console. They also send `noindex`; robots.txt is not access control.
  */
 export const PRIVATE_PATHS = [
@@ -12,7 +11,6 @@ export const PRIVATE_PATHS = [
   "/ja/experiences/*/book",
   "/ja/booking/",
   "/preview/",
-  "/guides/preview?",
   "/host/",
   "/admin",
 ] as const;

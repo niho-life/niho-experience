@@ -109,7 +109,6 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
     for (const consolidated of ["販売者表示", "ホスト紹介", "NIHOサポート"]) await expect(banner.getByRole("link", { name: consolidated, exact: true })).toHaveCount(0);
     await expect(banner.getByRole("link", { name: "体験サイトを見る" })).toHaveAttribute("href", "/experiences");
     await expect(banner.getByRole("link", { name: "NIHO アプリ" })).toHaveAttribute("href", "https://niho.life");
-    // Writing starts at /write and hands off to the fixed editor destination (#254).
     await expect(banner.getByRole("link", { name: "記事を書く" })).toHaveAttribute("href", "/write");
     await expect(banner).toContainText("サンプル ホスト");
     await expect(banner.getByRole("button", { name: "ログアウト" })).toBeVisible();
@@ -128,7 +127,6 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
     await page.waitForURL(/\/host\/sales$/);
     await expect(page.getByRole("heading", { level: 1, name: "売上" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "売上" })).toHaveAttribute("aria-current", "page");
-    // The account menu carries the same /write handoff (#254).
     await page.locator("summary:visible", { hasText: "のアカウント" }).click();
     await expect(page.getByRole("link", { name: "記事を書く" })).toHaveAttribute("href", "/write");
   }

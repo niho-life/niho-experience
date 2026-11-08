@@ -1,5 +1,5 @@
 import "server-only";
-import { StoreValidationError, type ArticleAuthorityCandidate, type ArticleAuthorityRepository } from "@niho-experience/experience-store";
+import { StoreValidationError, type ArticleAuthorityRepository } from "@niho-experience/experience-store";
 import { GoogleAuth } from "google-auth-library";
 import { config } from "@/lib/config";
 import { articleAuthorityRepository } from "@/lib/experience/store-server";
@@ -8,11 +8,8 @@ import { readBoundedJson } from "@/lib/read-bounded-json";
 
 const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const USER_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
-const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const BODY_LIMIT = 4 * 1024;
 const RESPONSE_LIMIT = 64 * 1024;
-const PAGE_SIZE = 20;
-const SCAN_SIZE = 96;
 const googleAuth = new GoogleAuth();
 
 export interface NihoArticleAuthorityResult {
@@ -82,13 +79,6 @@ export function writerId(value: unknown): string {
   return value;
 }
 
-export function articleSlugs(value: unknown): readonly string[] {
-  if (!Array.isArray(value) || value.length > 32 || new Set(value).size !== value.length || value.some((slug) => typeof slug !== "string" || slug.length > 160 || !SLUG.test(slug))) {
-    throw new StoreValidationError("slugs is invalid.");
-  }
-  return value as string[];
-}
-
 async function serviceToken(audience: string): Promise<string> {
   const client = await googleAuth.getIdTokenClient(audience);
   const headers = await client.getRequestHeaders();
@@ -131,59 +121,6 @@ export async function checkNihoArticleAuthority(writerNihoUserId: string, provid
     throw new Error("NIHO authority unavailable");
   }
   return parseNihoAuthority(await readBoundedJson(response, RESPONSE_LIMIT, { fatalUtf8: true }), new Set(providerIds));
-}
-
-async function allowedProviders(writerNihoUserId: string, providerIds: readonly string[], deps: ArticleAuthorityDependencies): Promise<Set<string> | null> {
-  const unique = [...new Set(providerIds)];
-  const owned = new Set(await deps.repository.ownedProviderIds(writerNihoUserId));
-  const allowed = new Set(unique.filter((id) => owned.has(id)));
-  let writer = true;
-  for (let offset = 0; offset < unique.length || offset === 0; offset += 32) {
-    const chunk = unique.slice(offset, offset + 32);
-    const authority = await deps.checkNiho(writerNihoUserId, chunk);
-    writer &&= authority.writer;
-    if (!authority.writer) continue;
-    const owners = await deps.repository.activeOwnerIds(chunk);
-    for (const link of authority.links) {
-      if (owners.get(link.providerId)?.has(link.inviterNihoUserId)) allowed.add(link.providerId);
-    }
-    if (!unique.length) break;
-  }
-  return writer ? allowed : null;
-}
-
-export async function candidateItems(input: Readonly<{ writerNihoUserId: string; query?: string; cursor?: string }>, deps: ArticleAuthorityDependencies) {
-  const scanned = await deps.repository.listPublishedCandidates({ query: input.query, afterSlug: input.cursor, limit: SCAN_SIZE });
-  const allowed = await allowedProviders(input.writerNihoUserId, scanned.map((item) => item.providerId), deps);
-  if (!allowed) return { version: 1 as const, items: [], nextCursor: null };
-  const items: { slug: string; title: string; providerName: string }[] = [];
-  const ambiguous = new Set<string>();
-  const counts = new Map<string, number>();
-  for (const item of scanned) counts.set(item.slug, (counts.get(item.slug) ?? 0) + 1);
-  for (const [slug, count] of counts) if (count > 1) ambiguous.add(slug);
-  let consumed = 0;
-  for (const item of scanned) {
-    consumed += 1;
-    if (allowed.has(item.providerId) && !ambiguous.has(item.slug)) items.push({ slug: item.slug, title: item.title, providerName: item.providerName });
-    if (items.length >= PAGE_SIZE) break;
-  }
-  const hasMore = consumed < scanned.length || scanned.length === SCAN_SIZE;
-  const cursor = hasMore ? scanned[consumed - 1]?.slug ?? null : null;
-  return { version: 1 as const, items, nextCursor: cursor };
-}
-
-export async function allowedRelatedSlugs(writerNihoUserId: string, slugs: readonly string[], deps: ArticleAuthorityDependencies): Promise<readonly string[]> {
-  const products = await deps.repository.publishedProductsBySlugs(slugs);
-  const counts = new Map<string, number>();
-  for (const item of products) counts.set(item.slug, (counts.get(item.slug) ?? 0) + 1);
-  const allowed = await allowedProviders(writerNihoUserId, products.map((item) => item.providerId), deps);
-  if (!allowed) return [];
-  const bySlug = new Map<string, ArticleAuthorityCandidate>();
-  for (const item of products) if (counts.get(item.slug) === 1) bySlug.set(item.slug, item);
-  return slugs.filter((slug) => {
-    const item = bySlug.get(slug);
-    return item !== undefined && allowed.has(item.providerId);
-  });
 }
 
 export function articleAuthorityFailure(error: unknown): Response {

@@ -23,17 +23,17 @@ beforeEach(() => {
   mocks.assignments.mockResolvedValue([{ providerId: "provider-a", productId: "tea-a", productTitle: "Synthetic tea", sellerDisplayName: "Synthetic seller", assignmentLabel: "Teacher", grantVersion: 1 }]);
 });
 
-async function shellProps(): Promise<{ readonly providers: readonly HostConsoleChoice[]; readonly editorUrl?: string }> {
+async function shellProps(): Promise<{ readonly providers: readonly HostConsoleChoice[]; readonly writePath?: string }> {
   const tree = await HostConsoleLayout({ children: createElement("div", null, "Calendar") });
   const shell = Children.toArray(tree.props.children).find((node) => isValidElement(node) && node.type === HostShell);
   expect(shell).toBeDefined();
-  return (shell as ReactElement<{ providers: readonly HostConsoleChoice[]; editorUrl?: string }>).props;
+  return (shell as ReactElement<{ providers: readonly HostConsoleChoice[]; writePath?: string }>).props;
 }
 
 const shellChoices = async () => (await shellProps()).providers;
 
 it("always sends the host writer entry to same-origin /write", async () => {
-  expect((await shellProps()).editorUrl).toBe("/write");
+  expect((await shellProps()).writePath).toBe("/write");
 });
 
 it("passes the actual HostShell an operator choice for a COHOST with an owned identity and assigned product", async () => {

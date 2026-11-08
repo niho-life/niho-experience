@@ -281,6 +281,11 @@ test("cohost has operational navigation but no sales, Stripe or member controls"
   await expect(page.getByText("売上受取口座")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "売上", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "予約", exact: true })).toBeVisible();
+  const accountMenu = page.locator("summary:visible", { hasText: "のアカウント" });
+  await accountMenu.click();
+  await expect(page.getByRole("link", { name: "記事を書く", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "設定", exact: true })).toBeVisible();
+  await accountMenu.click();
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
   await noOverflow(page);
