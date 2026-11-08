@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nihoIdOrNull, providerRoleLabel, selectProvider, toProviderChoice, usableProviders, type HostProvider } from "./providers";
+import { hasOwnerMembership, nihoIdOrNull, providerRoleLabel, selectProvider, toProviderChoice, usableProviders, type HostConsoleChoice, type HostProvider } from "./providers";
 
 const provider = (fields: Partial<HostProvider> = {}): HostProvider => ({
   id: "experience-provider-1",
@@ -27,6 +27,15 @@ describe("Experience provider choices", () => {
     expect(selectProvider(providers, "b")).toEqual({ provider: providers[1], requestedMissing: false });
     expect(selectProvider(providers, "z")).toEqual({ provider: providers[0], requestedMissing: true });
     expect(selectProvider([], null)).toEqual({ provider: null, requestedMissing: false });
+  });
+
+  it("offers the article writer only when the account has an OWNER membership", () => {
+    const editor = toProviderChoice(provider({ id: "provider-editor", memberRole: "EDITOR" }));
+    const cohost = toProviderChoice(provider({ id: "provider-cohost", memberRole: "COHOST" }));
+    const operator: HostConsoleChoice = { kind: "OPERATOR", id: "operator-1", displayName: "Operator", memberRole: null };
+    const owner = toProviderChoice(provider({ id: "provider-owner", memberRole: "OWNER" }));
+    expect(hasOwnerMembership([editor, cohost, operator])).toBe(false);
+    expect(hasOwnerMembership([editor, owner])).toBe(true);
   });
 
   it("accepts only url-safe IDs for ?providerId=", () => {
