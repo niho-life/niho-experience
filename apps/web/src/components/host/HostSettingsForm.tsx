@@ -8,12 +8,12 @@ import { normalizeMeetingPoint, sameMeetingPoint } from "@/host/meeting-point";
 import type { HostNotificationAddressView } from "@/host/notification-address";
 import { notificationChanges, notificationPanelView, notificationRows, toggleNotification } from "@/host/notifications";
 import { reviewRow, saveNeedsReviewConfirm, type HostNotice, type HostPayoutLoad, type ProviderProfile } from "@/host/payout";
-import { PREPARING_STATUS, PROVIDER_REVIEW_STATUS } from "@/host/status";
+import { PROVIDER_REVIEW_STATUS } from "@/host/status";
 import type { HostGoogleConnection, HostMeetingDefaults, HostNotificationKey, HostSettings } from "@/host/types";
 import type { HostProviderRole } from "@/lib/host/providers";
-import { HOST_CALENDAR_PATH, withProvider } from "@/lib/host/routes";
+import { HOST_CALENDAR_PATH, HOST_SELLER_PATH, withProvider } from "@/lib/host/routes";
 import { DISABLED } from "./editor-parts";
-import { FIELD_DISABLED, FieldRow, FieldSection, INPUT, KindSegment, NARROW, TEXTAREA } from "./fields";
+import { FieldRow, FieldSection, INPUT, KindSegment, NARROW, TEXTAREA } from "./fields";
 import { MeetingPointFields } from "./MeetingPointFields";
 import { HostCalendarPanel, HostLiveCalendarPanel } from "./HostCalendarPanel";
 import { HostConfirmDialog } from "./HostConfirmDialog";
@@ -24,12 +24,11 @@ import { HostNotificationPanel } from "./HostNotificationPanel";
 import { HostPayoutPanel } from "./HostPayoutPanel";
 import { StatusPill } from "./ui";
 
-/** The fields of 提供者情報 that differ from what NIHO has (the seller page only for the owner). */
-function changedFields(saved: ProviderProfile, now: ProviderProfile, owner: boolean): Partial<ProviderProfile> {
+/** Profile changes exclude the dedicated seller-disclosure command. */
+function changedFields(saved: ProviderProfile, now: ProviderProfile): Partial<ProviderProfile> {
   const changes: Partial<ProviderProfile> = {};
   if (now.displayName !== saved.displayName) changes.displayName = now.displayName;
   if (now.bio !== saved.bio) changes.bio = now.bio;
-  if (owner && now.sellerDisclosureUrl.trim() !== saved.sellerDisclosureUrl) changes.sellerDisclosureUrl = now.sellerDisclosureUrl;
   return changes;
 }
 
@@ -102,7 +101,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const [submitting, startSubmitting] = useTransition();
   const stay = useRef<HTMLButtonElement>(null);
 
-  const changes = changedFields(saved, profile, owner);
+  const changes = changedFields(saved, profile);
   const unsaved = Object.keys(changes).length > 0;
   const meetingChanged = meetingEditable && meeting !== null && savedMeeting !== null && !sameMeetingPoint(meeting, savedMeeting);
   // The preview keeps the meeting point on screen: nothing of NIHO's stops there.
@@ -149,10 +148,11 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const saveNotifications = async (): Promise<HostNotice | null> => {
     const changed = notificationChanges(savedNotifications, notifications);
     if (Object.keys(changed).length === 0) return null;
-    if (settings.notificationSource !== "live") {
+    if (settings.notificationSource === "preview") {
       setSavedNotifications(notifications);
       return null;
     }
+    if (settings.notificationSource !== "live") return { tone: "error", message: "通知設定を保存できません。再読込してください。" };
     const result = await saveNotificationSettings({ providerId, changes: changed });
     if (!result.ok) return { tone: "error", message: result.message };
     const rows = notificationRows(result.items);
@@ -231,7 +231,6 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
     });
   };
 
-  const sellerOwnerHelp = `${ids}-seller-owner`;
   const kindHelp = `${ids}-kind-help`;
   const reviewWhy = `${ids}-review-why`;
 
@@ -262,41 +261,9 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
               <textarea id="settings-bio" rows={3} maxLength={4000} value={profile.bio} onChange={(event) => edit("bio", event.currentTarget.value)} className={TEXTAREA} />
             </FieldRow>
             <FieldRow label="販売者表示" labelId="settings-seller-label">
-              {/* The seller's legal page (特商法表示): the provider's own site. NIHO's page for providers without one is not in the contract yet. */}
-              <div role="group" aria-labelledby="settings-seller-label" className="flex flex-col gap-1.5">
-                <label className="inline-flex min-h-8 items-center gap-2.5 font-bold">
-                  <input type="radio" name="settings-seller-display" value="own-site" defaultChecked disabled={!owner} className="size-4 shrink-0 accent-moss" />
-                  自分のサイトに表示する
-                </label>
-                <div className="pl-[26px]">
-                  <label htmlFor="settings-seller-url" className="mb-1 block text-xs font-bold text-muted">
-                    特商法表示 URL
-                  </label>
-                  <input
-                    id="settings-seller-url"
-                    type="url"
-                    inputMode="url"
-                    placeholder="https://"
-                    pattern="https://.+"
-                    title="https:// で始まる URL を入力してください"
-                    maxLength={2048}
-                    value={profile.sellerDisclosureUrl}
-                    disabled={!owner}
-                    aria-describedby={owner ? undefined : sellerOwnerHelp}
-                    onChange={(event) => edit("sellerDisclosureUrl", event.currentTarget.value)}
-                    className={`${INPUT} ${NARROW} ${FIELD_DISABLED}`}
-                  />
-                  {owner ? null : (
-                    <p id={sellerOwnerHelp} className="mt-1 text-xs text-muted">
-                      特商法表示 URL はオーナーが変えられます。
-                    </p>
-                  )}
-                </div>
-                <label className="inline-flex min-h-8 flex-wrap items-center gap-x-2.5 gap-y-1 text-ink-soft">
-                  <input type="radio" name="settings-seller-display" value="niho-page" disabled className="size-4 shrink-0" />
-                  NIHO のページに表示する（自前サイトがない事業者）
-                  <StatusPill status={PREPARING_STATUS} />
-                </label>
+              <div role="group" aria-labelledby="settings-seller-label" className="space-y-2">
+                <p className="text-sm text-ink-soft">販売者情報は専用画面で公開用の内容と同意を確認して保存します。法的販売者名や受取口座の対応付けはここでは変更できません。</p>
+                {owner ? <Link href={withProvider(HOST_SELLER_PATH, providerId)} className={consoleButtonClass("secondary", "sm")}>販売者情報を確認・編集</Link> : <p className="text-xs text-muted">販売者情報はオーナーが管理します。</p>}
               </div>
             </FieldRow>
             {preview ? <FieldRow label="提供者規約" labelId="settings-consent-label">

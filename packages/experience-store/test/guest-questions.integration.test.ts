@@ -16,6 +16,7 @@ async function claimQuestions(questions: GuestQuestionRepository, options: { lim
   });
 }
 const ownerA = { providerId: "provider-a", nihoUserId: "owner-a" } as const;
+const cohostA = { providerId: "provider-a", nihoUserId: "cohost-a", calendarRoleCeiling: "EDITOR" as const } as const;
 const ownerB = { providerId: "provider-b", nihoUserId: "owner-b" } as const;
 
 /** A fresh schema with every migration and synthetic providers, members and experiences. */
@@ -26,7 +27,7 @@ async function withSchema(run: (pool: Pool, repository: GuestQuestionRepository)
     await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
     await pool.query(
       `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES
-         ('provider-a','owner-a','OWNER',true),('provider-a','editor-a','EDITOR',true),
+         ('provider-a','owner-a','OWNER',true),('provider-a','cohost-a','COHOST',true),('provider-a','editor-a','EDITOR',true),
          ('provider-a','former-a','OWNER',false),('provider-b','owner-b','OWNER',true)`,
     );
     await pool.query(
@@ -143,7 +144,7 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
     });
   });
 
-  it("lets only the OWNER read and answer the provider's questions, never with the guest's address", async () => {
+  it("lets OWNER and COHOST read and answer, denies EDITOR/OPERATOR, and never returns the guest address", async () => {
     await withSchema(async (pool, questions) => {
       await questions.submitQuestion(question());
       await questions.submitQuestion(question({ productSlug: "sample-walk", guestEmail: "walker@example.com" }));
@@ -162,6 +163,8 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
       assert.equal(summary?.read, false);
       assert.equal(summary?.lastMessage.body, "Is there a vegetarian option?");
       assert.doesNotMatch(JSON.stringify(page), /example\.com/);
+      assert.equal((await questions.listThreads(cohostA)).threads[0]?.id, threadA);
+      assert.equal((await questions.getThread(cohostA, threadA)).guestName, "Sample Guest");
 
       // Not the OWNER, an inactive OWNER, another provider's OWNER, NIHO capping the role, a product operator.
       for (const actor of [
@@ -184,19 +187,19 @@ describe("PostgreSQL guest questions (#105 #106)", { skip: databaseUrl === undef
       }
       await assert.rejects(() => questions.getThread(ownerA, "not-a-uuid"), StoreValidationError);
 
-      await questions.markThreadRead(ownerA, threadA);
+      await questions.markThreadRead(cohostA, threadA);
       assert.equal((await questions.getThread(ownerA, threadA)).read, true);
       assert.equal((await questions.listThreads(ownerA, { unreadOnly: true })).threads.length, 0);
 
       // 返信: the English the guest gets, with or without the host's Japanese; the same command once.
       const commandId = randomUUID();
       const reply = { english: "Yes, we can make it vegetarian.", japanese: "はい、ベジタリアンにできます。", commandId };
-      const sent = await questions.reply(ownerA, threadA, reply);
+      const sent = await questions.reply(cohostA, threadA, reply);
       assert.equal(sent.author, "HOST");
       assert.equal(sent.deliveryStatus, "PENDING");
-      assert.equal((await questions.reply(ownerA, threadA, reply)).id, sent.id);
-      await assert.rejects(() => questions.reply(ownerA, threadA, { ...reply, english: "No." }), StoreConflictError);
-      await assert.rejects(() => questions.reply(ownerA, threadA, { ...reply, japanese: null }), StoreConflictError);
+      assert.equal((await questions.reply(cohostA, threadA, reply)).id, sent.id);
+      await assert.rejects(() => questions.reply(cohostA, threadA, { ...reply, english: "No." }), StoreConflictError);
+      await assert.rejects(() => questions.reply(cohostA, threadA, { ...reply, japanese: null }), StoreConflictError);
       // The same command on another of the provider's threads; another provider's commands are its own.
       await questions.submitQuestion(question({ guestEmail: "second@example.com" }));
       const threadA2 = await threadIdFor(pool, "tea", "second@example.com");

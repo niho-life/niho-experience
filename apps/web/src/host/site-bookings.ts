@@ -94,7 +94,7 @@ function answerOf(answer: HostGuestBookingAnswer): HostBookingAnswer {
  * One booking made here as 予約 shows it. Never the guest's address (the store has none to give) and, as for
  * NIHO's bookings, never their phone: only この回 shows it (owner decision 2026-10-22, #103).
  */
-export function siteBooking(stored: HostGuestBooking): HostBooking {
+export function siteBooking(stored: HostGuestBooking, ownerFinancial = true): HostBooking {
   const status = STATUS[stored.status];
   const bookedAt = japanMinute(stored.bookedAtUtc);
   const paidAt = stored.paidAtUtc ? japanMinute(stored.paidAtUtc) : null;
@@ -139,7 +139,7 @@ export function siteBooking(stored: HostGuestBooking): HostBooking {
     cancelMessage: null,
     refundedYen: stored.refundedAmount,
     timeline,
-    site: {
+    site: ownerFinancial ? {
       fee: fee ? { amountYen: fee.amount, percent: fee.basisPoints / 100, supportEnabled: fee.supportEnabled } : null,
       payoutYen: stored.providerAmount,
       cancellationPolicy: stored.cancellationPolicy,
@@ -161,7 +161,7 @@ export function siteBooking(stored: HostGuestBooking): HostBooking {
         })),
       } : {}),
       ...(stored.mailUndeliverable ? { guestEmailUndeliverable: true as const } : {}),
-    },
+    } : { cancellationPolicy: stored.cancellationPolicy },
   };
 }
 

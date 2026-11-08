@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { hostAddressConfirmationEmail, hostBookingEmail } from "./host-templates";
+import { hostAddressConfirmationEmail, hostBookingEmail, hostNotificationEmail } from "./host-templates";
+import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
+import { HOST_NOTIFICATION_TOPICS } from "@niho-experience/experience-store";
 
 /** The hosts' emails (#194): Japanese, the push's words, nothing more. Synthetic data only. */
 const SITE = "https://experience.example";
@@ -13,6 +15,18 @@ const ota = {
 };
 
 describe("host emails", () => {
+  it("keeps the target provider in the day-before summary's booking link", () => {
+    const event = hostPushEventFromOutbox({
+      id: "1", providerId: "provider-b", topic: HOST_NOTIFICATION_TOPICS.dayBeforeSummary,
+      payload: { v: 1, localDate: "2026-11-09", bookingCount: 2, participantCount: 4 },
+      attempts: 1, createdAt: "2026-11-08T09:00:00.000Z",
+    }, Date.parse("2026-11-08T09:00:00.000Z"));
+    expect(event.ok).toBe(true);
+    if (!event.ok) throw new Error("Synthetic summary did not produce an event");
+    const mail = hostNotificationEmail(event.event, { siteUrl: SITE });
+    expect(mail.text).toContain(`${SITE}/host/bookings?providerId=provider-b`);
+    expect(mail.html).toContain(`href="${SITE}/host/bookings?providerId=provider-b"`);
+  });
   it("words an OTA cancellation as its push, escaped, with where to handle it", () => {
     const mail = hostBookingEmail(ota, { siteUrl: SITE });
     expect(mail.subject).toBe("GetYourGuide の予約が取り消されました：Synthetic <tea> 11/14（土）10:00");

@@ -17,6 +17,13 @@ export const HOST_MAIL_TOPICS = {
   newBooking: "host.mail.new_booking",
   cancellation: "host.mail.cancellation",
   otaBooking: "host.mail.ota_booking",
+  guestMessage: "host.mail.guest_message",
+  guestQuestion: "host.mail.guest_question",
+  bookingMessage: "host.mail.booking_message",
+  newReview: "host.mail.new_review",
+  guestEmailDeliveryFailed: "host.mail.guest_email_delivery_failed",
+  dayBeforeSummary: "host.mail.day_before_summary",
+  listingSuspension: "host.mail.listing_suspension",
   addressConfirmation: "host.mail.address_confirmation",
 } as const;
 export type HostMailTopic = (typeof HOST_MAIL_TOPICS)[keyof typeof HOST_MAIL_TOPICS];
@@ -49,10 +56,13 @@ export const sameEmail = (a: string | null | undefined, b: string | null | undef
  * SQL: the user (an expression for a NIHO user ID) still has a reason to get this site's emails: an active membership of
  * any provider, or an active product-operator grant that has not expired.
  */
+export const HOST_ACCOUNT_USABLE = (user: string) =>
+  `(${user} !~ '^hst_[0-9a-f]{32}$' OR EXISTS (SELECT 1 FROM host_accounts ha WHERE ha.id=${user} AND ha.status='ACTIVE'))`;
+
 export const HAS_HOST_ACCESS = (user: string) =>
-  `(EXISTS (SELECT 1 FROM provider_memberships hm WHERE hm.niho_user_id = ${user} AND hm.active)
+  `(${HOST_ACCOUNT_USABLE(user)} AND (EXISTS (SELECT 1 FROM provider_memberships hm WHERE hm.niho_user_id = ${user} AND hm.active)
     OR EXISTS (SELECT 1 FROM product_operator_grants hg WHERE hg.niho_user_id = ${user} AND hg.active
-                AND (hg.expires_at IS NULL OR hg.expires_at > clock_timestamp())))`;
+                AND (hg.expires_at IS NULL OR hg.expires_at > clock_timestamp()))))`;
 
 /**
  * Writes a booking's email rows (#194) in the transaction of the event, one per person it is for who has an address here:
@@ -87,7 +97,7 @@ export async function enqueueHostBookingMails(
               WHERE $7::text IS NOT NULL AND g.provider_id = $1 AND g.product_id = $7 AND g.active
                 AND (g.expires_at IS NULL OR g.expires_at > clock_timestamp())) r
        JOIN host_notification_addresses a ON a.niho_user_id = r.niho_user_id
-      WHERE COALESCE(a.override_email, a.login_email) IS NOT NULL
+      WHERE COALESCE(a.override_email, a.login_email) IS NOT NULL AND ${HOST_ACCOUNT_USABLE("r.niho_user_id")}
       -- One order whatever the collation, so the rows (and their emails) come in the same order every time.
       ORDER BY r.niho_user_id COLLATE "C"
      ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,

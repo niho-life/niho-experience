@@ -155,10 +155,11 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   const payoutPanel = accountPayout
     ? <HostPayoutAccountPanel providerId={provider.id} load={accountPayout.experience} notice={payoutOutcome ? PAYOUT_CONSENT_OUTCOMES[payoutOutcome] : null} />
     : undefined;
+  const teamMode = config.hostTeamEnabled && session.kind === "experience" ? "native" as const : providerOperationsEnabled() ? "legacy" as const : "off" as const;
 
   return (
     <HostPageBody>
-      <PageHead title="設定">{provider.memberRole === "OWNER" && providerOperationsEnabled() ? <a href="#settings-team" className={consoleButtonClass("secondary")}>サブホストを管理</a> : null}</PageHead>
+      <PageHead title="設定">{provider.memberRole === "OWNER" && teamMode !== "off" ? <a href="#settings-team" className={consoleButtonClass("secondary")}>共同ホストを管理</a> : null}</PageHead>
       {/* Keyed by provider: switching providers starts from that provider's values. */}
       <HostSettingsForm
         key={provider.id}
@@ -173,7 +174,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         notificationAddress={notificationAddress}
         payoutPanel={payoutPanel}
         bookingGuidesHref={config.experienceHostPublicationApiEnabled ? withProvider("/host/booking-guides", provider.id) : null}
-        account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} />{provider.memberRole === "OWNER" && config.hostArticleLinksEnabled ? <div className="mt-3.5"><HostArticleLinksPanel providerId={provider.id} /></div> : null}<div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
+        account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} mode={teamMode} />{provider.memberRole === "OWNER" && config.hostArticleLinksEnabled ? <div className="mt-3.5"><HostArticleLinksPanel providerId={provider.id} /></div> : null}<div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
       />
     </HostPageBody>
   );

@@ -42,7 +42,7 @@ import type { HostThread, HostThreadBooking, HostThreadMessage } from "./types";
  * yet opens as an empty one (`?booking=`), which the host's first message starts.
  */
 
-export const GUEST_QUESTION_OWNER_ONLY_TEXT = "予約前の質問はオーナーが読み書きできます";
+export const GUEST_QUESTION_OWNER_ONLY_TEXT = "予約前の質問はオーナーと共同ホストが読み書きできます";
 export const GUEST_QUESTION_MISSING_TEXT = "このやりとりは見つかりませんでした。一覧から選び直してください。";
 export const GUEST_QUESTION_LOAD_FAILED_TEXT = "やりとりを読み込めませんでした。時間をおいて、もう一度お試しください。";
 export const GUEST_QUESTION_REPLY_FAILED_TEXT = "返信を送れませんでした。時間をおいて、もう一度お試しください。";
@@ -62,8 +62,8 @@ export function japanMinute(utc: string): string {
 }
 
 function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): HostActor {
-  if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
-  return { providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: "OWNER" };
+  if (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST") throw new Error("A current provider responder is required.");
+  return { providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: provider.memberRole === "OWNER" ? "OWNER" : "EDITOR" };
 }
 
 /** One stored message as メッセージ shows it: the guest's words (translation still null) or the host's reply and its email. */
@@ -163,7 +163,7 @@ export type HostGuestQuestionsLoad =
  */
 export async function loadGuestQuestions(provider: HostProvider, requestedThread: string | null, requestedBooking: string | null = null): Promise<HostGuestQuestionsLoad> {
   if (isHostMock()) {
-    if (provider.memberRole !== "OWNER") return { status: "closed" };
+    if (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST") return { status: "closed" };
     const stored = mockExperienceBookings(provider.id);
     const threads = mockExperienceThreads(provider.id);
     const booking = stored.find((row) => row.publicBookingId === requestedBooking);
@@ -177,7 +177,7 @@ export async function loadGuestQuestions(provider: HostProvider, requestedThread
     };
   }
   const site = siteThreadRepository();
-  if (!site || provider.memberRole !== "OWNER") return { status: "closed" };
+  if (!site || (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST")) return { status: "closed" };
   const { repository: questions, kind } = site;
   const actor = ownerActor(provider);
   try {
@@ -230,7 +230,7 @@ async function asOwner(providerId: string, failed: string): Promise<OwnerCheck> 
   const providers = await loadHostProviders();
   if (providers.status !== "ok") return { ok: false, message: providers.status === "error" ? failed : HOST_SESSION_ENDED_TEXT };
   const provider = providers.providers.find((entry) => entry.id === providerId);
-  if (provider?.memberRole !== "OWNER") return { ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT };
+  if (!provider || (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST")) return { ok: false, message: GUEST_QUESTION_OWNER_ONLY_TEXT };
   return { ok: true, questions: site.repository, kind: site.kind, actor: ownerActor(provider) };
 }
 

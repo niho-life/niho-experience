@@ -113,11 +113,13 @@ export async function loadHostConsoleData(provider: HostProvider, options: { not
   const owner = provider.memberRole === "OWNER";
   const [meetingPoint, notificationLoad] = await Promise.all([
     options.meetingPoint ? loadMeetingDefaults(provider, mode, snapshot.meetingPoint) : null,
-    mode === "http" && owner && session && options.notifications ? loadNotificationSettings(provider) : null,
+    mode === "http" && options.notifications
+      ? (session ? owner ? loadNotificationSettings(provider) : Promise.resolve({ status: "forbidden" as const }) : Promise.resolve({ status: "expired" as const }))
+      : null,
   ]);
   return {
     today: snapshot.today,
-    home: hostHome(mode === "mock" ? { ...snapshot, bookings: mockExperienceBookings(provider.id).map(siteBooking), threads: mockExperienceThreads(provider.id) } : snapshot),
+    home: hostHome(mode === "mock" ? { ...snapshot, bookings: mockExperienceBookings(provider.id).map((booking) => siteBooking(booking)), threads: mockExperienceThreads(provider.id) } : snapshot),
     experiences: snapshot.experiences,
     settings: {
       displayName: displayProvider?.displayName ?? provider.displayName,
@@ -129,8 +131,8 @@ export async function loadHostConsoleData(provider: HostProvider, options: { not
       consentCurrent: displayProvider && legacyDetail ? displayProvider.consentVersion === legacyDetail.consent.version : null,
       meetingPoint,
       calendar: snapshot.calendar,
-      notifications: !owner ? null : notificationLoad?.status === "live" ? { email: { addresses: [] }, items: notificationLoad.items } : snapshot.notifications,
-      notificationSource: mode === "mock" ? "preview" : (notificationLoad?.status ?? "preparing"),
+      notifications: mode === "mock" ? (!owner ? null : snapshot.notifications) : notificationLoad?.status === "live" ? { email: { addresses: [] }, items: notificationLoad.items } : null,
+      notificationSource: mode === "mock" ? "preview" : (notificationLoad?.status ?? "disabled"),
     },
     googleConnection: googleConnectionPreview(mode),
   };

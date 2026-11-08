@@ -30,7 +30,12 @@ const booking = { providerId: "provider-a", bookingId: "bk-1", experienceTitle: 
 
 function recordingClient() {
   const calls: { sql: string; params: unknown[] }[] = [];
-  const client = { query: async (sql: string, params: unknown[]) => { calls.push({ sql, params }); return { rowCount: 1, rows: [] }; } };
+  const client = { query: async (sql: string, params: unknown[]) => {
+    const optionalMail = sql.includes("JOIN host_notification_addresses") && [HOST_MAIL_TOPICS.guestMessage, HOST_MAIL_TOPICS.guestQuestion,
+      HOST_MAIL_TOPICS.bookingMessage, HOST_MAIL_TOPICS.newReview, HOST_MAIL_TOPICS.listingSuspension].includes(params[3] as never);
+    if (!optionalMail) calls.push({ sql, params });
+    return { rowCount: 1, rows: [] };
+  } };
   return { client: client as unknown as PoolClient, calls };
 }
 
@@ -229,7 +234,7 @@ describe("HostNotificationOutbox input checks", () => {
     } } as never);
     const now = new Date("2026-11-04T09:00:00.000Z"); // 18:00 in Japan
     assert.equal(await outbox.enqueueDueDayBeforeSummaries(now), 1);
-    assert.deepEqual(calls[0]!.params, [now.toISOString(), HOST_NOTIFICATION_TOPICS.dayBeforeSummary]);
+    assert.deepEqual(calls[0]!.params, [now.toISOString(), HOST_NOTIFICATION_TOPICS.dayBeforeSummary, HOST_MAIL_TOPICS.dayBeforeSummary]);
     assert.match(calls[0]!.sql, /b\.status = 'CONFIRMED'/);
     assert.match(calls[0]!.sql, /adult_count \+ g\.child_count/);
     assert.match(calls[0]!.sql, /Asia\/Tokyo/);

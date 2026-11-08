@@ -95,6 +95,8 @@ OWNER が設定 › 受取口座で、登録された口座で提供者の Exper
 
 ## まだ閉じているもの
 
+Experience 自前のチーム管理は `EXPERIENCE_HOST_TEAM_ENABLED`（既定 OFF）で独立して有効化する。現在の OWNER が、ops 登録済みのホストを COHOST として追加・解除できる。COHOST は開催枠・予約参照・返信を担当し、本文・料金・公開・金融・チーム管理は OWNER に残す。詳細は [ホストチーム](host-team.md)。旧 NIHO provider operations の flag を有効にする機能ではない。
+
 - **NIHO のトークンを NIHO へ送る機能**は、フラグと同時に ON にできない（起動時に止まる。配備前の検査でも止まる）：`EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED`、`EXPERIENCE_PROVIDER_PAGES_API_ENABLED`、`EXPERIENCE_TRANSLATE_API_ENABLED`、`HOST_SUPPORT_SETTINGS_API_ENABLED`、`HOST_SUPPORT_HISTORY_API_ENABLED`、`EXPERIENCE_FEE_SUMMARY_API_ENABLED`（Admin と共用）、`EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED`。
 - **運営者の招待**：招待された人にもホストアカウントが要る（無いアドレスにはリンクが届かない）。今は ops が先に登録する。
 - **新しい販売者の口座の接続**（Express アカウントの作成と Account Links）はまだ無い。今は Stripe で接続済みの既存の口座を ops が登録する。

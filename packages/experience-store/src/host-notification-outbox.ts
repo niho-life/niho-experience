@@ -370,15 +370,18 @@ export async function enqueueNewReviewNotification(
   if (!HOST_REF.test(input.reviewId)) throw new StoreValidationError("reviewId must be a UUID.");
   const experienceTitle = clippedTitle(input.experienceTitle);
   if (!title(experienceTitle)) throw new StoreValidationError("experienceTitle must not be empty.");
-  return insertRow(client, {
+  const payload = { v: 1, reviewId: input.reviewId, experienceTitle } satisfies NewReviewPayload;
+  const added = await insertRow(client, {
     providerId: input.providerId,
     bookingId: input.reviewId,
     aggregateType: "guest_review",
     topic: HOST_NOTIFICATION_TOPICS.newReview,
     deduplicationKey: `host-push:new-review:${input.reviewId}`,
-    payload: { v: 1, reviewId: input.reviewId, experienceTitle } satisfies NewReviewPayload,
+    payload,
     availableAt: null,
   });
+  await enqueueHostBookingMails(client, { providerId: input.providerId, topic: HOST_MAIL_TOPICS.newReview, aggregateType: "guest_review", aggregateId: input.reviewId, deduplicationKey: `new-review:${input.reviewId}`, payload });
+  return added;
 }
 
 /** A guest wrote to the host: one notification per message, due now. 1 when added, 0 for a repeat. */
@@ -386,7 +389,7 @@ export async function enqueueGuestMessageNotification(client: PoolClient, input:
   const { startsAt } = validBooking(input);
   if (!publicId(input.messageId)) throw new StoreValidationError("messageId must contain 1-48 letters, digits, '_' or '-'.");
   const payload: GuestMessagePayload = { v: 1, bookingId: input.bookingId, messageId: input.messageId, experienceTitle: input.experienceTitle, startsAt, seats: input.seats };
-  return insertRow(client, {
+  const added = await insertRow(client, {
     providerId: input.providerId,
     bookingId: input.bookingId,
     topic: HOST_NOTIFICATION_TOPICS.guestMessage,
@@ -394,6 +397,8 @@ export async function enqueueGuestMessageNotification(client: PoolClient, input:
     payload,
     availableAt: null,
   });
+  await enqueueHostBookingMails(client, { providerId: input.providerId, topic: HOST_MAIL_TOPICS.guestMessage, aggregateType: AGGREGATE_TYPE, aggregateId: input.bookingId, deduplicationKey: `guest-message:${input.messageId}`, payload });
+  return added;
 }
 
 /**
@@ -411,7 +416,7 @@ export async function enqueueGuestQuestionNotification(
   const experienceTitle = typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "";
   if (!title(experienceTitle)) throw new StoreValidationError("experienceTitle must contain text.");
   const payload: GuestQuestionPayload = { v: 1, threadId: input.threadId, messageId: input.messageId, experienceTitle };
-  return insertRow(client, {
+  const added = await insertRow(client, {
     providerId: input.providerId,
     bookingId: input.threadId,
     aggregateType: QUESTION_AGGREGATE_TYPE,
@@ -420,6 +425,8 @@ export async function enqueueGuestQuestionNotification(
     payload,
     availableAt: null,
   });
+  await enqueueHostBookingMails(client, { providerId: input.providerId, topic: HOST_MAIL_TOPICS.guestQuestion, aggregateType: QUESTION_AGGREGATE_TYPE, aggregateId: input.threadId, deduplicationKey: `guest-question:${input.messageId}`, payload });
+  return added;
 }
 
 /**
@@ -440,7 +447,7 @@ export async function enqueueBookingMessageNotification(
   const startsAt = canonicalInstant(input.startsAt);
   if (startsAt === null) throw new StoreValidationError("startsAt must be an ISO 8601 instant.");
   const payload: BookingMessagePayload = { v: 1, threadId: input.threadId, messageId: input.messageId, experienceTitle, startsAt, seats: input.seats };
-  return insertRow(client, {
+  const added = await insertRow(client, {
     providerId: input.providerId,
     bookingId: input.threadId,
     aggregateType: QUESTION_AGGREGATE_TYPE,
@@ -449,6 +456,8 @@ export async function enqueueBookingMessageNotification(
     payload,
     availableAt: null,
   });
+  await enqueueHostBookingMails(client, { providerId: input.providerId, topic: HOST_MAIL_TOPICS.bookingMessage, aggregateType: QUESTION_AGGREGATE_TYPE, aggregateId: input.threadId, deduplicationKey: `booking-message:${input.messageId}`, payload });
+  return added;
 }
 
 /**
@@ -620,7 +629,7 @@ export async function enqueueListingSuspensionNotification(
   };
   // The same check the push job makes: a row it would drop is refused here instead.
   if (parseListingSuspensionPayload(payload) === null) throw new StoreValidationError("The listing suspension notification is invalid.");
-  return insertRow(client, {
+  const added = await insertRow(client, {
     providerId: input.providerId,
     bookingId: input.productId,
     aggregateType: "experience_product",
@@ -630,6 +639,11 @@ export async function enqueueListingSuspensionNotification(
     payload,
     availableAt: null,
   });
+  await enqueueHostBookingMails(client, {
+    providerId: input.providerId, topic: HOST_MAIL_TOPICS.listingSuspension, aggregateType: "experience_product", aggregateId: input.productId,
+    deduplicationKey: `listing-suspension:${createHash("sha256").update(input.productId).digest("hex").slice(0, 32)}:${input.stateVersion}`, payload,
+  });
+  return added;
 }
 
 function assertRowId(id: string): void {
@@ -666,26 +680,36 @@ export class HostNotificationOutbox {
    */
   async enqueueDueDayBeforeSummaries(now: Date): Promise<number> {
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new StoreValidationError("now must be a valid time.");
-    const result = await this.#pool.query(
-      `INSERT INTO outbox_messages (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload, available_at)
-       SELECT summary.provider_id, 'host_day_before_summary', summary.local_date, $2,
-              'host-push:day-before-summary:' || summary.local_date,
-              jsonb_build_object('v', 1, 'localDate', summary.local_date,
-                'bookingCount', summary.booking_count, 'participantCount', summary.participant_count), $1::timestamptz
-         FROM (
-           SELECT b.provider_id, b.occurrence_snapshot->>'localDate' AS local_date,
-                  count(*)::int AS booking_count, sum(g.adult_count + g.child_count)::int AS participant_count
-             FROM bookings b
-             JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
-            WHERE b.status = 'CONFIRMED'
-              AND b.occurrence_snapshot->>'localDate' = (($1::timestamptz AT TIME ZONE 'Asia/Tokyo')::date + 1)::text
-              AND ($1::timestamptz AT TIME ZONE 'Asia/Tokyo')::time >= time '18:00'
-            GROUP BY b.provider_id, b.occurrence_snapshot->>'localDate'
-         ) summary
-       ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,
-      [now.toISOString(), HOST_NOTIFICATION_TOPICS.dayBeforeSummary],
+    const result = await this.#pool.query<DbRow>(
+      `WITH summary AS (
+         SELECT b.provider_id, b.occurrence_snapshot->>'localDate' AS local_date,
+                count(*)::int AS booking_count, sum(g.adult_count + g.child_count)::int AS participant_count
+           FROM bookings b JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+          WHERE b.status = 'CONFIRMED'
+            AND b.occurrence_snapshot->>'localDate'=(($1::timestamptz AT TIME ZONE 'Asia/Tokyo')::date+1)::text
+            AND ($1::timestamptz AT TIME ZONE 'Asia/Tokyo')::time>=time '18:00'
+          GROUP BY b.provider_id,b.occurrence_snapshot->>'localDate'
+       ), pushed AS (
+         INSERT INTO outbox_messages (provider_id,aggregate_type,aggregate_id,topic,deduplication_key,payload,available_at)
+         SELECT provider_id,'host_day_before_summary',local_date,$2,'host-push:day-before-summary:'||local_date,
+                jsonb_build_object('v',1,'localDate',local_date,'bookingCount',booking_count,'participantCount',participant_count),$1::timestamptz
+           FROM summary
+          ORDER BY provider_id COLLATE "C"
+         ON CONFLICT (provider_id, deduplication_key) DO NOTHING
+         RETURNING provider_id,aggregate_id,payload
+       ), mailed AS (
+         INSERT INTO outbox_messages (provider_id,aggregate_type,aggregate_id,topic,deduplication_key,payload)
+         SELECT p.provider_id,'host_day_before_summary',p.aggregate_id,$3,'host-mail:day-before-summary:'||p.aggregate_id||':'||md5(m.niho_user_id),
+                p.payload||jsonb_build_object('to',m.niho_user_id)
+           FROM pushed p JOIN provider_memberships m ON m.provider_id=p.provider_id AND m.active AND m.role='OWNER'
+           JOIN host_notification_addresses a ON a.niho_user_id=m.niho_user_id
+          WHERE COALESCE(a.override_email,a.login_email) IS NOT NULL
+          ORDER BY p.provider_id COLLATE "C",m.niho_user_id COLLATE "C"
+         ON CONFLICT (provider_id, deduplication_key) DO NOTHING RETURNING 1
+       ) SELECT count(*)::int AS added FROM pushed`,
+      [now.toISOString(), HOST_NOTIFICATION_TOPICS.dayBeforeSummary, HOST_MAIL_TOPICS.dayBeforeSummary],
     );
-    return result.rowCount ?? 0;
+    return Number(result.rows[0]?.added ?? result.rowCount ?? 0);
   }
 
   /** Up to `limit` due rows, oldest first, each claimed for `leaseMs`. Concurrent claimers never share a row. */
