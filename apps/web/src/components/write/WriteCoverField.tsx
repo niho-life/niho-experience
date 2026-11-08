@@ -20,7 +20,7 @@ function upload(articleId: string, file: File, progress: (value: number) => void
   });
 }
 
-export function WriteCoverField({ articleId, cover, initialAssets, onChange, onBusy, beforeRevisionMutation, onRevoked, onConflict }: {
+export function WriteCoverField({ articleId, cover, initialAssets, onChange, onBusy, beforeRevisionMutation, onRevoked, onConflict, hidePreview = false }: {
   readonly articleId: string;
   readonly cover: WriteCover | null;
   readonly initialAssets: readonly WriteMediaAsset[];
@@ -29,6 +29,7 @@ export function WriteCoverField({ articleId, cover, initialAssets, onChange, onB
   readonly beforeRevisionMutation: () => Promise<number | null>;
   readonly onRevoked: (guide: GuideResponse["guide"], assetId: string) => void;
   readonly onConflict: () => void;
+  readonly hidePreview?: boolean;
 }) {
   const [assets, setAssets] = useState(initialAssets);
   const [assetId, setAssetId] = useState(cover?.assetId ?? "");
@@ -89,7 +90,7 @@ export function WriteCoverField({ articleId, cover, initialAssets, onChange, onB
     <label>写真<select value={assetId} disabled={busy} onChange={(event) => select(event.target.value)}><option value="">カバーなし</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.publicCredit ?? `未確認 ${asset.id.slice(0, 8)}`}</option>)}</select></label>
     <label>JPEG / PNGを追加（10MBまで）<input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0] ?? null; event.currentTarget.value = ""; void uploadFile(file); }} /></label>
     {progress !== null ? <p role="status">アップロード中 {progress}%</p> : null}
-    {assetId ? <img src={`/write/api/guides/${encodeURIComponent(articleId)}/media/${encodeURIComponent(assetId)}`} alt="選択中のカバー" /> : null}
+    {assetId && !hidePreview ? <img src={`/write/api/guides/${encodeURIComponent(articleId)}/media/${encodeURIComponent(assetId)}`} alt="選択中のカバー" /> : null}
     {assetId ? <><label>英語alt<input maxLength={300} value={alt} disabled={busy} onChange={(event) => setAlt(event.target.value)} /></label><label>公開クレジット<input maxLength={300} value={credit} disabled={busy || selected?.webConfirmed} onChange={(event) => setCredit(event.target.value)} /></label><label className="write-check"><input type="checkbox" checked={confirmed} disabled={busy || selected?.webConfirmed} onChange={(event) => setConfirmed(event.target.checked)} />Webサイトへの掲載許諾を確認済み</label><p className="write-help">Web記事への掲載同意です。SNS・OG画像への利用許諾とは別です。</p><div className="write-inline-actions"><button type="button" disabled={busy} onClick={() => { setAssetId(""); onChange(null); }}>記事から外す（権利は保持）</button><button type="button" disabled={busy} onClick={() => void revoke()}>掲載権利を取り消す</button><button type="button" className="write-secondary" disabled={busy} onClick={() => void apply()}>カバーに設定</button></div></> : null}
     {error ? <p className="write-error" role="alert">{error} {retryFile ? <button type="button" onClick={() => void uploadFile(retryFile)}>再試行</button> : null}</p> : null}
   </div>;

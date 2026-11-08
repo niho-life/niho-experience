@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "@/host/nav";
 import { hasOwnerMembership, nihoIdOrNull, providerRoleLabel, selectProvider, type HostConsoleChoice, type HostProviderRole } from "@/lib/host/providers";
 import { hostSupportPath, HOST_DAILY_NAV, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_NAV, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
@@ -37,6 +37,21 @@ export interface HostChromeProps {
   writePath?: string;
 }
 
+export interface HostWriterArticle {
+  readonly id: string;
+  readonly title: string;
+  readonly status: "DRAFT" | "PUBLISHED" | "STOPPED" | "OPS_STOPPED";
+  readonly statusLabel: string;
+}
+
+export interface HostWriterNavigation {
+  readonly articles: readonly HostWriterArticle[];
+  readonly activeArticleId?: string;
+  readonly articlesAvailable?: boolean;
+  readonly onNavigate?: (event: ReactMouseEvent<HTMLElement>) => void;
+  readonly onNewArticle?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+}
+
 /** Tailwind needs to see each possible column class as a complete string. */
 const TAB_COLUMNS: Readonly<Record<number, string>> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4", 5: "grid-cols-5" };
 
@@ -61,15 +76,19 @@ export function hostDailyNavForChoice(choice: HostConsoleChoice | null | undefin
   return hostNavForChoice(choice).filter((item) => HOST_DAILY_NAV.some((daily) => daily.href === item.href));
 }
 
+export function hostWriterNavAllowed(choice: HostConsoleChoice | null | undefined, writePath?: string, articleOnly = false) {
+  return Boolean(writePath) && (choice?.kind === "MEMBER" && choice.memberRole === "OWNER" || articleOnly);
+}
+
 /** The chosen provider lives in `?providerId=`; every console link carries it. */
 function useProviderId(): string | null {
   return nihoIdOrNull(useSearchParams().get("providerId"));
 }
 
-function ProviderLinks({ providers, currentId, onPick }: { providers: readonly HostConsoleChoice[]; currentId: string; onPick: () => void }) {
+function ProviderLinks({ providers, currentId, onPick, basePath }: { providers: readonly HostConsoleChoice[]; currentId: string; onPick: () => void; basePath?: string }) {
   const pathname = usePathname();
   // A page under a section (one experience) may not exist for the other provider: switch to the section itself.
-  const base = providerSwitchPath(pathname);
+  const base = basePath ?? providerSwitchPath(pathname);
   return (
     <ul className="flex flex-col gap-0.5">
       {providers.map((provider) => {
@@ -98,8 +117,9 @@ function ProviderLinks({ providers, currentId, onPick }: { providers: readonly H
 }
 
 /** The provider being managed. With one provider it only shows it; with several it opens the list below it. */
-function SidebarProviderSwitcher({ providers }: { providers: readonly HostConsoleChoice[] }) {
-  const providerId = useProviderId();
+function SidebarProviderSwitcher({ providers, providerIdOverride, basePath }: { providers: readonly HostConsoleChoice[]; providerIdOverride?: string; basePath?: string }) {
+  const routeProviderId = useProviderId();
+  const providerId = providerIdOverride ?? routeProviderId;
   const menu = useRef<HTMLDetailsElement>(null);
   const { provider: current } = selectProvider(providers, providerId);
   if (!current) return null;
@@ -118,7 +138,7 @@ function SidebarProviderSwitcher({ providers }: { providers: readonly HostConsol
         <HostIcon name="chevronDown" className="size-4 text-muted group-open:rotate-180" />
       </summary>
       <div className="mt-1.5 rounded-xl border border-line p-1">
-        <ProviderLinks providers={providers} currentId={current.id} onPick={() => menu.current?.removeAttribute("open")} />
+        <ProviderLinks providers={providers} currentId={current.id} onPick={() => menu.current?.removeAttribute("open")} basePath={basePath} />
       </div>
     </details>
   );
@@ -128,20 +148,58 @@ function SidebarProviderSwitcher({ providers }: { providers: readonly HostConsol
  * PC (md and up): the 232px sidebar with the brand, the provider and the daily
  * sections. Settings and the ways out live in the account menu at its foot.
  */
-export function HostSidebar({ account, providers, nihoAppUrl, writePath }: HostChromeProps) {
+export function HostSidebar({ account, providers, nihoAppUrl, writePath, writerNavigation, providerIdOverride }: HostChromeProps & { readonly writerNavigation?: HostWriterNavigation; readonly providerIdOverride?: string }) {
   const pathname = usePathname();
-  const providerId = useProviderId();
+  const routeProviderId = useProviderId();
+  const providerId = providerIdOverride ?? routeProviderId;
   const { provider: current } = selectProvider(providers, providerId);
+  const writerAllowed = hostWriterNavAllowed(current, writePath, writerNavigation !== undefined && providers.length === 0);
+  const writerActive = pathname === "/write" || pathname.startsWith("/write/");
+  const captureNavigation = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!(event.target instanceof Element)) return;
+    const anchor = event.target.closest<HTMLAnchorElement>("a[href]");
+    if (anchor) {
+      const href = anchor.getAttribute("href") ?? "";
+      const sameTabInternal = anchor.target !== "_blank"
+        && !anchor.hasAttribute("download")
+        && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+        && href.startsWith("/") && !href.startsWith("//");
+      if (!sameTabInternal) return;
+    } else if (!event.target.closest("button[type='submit']")) {
+      return;
+    }
+    writerNavigation?.onNavigate?.(event);
+  };
+  const writerItem = writerAllowed ? (
+    <li className="mt-2 border-t border-line pt-2">
+      <div className={`flex h-10 items-center rounded-[10px] ${writerActive ? "bg-sand text-ink" : "text-ink-soft hover:bg-sand/60 hover:text-ink"}`}>
+        <Link href={writePath!} aria-current={writerActive && !writerNavigation?.activeArticleId ? "page" : undefined} className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 font-bold">
+          <HostIcon name="article" className="size-[18px]" />
+          <span>記事</span>
+        </Link>
+        {writerNavigation ? <button type="button" onClick={writerNavigation.onNewArticle} aria-label="新しい記事" className="grid size-9 place-items-center rounded-[9px] hover:bg-line"><HostIcon name="plus" className="size-4" /></button> : null}
+      </div>
+      {writerNavigation ? (
+        writerNavigation.articles.length ? <><ul className="mt-1 flex flex-col gap-0.5 pl-7">
+          {writerNavigation.articles.map((article) => {
+            const active = article.id === writerNavigation.activeArticleId;
+            const tone = article.status === "PUBLISHED" ? "bg-moss" : article.status === "DRAFT" ? "bg-muted" : "bg-danger";
+            return <li key={article.id}><Link href={`/write/${encodeURIComponent(article.id)}`} aria-current={active ? "page" : undefined} className={`flex min-h-9 items-start gap-2 rounded-[9px] px-2 py-2 text-xs leading-[1.35] ${active ? "bg-leaf-pale font-extrabold text-ink" : "font-bold text-ink-soft hover:bg-sand"}`}><span aria-hidden="true" className={`mt-1 size-1.5 shrink-0 rounded-full ${tone}`} /><span className="min-w-0"><span className="block truncate">{article.title || "無題の記事"}</span><span className="block font-normal text-muted">{article.statusLabel}</span></span></Link></li>;
+          })}
+        </ul>{writerNavigation.articlesAvailable === false ? <p role="status" className="py-2 pl-9 text-xs text-danger">記事一覧を読み込めませんでした</p> : null}</> : writerNavigation.articlesAvailable === false ? <p role="status" className="py-2 pl-9 text-xs text-danger">記事一覧を読み込めませんでした</p> : <p className="py-2 pl-9 text-xs text-muted">まだ記事はありません</p>
+      ) : null}
+    </li>
+  ) : null;
   return (
-    <header className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-line bg-canvas px-3 pt-[18px] pb-3.5 md:flex">
+    <header onClickCapture={captureNavigation} className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-line bg-canvas px-3 pt-[18px] pb-3.5 md:flex">
       <p className="px-2.5 pt-1 pb-4">
-        <Link href={withProvider(current?.kind === "OPERATOR" ? "/host/calendar" : HOST_HOME_PATH, providerId)} className="font-display text-[1.1875rem] leading-[1.1] font-medium tracking-[-0.01em] whitespace-nowrap">
+        <Link href={writerNavigation && providers.length === 0 ? writePath! : withProvider(current?.kind === "OPERATOR" ? "/host/calendar" : HOST_HOME_PATH, providerId)} className="font-display text-[1.1875rem] leading-[1.1] font-medium tracking-[-0.01em] whitespace-nowrap">
           NIHO Experience
         </Link>
       </p>
       {providers.length > 0 ? (
         <>
-          <SidebarProviderSwitcher providers={providers} />
+          <SidebarProviderSwitcher providers={providers} providerIdOverride={providerIdOverride} basePath={writerNavigation ? HOST_HOME_PATH : undefined} />
           <nav aria-label={NAV_LABEL}>
             <ul className="flex flex-col gap-0.5">
               {hostDailyNavForChoice(current).map((item) => {
@@ -159,21 +217,24 @@ export function HostSidebar({ account, providers, nihoAppUrl, writePath }: HostC
                   </li>
                 );
               })}
+              {writerItem}
             </ul>
           </nav>
         </>
       ) : null}
+      {providers.length === 0 && writerItem ? <nav aria-label={NAV_LABEL}><ul>{writerItem}</ul></nav> : null}
       <div className="mt-auto pt-3">
-        <AccountMenu account={account} providers={providers} nihoAppUrl={nihoAppUrl} writePath={writePath} variant="sidebar" />
+        <AccountMenu account={account} providers={providers} nihoAppUrl={nihoAppUrl} writePath={writePath} variant="sidebar" providerIdOverride={providerIdOverride} providerSwitchBasePath={writerNavigation ? HOST_HOME_PATH : undefined} />
       </div>
     </header>
   );
 }
 
 /** Both widths use one account menu; the phone variant also owns the modal-like inert behavior. */
-function AccountMenu({ account, providers, nihoAppUrl, writePath, variant = "mobile" }: HostChromeProps & { variant?: "mobile" | "sidebar" }) {
+function AccountMenu({ account, providers, nihoAppUrl, writePath, variant = "mobile", providerIdOverride, providerSwitchBasePath }: HostChromeProps & { variant?: "mobile" | "sidebar"; providerIdOverride?: string; providerSwitchBasePath?: string }) {
   const pathname = usePathname();
-  const providerId = useProviderId();
+  const routeProviderId = useProviderId();
+  const providerId = providerIdOverride ?? routeProviderId;
   const menu = useRef<HTMLDetailsElement>(null);
   const { provider: current } = selectProvider(providers, providerId);
   const writerHref = writePath && current?.kind !== "OPERATOR" && hasOwnerMembership(providers) ? writePath : undefined;
@@ -226,7 +287,7 @@ function AccountMenu({ account, providers, nihoAppUrl, writePath, variant = "mob
         {switchable ? (
           <div className="border-t border-line pt-2 pb-1">
             <p className="px-2.5 pb-1 text-xs font-bold text-muted">提供者</p>
-            <ProviderLinks providers={providers} currentId={switchable.id} onPick={close} />
+            <ProviderLinks providers={providers} currentId={switchable.id} onPick={close} basePath={providerSwitchBasePath} />
           </div>
         ) : null}
         <div className="flex flex-col gap-0.5 border-t border-line py-1">

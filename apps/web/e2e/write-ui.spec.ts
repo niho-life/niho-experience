@@ -1,8 +1,13 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 const ID = "00000000-0000-4000-8000-000000000478";
 const COVER_ID = "00000000-0000-4000-8000-000000000479";
 const UPDATED = "2026-11-08T01:00:00.000Z";
+const auditSerious = async (page: Page) => {
+  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+  expect(results.violations.filter((item) => item.impact === "serious" || item.impact === "critical").map((item) => item.id)).toEqual([]);
+};
 
 type SyntheticGuide = {
   id: string;
@@ -109,9 +114,106 @@ test("opening an existing article does not create an unpublished revision", asyn
   const api = await mockWriterApi(page);
   await page.goto(`/write/write-e2e-fixture/edit/${ID}`);
   await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
+  const nav = page.getByRole("navigation", { name: "ホストのメニュー" });
+  await expect(nav).toBeVisible();
+  await expect(nav.getByRole("link", { name: /A slow Kamakura morning/ })).toHaveAttribute("aria-current", "page");
+  await expect(nav.getByRole("link", { name: /A slow Kamakura morning/ })).toContainText("下書き");
+  await page.getByRole("button", { name: "サイドバーを閉じる" }).click();
+  await expect(nav).toBeHidden();
+  await page.getByRole("button", { name: "サイドバーを開く" }).click();
+  await expect(nav).toBeVisible();
   await page.waitForTimeout(1200); // Exceeds the editor's 900ms autosave debounce.
   expect(api.events.filter((event) => event.startsWith("save:"))).toEqual([]);
   expect(api.guide.revision).toBe(1);
+});
+
+test("1280px and 1024px keep the paper and publish checks aligned in two columns", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "write-desktop", "desktop editor layout");
+  await mockWriterApi(page);
+  for (const width of [1280, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`/write/write-e2e-fixture/edit/${ID}`);
+    const paper = page.locator(".write-rail");
+    const checks = page.locator(".write-check-panel");
+    await expect(paper).toBeVisible();
+    await expect(checks).toBeVisible();
+    const [paperBox, checksBox] = await Promise.all([paper.boundingBox(), checks.boundingBox()]);
+    expect(paperBox).not.toBeNull();
+    expect(checksBox).not.toBeNull();
+    expect(Math.abs(paperBox!.y - checksBox!.y)).toBeLessThanOrEqual(2);
+    expect(checksBox!.x).toBeGreaterThan(paperBox!.x + paperBox!.width);
+    expect(paperBox!.y).toBeLessThan(900);
+    expect(checksBox!.y).toBeLessThan(900);
+    const titleFontSize = await page.getByLabel("タイトル", { exact: true }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+    expect(titleFontSize).toBeLessThanOrEqual(44);
+  }
+});
+
+test("article list filters and searches, distinguishes empty results, and creates only after dialog submit", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "write-desktop", "desktop list and dialog");
+  const api = await mockWriterApi(page);
+  await page.goto("/write/write-e2e-fixture/list");
+  await expect(page.getByRole("heading", { level: 1, name: "記事" })).toBeVisible();
+  const hostNavigation = page.getByRole("navigation", { name: "ホストのメニュー" });
+  const guideList = page.locator(".write-guide-list");
+  await expect(hostNavigation.getByRole("link", { name: "記事", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("3件", { exact: true })).toBeVisible();
+  await expect(guideList.getByRole("link", { name: /A slow Kamakura morning/ }).locator("img")).toHaveAttribute("src", `/write/api/guides/${ID}/media/${COVER_ID}`);
+
+  await page.getByRole("button", { name: /公開停止中/ }).click();
+  await expect(guideList.getByRole("link", { name: /Stopped neighborhood story/ })).toBeVisible();
+  await page.getByRole("button", { name: /公開中/ }).click();
+  await expect(guideList.getByRole("link", { name: /Published neighborhood story/ })).toBeVisible();
+  await expect(guideList.getByRole("link", { name: /A slow Kamakura morning/ })).toHaveCount(0);
+  await page.getByPlaceholder("題名・URLで検索").fill("published-neighborhood-story");
+  await expect(guideList.getByRole("link", { name: /Published neighborhood story/ })).toBeVisible();
+  await page.getByPlaceholder("題名・URLで検索").fill("does-not-exist");
+  await expect(page.getByRole("heading", { name: "条件に合う記事はありません" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "最初の記事を書きましょう" })).toHaveCount(0);
+
+  const sidebarTrigger = hostNavigation.getByRole("button", { name: "新しい記事" });
+  await sidebarTrigger.click();
+  const dialog = page.getByRole("dialog", { name: "新しい記事" });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Shift+Tab");
+  expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(sidebarTrigger).toBeFocused();
+
+  const trigger = page.locator(".write-page-head").getByRole("button", { name: /新しい記事/ });
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  expect(await dialog.evaluate((element: HTMLDialogElement) => element.matches(":modal"))).toBe(true);
+  expect(api.createIds).toHaveLength(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  expect(api.createIds).toHaveLength(0);
+
+  await trigger.click();
+  await dialog.getByLabel("記事タイトル").fill("A new local story");
+  await dialog.getByRole("button", { name: "下書きを作成" }).click();
+  await expect(dialog.locator(".write-error")).toContainText("同じ作成IDで再試行");
+  await dialog.getByRole("button", { name: "下書きを作成" }).click();
+  await expect(page).toHaveURL(new RegExp(`/write/write-e2e-fixture/edit/${ID}$`));
+  expect(api.createIds).toHaveLength(2);
+  expect(api.createIds[0]).toBe(api.createIds[1]);
+});
+
+test("empty list, multi-provider choice and direct /new dialog keep their distinct safe states", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "write-desktop", "desktop list states");
+  const api = await mockWriterApi(page);
+  await page.goto("/write/write-e2e-fixture/list-empty");
+  await expect(page.getByRole("heading", { name: "最初の記事を書きましょう" })).toBeVisible();
+  await expect(page.locator(".write-empty")).toContainText("下書きを作る");
+  await page.goto("/write/write-e2e-fixture/list-multi");
+  await page.locator(".write-page-head").getByRole("button", { name: /新しい記事/ }).click();
+  await expect(page.getByLabel("記事を書く提供者")).toBeVisible();
+  await page.getByRole("button", { name: "新しい記事を閉じる" }).click();
+  await page.goto("/write/write-e2e-fixture/new-direct");
+  await expect(page.getByRole("dialog", { name: "新しい記事" })).toBeVisible();
+  expect(api.createIds).toHaveLength(0);
+  await auditSerious(page);
 });
 
 test("login entry → idempotent create retry → latest save → private preview → publish → public guide → stop", async ({ page }, testInfo) => {
@@ -140,7 +242,8 @@ test("login entry → idempotent create retry → latest save → private previe
 
   await page.getByRole("button", { name: "公開する" }).click();
   await page.getByRole("dialog", { name: "記事を公開" }).getByRole("button", { name: "公開する" }).click();
-  await expect(page.getByText("公開中", { exact: true })).toBeVisible();
+  await expect(page.locator(".write-editor-header .write-publication-status")).toHaveText("公開中");
+  await expect(page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: /A slow Kamakura morning/ })).toContainText("公開中");
   await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
   await expect(page.getByLabel("記事URL")).toHaveAttribute("readonly", "");
   await expect(page.getByRole("status").filter({ hasText: "記事を公開しました。" })).toBeVisible();
@@ -151,8 +254,9 @@ test("login entry → idempotent create retry → latest save → private previe
   await expect(publicPage).toHaveTitle("Public guide");
 
   await body.click(); await page.keyboard.press("End"); await page.keyboard.type(" Unpublished edit.");
-  await expect(page.getByText("公開中・未公開の変更あり", { exact: true })).toBeVisible();
+  await expect(page.locator(".write-editor-header .write-publication-status")).toHaveText("公開中・未公開の変更あり");
   page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByLabel("記事のその他の操作", { exact: true }).click();
   await page.getByRole("button", { name: "公開を停止" }).click();
   await expect(page.getByRole("button", { name: "再公開" })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "公開を停止しました。" })).toBeVisible();
@@ -164,22 +268,23 @@ test("401 keeps the editor mounted for a separate-tab relogin, then 409 freezes 
   const api = await mockWriterApi(page);
   await page.goto(`/write/write-e2e-fixture/edit/${ID}`);
   api.setNextSave("401");
-  await page.getByLabel("タイトル").fill("A title kept through relogin");
+  await page.getByLabel("タイトル", { exact: true }).fill("A title kept through relogin");
   await expect(page.getByText("ログインの有効期限が切れました。編集内容はこのタブに残っています。")).toBeVisible();
-  await expect(page.getByLabel("タイトル")).toHaveValue("A title kept through relogin");
+  await expect(page.getByLabel("タイトル", { exact: true })).toHaveValue("A title kept through relogin");
   const loginPagePromise = page.context().waitForEvent("page");
   await page.getByRole("link", { name: "別タブで再ログイン" }).click();
   const loginPage = await loginPagePromise;
   await expect(loginPage).toHaveTitle("Signed in");
   await page.getByRole("button", { name: "再ログイン後に保存を再試行" }).click();
   await expect(page.getByText(/保存済み/)).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: /A title kept through relogin/ })).toBeVisible();
 
   api.setNextSave("409");
-  await page.getByLabel("タイトル").fill("Conflicting local title");
+  await page.getByLabel("タイトル", { exact: true }).fill("Conflicting local title");
   await expect(page.getByText("自動保存を停止しました。このタブの入力を上書きせず、古いrevisionも再送しません。")).toBeVisible();
   await page.getByRole("button", { name: "サーバーの最新版を確認" }).click();
   await expect(page.getByText(/最新版: revision .*Server latest/)).toBeVisible();
-  await expect(page.getByLabel("タイトル")).toHaveValue("Conflicting local title");
+  await expect(page.getByLabel("タイトル", { exact: true })).toHaveValue("Conflicting local title");
 });
 
 test("cover rights revocation waits for the saved revision and completes", async ({ page }, testInfo) => {
@@ -187,6 +292,7 @@ test("cover rights revocation waits for the saved revision and completes", async
   const api = await mockWriterApi(page, true);
   await page.goto(`/write/write-e2e-fixture/edit-photo/${ID}`);
   await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
+  await page.getByText("カバー写真を編集", { exact: true }).click();
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "掲載権利を取り消す" }).click();
   await expect.poll(() => api.events.includes("revoke-cover")).toBe(true);
@@ -195,11 +301,57 @@ test("cover rights revocation waits for the saved revision and completes", async
   await expect(page.locator(`.write-figure[data-asset-id="${COVER_ID}"]`)).toHaveCount(0);
 });
 
+test("operations stop remains explicit and cannot publish", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "write-desktop", "desktop operations stop");
+  await mockWriterApi(page);
+  await page.goto(`/write/write-e2e-fixture/edit-ops/${ID}`);
+  await expect(page.getByRole("alert").filter({ hasText: "運営により公開が停止されています" })).toContainText("Synthetic policy review");
+  await expect(page.getByRole("button", { name: "公開する" })).toBeDisabled();
+});
+
+test("secondary list failures keep the authorized article body mounted and preserve settings", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "write-desktop", "desktop auxiliary failure");
+  const api = await mockWriterApi(page);
+  await page.goto(`/write/write-e2e-fixture/edit-aux/${ID}`);
+  await expect(page.getByText("一部の設定を読み込めませんでした。本文の編集は続けられます。")).toBeVisible();
+  await expect(page.locator(".write-prosemirror")).toBeVisible();
+  await page.waitForTimeout(1200);
+  expect(api.events.filter((event) => event.startsWith("save:"))).toEqual([]);
+
+  await page.goto(`/write/write-e2e-fixture/edit-list-error/${ID}`);
+  await expect(page.getByRole("status").filter({ hasText: "記事一覧を読み込めませんでした" })).toBeVisible();
+  await expect(page.locator(".write-prosemirror")).toBeVisible();
+  await expect(page.getByText("まだ記事はありません")).toHaveCount(0);
+
+  await page.goto(`/write/write-e2e-fixture/edit-multi-provider/${ID}`);
+  const navigation = page.getByRole("navigation", { name: "ホストのメニュー" });
+  await expect(page.locator(".write-workspace > header > details > summary")).toContainText("Second Owner");
+  await expect(navigation.getByRole("link", { name: "ホーム" })).toHaveAttribute("href", /providerId=provider-two/);
+});
+
+test("publish checks open a closed settings section and focus the field to fix", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "write-desktop", "desktop checklist focus");
+  await mockWriterApi(page);
+  await page.goto(`/write/write-e2e-fixture/edit/${ID}`);
+  await page.getByText("著者", { exact: true }).click();
+  await page.getByLabel("名前").fill("");
+  await page.getByLabel("タイトル", { exact: true }).fill("A title that must remain here");
+  await page.getByText("著者", { exact: true }).click();
+  page.once("dialog", (dialog) => void dialog.dismiss());
+  await page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: /Published neighborhood story/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/write/write-e2e-fixture/edit/${ID}$`));
+  await expect(page.getByLabel("タイトル", { exact: true })).toHaveValue("A title that must remain here");
+  const requirement = page.locator(".write-check-panel li").filter({ hasText: "公開する著者名" });
+  await requirement.getByRole("button", { name: "直す" }).click();
+  await expect(page.getByLabel("名前")).toBeVisible();
+  await expect(page.getByLabel("名前")).toBeFocused();
+});
+
 test("360px and 320px keep primary actions and rails inside the viewport", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name === "write-desktop", "mobile layout");
   await mockWriterApi(page);
   await page.goto(`/write/write-e2e-fixture/edit/${ID}`);
-  const title = page.getByLabel("タイトル");
+  const title = page.getByLabel("タイトル", { exact: true });
   await title.fill("A long title about experiencing the slower side of Kamakura and finding beautiful places around the neighborhood");
   const titleMetrics = await title.evaluate((element) => ({ height: element.clientHeight, content: element.scrollHeight, width: element.clientWidth, contentWidth: element.scrollWidth }));
   expect(titleMetrics.height).toBeGreaterThan(100);
@@ -207,6 +359,13 @@ test("360px and 320px keep primary actions and rails inside the viewport", async
   expect(titleMetrics.contentWidth).toBeLessThanOrEqual(titleMetrics.width + 1);
   await expect(page.getByRole("button", { name: "プレビュー" })).toBeVisible();
   await expect(page.getByRole("button", { name: "公開する" })).toBeVisible();
+  await page.getByRole("button", { name: "設定", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
+  await page.getByLabel("カテゴリ").selectOption("");
+  await page.getByRole("button", { name: "チェック", exact: true }).click();
+  const categoryRequirement = page.locator(".write-check-panel li").filter({ hasText: "カテゴリ" });
+  await categoryRequirement.getByRole("button", { name: "直す" }).click();
+  await expect(page.getByLabel("カテゴリ")).toBeFocused();
   const metrics = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }));
   expect(metrics.scroll).toBeLessThanOrEqual(metrics.width);
   for (const button of [page.getByRole("button", { name: "プレビュー" }), page.getByRole("button", { name: "公開する" })]) {
@@ -215,4 +374,24 @@ test("360px and 320px keep primary actions and rails inside the viewport", async
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(metrics.width);
   }
+  await auditSerious(page);
+  await page.getByRole("button", { name: "本文", exact: true }).click();
+  // Long articles keep the formatting toolbar below the sticky mobile tabs.
+  await page.locator(".write-prosemirror").evaluate((element) => { element.style.minHeight = "1500px"; });
+  await page.evaluate(() => window.scrollTo(0, 700));
+  await expect.poll(async () => {
+    const tabs = await page.locator(".write-mobile-tabs").boundingBox();
+    const toolbar = await page.locator(".write-toolbar").boundingBox();
+    return toolbar && tabs ? toolbar.y - tabs.y - tabs.height : -1;
+  }).toBeGreaterThanOrEqual(0);
+});
+
+test("desktop host sidebar shows 記事 only for the currently selected OWNER", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "write-desktop", "desktop host role gating");
+  await page.goto("/host/auth/mock-login");
+  await page.waitForURL(/\/host\/home/);
+  const nav = page.getByRole("navigation", { name: "ホストのメニュー" });
+  await expect(nav.getByRole("link", { name: "記事", exact: true })).toBeVisible();
+  await page.goto("/host/home?providerId=sample-provider-studio");
+  await expect(nav.getByRole("link", { name: "記事", exact: true })).toHaveCount(0);
 });
