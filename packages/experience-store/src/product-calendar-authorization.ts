@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import { StoreAccessDeniedError } from "./errors.ts";
+import { isHostAccountId } from "./host-accounts.ts";
 import type { DbRow } from "./rows.ts";
 import type { CalendarAccess, HostActor, MembershipRole } from "./types.ts";
 import { assertStoreIdentifier } from "./validation.ts";
@@ -45,13 +46,13 @@ export function effectiveCalendarRole(actor: HostActor, localRole: MembershipRol
 /** A current server-side product ceiling always suppresses stale provider membership. */
 export async function calendarMembershipRole(client: Queryable, actor: HostActor, allowedRoles: readonly MembershipRole[] = ["OWNER", "COHOST", "EDITOR", "VIEWER"]): Promise<MembershipRole | null> {
   if (actor.calendarScope === "OPERATOR") return null;
+  const nativeAccount = isHostAccountId(actor.nihoUserId);
   const result = await client.query<DbRow>(
     `SELECT m.role FROM provider_memberships m
-       LEFT JOIN host_accounts a ON a.id=m.niho_user_id AND m.niho_user_id ~ '^hst_[0-9a-f]{32}$'
+       ${nativeAccount ? "JOIN host_accounts a ON a.id=m.niho_user_id AND a.status='ACTIVE'" : ""}
       WHERE m.provider_id=$1 AND m.niho_user_id=$2
         AND m.active=true AND m.role=ANY($3::text[])
-        AND (m.niho_user_id !~ '^hst_[0-9a-f]{32}$' OR a.status='ACTIVE')
-      FOR SHARE OF m`,
+      FOR SHARE OF m${nativeAccount ? ",a" : ""}`,
     [actor.providerId, actor.nihoUserId, allowedRoles],
   );
   const role = result.rows[0] ? effectiveCalendarRole(actor, String(result.rows[0].role) as MembershipRole) : null;

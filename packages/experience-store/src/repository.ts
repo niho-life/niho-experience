@@ -33,7 +33,7 @@ import { withTransaction } from "./transaction.ts";
 import { snapshotGuestMeetingGuide } from "./guest-meeting-guides.ts";
 import { enqueueNewBookingNotification } from "./host-notification-outbox.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
-import { effectiveCalendarRole, listCalendarProductsForActor, requireProductCalendarAccess } from "./product-calendar-authorization.ts";
+import { calendarMembershipRole, effectiveCalendarRole, listCalendarProductsForActor, requireProductCalendarAccess } from "./product-calendar-authorization.ts";
 import {
   evaluateStoredInventory,
   lockGoogleCalendarUsage,
@@ -199,26 +199,13 @@ export async function requireMembership(
   allowedRoles: readonly MembershipRole[],
 ): Promise<ProviderMembership> {
   validateActor(actor);
-  const result = await client.query<DbRow>(
-    `SELECT m.provider_id, m.niho_user_id, m.role, m.active
-       FROM provider_memberships m
-       LEFT JOIN host_accounts a ON a.id=m.niho_user_id AND m.niho_user_id ~ '^hst_[0-9a-f]{32}$'
-      WHERE m.provider_id = $1
-        AND m.niho_user_id = $2
-        AND m.active = true
-        AND m.role = ANY($3::text[])
-        AND (m.niho_user_id !~ '^hst_[0-9a-f]{32}$' OR a.status='ACTIVE')
-      FOR SHARE OF m`,
-    [actor.providerId, actor.nihoUserId, allowedRoles],
-  );
-  const row = result.rows[0];
-  const role = row ? effectiveCalendarRole(actor, String(row.role) as MembershipRole) : null;
-  if (!row || !role || !allowedRoles.includes(role)) throw new StoreAccessDeniedError();
+  const role = await calendarMembershipRole(client, actor, allowedRoles);
+  if (!role) throw new StoreAccessDeniedError();
   return {
-    providerId: String(row.provider_id),
-    nihoUserId: String(row.niho_user_id),
+    providerId: actor.providerId,
+    nihoUserId: actor.nihoUserId,
     role,
-    active: row.active === true,
+    active: true,
   };
 }
 
