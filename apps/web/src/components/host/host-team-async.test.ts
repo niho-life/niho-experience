@@ -13,12 +13,21 @@ describe("native team async scope", () => {
 
   it("invalidates only an edited lookup without leaving list or command requests busy forever", () => {
     const gate = new HostTeamAsyncGate(); gate.activate("provider-a:OWNER");
-    const list = gate.begin("list"); const lookup = gate.begin("resolve"); const command = gate.begin("command");
+    const command = gate.begin("command"); const list = gate.begin("list"); const lookup = gate.begin("resolve");
     gate.invalidate("resolve");
     expect(gate.current(lookup)).toBe(false);
     expect(gate.current(list)).toBe(true);
     expect(gate.current(command)).toBe(true);
     expect(gate.current(gate.begin("resolve"))).toBe(true);
+  });
+
+  it("invalidates an older list and lookup before a membership command can succeed", () => {
+    const gate = new HostTeamAsyncGate(); gate.activate("provider-a:OWNER");
+    const list = gate.begin("list"); const lookup = gate.begin("resolve");
+    const command = gate.begin("command");
+    expect(gate.current(list)).toBe(false);
+    expect(gate.current(lookup)).toBe(false);
+    expect(gate.current(command)).toBe(true);
   });
 
   it("clears every pending request when permission ends or the component unmounts", () => {

@@ -11,6 +11,10 @@ export class HostTeamAsyncGate {
   begin(kind: TeamRequestKind): TeamRequestToken {
     const scope = this.#scope;
     if (scope === null) throw new Error("Host team request scope is inactive.");
+    if (kind === "command") {
+      this.invalidate("list");
+      this.invalidate("resolve");
+    }
     return { kind, scope, sequence: ++this.#sequence[kind] };
   }
   invalidate(kind: TeamRequestKind): void { this.#sequence[kind] += 1; }

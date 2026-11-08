@@ -111,6 +111,7 @@ function NativeTeamPanel({ providerId, role }: { providerId: string; role: HostP
       if (!parsed || !teamMutationMatchesCommand(parsed, command)) {
         throw new Error("変更結果を確認できません。同じ操作を再送してください。");
       }
+      gate.current.invalidate("list"); gate.current.invalidate("resolve");
       setMembers(parsed.members); setRevision(parsed.teamRevision); setPending(null); setCandidate(null); setCandidateEmail(""); setEmail("");
       setNotice(command.operation === "add" ? "共同ホストを追加しました。" : "共同ホストを外しました。");
     } catch (reason) { if (gate.current.current(token)) setError(teamError(reason, "変更結果を確認できません。同じ操作を再送してください。")); }

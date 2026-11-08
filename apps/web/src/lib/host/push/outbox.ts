@@ -187,7 +187,7 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         providerId,
         kind: "DAY_BEFORE_SUMMARY",
         note: `明日 ${year}年${month}月${day}日の確定予約：${payload.bookingCount}件・${payload.participantCount}名`,
-        url: HOST_BOOKINGS_PATH,
+        url: withQuery(HOST_BOOKINGS_PATH, { providerId }),
         tag: `day-before-summary-${payload.localDate}`,
       },
     };

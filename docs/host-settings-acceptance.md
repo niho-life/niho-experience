@@ -30,9 +30,9 @@ GitHub 変数は必要な boolean 名だけを読み取った。`PROD_HOST_ACCOU
 
 実装後の対象検証:
 
-- Web unit: 14 files / 255 tests 成功（native 通知の読取・保存・再読込、失効、DB障害、チーム API/契約/遅延応答、メール配信設定、配備フラグ）。
+- Web unit: 15 files / 289 tests 成功（native 通知の読取・保存・再読込、失効、DB障害、チーム API/契約/遅延応答、メール配信設定、配備フラグ）。
 - PostgreSQL: 対象11 files / 118 tests 成功、skip 0（チーム CAS・実行者/送信内容の結合、OWNER/COHOST/EDITOR、別提供者、失効、必須通知、メール producer、商品限定運営者、取消/返金、runtime grants）。`createIsolatedDatabase` の合成データだけを使用。
-- Playwright: 実コンポーネントを使う合成ブラウザ3件が成功。StrictMode の再マウント後の失効検出、提供者切替後の古い mutation 応答の無視、変更内容を確認できない200/503後の同一 command 再送を検証した。テストは `e2e/host-settings-access.spec.ts`。外部への実通信・認証・メール送信はしない。
+- Playwright: 実コンポーネントを使う合成ブラウザ4件が成功。StrictMode の再マウント後の失効検出、提供者切替後の古い mutation 応答の無視、変更内容を確認できない200/503後の同一 command 再送、変更成功後の古い一覧による版番号の巻き戻し防止を検証した。テストは `e2e/host-settings-access.spec.ts`。外部への実通信・認証・メール送信はしない。
 - メール関連4 files / 10 tests を追加確認（上記DB対象との重複あり）。ネイティブ受信者が停止された後は宛先を返さず、新しいメールも enqueue しない。
 - Store/Web の型検査は成功。Web lint はエラーなし。今回発生した未使用変数を除去し、既存の `_operation` 未使用の警告は対象外として維持する。
 

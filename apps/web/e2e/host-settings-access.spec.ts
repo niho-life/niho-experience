@@ -136,3 +136,51 @@ test("unknown and unavailable mutation results keep one command until a verified
   expect(new Set(payloads).size).toBe(1);
   expect(errors).toEqual([]);
 });
+
+test("a list begun before adding a member cannot roll back the successful team revision", async ({ page }) => {
+  const errors = await mountHarness(page);
+  const owner = `hst_${"1".repeat(32)}`, member = `hst_${"3".repeat(32)}`;
+  const ownerRow = { hostAccountId: owner, role: "OWNER", label: "owner@example.test" };
+  let release!: () => void;
+  let listed = false, returned = false;
+  let removeRevision: number | undefined;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(`${ORIGIN}/host/api/team/**`, async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      listed = true;
+      await pending;
+      await route.fulfill({ json: { contractVersion: 1, teamRevision: 0, members: [ownerRow] } });
+      returned = true;
+      return;
+    }
+    if (request.url().endsWith("/resolve")) return route.fulfill({ json: { contractVersion: 1, teamRevision: 0, candidate: { hostAccountId: member, label: "member@example.test" } } });
+    const body = request.postDataJSON() as { commandId: string; expectedRevision: number };
+    const remove = request.method() === "DELETE";
+    if (remove) removeRevision = body.expectedRevision;
+    return route.fulfill({ json: {
+      contractVersion: 1, teamRevision: remove ? 2 : 1,
+      members: remove ? [ownerRow] : [ownerRow, { hostAccountId: member, role: "COHOST", label: "member@example.test" }],
+      receipt: { commandId: body.commandId, operation: remove ? "REMOVE_COHOST" : "ADD_COHOST", fingerprint: "a".repeat(64), version: remove ? 2 : 1, repeated: false },
+    } });
+  });
+  page.on("dialog", (dialog) => dialog.accept());
+  try {
+    await page.evaluate(() => window.mountHostTeam("provider-a"));
+    await expect.poll(() => listed).toBe(true);
+    await page.getByLabel("登録済み Experience ホストのメールアドレス").fill("member@example.test");
+    await page.getByRole("button", { name: "アカウントを確認", exact: true }).click();
+    await page.getByRole("button", { name: /範囲を確認して/ }).click();
+    await expect(page.getByRole("status")).toContainText("追加しました");
+    release();
+    await expect.poll(() => returned).toBe(true);
+    await page.waitForTimeout(100);
+    await expect(page.getByText("member@example.test", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "外す", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("外しました");
+    expect(removeRevision).toBe(1);
+    expect(errors).toEqual([]);
+  } finally {
+    release();
+  }
+});
