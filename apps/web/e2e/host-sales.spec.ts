@@ -172,8 +172,8 @@ test("a new provider: registered through NIHO, led from 売上 to its payout acc
   await expect(payout).toContainText("準備済み");
   await expect(payout).toContainText("サンプルの拠点の口座を共有中");
   await expect(payout.getByRole("link", { name: /Stripe で確認/ })).toBeVisible();
-  await expect(provider.getByRole("button", { name: "審査を申請" })).toHaveCount(0);
-  await expect(provider).not.toContainText("審査");
+  await expect(provider).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "審査を申請" })).toHaveCount(0);
 });
 
 test("提供者情報: preview saves an ordinary change without review", async ({ page }) => {

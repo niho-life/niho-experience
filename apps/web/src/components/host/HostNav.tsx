@@ -172,6 +172,7 @@ export function HostSidebar({ account, providers, nihoAppUrl, editorUrl }: HostC
 
 /** Both widths use one account menu; the phone variant also owns the modal-like inert behavior. */
 function AccountMenu({ account, providers, nihoAppUrl, editorUrl, variant = "mobile" }: HostChromeProps & { variant?: "mobile" | "sidebar" }) {
+  const pathname = usePathname();
   const providerId = useProviderId();
   const menu = useRef<HTMLDetailsElement>(null);
   const { provider: current } = selectProvider(providers, providerId);
@@ -228,7 +229,7 @@ function AccountMenu({ account, providers, nihoAppUrl, editorUrl, variant = "mob
           </div>
         ) : null}
         <div className="flex flex-col gap-0.5 border-t border-line py-1">
-          {settingsAllowed ? <Link href={withProvider(HOST_SETTINGS_PATH, providerId)} onClick={close} className={MENU_LINK}>
+          {settingsAllowed ? <Link href={withProvider(HOST_SETTINGS_PATH, providerId)} aria-current={isHostNavActive(pathname, HOST_SETTINGS_PATH) ? "page" : undefined} onClick={close} className={MENU_LINK}>
             <HostIcon name="settings" className="size-3.5" />
             <span>設定</span>
           </Link> : null}

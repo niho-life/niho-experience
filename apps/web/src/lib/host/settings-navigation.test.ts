@@ -23,8 +23,8 @@ describe("host settings navigation", () => {
     const options = { providerId: "provider-one", deviceEnabled: true, articlesEnabled: true };
     const labels = (role: "OWNER" | "EDITOR" | "COHOST" | "VIEWER") => hostSettingsIndexGroups({ ...options, role }).flatMap((group) => group.items.map((item) => item.label));
     expect(labels("OWNER")).toEqual(["提供者情報", "ホスト紹介", "販売者表示", "受取口座", "通知", "カレンダー連携", "チーム", "NIHOサポート", "集合案内", "ログイン情報", "この端末", "記事連携"]);
-    expect(labels("EDITOR")).toEqual(["提供者情報", "カレンダー連携", "NIHOサポート", "集合案内", "ログイン情報", "この端末"]);
-    expect(labels("COHOST")).toEqual(["カレンダー連携", "NIHOサポート", "ログイン情報", "この端末"]);
-    expect(labels("VIEWER")).toEqual(["NIHOサポート", "ログイン情報", "この端末"]);
+    expect(labels("EDITOR")).toEqual(["提供者情報", "通知", "カレンダー連携", "NIHOサポート", "集合案内", "ログイン情報", "この端末"]);
+    expect(labels("COHOST")).toEqual(["通知", "カレンダー連携", "NIHOサポート", "ログイン情報", "この端末"]);
+    expect(labels("VIEWER")).toEqual(["通知", "カレンダー連携", "NIHOサポート", "ログイン情報", "この端末"]);
   });
 });

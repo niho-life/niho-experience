@@ -6,7 +6,7 @@
 
 niho-experience のホスト設定で、現在「準備中」「現在利用できません」と表示される機能を調査し、必要な実装・接続・対象テストを行って、レビュー可能な PR まで進めてください。本番への配備・flag の有効化はこの依頼には含めません。
 
-UI の整理はオーナー承認済みで、別セッションが `paneB-4/host-workspace-simple` で実装しています。基準モックは `idea/mock/host-workspace-simple-v1.html`。このモック、`HostNav.tsx`、`HostShell.tsx`、`HostPublicationWorkspace.tsx`、設定ページの配置・表示用部品を並行して書き換えないでください。通知・チーム・販売者表示の実装側は保存処理・API・repository・専用パネルを担当し、配置に必要なpropsや部品が変わる場合は変更範囲を明示してください。共通の `HostSettingsForm.tsx` は未接続機能側が保存・販売者表示の一本化を先に担当し、UI 側はその差分確定後に表示用sectionだけを接続します。UI 側は設定一覧・設定pageの組み立て・新規表示helperを担当します。
+UI の整理はオーナー承認済みで、別セッションが `paneB-4/host-workspace-simple` で実装しています。基準モックは `idea/mock/host-workspace-simple-v1.html`。このモック、`HostNav.tsx`、`HostShell.tsx`、`HostPublicationWorkspace.tsx`、設定ページの配置・表示用部品を並行して書き換えないでください。通知・チーム・販売者表示の実装側は保存処理・API・repository・専用パネルを担当し、配置に必要なpropsや部品が変わる場合は変更範囲を明示してください。共通の `HostSettingsForm.tsx` は、未接続機能側が保存処理・販売者表示の一本化、UI 側が表示用の任意 `section` prop・表示条件・離脱保護を担当します。UI 側は保存関数の本文を変えません。設定pageの組み立てはUI側で行い、チーム側のnative/legacy modeと既存panelのpropsは機能側の契約を維持して統合します。
 
 ## 作業環境と正本
 

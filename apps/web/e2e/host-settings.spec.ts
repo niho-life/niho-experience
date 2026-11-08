@@ -53,13 +53,17 @@ test("設定の通常入口は役割に合う一覧で、providerId を保って
   await expect(page.getByRole("link", { name: "設定へ戻る" })).toHaveAttribute("href", "/host/settings?providerId=sample-provider-kitchen");
 
   await page.goto("/host/settings?providerId=sample-provider-studio");
-  await expect(main.getByRole("link")).toHaveCount(6);
-  for (const label of ["提供者情報", "カレンダー連携", "NIHOサポート", "集合案内", "ログイン情報", "この端末"]) {
+  await expect(main.getByRole("link")).toHaveCount(7);
+  for (const label of ["提供者情報", "通知", "カレンダー連携", "NIHOサポート", "集合案内", "ログイン情報", "この端末"]) {
     await expect(main.getByRole("link", { name: new RegExp(`^${label}`) }), label).toBeVisible();
   }
-  for (const ownerOnly of ["ホスト紹介", "販売者表示", "受取口座", "通知", "チーム"]) {
+  for (const ownerOnly of ["ホスト紹介", "販売者表示", "受取口座", "チーム"]) {
     await expect(main.getByRole("link", { name: new RegExp(ownerOnly) }), ownerOnly).toHaveCount(0);
   }
+  await main.getByRole("link", { name: "通知", exact: true }).click();
+  await expect(page.getByRole("region", { name: "通知", exact: true })).toContainText("オーナーが変えられます");
+  await expect(page.getByRole("button", { name: "宛先を変える", exact: true })).toBeVisible();
+  await expect(page.getByRole("switch", { name: "新しいレビュー", exact: true })).toHaveCount(0);
 });
 
 test("preview の提供者設定は審査を出さず、公開条件の案内を残して通常保存する", async ({ page }) => {

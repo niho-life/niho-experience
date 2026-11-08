@@ -12,6 +12,7 @@ import { PREPARING_STATUS, PROVIDER_REVIEW_STATUS } from "@/host/status";
 import type { HostGoogleConnection, HostMeetingDefaults, HostNotificationKey, HostSettings } from "@/host/types";
 import type { HostProviderRole } from "@/lib/host/providers";
 import { HOST_CALENDAR_PATH, withProvider } from "@/lib/host/routes";
+import type { HostSettingsSection } from "@/lib/host/settings-navigation";
 import { DISABLED } from "./editor-parts";
 import { FIELD_DISABLED, FieldRow, FieldSection, INPUT, KindSegment, NARROW, TEXTAREA } from "./fields";
 import { MeetingPointFields } from "./MeetingPointFields";
@@ -22,6 +23,7 @@ import { HostIcon } from "./HostIcon";
 import { HostNoticeLine } from "./HostNoticeLine";
 import { HostNotificationPanel } from "./HostNotificationPanel";
 import { HostPayoutPanel } from "./HostPayoutPanel";
+import { HostSettingsLeaveProtection } from "./HostSettingsLeaveProtection";
 import { StatusPill } from "./ui";
 
 /** The fields of 提供者情報 that differ from what NIHO has (the seller page only for the owner). */
@@ -34,6 +36,8 @@ function changedFields(saved: ProviderProfile, now: ProviderProfile, owner: bool
 }
 
 export interface HostSettingsFormProps {
+  /** UI-only projection; omitted by older callers to keep the complete settings form. */
+  section?: HostSettingsSection;
   providerId: string;
   role: HostProviderRole | null;
   settings: HostSettings;
@@ -79,7 +83,7 @@ export interface HostSettingsFormProps {
  * their own, and a form cannot hold another. The meeting fields join it with `form`, so 保存 still
  * checks them.
  */
-export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account, notificationAddress, payoutPanel , bookingGuidesHref = null }: HostSettingsFormProps) {
+export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account, notificationAddress, payoutPanel , bookingGuidesHref = null, section = "all" }: HostSettingsFormProps) {
   const ids = useId();
   const formId = `${ids}-form`;
   const owner = role === "OWNER";
@@ -234,12 +238,20 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const sellerOwnerHelp = `${ids}-seller-owner`;
   const kindHelp = `${ids}-kind-help`;
   const reviewWhy = `${ids}-review-why`;
+  const show = (part: HostSettingsSection) => section === "all" || section === part;
+  const editableSection = show("provider") || show("meeting") || show("notifications");
+  const parentDirty = unsaved || meetingChanged || Object.keys(notificationChanges(savedNotifications, notifications)).length > 0;
+  // Other panels own their commands. Do not install an inactive guard over a child's history guard.
+  const leaveMode = section !== "all" && editableSection
+    ? saving || submitting ? "saving" as const : parentDirty ? "dirty" as const : null
+    : null;
 
   return (
     <>
+      {leaveMode ? <HostSettingsLeaveProtection mode={leaveMode} /> : null}
       <div className="flex flex-col gap-3.5">
         <form id={formId} className="flex flex-col gap-3.5" onSubmit={submit}>
-          <FieldSection id="settings-provider" title="提供者情報" status={!preview && reviewStatus ? PROVIDER_REVIEW_STATUS[reviewStatus] : null}>
+          {show("provider") ? <FieldSection id="settings-provider" title="提供者情報" status={!preview && reviewStatus ? PROVIDER_REVIEW_STATUS[reviewStatus] : null}>
             <FieldRow label="掲載名" htmlFor="settings-display-name">
               <input
                 id="settings-display-name"
@@ -336,22 +348,22 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
             ) : (
               <HostNoticeLine notice={reviewNotice} className="pt-1" />
             )}
-          </FieldSection>
+          </FieldSection> : null}
 
         </form>
 
-        {owner ? payoutPanel ?? <HostPayoutPanel providerId={providerId} displayName={saved.displayName} payout={payout} onPayout={setPayout} initialNotice={connectNotice} preview={preview} /> : null}
+        {owner && show("payout") ? payoutPanel ?? <HostPayoutPanel providerId={providerId} displayName={saved.displayName} payout={payout} onPayout={setPayout} initialNotice={connectNotice} preview={preview} /> : null}
 
-        {preview ? <HostCalendarPanel calendar={settings.calendar} connection={googleConnection} preview /> :
+        {show("calendar") ? (preview ? <HostCalendarPanel calendar={settings.calendar} connection={googleConnection} preview /> :
           liveCalendar?.status === "live" ? <HostLiveCalendarPanel providerId={providerId} load={liveCalendar} /> :
           <FieldSection id="settings-calendar" title="カレンダー" status={null}>
             {liveCalendar?.status === "error" ? <p role="alert" className="pb-1 text-[0.78125rem] leading-normal font-extrabold text-danger">{CALENDAR_LOAD_FAILED_TEXT}</p> : null}
             <FieldRow label="開催枠と Google の予定" labelId="settings-calendar-link">
               <a href={withProvider(HOST_CALENDAR_PATH, providerId)} className="font-bold text-moss underline underline-offset-4">カレンダーを開く</a>
             </FieldRow>
-          </FieldSection>}
+          </FieldSection>) : null}
 
-        <FieldSection id="settings-meeting" title="既定の集合案内" status={null}>
+        {show("meeting") ? <FieldSection id="settings-meeting" title="既定の集合案内" status={null}>
           {meetingEditable && meeting ? (
             <MeetingPointFields idPrefix="settings-meeting" value={meeting} form={formId} onChange={(value) => { setMeeting(value); setNotice(null); }} />
           ) : (
@@ -363,15 +375,15 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
               </p>
             ) : <p className="text-ink-soft">既定の集合案内はオーナーと編集者が変えられます。</p>
           )}
-        </FieldSection>
+        </FieldSection> : null}
 
-        <HostNotificationPanel view={notificationView} rows={notifications} onToggle={toggle} providerId={providerId} address={notificationAddress} />
+        {show("notifications") ? <HostNotificationPanel view={notificationView} rows={notifications} onToggle={toggle} providerId={providerId} address={notificationAddress} /> : null}
       </div>
 
-      <div className="mt-3.5">{account}</div>
+      {section === "all" || ["team", "articles", "support", "device", "account"].includes(section) ? <div className="mt-3.5">{account}</div> : null}
 
       {/* PC: a leaf pill floating at the bottom right. Phones: a full-width band just above the bottom tabs. */}
-      <div className="sticky bottom-[var(--host-tabbar)] z-10 -mx-4 mt-4 -mb-6 border-t border-line bg-canvas px-4 pt-2.5 pb-3.5 md:pointer-events-none md:bottom-4 md:mx-0 md:mb-0 md:flex md:items-center md:justify-end md:gap-3 md:border-0 md:bg-transparent md:p-0">
+      {editableSection ? <div className="sticky bottom-[var(--host-tabbar)] z-10 -mx-4 mt-4 -mb-6 border-t border-line bg-canvas px-4 pt-2.5 pb-3.5 md:pointer-events-none md:bottom-4 md:mx-0 md:mb-0 md:flex md:items-center md:justify-end md:gap-3 md:border-0 md:bg-transparent md:p-0">
         <p role="status" className="text-center text-[0.78125rem] font-extrabold text-moss md:text-right">
           {notice?.tone === "success" ? (
             <span className="inline-flex items-center gap-1 pb-2 md:rounded-full md:bg-canvas md:px-3 md:py-1.5">
@@ -393,7 +405,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
         >
           {saving ? "保存しています…" : "保存"}
         </button>
-      </div>
+      </div> : null}
 
       {confirming ? (
         <HostConfirmDialog

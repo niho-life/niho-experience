@@ -24,7 +24,7 @@ async function attemptNavigation(page: Page) {
   const account = page.locator("summary:visible", { hasText: "のアカウント" });
   if (!(await logout.count()) && await account.count()) await account.click();
   if (await logout.count()) await logout.click();
-  else await page.getByRole("link", { name: "ホームへ戻る", exact: true }).click();
+  else await page.getByRole("link", { name: /^(ホーム|設定)へ戻る$/ }).filter({ visible: true }).click();
 }
 
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", headers: { "cache-control": "private, no-store" }, body: JSON.stringify(body) });

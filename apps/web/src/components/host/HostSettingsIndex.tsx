@@ -33,10 +33,10 @@ export function HostSettingsIndex({ providerId, role, deviceEnabled, articlesEna
           <ul className="divide-y divide-line">
             {group.items.map((item) => (
               <li key={item.label}>
-                <Link href={item.href} className="flex min-h-[64px] items-center gap-3 px-4 py-3 hover:bg-sand md:px-5">
+                <Link href={item.href} aria-label={item.label} aria-describedby={`settings-description-${group.label}-${item.label}`} className="flex min-h-[64px] items-center gap-3 px-4 py-3 hover:bg-sand md:px-5">
                   <span className="min-w-0 flex-1">
                     <span className="block font-extrabold">{item.label}</span>
-                    <span className="block text-[0.78125rem] leading-normal text-muted">{item.description}</span>
+                    <span id={`settings-description-${group.label}-${item.label}`} className="block text-[0.78125rem] leading-normal text-muted">{item.description}</span>
                   </span>
                   <HostIcon name="chevronRight" className="size-4 text-muted" />
                 </Link>

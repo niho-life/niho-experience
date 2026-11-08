@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { hostFetch } from "@/lib/host/client-session";
-import { HOST_HOME_PATH } from "@/lib/host/routes";
+import { HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
 import { FieldRow, FieldSection } from "./fields";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { HostLeaveDialog, useHostLeaveGuard, type HostLeaveMode } from "./HostLeaveGuard";
 import { consoleButtonClass } from "./host-ui";
 import { HostSubHeader } from "./HostSubHeader";
+import { HostSettingsBackLink } from "./HostSettingsBackLink";
 import { HostPageBody, PageHead } from "./ui";
 
 const CONSENT_VERSION = "2026-10-23";
@@ -128,8 +129,9 @@ export function HostExperienceSupportSettings({ providerId, displayName }: { pro
 
   const fee = choice ?? saved?.supportEnabled ?? false;
   return <>
-    <HostSubHeader backHref={HOST_HOME_PATH} backLabel="ホーム" title="NIHOサポート" />
+    <HostSubHeader backHref={withProvider(HOST_SETTINGS_PATH, providerId)} backLabel="設定" title="NIHOサポート" />
     <HostPageBody>
+      <HostSettingsBackLink providerId={providerId} desktopOnly />
       <PageHead title="ExperienceのNIHOサポート" />
       <p className="mb-4 max-w-3xl text-ink-soft">{displayName}で新しく受け付ける予約の支援範囲と手数料を設定します。</p>
       <FieldSection id="experience-support-setting" title={displayName} status={currentConsent ? { label: saved?.supportEnabled ? "サポートON" : "サポートOFF", tone: saved?.supportEnabled ? "ok" : "draft" } : { label: "同意が必要", tone: "wait" }}>

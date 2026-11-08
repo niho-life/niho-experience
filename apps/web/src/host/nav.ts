@@ -1,4 +1,4 @@
-import { HOST_BOOKINGS_PATH, HOST_HOME_PATH, HOST_MESSAGES_PATH, HOST_NAV, HOST_REVIEWS_PATH, HOST_SUPPORT_PATH, HOST_TRANSLATE_PATH } from "@/lib/host/routes";
+import { HOST_BOOKINGS_PATH, HOST_HOME_PATH, HOST_MESSAGES_PATH, HOST_NAV, HOST_PROFILE_PATH, HOST_REVIEWS_PATH, HOST_SELLER_PATH, HOST_SETTINGS_PATH, HOST_SUPPORT_PATH, HOST_TRANSLATE_PATH } from "@/lib/host/routes";
 
 /** Path only: `?providerId=` (and any other query or hash) never changes which item is selected. */
 function pathOf(location: string): string {
@@ -11,7 +11,8 @@ function pathOf(location: string): string {
  * (#108). The menu keeps ホーム selected and phones get "‹ ホーム" instead of the brand header and
  * the bottom tabs.
  */
-const HOME_SUB_SCREENS: readonly string[] = [HOST_MESSAGES_PATH, HOST_REVIEWS_PATH, HOST_SUPPORT_PATH, HOST_TRANSLATE_PATH];
+const HOME_SUB_SCREENS: readonly string[] = [HOST_MESSAGES_PATH, HOST_REVIEWS_PATH, HOST_TRANSLATE_PATH];
+const SETTINGS_SUB_SCREENS: readonly string[] = [HOST_PROFILE_PATH, HOST_SELLER_PATH, HOST_SUPPORT_PATH];
 
 const isUnder = (path: string, target: string) => path === target || path.startsWith(`${target}/`);
 
@@ -20,6 +21,7 @@ export function isHostNavActive(location: string, href: string): boolean {
   const path = pathOf(location);
   const target = pathOf(href);
   if (isUnder(path, target)) return true;
+  if (target === HOST_SETTINGS_PATH) return SETTINGS_SUB_SCREENS.some((screen) => isUnder(path, screen));
   return target === HOST_HOME_PATH && HOME_SUB_SCREENS.some((screen) => isUnder(path, screen));
 }
 
@@ -54,6 +56,7 @@ export function hostBackLink(location: string, search?: string | URLSearchParams
   for (const sub of QUERY_SUB_SCREENS) {
     if (path === sub.path && sub.params.some((param) => query.get(param))) return { href: sub.path, label: sub.label };
   }
+  if (SETTINGS_SUB_SCREENS.some((screen) => isUnder(path, screen))) return { href: HOST_SETTINGS_PATH, label: "設定" };
   if (HOME_SUB_SCREENS.some((screen) => isUnder(path, screen))) return { href: HOST_HOME_PATH, label: "ホーム" };
   return null;
 }

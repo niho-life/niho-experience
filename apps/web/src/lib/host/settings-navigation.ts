@@ -97,11 +97,13 @@ export function hostSettingsIndexGroups(input: {
       { label: "販売者表示", description: "旅行者に公開する販売者の情報", href: withProvider(HOST_SELLER_PATH, providerId) },
       { label: "受取口座", description: "売上を受け取る口座", href: section("payout") },
     );
-    operations.push({ label: "通知", description: "宛先・受け取る通知", href: section("notifications") });
   }
-  if (role === "OWNER" || role === "EDITOR" || role === "COHOST") {
-    operations.push({ label: "カレンダー連携", description: "Google の予定と空き状況", href: section("calendar") });
-  }
+  // Every signed-in provider role can manage their own email address. The panel keeps
+  // provider-wide notification switches and Google connection commands permissioned.
+  operations.push(
+    { label: "通知", description: "宛先・受け取る通知", href: section("notifications") },
+    { label: "カレンダー連携", description: "Google の予定と空き状況", href: section("calendar") },
+  );
   if (role === "OWNER") {
     operations.push(
       { label: "チーム", description: "一緒に体験を運営する人", href: section("team") },
