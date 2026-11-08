@@ -92,7 +92,8 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
   await signIn(page);
   const nav = menu(page);
   await expect(nav).toHaveCount(1);
-  await expect(nav.getByRole("link")).toHaveText(["ホーム", "体験", "カレンダー", "予約", "売上"]);
+  const dailyLinks = ["ホーム", "体験", "カレンダー", "予約", "売上"];
+  await expect(nav.getByRole("link")).toHaveText(isDesktop(testInfo.project.name) ? [...dailyLinks, "記事"] : dailyLinks);
   await expect(nav.getByRole("link", { name: "ホーム" })).toHaveAttribute("aria-current", "page");
   const viewport = page.viewportSize()!;
   const navBox = (await nav.boundingBox())!;
