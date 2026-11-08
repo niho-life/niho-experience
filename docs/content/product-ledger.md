@@ -18,7 +18,7 @@
 
 公開URLは [Kamakura Community Dinner with Locals](https://experience.niho.life/experiences/community-dinner-with-locals)。[candidate](https://github.com/niho-life/niho-experience/actions/runs/42387874462) → [promote](https://github.com/niho-life/niho-experience/actions/runs/42388212552)で、SHA `306613ac0228a33dab1da93eadba911f39c65a21`・revision `niho-experience-00038-but`を100%へ昇格した。`BOOKINGS_ENABLED=true`、ゲスト予約とホスト機能ON、正規SITE_URL、制限済みingressを実環境から読戻し確認した。
 
-**同日の追加決定：NIHO 企画ページの Dinner 受付を統一する。** オーナーは「現行ページは残し、Dinner の予約を Experience へ統一する」を選択した。NIHO の本文・写真・URLを残し、Dinner の開催枠・残席・販売条件を Experience から表示して、新規の予約入力は Experience へ進める。ホストカレンダーの変更と Google の予定は同じ Experience 在庫に反映する。NIHO の既存予約と Tea time の受付は今回の統一対象に含めず、GetYourGuide との併売を継続する。[NIHO #19966](https://github.com/niho-coliving/niho-app/issues/19966) で実装・配備を追い、本番の読戻し受入までは、下記の併売承認と区別して「統一済み」と扱わない。[責任分界](../adr/0002-experience-domain-ownership.md#community-dinner-の-niho-企画ページからの予約2026-11-08)を参照する。
+**同日の最新決定：NIHO と Experience の予約受付は分けたままにする。** NIHO 企画ページからの予約は NIHO 内の予定・予約として扱い、Experience の予約は Experience で扱う。同じ体験のコンテンツページは併存してよい。Experience のホストカレンダーに出す予約は Experience の予約とし、開催枠・在庫・Google Calendar 連携を Experience 内で完結させる。NIHO の枠への書戻し、受付の統一・停止、Experience への予約入口の強制切替は行わない。直前の受付統一案は撤回し、[NIHO PR #19968](https://github.com/niho-coliving/niho-app/pull/19968) を Draft のまま保留する（本番未反映）。NIHO・GetYourGuide との併売を認める既存の決定は維持する。詳しくは[責任分界](../adr/0002-experience-domain-ownership.md)を参照する。
 
 現在値の一覧は[登録引き渡し表](registration-handoff.md)。技術受入の証跡は [#471](https://github.com/niho-life/niho-experience/issues/471#issuecomment-6708625143)・[#472](https://github.com/niho-life/niho-experience/issues/472#issuecomment-6708601329)。以下の過去の決定・掲載元調査・staging仮値は履歴であり、現在の保存状態はこの節を優先する。
 
