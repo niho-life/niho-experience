@@ -115,8 +115,9 @@ test("an editor cannot open sales or the payout account", async ({ page }) => {
   await page.waitForURL("**/host/settings?providerId=sample-provider-studio");
   const provider = providerPanel(page);
   await expect(provider).not.toContainText("審査");
-  await expect(provider.getByRole("textbox", { name: "特商法表示 URL" })).toBeDisabled();
-  await expect(provider).toContainText("特商法表示 URL はオーナーが変えられます。");
+  await expect(provider.getByRole("textbox", { name: "特商法表示 URL" })).toHaveCount(0);
+  await expect(provider.getByRole("link", { name: "販売者情報を確認・編集" })).toHaveCount(0);
+  await expect(provider).toContainText("販売者情報はオーナーが管理します。");
   await expect(provider.getByRole("button", { name: "審査を申請" })).toHaveCount(0);
   await expect(provider).toContainText("提供者規約");
   await expect(payoutPanel(page)).toHaveCount(0);
@@ -188,10 +189,11 @@ test("提供者情報: preview saves an ordinary change without review", async (
   await expect(provider).not.toContainText("審査");
   await expect(provider.getByRole("radio", { name: "個人" })).toBeChecked();
   await expect(provider.getByRole("radio", { name: "個人" })).toBeDisabled();
-  // 販売者表示: the provider's own site; NIHO's page for providers without one is not ready yet.
-  await expect(provider.getByRole("radio", { name: "自分のサイトに表示する" })).toBeChecked();
-  await expect(provider.getByRole("radio", { name: /NIHO のページに表示する（自前サイトがない事業者）/ })).toBeDisabled();
-  await expect(provider.getByRole("group", { name: "販売者表示" })).toContainText("準備中");
+  // One seller-disclosure source: the dedicated screen keeps its own consent and version contract.
+  await expect(provider.getByRole("radio", { name: "自分のサイトに表示する" })).toHaveCount(0);
+  await expect(provider.getByRole("textbox", { name: "特商法表示 URL" })).toHaveCount(0);
+  await expect(provider.getByRole("link", { name: "販売者情報を確認・編集" })).toHaveAttribute("href", "/host/seller?providerId=sample-provider-kitchen");
+  await expect(provider.getByRole("group", { name: "販売者表示" })).not.toContainText("準備中");
   await expect(provider).toContainText("提供者規約");
   await expect(provider).toContainText("同意済み");
 
@@ -301,7 +303,7 @@ test.describe("320px narrow phone", () => {
     await expect(providerPanel(page).getByRole("button", { name: "審査を申請" })).toHaveCount(0);
     // Inputs stay 16px on phones (iOS does not zoom in).
     expect(await payout.getByRole("combobox", { name: "既存の口座を使う" }).evaluate((select) => getComputedStyle(select).fontSize)).toBe("16px");
-    expect(await providerPanel(page).getByRole("textbox", { name: "特商法表示 URL" }).evaluate((input) => getComputedStyle(input).fontSize)).toBe("16px");
+    await inside(providerPanel(page).getByRole("link", { name: "販売者情報を確認・編集" }), "settings: 販売者情報を確認・編集");
   });
 });
 
