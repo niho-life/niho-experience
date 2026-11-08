@@ -17,7 +17,7 @@ vi.mock("@/lib/host/server", () => ({
 
 import HostConsoleLayout from "./layout";
 import { HostShell } from "@/components/host/HostShell";
-import { hostNavForChoice } from "@/components/host/HostNav";
+import { hostNavForChoice, hostWriterNavAllowed } from "@/components/host/HostNav";
 
 beforeEach(() => {
   mocks.assignments.mockResolvedValue([{ providerId: "provider-a", productId: "tea-a", productTitle: "Synthetic tea", sellerDisplayName: "Synthetic seller", assignmentLabel: "Teacher", grantVersion: 1 }]);
@@ -34,6 +34,11 @@ const shellChoices = async () => (await shellProps()).providers;
 
 it("always sends the host writer entry to same-origin /write", async () => {
   expect((await shellProps()).writePath).toBe("/write");
+  const choices = await shellChoices();
+  expect(hostWriterNavAllowed(choices.find((choice) => choice.id === "owned-provider"), "/write")).toBe(true);
+  expect(hostWriterNavAllowed(choices.find((choice) => choice.id === "provider-a"), "/write")).toBe(false);
+  expect(hostWriterNavAllowed(undefined, "/write", true)).toBe(true);
+  expect(hostWriterNavAllowed(undefined, "/write")).toBe(false);
 });
 
 it("passes the actual HostShell an operator choice for a COHOST with an owned identity and assigned product", async () => {

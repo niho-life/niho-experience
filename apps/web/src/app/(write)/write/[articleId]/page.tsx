@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { WriteEditor } from "@/components/write/WriteEditor";
+import { config } from "@/lib/config";
 import { markdownToWriteDocument, UnsupportedWriteContentError } from "@/lib/write/document";
 import { loadWritePageAccess } from "@/lib/write/page-access";
 import { privateGuideArticle, validArticleId, writeApiError } from "@/lib/write/server";
@@ -12,12 +13,21 @@ async function readArticle(context: Awaited<ReturnType<typeof loadWritePageAcces
   if (!context.ok) return { ok: false as const, status: 503 };
   try {
     const article = await context.context.repository.getArticle(context.context.actorId, articleId);
-    const [categories, assets, products] = await Promise.all([
+    const [categories, assets, products] = await Promise.allSettled([
       context.context.repository.listActiveCategories(),
       context.context.repository.listReadyMediaAssets(context.context.actorId, articleId),
       context.context.products.listProducts({ providerId: article.subject.providerId, nihoUserId: context.context.actorId }),
     ]);
-    return { ok: true as const, article, categories, assets, products };
+    return {
+      ok: true as const,
+      article,
+      categories: categories.status === "fulfilled" ? categories.value : [],
+      assets: assets.status === "fulfilled" ? assets.value : [],
+      products: products.status === "fulfilled" ? products.value : [],
+      categoriesAvailable: categories.status === "fulfilled",
+      assetsAvailable: assets.status === "fulfilled",
+      productsAvailable: products.status === "fulfilled",
+    };
   }
   catch (error) { return { ok: false as const, status: writeApiError(error).status }; }
 }
@@ -34,11 +44,19 @@ export default async function WriteArticlePage({ params }: { readonly params: Pr
   let initialDocument = null;
   try { initialDocument = markdownToWriteDocument(loaded.article.content.markdown); }
   catch (error) { if (!(error instanceof UnsupportedWriteContentError)) throw error; }
+  let articles: ReturnType<typeof privateGuideArticle>[] = [];
+  let articlesAvailable = true;
+  try { articles = (await access.context.repository.listArticles(access.context.actorId)).map(privateGuideArticle); }
+  catch { articlesAvailable = false; /* Sidebar list is secondary: never drop an authorized editor. */ }
   return <WriteEditor
     guide={privateGuideArticle(loaded.article)}
     categories={loaded.categories}
     assets={loaded.assets}
     products={loaded.products.filter((product) => product.status === "PUBLISHED").map((product) => ({ id: product.id, providerId: product.providerId, slug: product.slug, title: product.publicTitle }))}
     initialDocument={initialDocument}
+    chrome={{ account: access.context.account, providers: access.context.ownerProviders, nihoAppUrl: config.nihoWebOrigin, articles, articlesAvailable }}
+    categoriesAvailable={loaded.categoriesAvailable}
+    assetsAvailable={loaded.assetsAvailable}
+    productsAvailable={loaded.productsAvailable}
   />;
 }
