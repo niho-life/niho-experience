@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { HOST_NAV, withProvider, withQuery } from "@/lib/host/routes";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "./nav";
-import { hostNavForChoice, hostNavForRole } from "@/components/host/HostNav";
+import { hostDailyNavForChoice, hostNavForChoice, hostNavForRole } from "@/components/host/HostNav";
 
 const selected = (location: string) => HOST_NAV.filter((item) => isHostNavActive(location, item.href)).map((item) => item.label);
 
 describe("host navigation", () => {
-  it("lists the five destinations in order", () => {
+  it("keeps every permissioned section while showing five daily destinations", () => {
     expect(HOST_NAV.map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "売上", "設定"]);
+    expect(hostDailyNavForChoice({ kind: "MEMBER", id: "provider-a", displayName: "Synthetic seller", memberRole: "OWNER" }).map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "売上"]);
   });
 
   it("hides sales from COHOST and EDITOR while keeping OWNER sales", () => {
@@ -29,6 +30,7 @@ describe("host navigation", () => {
     expect(hostNavForChoice({ ...operator, screens: ["/host/calendar", "/host/bookings", "/host/settings"] }).map((item) => item.href)).toEqual(["/host/calendar", "/host/bookings", "/host/settings"]);
     // Never a provider screen it was not given, and カレンダー always.
     expect(hostNavForChoice({ ...operator, screens: ["/host/settings"] }).map((item) => item.href)).toEqual(["/host/calendar", "/host/settings"]);
+    expect(hostDailyNavForChoice({ ...operator, screens: ["/host/calendar", "/host/bookings", "/host/settings"] }).map((item) => item.href)).toEqual(["/host/calendar", "/host/bookings"]);
   });
 
   it("selects exactly one item on each top page", () => {

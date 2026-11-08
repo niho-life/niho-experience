@@ -67,6 +67,14 @@ export const HOST_NAV = [
 ] as const;
 
 /**
+ * The five places a host uses during day-to-day operations. Settings remains in
+ * HOST_NAV because it is still a permissioned console section, but it is opened
+ * from the account menu instead of competing with daily work in the sidebar or
+ * phone tab bar.
+ */
+export const HOST_DAILY_NAV = HOST_NAV.filter((item) => item.href !== HOST_SETTINGS_PATH);
+
+/**
  * `href` with these query values set, after the query it already has. Empty values are left
  * out, so `withQuery("/host/bookings", { filter: null })` stays "/host/bookings". A `#hash`
  * (one review, #108) stays at the end.

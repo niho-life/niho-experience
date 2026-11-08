@@ -110,9 +110,7 @@ test("an editor cannot open sales or the payout account", async ({ page }) => {
   await expect(menu(page).getByRole("link", { name: "売上" })).toHaveCount(0);
   expect((await page.goto("/host/sales?providerId=sample-provider-studio"))?.status()).toBe(404);
 
-  await page.goto("/host/home?providerId=sample-provider-studio");
-  await menu(page).getByRole("link", { name: "設定" }).click();
-  await page.waitForURL("**/host/settings?providerId=sample-provider-studio");
+  await page.goto("/host/settings?providerId=sample-provider-studio&section=all");
   const provider = providerPanel(page);
   await expect(provider).not.toContainText("審査");
   await expect(provider.getByRole("textbox", { name: "特商法表示 URL" })).toBeDisabled();
@@ -145,8 +143,7 @@ test("a new provider: registered through NIHO, led from 売上 to its payout acc
   await expect(page.getByRole("heading", { level: 1, name: "ホーム" })).toBeVisible();
   await expect(menu(page)).toHaveCount(1);
 
-  await menu(page).getByRole("link", { name: "設定" }).click();
-  await page.waitForURL(/\/host\/settings$/);
+  await page.goto("/host/settings?section=all");
   const provider = providerPanel(page);
   const payout = payoutPanel(page);
   await expect(provider.getByRole("group", { name: "販売者表示" })).toBeVisible();
@@ -163,7 +160,7 @@ test("a new provider: registered through NIHO, led from 売上 to its payout acc
   await expect(notice).toContainText("売上を受け取る口座を接続してください。");
   await expect(lines(page, "2026年10月")).toContainText("この月の売上はまだありません");
   await notice.getByRole("link", { name: "口座を設定" }).click();
-  await page.waitForURL(/\/host\/settings#settings-payout$/);
+  await page.waitForURL(/\/host\/settings\?section=payout#settings-payout$/);
   await expect(payout).toBeInViewport();
 
   const share = payout.getByRole("button", { name: "共有する" });
@@ -181,7 +178,7 @@ test("a new provider: registered through NIHO, led from 売上 to its payout acc
 
 test("提供者情報: preview saves an ordinary change without review", async ({ page }) => {
   await signIn(page);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const provider = providerPanel(page);
   const bio = provider.getByRole("textbox", { name: "紹介" });
   const save = page.getByRole("button", { name: "保存", exact: true });
@@ -212,7 +209,7 @@ test("提供者情報: preview saves an ordinary change without review", async (
 
 test("the payout account: Stripe's page in the preview, and the way back from Stripe", async ({ page }) => {
   await signIn(page, "?mock=payments-pending");
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const payout = payoutPanel(page);
   await payout.getByRole("button", { name: "Stripe で口座を接続" }).click();
   await expect(payout.getByRole("status")).toHaveText(PREVIEW_STRIPE);
@@ -221,6 +218,7 @@ test("the payout account: Stripe's page in the preview, and the way back from St
 
   // Back from Stripe without an account (?connect=return): NIHO says there is none yet.
   await page.goto("/host/settings?connect=return");
+  await expect(page.getByRole("heading", { level: 1, name: "受取口座" })).toBeVisible();
   await expect(payoutPanel(page).getByRole("alert")).toHaveText("口座がまだ接続されていません。「Stripe で口座を接続」から進めてください。");
   // The query is gone, so a reload does not ask again.
   await expect(page).toHaveURL(/\/host\/settings$/);
@@ -241,7 +239,7 @@ test("sales, payout and registration screens have no WCAG 2.2 AA violations", as
   await audit(page, "/host/sales");
   await page.goto("/host/sales?month=2026-11");
   await audit(page, "/host/sales (empty month)");
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   await providerPanel(page).getByRole("textbox", { name: "紹介" }).fill("合成の紹介");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -252,7 +250,7 @@ test("sales, payout and registration screens have no WCAG 2.2 AA violations", as
   await page.goto("/host/sales");
   await expect(page.getByRole("heading", { name: "受取口座の設定が済んでいません" })).toBeVisible();
   await audit(page, "/host/sales (payout not ready)");
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   await expect(payoutPanel(page).getByRole("combobox", { name: "既存の口座を使う" })).toBeVisible();
   await audit(page, "/host/settings (payout not connected)");
   await page.goto("/host/settings?connect=return");
@@ -292,7 +290,7 @@ test.describe("320px narrow phone", () => {
     await page.goto("/host/sales");
     expect(await overflowX(page), "sales with the note").toBeLessThanOrEqual(0);
     await inside(page.getByRole("link", { name: "口座を設定" }), "sales: 口座を設定");
-    await page.goto("/host/settings");
+    await page.goto("/host/settings?section=all");
     expect(await overflowX(page), "settings").toBeLessThanOrEqual(0);
     const payout = payoutPanel(page);
     await inside(payout.getByRole("button", { name: "Stripe で口座を接続" }), "settings: Stripe で口座を接続");

@@ -264,6 +264,8 @@ export function HostPublicationWorkspace({
   const [sharedPhotoName, setSharedPhotoName] = useState<string | null>(null);
   const rightsConfirmed = photoRightsConfirmed(photoRights, selectedPhoto, product?.id ?? null, photoPlacement);
   const [translationBusy, setTranslationBusy] = useState(false);
+  const [workspaceSection, setWorkspaceSection] = useState<"page" | "pricing">("page");
+  const [editorLocale, setEditorLocale] = useState<"ja" | "en">("ja");
   const [sellerConfirmationMethod, setSellerConfirmationMethod] = useState<"" | "VERBAL" | "WRITTEN">("");
   const [sellerConfirmed, setSellerConfirmed] = useState(false);
   const [publicationPhotoRightsConfirmed, setPublicationPhotoRightsConfirmed] = useState(false);
@@ -872,11 +874,11 @@ export function HostPublicationWorkspace({
     : nextAction === "SCHEDULE"
       ? <Link className={consoleButtonClass("primary")} href={calendarHref}>開催枠を追加</Link>
       : nextAction === "PRICING"
-        ? <a className={consoleButtonClass("primary")} href="#product-editor">料金・取消条件を入力</a>
+        ? <button type="button" className={consoleButtonClass("primary")} onClick={() => setWorkspaceSection("pricing")}>料金・取消条件を入力</button>
         : nextAction === "MANUSCRIPT"
-          ? <a className={consoleButtonClass("primary")} href="#product-editor">原稿を完成</a>
+          ? <button type="button" className={consoleButtonClass("primary")} onClick={() => setWorkspaceSection("page")}>原稿を完成</button>
           : nextAction === "PHOTOS"
-            ? <a className={consoleButtonClass("primary")} href="#product-editor">写真を追加</a>
+            ? <button type="button" className={consoleButtonClass("primary")} onClick={() => setWorkspaceSection("page")}>写真を追加</button>
             : nextAction === "SUPPORT"
               ? <Link className={consoleButtonClass("primary")} href="/host/settings#settings-support">サポート・手数料の条件を確認</Link>
             : nextAction === "PAYMENT_CONSENT" && paymentConsentHref
@@ -950,6 +952,147 @@ export function HostPublicationWorkspace({
     updateJapanese("timeline", japanese.timeline.map((item) => item.photoIndex === photo.sourcePosition ? { ...item, photoIndex: null } : item));
     if (isRecord(content.meetingPoint) && content.meetingPoint.exteriorPhotoIndex === photo.sourcePosition) updateContent("meetingPoint", { ...content.meetingPoint, exteriorPhotoIndex: null });
   };
+
+  if (!adminDraft) {
+    const japanese = japaneseManuscript(content);
+    const english = {
+      title,
+      lead: typeof content.lead === "string" ? content.lead : "",
+      description: typeof content.description === "string" ? content.description : "",
+      language: isRecord(content.facts) && typeof content.facts.language === "string" ? content.facts.language : "",
+      highlights: lines(content.highlights),
+      included: lines(content.included),
+      notIncluded: lines(content.notIncluded),
+      knowBeforeYouGo: lines(content.knowBeforeYouGo),
+      notSuitableFor: lines(content.notSuitableFor),
+    };
+    const localeIsJapanese = editorLocale === "ja";
+    const localeField = (key: "title" | "lead" | "description" | "language", jaLabel: string, enLabel: string, rows = 0) => {
+      const value = localeIsJapanese ? japanese[key] : english[key];
+      const update = (next: string) => {
+        if (localeIsJapanese) updateJapanese(key, next);
+        else if (key === "title") updateEnglishTitle(next);
+        else if (key === "language") updateEnglishContent("facts", { ...(isRecord(content.facts) ? content.facts : {}), language: next });
+        else updateEnglishContent(key, next);
+      };
+      return <Field label={localeIsJapanese ? jaLabel : enLabel} value={value} multiline={rows > 0} rows={rows || undefined} onChange={update} />;
+    };
+    const localeListField = (key: "highlights" | "included" | "notIncluded" | "knowBeforeYouGo" | "notSuitableFor", jaLabel: string, enLabel: string, rows = 3) => (
+      <Field
+        label={localeIsJapanese ? jaLabel : enLabel}
+        value={localeIsJapanese ? japanese[key].join("\n") : english[key]}
+        multiline
+        rows={rows}
+        onChange={(next) => {
+          const value = next.split("\n").filter((item) => item.trim().length > 0);
+          if (localeIsJapanese) updateJapanese(key, value);
+          else updateEnglishContent(key, value);
+        }}
+      />
+    );
+    const makeCoverPhoto = (id: string) => setMediaDraft((current) => {
+      const gallery = current.filter((item) => item.placement === "GALLERY");
+      const selected = gallery.find((item) => item.id === id);
+      if (!selected || gallery[0]?.id === id) return current;
+      const ordered = [selected, ...gallery.filter((item) => item.id !== id)];
+      let cursor = 0;
+      return current.map((item) => item.placement === "GALLERY" ? ordered[cursor++]! : item);
+    });
+    const statusAndMessages = <>
+      {dirty ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">未保存の変更があります。公開・停止は保存後に実行できます。</p> : null}
+      {product.publicationNeedsUpdate ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">現在の掲載版を維持しています。公開条件を満たす変更を反映すると、確認後に新しい掲載版へ切り替わります。</p> : null}
+      {error || conflictProduct ? <div role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error ? <p>{error}</p> : null}{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
+      {notice ? <p role="status" className="mb-3 rounded-xl bg-green-50 p-3 text-green-900">{notice}</p> : null}
+      {product.status === "SUSPENDED" ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950">運営停止中です。入力と下書きは保存できますが、再開は運営の停止解除後に行えます。</p> : null}
+    </>;
+    const languageSwitch = <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="inline-flex rounded-xl border border-line bg-white p-1" role="group" aria-label="原稿の言語">
+        <button type="button" aria-pressed={localeIsJapanese} className={`min-h-10 rounded-lg px-4 text-sm font-bold ${localeIsJapanese ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale("ja")}>日本語</button>
+        <button type="button" aria-pressed={!localeIsJapanese} className={`min-h-10 rounded-lg px-4 text-sm font-bold ${!localeIsJapanese ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale("en")}>英語を確認</button>
+      </div>
+      {!localeIsJapanese ? <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${englishIsConfirmed(content.translation) ? "bg-green-50 text-moss" : "bg-amber-50 text-amber-950"}`}>{englishIsConfirmed(content.translation) ? "確認済み" : "未確認"}</span> : null}
+    </div>;
+    const translationControls = !localeIsJapanese ? <div className="rounded-xl border border-line bg-sand/40 p-4">
+      <p className="text-sm text-ink-soft">日本語の内容と照合し、公開する英語を確認してください。日本語を編集すると確認状態が解除されます。</p>
+      <div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={translationBusy || busy} className={consoleButtonClass("secondary")} onClick={() => void generateEnglish()}>{translationBusy ? "翻訳中…" : "日本語から英語案を作成"}</button><button type="button" disabled={translationBusy || busy || englishIsConfirmed(content.translation)} className={consoleButtonClass("secondary")} onClick={confirmEnglish}>この英語を確認</button></div>
+      {liveEnglishStaleNote(product.status, englishIsConfirmed(content.translation)) ? <p role="status" className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-950">{liveEnglishStaleNote(product.status, englishIsConfirmed(content.translation))}</p> : null}
+    </div> : null;
+    const photoSection = <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-photos-title">
+      <div><h2 id="publication-photos-title" className="text-base font-extrabold">写真</h2><p className="mt-1 text-sm text-ink-soft">1枚目が体験ページの表紙です。説明・クレジット・並び順も公開内容として保存します。</p></div>
+      {mediaDraft.map((photo, index) => <details key={photo.id} className="rounded-xl border border-line p-3">
+        <summary className="flex min-h-11 cursor-pointer items-center gap-3">
+          <Image src={photo.previewUrl} alt="" width={64} height={48} unoptimized className="h-12 w-16 rounded-lg object-cover" />
+          <span className="min-w-0 flex-1 break-words text-sm font-bold">写真 {index + 1}{index === 0 ? " · 表紙" : ""}<span className="block text-xs font-normal text-muted">{photo.altTextJa || photo.altText || "写真の説明を編集"}</span></span>
+          <span className="shrink-0 text-xs text-muted">編集</span>
+        </summary>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <Field label="写真の説明（英語）" value={photo.altText} onChange={(next) => updatePhoto(photo.id, { altText: next })} />
+          <Field label="写真の説明（日本語）" value={photo.altTextJa} onChange={(next) => updatePhoto(photo.id, { altTextJa: next })} />
+          <Field label="写真クレジット（任意）" value={photo.publicCredit ?? ""} onChange={(next) => updatePhoto(photo.id, { publicCredit: next.trim() ? next : null })} />
+          <div className="flex flex-wrap gap-2 md:col-span-2">
+            <button type="button" aria-label={`写真 ${index + 1} を前へ`} disabled={busy || galleryMedia[0]?.id === photo.id} className={consoleButtonClass("secondary", "sm")} onClick={() => movePhoto(photo.id, -1)}>前へ</button>
+            <button type="button" aria-label={`写真 ${index + 1} を後ろへ`} disabled={busy || galleryMedia.at(-1)?.id === photo.id} className={consoleButtonClass("secondary", "sm")} onClick={() => movePhoto(photo.id, 1)}>後ろへ</button>
+            <button type="button" aria-label={`写真 ${index + 1} を表紙にする`} disabled={busy || galleryMedia[0]?.id === photo.id} className={consoleButtonClass("secondary", "sm")} onClick={() => makeCoverPhoto(photo.id)}>表紙にする</button>
+            <button type="button" aria-label={`写真 ${index + 1} を下書きから外す`} disabled={busy} className={consoleButtonClass("secondary", "sm")} onClick={() => removePhoto(photo.id)}>外す</button>
+          </div>
+        </div>
+      </details>)}
+      {!mediaDraft.length ? <p className="text-sm text-muted">表紙の写真がありません。公開するには、掲載許諾を確認した写真を追加してください。</p> : null}
+      <details open={!mediaDraft.length} className="space-y-3 rounded-xl bg-sand/40 p-4">
+        <summary className="min-h-11 cursor-pointer py-2 font-bold">写真を追加</summary>
+        <label className="block text-sm font-bold text-ink-soft">写真の用途<select value={photoPlacement} disabled={busy} onChange={(event) => { setPhotoPlacement(event.target.value as typeof photoPlacement); setPhotoRights(null); }} className="mt-1 block w-full rounded-xl border border-line bg-white px-3 py-2"><option value="GALLERY">この体験の写真</option><option value="PROVIDER_PHOTO">提供者写真（全商品）</option><option value="BUSINESS_LOGO">事業者ロゴ（全商品）</option></select></label>
+        <Field label="写真の説明（英語）" value={photoAlt} onChange={setPhotoAlt} />
+        <Field label="写真の説明（日本語）" value={photoAltJa} onChange={setPhotoAltJa} />
+        <Field label="写真クレジット（任意）" value={photoCredit} onChange={setPhotoCredit} />
+        <HostSharedPhotoOffer disabled={busy || !!conflictProduct} onUse={(photo) => { setSelectedPhoto(photo); setSharedPhotoName(photo.name); setPhotoRights(null); }} />
+        <label className="block text-sm font-bold text-ink-soft">端末から選ぶ<input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => { setSelectedPhoto(event.target.files?.[0] ?? null); setSharedPhotoName(null); setPhotoRights(null); }} className="mt-1 block max-w-full font-normal" /></label>
+        {sharedPhotoName && selectedPhoto ? <p className="text-sm text-ink-soft">共有された写真を選択中: <span className="[overflow-wrap:anywhere]">{sharedPhotoName}</span></p> : null}
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={rightsConfirmed} disabled={busy || !selectedPhoto} onChange={(event) => setPhotoRights(event.target.checked && selectedPhoto ? { file: selectedPhoto, productId: product.id, placement: photoPlacement } : null)} /><span>この写真を「{photoPlacement === "GALLERY" ? "この体験の写真" : photoPlacement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}」として{photoPlacement === "GALLERY" ? "この商品" : "販売者のすべての商品"}に公開する権利があり、権利者と写っている方から明示的な許諾を得ています。</span></label>
+        <button type="button" disabled={busy || !!conflictProduct || !selectedPhoto || !rightsConfirmed || !photoAlt.trim() || !photoAltJa.trim()} className={consoleButtonClass("secondary")} onClick={() => void uploadPhoto()}>写真を追加・差し替え</button>
+      </details>
+    </section>;
+    const pageSections = <div id="publication-page-panel" className="space-y-4">
+      {languageSwitch}
+      {translationControls}
+      {photoSection}
+      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-intro-title"><h2 id="publication-intro-title" className="text-base font-extrabold">ひとこと紹介・言語・説明</h2>{localeField("title", "体験名", "Experience title")}{localeField("lead", "ひとこと紹介", "Short introduction", 2)}{localeField("language", "当日の言語", "Languages during the experience")}{localeField("description", "詳しい説明", "Description", 7)}</section>
+      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-highlights-title"><h2 id="publication-highlights-title" className="text-base font-extrabold">見どころ・含まれるもの</h2>{localeListField("highlights", "見どころ", "Highlights")}{localeListField("included", "含まれるもの", "Included", 2)}{localeListField("notIncluded", "含まれないもの", "Not included", 2)}</section>
+      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-timeline-title"><h2 id="publication-timeline-title" className="text-base font-extrabold">当日の流れ</h2>{timelineSection(editorLocale, localeIsJapanese ? japanese.timeline : timelineItems(content.timeline))}</section>
+      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-meeting-title"><h2 id="publication-meeting-title" className="text-base font-extrabold">集合場所</h2><label className="block text-sm font-bold text-ink-soft">集合場所を旅行者に見せる時期<select value={String(content.meetingPointDisclosure ?? "AFTER_BOOKING")} onChange={(event) => setContent((current) => ({ ...current, meetingPointDisclosure: event.target.value === "PUBLIC" ? "PUBLIC" : "AFTER_BOOKING" }))} className="mt-1 block w-full rounded-xl border border-line bg-white px-3 py-2 font-normal text-ink"><option value="AFTER_BOOKING">予約が確定してから案内する</option><option value="PUBLIC">予約前から公開する</option></select></label><Field label="予約前に公開する集合概要" value={typeof content.meetingOverview === "string" ? content.meetingOverview : ""} multiline rows={3} onChange={(next) => updateContent("meetingOverview", next || null)} /></section>
+      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-notes-title"><h2 id="publication-notes-title" className="text-base font-extrabold">注意事項・よくある質問</h2>{localeListField("knowBeforeYouGo", "参加前の注意", "Know before you go", 2)}{localeListField("notSuitableFor", "参加に向かない条件", "Not suitable for", 2)}{faqSection(editorLocale)}</section>
+      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-host-title"><h2 id="publication-host-title" className="text-base font-extrabold">迎える人</h2><p className="text-sm text-ink-soft">販売者表示: <span className="font-bold text-ink">{product.sellerDisplayName || "未設定"}</span></p><p className="text-sm text-muted">提供者写真と事業者ロゴは同じ販売者のすべての体験に反映されます。</p>{providerMediaDraft.map((photo) => <div key={photo.id} className="grid gap-3 rounded-xl border border-line p-3 md:grid-cols-[5rem_1fr]"><Image src={photo.previewUrl} alt={photo.altText} width={80} height={80} unoptimized className="size-20 rounded-lg object-cover" /><div className="grid gap-3 md:grid-cols-2"><p className="text-sm font-bold text-ink-soft md:col-span-2">{photo.placement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}</p><Field label="写真の説明（英語）" value={photo.altText} onChange={(next) => updateProviderPhoto(photo.id, { altText: next })} /><Field label="写真の説明（日本語）" value={photo.altTextJa} onChange={(next) => updateProviderPhoto(photo.id, { altTextJa: next })} /><Field label="写真クレジット（任意）" value={photo.publicCredit ?? ""} onChange={(next) => updateProviderPhoto(photo.id, { publicCredit: next.trim() ? next : null })} /><button type="button" disabled={busy || !!conflictProduct} className={`${consoleButtonClass("secondary", "sm")} justify-self-start`} onClick={() => void removeProviderMedia(photo.id)}>全商品から削除</button></div></div>)}{!providerMediaDraft.length ? <p className="text-sm text-muted">提供者写真・事業者ロゴは未設定です。写真の用途を選んで上の「写真」から追加できます。</p> : null}</section>
+    </div>;
+    const pricingSections = <div id="publication-pricing-panel" className="space-y-4">
+      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-pricing-title"><h2 id="publication-pricing-title" className="text-base font-extrabold">料金</h2><Field label="大人1人の基本料金（税込・円）" value={unitAmount} onChange={setUnitAmount} /><p className="text-sm text-muted">無料体験は0円、有料料金は50円以上で入力してください。1〜49円は保存できません。</p><div className="rounded-xl bg-sand/40 p-3"><h3 className="font-bold">開催枠ごとの大人料金（税込・円）</h3><p className="mt-1 text-sm text-ink-soft">空欄なら基本料金を使います。枠別料金を使う場合は、現在の開催枠をすべて入力してください。</p>{product.offers.length ? <div className="mt-3 grid gap-3">{product.offers.map((offer) => { const price = terms.offerPrices.find((item) => item.offerId === offer.id)?.adultPriceYen ?? ""; return <Field key={offer.id} label={offerLabel(offer)} value={price} onChange={(next) => setTerms((current) => ({ ...current, offerPrices: current.offerPrices.map((item) => item.offerId === offer.id ? { ...item, adultPriceYen: next } : item) }))} placeholder={`基本料金 ¥${unitAmount || "未入力"}`} />; })}</div> : <p className="mt-3 text-sm font-bold text-amber-950">先にカレンダーで開催枠を追加すると、枠別料金を入力できます。</p>}</div><label className="flex min-h-11 items-center gap-2 font-bold"><input type="checkbox" checked={terms.childPricingEnabled} onChange={(event) => setTerms((current) => ({ ...current, childPricingEnabled: event.target.checked }))} />子ども料金を設定する</label>{terms.childPricingEnabled ? <div className="grid gap-4 rounded-xl border border-line p-3 md:grid-cols-2"><Field label="子ども1人の料金（税込・円）" value={terms.childPriceYen} onChange={(next) => setTerms((current) => ({ ...current, childPriceYen: next }))} /><Field label="子ども料金の最少年齢" value={terms.childMinAge} onChange={(next) => setTerms((current) => ({ ...current, childMinAge: next }))} /><Field label="子ども料金の最高年齢" value={terms.childMaxAge} onChange={(next) => setTerms((current) => ({ ...current, childMaxAge: next }))} /><label className="flex min-h-11 items-center gap-2 text-sm font-bold"><input type="checkbox" checked={terms.childAdultRequired} onChange={(event) => setTerms((current) => ({ ...current, childAdultRequired: event.target.checked }))} />大人の同伴を必須にする</label></div> : null}</section>
+      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-booking-title"><h2 id="publication-booking-title" className="text-base font-extrabold">予約条件・取消条件</h2><div className="grid gap-4 md:grid-cols-2"><Field label="最少申込人数" value={terms.minimumParticipants} onChange={(next) => setTerms((current) => ({ ...current, minimumParticipants: next }))} /><Field label="最少課金人数" value={terms.minimumChargeableParticipants} onChange={(next) => setTerms((current) => ({ ...current, minimumChargeableParticipants: next }))} /><Field label="1組の上限人数" value={terms.maxPartySize} onChange={(next) => setTerms((current) => ({ ...current, maxPartySize: next }))} /><Field label="最少催行人数（任意）" value={terms.minimumAttendance} onChange={(next) => setTerms((current) => ({ ...current, minimumAttendance: next }))} /></div><label className="block text-sm font-bold text-ink-soft">取消条件<select value={terms.cancellationPolicy} onChange={(event) => setTerms((current) => ({ ...current, cancellationPolicy: event.target.value as PublicationTermsForm["cancellationPolicy"] }))} className="mt-1 block w-full rounded-xl border border-line bg-white px-3 py-2"><option value="">選択してください</option><option value="CUSTOM">独自の取消期限・返金割合</option><option value="FREE_UNTIL_24H">開始24時間前まで無料</option><option value="FREE_UNTIL_48H">開始48時間前まで無料</option><option value="NONE">返金なし</option></select></label>{terms.cancellationPolicy === "CUSTOM" ? <div className="grid gap-4 md:grid-cols-2"><label className="block text-sm font-bold text-ink-soft">無料取消の期限（開始前）<div className="mt-1 grid grid-cols-[1fr_auto] gap-2"><input value={terms.cancellationWindowValue} onChange={(event) => setTerms((current) => ({ ...current, cancellationWindowValue: event.target.value }))} inputMode="numeric" className="w-full rounded-xl border border-line bg-white px-3 py-2 font-normal text-ink" /><select value={terms.cancellationWindowUnit} onChange={(event) => setTerms((current) => ({ ...current, cancellationWindowUnit: event.target.value as PublicationTermsForm["cancellationWindowUnit"] }))} className="rounded-xl border border-line bg-white px-3 py-2"><option value="DAYS">日前</option><option value="HOURS">時間前</option><option value="MINUTES">分前</option></select></div></label><label className="block text-sm font-bold text-ink-soft">期限内の返金割合（%）<input value={terms.cancellationRefundPercent} onChange={(event) => setTerms((current) => ({ ...current, cancellationRefundPercent: event.target.value }))} inputMode="decimal" placeholder="例: 100 または 37.5" className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 font-normal text-ink" /></label></div> : null}<p className="text-sm text-muted">取消期限と返金割合には確定済みの条件を入力してください。最少催行人数に達しない場合の自動取消・返金はありません。</p></section>
+      <section className={`${HOST_SURFACE} space-y-3 p-4 md:p-6`} aria-labelledby="publication-questions-title"><h2 id="publication-questions-title" className="text-base font-extrabold">申込時の質問</h2><p className="text-sm text-ink-soft">保存済みの質問 {product.saleTerms?.bookingQuestions.length ?? 0}件</p><p className="text-sm text-muted">現在の質問はこの画面の保存でも維持されます。質問の追加・変更は、質問編集に対応した商品画面で行ってください。</p></section>
+    </div>;
+    const listingRail = <aside className="order-first space-y-4 md:sticky md:top-4 md:order-none md:col-start-2 md:row-start-1 md:self-start" aria-label="掲載・料金・日程">
+      <section className={`${HOST_SURFACE} space-y-3 p-4`} aria-labelledby="publication-listing-title"><div className="flex items-center justify-between gap-3"><h2 id="publication-listing-title" className="font-extrabold">掲載</h2><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[product.status]}</span></div><p className="text-sm text-ink-soft">{nextActionText}</p>{nextActionControl ? <div>{nextActionControl}</div> : null}{publicHref && nextAction !== "LIVE" ? <Link className="text-sm font-bold text-moss underline underline-offset-4" href={publicHref}>体験ページを見る</Link> : null}{product.status === "PUBLISHED" ? <button type="button" disabled={busy || dirty || !!conflictProduct} className={consoleButtonClass("ghost", "sm", "text-danger")} onClick={() => void changeState("stop")}>新しい予約を停止</button> : null}<details className="border-t border-line pt-2"><summary className="min-h-10 cursor-pointer py-2 font-bold">公開前の確認</summary>{!dirty && savedBlockers.length ? <ul className="list-disc space-y-1 pl-5 text-sm text-ink-soft">{savedBlockers.map((blocker) => <li key={blocker}>{BLOCKER_COPY[blocker] ?? "公開条件を確認してください。"}</li>)}</ul> : !dirty ? <p className="text-sm font-bold text-moss">保存済みの内容は公開条件を満たしています。</p> : <p className="text-sm text-ink-soft">保存後に公開条件を確認できます。</p>}</details></section>
+      <section className={`${HOST_SURFACE} hidden space-y-2 p-4 md:block`}><h2 className="font-extrabold">料金・予約</h2><p className="text-lg font-extrabold tabular-nums">{asPublicationPrice(unitAmount) === null ? "未設定" : `¥${Number(unitAmount).toLocaleString("ja-JP")}`} <span className="text-xs font-normal text-muted">/ 大人1名</span></p><p className="text-sm text-muted">1組 {terms.minimumParticipants || "–"}–{terms.maxPartySize || "–"}名</p><button type="button" className="text-sm font-bold text-moss underline underline-offset-4" onClick={() => setWorkspaceSection("pricing")}>料金・条件を編集</button></section>
+      <section className={`${HOST_SURFACE} hidden space-y-2 p-4 md:block`}><h2 className="font-extrabold">開催日程</h2><p className="text-sm text-ink-soft">日程と定員はカレンダーで登録します。</p><Link className="text-sm font-bold text-moss underline underline-offset-4" href={calendarHref}>カレンダーを開く</Link></section>
+      <details className={`${HOST_SURFACE} p-4`}><summary className="min-h-10 cursor-pointer py-2 font-bold">体験ページのアドレス</summary><div className="space-y-3 pt-2"><Field label="ページのアドレス" value={slug} onChange={setSlug} /><p className="break-all text-xs text-muted">/experiences/{slug || "ページ名"}</p></div></details>
+    </aside>;
+    return <HostPageBody>
+      <PageHead title={localeIsJapanese ? japanese.title || title || "体験を編集" : title || japanese.title || "体験を編集"} />
+      {statusAndMessages}
+      <nav className="mb-4 flex gap-5 overflow-x-auto border-b border-line" aria-label="体験の編集">
+        <button type="button" disabled={busy} aria-pressed={workspaceSection === "page"} className={`min-h-11 shrink-0 border-b-2 px-1 text-sm font-bold ${workspaceSection === "page" ? "border-ink text-ink" : "border-transparent text-muted"}`} onClick={() => setWorkspaceSection("page")}>体験ページ</button>
+        <button type="button" disabled={busy} aria-pressed={workspaceSection === "pricing"} className={`min-h-11 shrink-0 border-b-2 px-1 text-sm font-bold ${workspaceSection === "pricing" ? "border-ink text-ink" : "border-transparent text-muted"}`} onClick={() => setWorkspaceSection("pricing")}>料金・予約</button>
+        <Link href={calendarHref} aria-disabled={busy} tabIndex={busy ? -1 : undefined} onClick={(event) => { if (busy) event.preventDefault(); }} className="flex min-h-11 shrink-0 items-center border-b-2 border-transparent px-1 text-sm font-bold text-muted">日程</Link>
+      </nav>
+      <form id="product-editor" aria-busy={busy} onSubmit={(event) => void saveAll(event)} className="scroll-mt-24">
+        <fieldset disabled={busy} className="border-0 p-0">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px] md:items-start">
+            {listingRail}
+            <div className="min-w-0 md:col-start-1 md:row-start-1">{workspaceSection === "page" ? pageSections : pricingSections}</div>
+          </div>
+        </fieldset>
+      </form>
+      {stateConfirm ? <HostConfirmDialog title={stateConfirm === "stop" ? "新しい予約を停止しますか？" : "この商品を公開しますか？"} description={stateConfirm === "stop" ? "この商品の新しい予約を停止します。受け付けた予約はそのまま残ります。" : "掲載条件を確認し、この商品を公開します。公開内容と販売条件に同意します。"} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>{stateConfirm === "stop" ? "停止する" : "同意して公開する"}</button>} onConfirm={() => { const action = stateConfirm; void runStateChange(action); }} onClose={() => setStateConfirm(null)} /> : null}
+    </HostPageBody>;
+  }
+
   return <HostPageBody>
     <PageHead title={title || "体験を編集"} />
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[product.status]}</span><div className="flex flex-wrap gap-2"><Link className={consoleButtonClass("secondary")} href={calendarHref}>開催日程を設定</Link>{!adminDraft && publicHref ? <Link className={consoleButtonClass("secondary")} href={publicHref}>公開ページを見る</Link> : null}<button type="button" disabled={busy || !dirty || !!conflictProduct} className={consoleButtonClass("secondary")} onClick={() => void saveAll()}>下書きを保存</button>{adminDraft ? <button type="button" disabled={busy || !canPublish || !product.adminEnglishReview?.reviewed || !sellerConfirmed || !publicationPhotoRightsConfirmed || !sellerConfirmationMethod} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>事務局として代理公開</button> : null}{!adminDraft && (product.status !== "PUBLISHED" || product.publicationNeedsUpdate) ? <button type="button" disabled={busy || !canPublish} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>{product.status === "PUBLISHED" ? "変更を公開" : "公開・再開"}</button> : null}{!adminDraft && product.status === "PUBLISHED" ? <button type="button" disabled={busy || dirty || !!conflictProduct} className={consoleButtonClass("secondary")} onClick={() => void changeState("stop")}>販売を停止</button> : null}</div></div>

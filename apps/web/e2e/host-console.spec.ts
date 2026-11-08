@@ -27,7 +27,7 @@ async function expectProvider(page: Page, name: string) {
   await expect(providerMenu(page)).toContainText(name);
 }
 
-/** Phones keep sign-out in the account menu; the PC sidebar shows it as it is. */
+/** Settings and sign-out live in the account menu at both widths. */
 async function openAccountMenu(page: Page) {
   const menu = page.locator("summary:visible", { hasText: "のアカウント" });
   if (await menu.count()) await menu.click();
@@ -183,10 +183,9 @@ test("host pages have no serious accessibility violations and fit the screen", a
     expect(await noHorizontalScroll(page), path).toBeLessThanOrEqual(0);
   }
   for (const menu of ["提供者", "のアカウント"]) {
-    // The PC sidebar has no account menu (sign-out is shown as it is).
     const summary = page.locator("summary:visible", { hasText: menu });
     if (!(await summary.count())) continue;
-    const mobileAccountMenu = await page.locator("summary:visible", { hasText: "のアカウント" }).count();
+    const mobileAccountMenu = page.viewportSize()!.width < 768 && await page.locator("summary:visible", { hasText: "のアカウント" }).count();
     await summary.click();
     if (mobileAccountMenu) await expect(page.locator("#main")).toHaveAttribute("inert", "");
     expect(await seriousViolations(page), `${menu} open`).toEqual([]);
@@ -204,11 +203,12 @@ test.describe("320px narrow phone", () => {
   test("the console frame and its menus fit", async ({ page }) => {
     await signIn(page);
     expect(await noHorizontalScroll(page)).toBeLessThanOrEqual(0);
-    for (const label of ["ホーム", "体験", "カレンダー", "予約", "売上", "設定"]) {
+    for (const label of ["ホーム", "体験", "カレンダー", "予約", "売上"]) {
       const box = await page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: label }).boundingBox();
       expect(box && box.x >= 0 && box.x + box.width <= 320, label).toBe(true);
     }
-    await page.locator("summary", { hasText: "のアカウント" }).click();
+    await page.locator("summary:visible", { hasText: "のアカウント" }).click();
+    await expect(page.getByRole("link", { name: "設定", exact: true })).toBeVisible();
     const logout = await page.getByRole("button", { name: "ログアウト" }).boundingBox();
     expect(logout && logout.x >= 0 && logout.x + logout.width <= 320).toBe(true);
     expect(await noHorizontalScroll(page)).toBeLessThanOrEqual(0);

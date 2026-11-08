@@ -153,7 +153,7 @@ test("inside the app, a browser session is never used: the app signs in on its o
   await page.goto("/host/launch?source=pwa");
   await page.waitForURL(/\/host\/home$/);
 
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const device = page.getByRole("region", { name: "この端末" });
   await expect(device.getByRole("group", { name: "アプリ" })).toHaveText("この端末ではアプリとして使っています。");
   await page.getByRole("region", { name: "アカウント" }).getByRole("button", { name: "ログアウト" }).click();
@@ -164,7 +164,7 @@ test("inside the app, a browser session is never used: the app signs in on its o
 test("設定 shows この端末 above アカウント", async ({ page }) => {
   await page.goto("/host/auth/mock-login");
   await page.waitForURL(/\/host\/home$/);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const headings = await page.locator("main").getByRole("heading", { level: 2 }).allTextContents();
   expect(headings.slice(-2)).toEqual(["この端末", "アカウント"]);
   await expect(page.getByRole("region", { name: "この端末" }).getByRole("group", { name: "アプリ" })).not.toBeEmpty();
@@ -235,7 +235,7 @@ test.describe("通知 on an iPhone's browser tab", () => {
   test("points to the home-screen app instead of asking", async ({ page }) => {
     await page.goto("/host/auth/mock-login");
     await page.waitForURL(/\/host\/home$/);
-    await page.goto("/host/settings");
+    await page.goto("/host/settings?section=all");
     await expect(pushRow(page)).toHaveText("ホーム画面に追加したアプリから通知を受け取れます。");
     await expect(page.getByRole("region", { name: "この端末" })).toContainText("ロック画面には体験名・日時・人数だけを表示します。");
   });
@@ -247,7 +247,7 @@ test("通知 inside the app: on, checked again after a reload, a test, and off, 
   const calls = pushCalls(page);
   await page.goto("/host/auth/mock-login?surface=app");
   await page.waitForURL(/\/host\/home$/);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
 
   const row = pushRow(page);
   await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
@@ -274,7 +274,7 @@ test("VAPID 鍵が変わった端末はオンと表示せず、再登録でき�
   await stubPush(page);
   await page.goto("/host/auth/mock-login?surface=app");
   await page.waitForURL(/\/host\/home$/);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const row = pushRow(page);
   await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
   await expect(row).toContainText("この端末に通知が届きます");
@@ -294,7 +294,7 @@ test("ブラウザとサーバーの解除が両方失敗したらオンを維�
   await stubPush(page);
   await page.goto("/host/auth/mock-login?surface=app");
   await page.waitForURL(/\/host\/home$/);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const row = pushRow(page);
   await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
   await expect(row).toContainText("この端末に通知が届きます");
@@ -320,7 +320,7 @@ test("状態確認が失敗した場合は通知をオフと断定しない", as
   await stubPush(page);
   await page.goto("/host/auth/mock-login?surface=app");
   await page.waitForURL(/\/host\/home$/);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const row = pushRow(page);
   await row.getByRole("button", { name: "この端末で通知を受け取る" }).click();
   await expect(row).toContainText("この端末に通知が届きます");
