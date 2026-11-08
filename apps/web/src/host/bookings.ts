@@ -423,7 +423,7 @@ export function refundedFeeShareYen(feeYen: number, refundedYen: number, paidYen
 /** The breakdown of a booking made on this site; null for NIHO's bookings and for a booking with no fee recorded. */
 export function siteFeeBreakdown(booking: Pick<HostBooking, "amountYen" | "site">): SiteFeeBreakdown | null {
   const site = booking.site;
-  if (!site?.fee) return null;
+  if (!site?.fee || site.payoutYen === undefined) return null;
   const totalYen = booking.amountYen;
   const feeYen = site.fee.amountYen;
   const refundedYen = site.cancellation?.refundedYen ?? 0;

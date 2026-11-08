@@ -96,15 +96,19 @@ describe("loadSiteBookings", () => {
 
     const load = await loadSiteBookings(OWNER, BOOKING_ID);
 
-    expect(load).toMatchObject({ status: "live", readOnly: true, messages: false, nextCursor: null, bookings: [expect.objectContaining({ id: BOOKING_ID })] });
+    expect(load).toMatchObject({ status: "live", readOnly: true, canCancel: false, messages: false, nextCursor: null, bookings: [expect.objectContaining({ id: BOOKING_ID })] });
     expect(state.translateStore.listGuestBookingsForHost).toHaveBeenCalledWith(ACTOR, { from: expect.any(String), limit: 100 });
     expect(state.translateStore.getGuestBookingForHost).not.toHaveBeenCalled();
   });
 
-  it("keeps today's screen while closed, for anyone but the owner, and while the experience DB has no OWNER for them", async () => {
-    for (const memberRole of ["EDITOR", "COHOST"] as const) {
-      expect(await loadSiteBookings({ ...OWNER, memberRole }, null)).toEqual({ status: "closed" });
-    }
+  it("lets a COHOST read/reply without financial details, keeps EDITOR closed, and honors fresh DB revocation", async () => {
+    expect(await loadSiteBookings({ ...OWNER, memberRole: "EDITOR" }, null)).toEqual({ status: "closed" });
+    const cohost = await loadSiteBookings({ ...OWNER, memberRole: "COHOST" }, null);
+    expect(cohost).toMatchObject({ status: "live", messages: true, canCancel: false, bookings: [{ guest: "Sample Guest", phone: null, site: { cancellationPolicy: "NONE" } }] });
+    expect(cohost.status === "live" ? cohost.bookings[0]?.site : null).not.toHaveProperty("fee");
+    expect(cohost.status === "live" ? cohost.bookings[0]?.site : null).not.toHaveProperty("payoutYen");
+    expect(cohost.status === "live" ? cohost.bookings[0]?.site : null).not.toHaveProperty("cancellation");
+    expect(JSON.stringify(cohost)).not.toMatch(/payoutYen|supportEnabled|refundPendingYen/);
     state.store!.listGuestBookingsForHost!.mockRejectedValueOnce(new StoreAccessDeniedError());
     expect(await loadSiteBookings(OWNER, null)).toEqual({ status: "closed" });
     state.store = null;

@@ -34,7 +34,7 @@ import type { HostBooking } from "./types";
  * existing bookings read-only for the OWNER's interpreter flow. The guest's address never reaches the console.
  */
 
-export const SITE_BOOKING_OWNER_ONLY_TEXT = "このサイトで受けた予約はオーナーが確認できます";
+export const SITE_BOOKING_OWNER_ONLY_TEXT = "このサイトで受けた予約はオーナーと共同ホストが確認できます";
 
 /** The list reads this many bookings: the upcoming ones from today, the nearest first, then the latest past ones. */
 const LIST_LIMIT = 100;
@@ -43,6 +43,12 @@ const LIST_LIMIT = 100;
 export function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): HostActor {
   if (provider.memberRole !== "OWNER") throw new Error("A current provider owner is required.");
   return { providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: "OWNER" };
+}
+
+/** Read/reply authority only. Do not pass this actor to cancellation, refund, sales or payout code. */
+export function bookingReaderActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): HostActor {
+  if (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST") throw new Error("A current booking reader is required.");
+  return { providerId: provider.id, nihoUserId: provider.nihoUserId, calendarRoleCeiling: provider.memberRole === "OWNER" ? "OWNER" : "EDITOR" };
 }
 
 /** The start of the day in Japan: the list's これから counts today's bookings, as the screen does (ホーム's 今日 too). */
@@ -58,8 +64,8 @@ export interface HostSiteBookingPage {
   nextCursor: string | null;
 }
 
-function screenPage(bookings: readonly HostGuestBooking[], nextCursor: string | null): HostSiteBookingPage {
-  return { bookings: bookings.map(siteBooking), experiences: siteBookingExperiences(bookings), nextCursor };
+function screenPage(bookings: readonly HostGuestBooking[], nextCursor: string | null, ownerFinancial: boolean): HostSiteBookingPage {
+  return { bookings: bookings.map((booking) => siteBooking(booking, ownerFinancial)), experiences: siteBookingExperiences(bookings), nextCursor };
 }
 
 /**
@@ -80,6 +86,8 @@ export type HostSiteBookingsLoad =
       messages: boolean;
       /** Guest sales are closed; existing reservations are shown for interpreter access only. */
       readOnly: boolean;
+      /** Cancellation/refund is always OWNER-only, independently of message and pagination access. */
+      canCancel: boolean;
       /** The preview's synthetic bookings (`?mock=site-bookings`): read only, nothing is sent. */
       preview?: true;
     })
@@ -89,10 +97,10 @@ export type HostSiteBookingsLoad =
 
 /** The ordinary mock sign-in and the explicit site-bookings alias share this provider-scoped preview. */
 function previewSiteBookings(provider: HostProvider, requestedBooking: string | null): HostSiteBookingsLoad {
-  if (provider.memberRole !== "OWNER") return { status: "closed" };
+  if (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST") return { status: "closed" };
   const bookings = mockExperienceBookings(provider.id);
   const requestedMissing = requestedBooking !== null && !bookings.some((booking) => booking.publicBookingId === requestedBooking);
-  return { status: "live", ...screenPage(bookings, null), requestedMissing, today: MOCK_TODAY, messages: true, readOnly: true, preview: true };
+  return { status: "live", ...screenPage(bookings, null, provider.memberRole === "OWNER"), requestedMissing, today: MOCK_TODAY, messages: true, readOnly: true, canCancel: false, preview: true };
 }
 
 /**
@@ -103,9 +111,9 @@ export async function loadSiteBookings(provider: HostProvider, requestedBooking:
   if (isHostMock()) return previewSiteBookings(provider, requestedBooking);
   const salesBookings = guestBookingRepository();
   const bookings = salesBookings ?? translateSiteBookingRepository();
-  if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
+  if (!bookings || (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST")) return { status: "closed" };
   const readOnly = !salesBookings;
-  const actor = ownerActor(provider);
+  const actor = bookingReaderActor(provider);
   const today = todayInJapan(Date.now());
   try {
     const page = await bookings.listGuestBookingsForHost(actor, { from: startOfJapanDay(today), limit: LIST_LIMIT });
@@ -121,11 +129,12 @@ export async function loadSiteBookings(provider: HostProvider, requestedBooking:
     }
     return {
       status: "live",
-      ...screenPage(stored, readOnly ? null : page.nextCursor),
+      ...screenPage(stored, readOnly ? null : page.nextCursor, provider.memberRole === "OWNER"),
       requestedMissing,
       today,
       messages: siteBookingMessagesEnabled(),
       readOnly,
+      canCancel: provider.memberRole === "OWNER" && !readOnly,
     };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "closed" } : { status: "error" };
@@ -152,6 +161,18 @@ export function asOwner(providerId: string): Promise<OwnerCheck> {
   return ownerWithBookings(providerId, guestBookingRepository());
 }
 
+async function asBookingReader(providerId: string): Promise<OwnerCheck> {
+  const session = await readHostSession();
+  if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
+  const bookings = guestBookingRepository();
+  if (!bookings) return { ok: false, message: SITE_BOOKING_LOAD_FAILED_TEXT };
+  const providers = await loadHostProviders();
+  if (providers.status !== "ok") return { ok: false, message: providers.status === "error" ? SITE_BOOKING_LOAD_FAILED_TEXT : HOST_SESSION_ENDED_TEXT };
+  const provider = providers.providers.find((entry) => entry.id === providerId);
+  if (!provider || (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST")) return { ok: false, message: SITE_BOOKING_OWNER_ONLY_TEXT };
+  return { ok: true, bookings, actor: bookingReaderActor(provider) };
+}
+
 /** The interpreter BFF can only read the booking under the translate flag, without opening guest sales. */
 export function asTranslateOwner(providerId: string): Promise<OwnerCheck<OwnerReadRepository>> {
   return ownerWithBookings(providerId, translateSiteBookingRepository());
@@ -159,11 +180,11 @@ export function asTranslateOwner(providerId: string): Promise<OwnerCheck<OwnerRe
 
 /** 続きを見る: the bookings after the list's last one, from the cursor the previous page gave (it keeps that page's today). */
 export async function loadMoreSiteBookings(providerId: string, cursor: string): Promise<HostActionResult<HostSiteBookingPage>> {
-  const owner = await asOwner(providerId);
+  const owner = await asBookingReader(providerId);
   if (!owner.ok) return owner;
   try {
     const page: HostGuestBookingPage = await owner.bookings.listGuestBookingsForHost(owner.actor, { cursor, limit: LIST_LIMIT });
-    return { ok: true, message: "", ...screenPage(page.bookings, page.nextCursor) };
+    return { ok: true, message: "", ...screenPage(page.bookings, page.nextCursor, owner.actor.calendarRoleCeiling === "OWNER") };
   } catch (error) {
     if (error instanceof StoreAccessDeniedError) return { ok: false, message: SITE_BOOKING_OWNER_ONLY_TEXT };
     if (error instanceof StoreValidationError) return { ok: false, message: HOST_INVALID_INPUT_TEXT };

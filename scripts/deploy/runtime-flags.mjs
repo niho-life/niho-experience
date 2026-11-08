@@ -280,6 +280,14 @@ export const FLAGS = Object.freeze([
     secrets: [{ env: "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", variable: "STRIPE_PLATFORM_SECRET_KEY_REF", stg: "STRIPE_CONNECT_PLATFORM_SECRET_KEY" }],
     settings: [{ env: "EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION", variable: "PAYOUT_ACCOUNT_CONSENT_VERSION", shape: "consentVersion" }],
   },
+  // Experience-native COHOST teams. This is independent from (and does not open) the legacy provider-operations consumer.
+  {
+    env: "EXPERIENCE_HOST_TEAM_ENABLED",
+    variable: "HOST_TEAM_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
+    // The dependency opens the native account mode, so the team switch has the same incompatible legacy consumers.
+    conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_TRANSLATE_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED"],
+  },
   // 日本語サイト (#59): /ja の detail・sitemap・hreflang。公開サイト側の機能だが、flag は host console を配線する経路の
   // revision にだけ渡るので HOST_CONSOLE を要する。NIHO の日本語 release の実配備と実機確認が済むまで ON にしない
   // （docs/localization-consumer.md「有効化の前に確かめること」）。

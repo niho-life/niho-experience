@@ -518,6 +518,9 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }).hostAccountsEnabled).toBe(false);
     expect(resolveConfig({ ...on, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "1" }).hostAccountsEnabled).toBe(false);
     expect(resolveConfig(on).hostAccountsEnabled).toBe(true);
+    expect(resolveConfig(on).hostTeamEnabled).toBe(false);
+    expect(resolveConfig({ ...on, EXPERIENCE_HOST_TEAM_ENABLED: "true" }).hostTeamEnabled).toBe(true);
+    expect(() => resolveConfig({ ...mail, ...host, EXPERIENCE_HOST_TEAM_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_TEAM_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
     expect(() => resolveConfig({ ...on, HOST_CONSOLE_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
     expect(() => resolveConfig({ ...host, EXPERIENCE_API_MODE: "http", EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }))
       .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_DATABASE_URL");

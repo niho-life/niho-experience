@@ -33,6 +33,7 @@ import {
   listLimit,
   publicBookingIdOf,
   requireBookingsOwner,
+  requireBookingsReader,
   selectOne,
   selectSegment,
   selectSessionBookings,
@@ -1431,7 +1432,7 @@ export class GuestBookingRepository {
     const limit = listLimit(options.limit);
     const cursor = decodeBookingCursor(options.cursor);
     return withTransaction(this.#pool, async (client) => {
-      await requireBookingsOwner(client, actor);
+      await requireBookingsReader(client, actor);
       const from = cursor?.from ?? await listBoundary(client, options.from);
       const rows: DbRow[] = [];
       if (cursor === null || cursor.segment === "UPCOMING") {
@@ -1455,7 +1456,7 @@ export class GuestBookingRepository {
   async getGuestBookingForHost(actor: HostActor, publicBookingId: string): Promise<HostGuestBooking> {
     const id = publicBookingIdOf(publicBookingId);
     return withTransaction(this.#pool, async (client) => {
-      await requireBookingsOwner(client, actor);
+      await requireBookingsReader(client, actor);
       return hostGuestBookingFromRow(await selectOne(client, actor.providerId, id));
     });
   }
@@ -1463,7 +1464,7 @@ export class GuestBookingRepository {
   /** How many guest bookings listGuestBookingsForHost would list in all (予約's notice beside NIHO's bookings). */
   async countGuestBookingsForHost(actor: HostActor): Promise<number> {
     return withTransaction(this.#pool, async (client) => {
-      await requireBookingsOwner(client, actor);
+      await requireBookingsReader(client, actor);
       return countShown(client, actor.providerId);
     });
   }
@@ -1480,7 +1481,7 @@ export class GuestBookingRepository {
     const limit = listLimit(options.limit);
     const to = sessionWindowEnd(options.to);
     return withTransaction(this.#pool, async (client) => {
-      await requireBookingsOwner(client, actor);
+      await requireBookingsReader(client, actor);
       const from = await listBoundary(client, options.from);
       assertSessionWindow(from, to);
       return (await selectSessions(client, actor.providerId, from, to, limit)).map(hostGuestSessionFromRow);
@@ -1495,7 +1496,7 @@ export class GuestBookingRepository {
   async listGuestBookingsForSession(actor: HostActor, session: HostGuestSessionKey): Promise<HostGuestBooking[]> {
     const key = sessionKeyOf(session);
     return withTransaction(this.#pool, async (client) => {
-      await requireBookingsOwner(client, actor);
+      await requireBookingsReader(client, actor);
       return (await selectSessionBookings(client, actor.providerId, key)).map(hostGuestBookingFromRow);
     });
   }

@@ -200,13 +200,15 @@ export async function requireMembership(
 ): Promise<ProviderMembership> {
   validateActor(actor);
   const result = await client.query<DbRow>(
-    `SELECT provider_id, niho_user_id, role, active
-       FROM provider_memberships
-      WHERE provider_id = $1
-        AND niho_user_id = $2
-        AND active = true
-        AND role = ANY($3::text[])
-      FOR SHARE`,
+    `SELECT m.provider_id, m.niho_user_id, m.role, m.active
+       FROM provider_memberships m
+       LEFT JOIN host_accounts a ON a.id=m.niho_user_id AND m.niho_user_id ~ '^hst_[0-9a-f]{32}$'
+      WHERE m.provider_id = $1
+        AND m.niho_user_id = $2
+        AND m.active = true
+        AND m.role = ANY($3::text[])
+        AND (m.niho_user_id !~ '^hst_[0-9a-f]{32}$' OR a.status='ACTIVE')
+      FOR SHARE OF m`,
     [actor.providerId, actor.nihoUserId, allowedRoles],
   );
   const row = result.rows[0];
@@ -369,7 +371,7 @@ export class ExperienceStore {
   }
 
   async verifyProductCalendarAccess(actor: HostActor, productId: string, write = false): Promise<CalendarAccess> {
-    return requireProductCalendarAccess(this.#pool, actor, productId, write ? ["OWNER", "EDITOR"] : ["OWNER", "EDITOR", "VIEWER"]);
+    return requireProductCalendarAccess(this.#pool, actor, productId, write ? ["OWNER", "COHOST", "EDITOR"] : ["OWNER", "COHOST", "EDITOR", "VIEWER"]);
   }
 
   async listCalendarProducts(actor: HostActor): Promise<readonly CalendarProduct[]> {
@@ -387,7 +389,7 @@ export class ExperienceStore {
     const row = result.rows[0];
     if (!row) throw new StoreNotFoundError("schedule rule");
     const productId = String(row.product_id);
-    await requireProductCalendarAccess(this.#pool, actor, productId, write ? ["OWNER", "EDITOR"] : ["OWNER", "EDITOR", "VIEWER"]);
+    await requireProductCalendarAccess(this.#pool, actor, productId, write ? ["OWNER", "COHOST", "EDITOR"] : ["OWNER", "COHOST", "EDITOR", "VIEWER"]);
     return productId;
   }
 
@@ -505,7 +507,7 @@ export class ExperienceStore {
     validateCommandId(commandId);
     const requestFingerprint = inventoryCommandFingerprint({ input, expectedVersion });
     return this.#saveInventoryResource(actor.providerId, input, expectedVersion, commandId, requestFingerprint,
-      (client) => requireMembership(client, actor, ["OWNER", "EDITOR"]));
+      (client) => requireMembership(client, actor, ["OWNER", "COHOST", "EDITOR"]));
   }
 
   async listInventoryResources(actor: HostActor): Promise<readonly InventoryResourceRecord[]> {
@@ -638,7 +640,7 @@ export class ExperienceStore {
     };
     const requestFingerprint = inventoryCommandFingerprint({ productId, input: normalized, expectedVersion });
     return this.#saveProductInventorySetting(actor.providerId, productId, normalized, expectedVersion, commandId, requestFingerprint,
-      (client) => requireMembership(client, actor, ["OWNER", "EDITOR"]));
+      (client) => requireMembership(client, actor, ["OWNER", "COHOST", "EDITOR"]));
   }
 
   async saveProductInventorySettingAsAdmin(
@@ -696,7 +698,7 @@ export class ExperienceStore {
     }
     const requestFingerprint = JSON.stringify({ productId, rule, expectedVersion });
     return this.#saveScheduleRule(actor.providerId, productId, rule, expectedVersion, commandId, requestFingerprint,
-      (client) => requireProductCalendarAccess(client, actor, productId, ["OWNER", "EDITOR"]));
+      (client) => requireProductCalendarAccess(client, actor, productId, ["OWNER", "COHOST", "EDITOR"]));
   }
 
   /** Admin-only draft calendar write; it cannot address a published or formerly-published product. */
@@ -858,7 +860,7 @@ export class ExperienceStore {
   async listSchedule(actor: HostActor, productId: string): Promise<readonly ScheduleView[]> {
     validateActor(actor, true);
     assertStoreIdentifier(productId, "productId");
-    await requireProductCalendarAccess(this.#pool, actor, productId, ["OWNER", "EDITOR", "VIEWER"]);
+    await requireProductCalendarAccess(this.#pool, actor, productId, ["OWNER", "COHOST", "EDITOR", "VIEWER"]);
     return this.#listSchedule(actor.providerId, productId);
   }
 
@@ -913,7 +915,7 @@ export class ExperienceStore {
     const requestFingerprint = JSON.stringify({ productId, ruleId, override, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      await requireProductCalendarAccess(client, actor, productId, ["OWNER", "EDITOR"]);
+      await requireProductCalendarAccess(client, actor, productId, ["OWNER", "COHOST", "EDITOR"]);
       const previous = await previousCalendarCommand(client, actor.providerId, commandId, "occurrence.reschedule", requestFingerprint);
       if (previous) return previous;
       const ruleResult = await client.query<DbRow>(
@@ -979,7 +981,7 @@ export class ExperienceStore {
     const requestFingerprint = JSON.stringify({ productId, ruleId, state: rawState, expectedVersion });
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      await requireProductCalendarAccess(client, actor, productId, ["OWNER", "EDITOR"]);
+      await requireProductCalendarAccess(client, actor, productId, ["OWNER", "COHOST", "EDITOR"]);
       const previous = await previousCalendarCommand(client, actor.providerId, commandId, "occurrence.sales_state", requestFingerprint);
       if (previous) return previous;
       const rule = await client.query<DbRow>(
@@ -1047,7 +1049,7 @@ export class ExperienceStore {
     }
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      await requireMembership(client, actor, ["OWNER", "EDITOR"]);
+      await requireMembership(client, actor, ["OWNER", "COHOST", "EDITOR"]);
       await lockGoogleCalendarUsage(client, [input.opaqueCalendarId]);
       const outputCollision = await client.query(
         "SELECT 1 FROM google_channel_output_bindings WHERE opaque_calendar_id=$1 FOR SHARE",

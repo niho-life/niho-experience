@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Pool } from "pg";
 import { StoreError, StoreValidationError } from "./errors.ts";
-import { HAS_HOST_ACCESS, HOST_MAIL_TOPICS, HOST_NOTIFICATION_ADDRESS_LIMITS, type HostBookingMailTopic } from "./host-mail-shared.ts";
+import { HAS_HOST_ACCESS, HOST_ACCOUNT_USABLE, HOST_MAIL_TOPICS, HOST_NOTIFICATION_ADDRESS_LIMITS, type HostBookingMailTopic } from "./host-mail-shared.ts";
 import { HOST_NOTIFICATION_TOPICS, type HostNotificationTopic } from "./host-notification-outbox.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -18,6 +18,13 @@ export const HOST_MAIL_NOTIFICATION_TOPICS: Readonly<Record<HostBookingMailTopic
   [HOST_MAIL_TOPICS.newBooking]: HOST_NOTIFICATION_TOPICS.newBooking,
   [HOST_MAIL_TOPICS.cancellation]: HOST_NOTIFICATION_TOPICS.cancellation,
   [HOST_MAIL_TOPICS.otaBooking]: HOST_NOTIFICATION_TOPICS.otaBooking,
+  [HOST_MAIL_TOPICS.guestMessage]: HOST_NOTIFICATION_TOPICS.guestMessage,
+  [HOST_MAIL_TOPICS.guestQuestion]: HOST_NOTIFICATION_TOPICS.guestQuestion,
+  [HOST_MAIL_TOPICS.bookingMessage]: HOST_NOTIFICATION_TOPICS.bookingMessage,
+  [HOST_MAIL_TOPICS.newReview]: HOST_NOTIFICATION_TOPICS.newReview,
+  [HOST_MAIL_TOPICS.guestEmailDeliveryFailed]: HOST_NOTIFICATION_TOPICS.guestEmailDeliveryFailed,
+  [HOST_MAIL_TOPICS.dayBeforeSummary]: HOST_NOTIFICATION_TOPICS.dayBeforeSummary,
+  [HOST_MAIL_TOPICS.listingSuspension]: HOST_NOTIFICATION_TOPICS.listingSuspension,
 };
 
 const BOOKING_TOPICS: readonly string[] = Object.keys(HOST_MAIL_NOTIFICATION_TOPICS);
@@ -109,12 +116,12 @@ const RECIPIENT = (row: string) => `${row}.payload->>'to'`;
  * operator of its product.
  */
 const STILL_RECIPIENT = (row: string) =>
-  `(EXISTS (SELECT 1 FROM provider_memberships rm
+  `(${HOST_ACCOUNT_USABLE(RECIPIENT(row))} AND (EXISTS (SELECT 1 FROM provider_memberships rm
              WHERE rm.provider_id = ${row}.provider_id AND rm.niho_user_id = ${RECIPIENT(row)} AND rm.active AND rm.role = 'OWNER')
     OR (${row}.topic = '${HOST_MAIL_TOPICS.otaBooking}' AND EXISTS (
           SELECT 1 FROM product_operator_grants rg
            WHERE rg.provider_id = ${row}.provider_id AND rg.product_id = ${row}.payload->>'productId'
-             AND rg.niho_user_id = ${RECIPIENT(row)} AND rg.active AND (rg.expires_at IS NULL OR rg.expires_at > clock_timestamp()))))`;
+             AND rg.niho_user_id = ${RECIPIENT(row)} AND rg.active AND (rg.expires_at IS NULL OR rg.expires_at > clock_timestamp())))))`;
 
 export class HostMailOutbox {
   readonly #pool: Pool;

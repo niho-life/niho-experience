@@ -415,9 +415,9 @@ export interface HostOtaBookingTerms {
 /** What a booking made on this site fixed when it was made (its pricing snapshot), for 申込内容. */
 export interface HostSiteBookingTerms {
   /** NIHO's fee; null for a booking that has none recorded. */
-  fee: { amountYen: number; percent: number; supportEnabled: boolean } | null;
+  fee?: { amountYen: number; percent: number; supportEnabled: boolean } | null;
   /** The total less NIHO's fee: what the host receives, before any refund. */
-  payoutYen: number;
+  payoutYen?: number;
   /** 取消条件; null for a booking that has none recorded. */
   cancellationPolicy: "FREE_UNTIL_24H" | "FREE_UNTIL_48H" | "NONE" | null;
   /** 取消と返金 (#285 slice 7): who cancelled, why, and where its refunds are. Absent on the preview's bookings. */

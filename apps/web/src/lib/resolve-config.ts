@@ -329,6 +329,16 @@ function hostAccountsSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnab
   return true;
 }
 
+/** Native Experience teams require every native identity boundary; the legacy provider-operations flag is unrelated. */
+function hostTeamSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, hostAccountsEnabled: boolean): boolean {
+  const name = "EXPERIENCE_HOST_TEAM_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (!hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
+  if (!hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error(`${name}=true needs EXPERIENCE_DATABASE_URL in http mode`);
+  return true;
+}
+
 /**
  * The flags whose code sends the signed-in admin's NIHO admin token (NIHO's Admin session) to NIHO. With the Google
  * login (ADR 0003 decision 4) there is no such token, so none of them may be on at the same time. The fee summary is
@@ -840,6 +850,7 @@ export function resolveConfig(env: Env) {
   const hostMailEnabled = hostMailSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
   // ホストのアカウント (ADR 0003): /host signs in with Experience's own accounts instead of NIHO; see hostAccountsSetting.
   const hostAccountsEnabled = hostAccountsSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
+  const hostTeamEnabled = hostTeamSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   // After host accounts: with them, the host publication API reads Stripe and the experience DB instead of NIHO.
   const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   // The Google calendar jobs (#238): busy re-checks and the booking calendar, each behind its own flag.
@@ -1001,6 +1012,8 @@ export function resolveConfig(env: Env) {
     hostMailEnabled,
     // Experience host accounts (ADR 0003): the emailed sign-in link and server-side sessions replace the NIHO login.
     hostAccountsEnabled,
+    // Experience-native COHOST membership, independent from the legacy provider-operations consumer.
+    hostTeamEnabled,
     googleBusySyncEnabled: googleCalendarJobs.busySyncEnabled,
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,
     googleJobsAudience: googleCalendarJobs.audience,

@@ -808,6 +808,34 @@ describe("host emails (#194)", () => {
     expect(s.hostOutbox.completeBookingMail.mock.calls as unknown[]).toEqual([["501"]]);
   });
 
+  it("enqueues day-before summaries from the mail job even without a push drain, then follows the optional switch", async () => {
+    const summaries = { enqueueDueDayBeforeSummaries: vi.fn(async () => 1) };
+    s.hostOutbox.claimBookingMails.mockImplementation(hostMailsOneAtATime([hostMailOf(6, {
+      notificationTopic: "host.notify.day_before_summary",
+      payload: { v: 1, localDate: "2026-11-02", bookingCount: 2, participantCount: 4 },
+    })]));
+    s.allowed.mockResolvedValue(false);
+    const counts = await runExperienceJobs({ ...s.deps, hostMail: { outbox: s.hostOutbox, allowed: s.allowed, summaries } });
+    expect(summaries.enqueueDueDayBeforeSummaries).toHaveBeenCalledWith(NOW);
+    expect(s.allowed).toHaveBeenCalledWith("provider-a", "DAY_BEFORE_SUMMARY");
+    expect(counts.hostBookingMails).toEqual({ claimed: 1, sent: 0, skipped: 1, retried: 0, failed: 0, abandoned: 0 });
+    expect(s.mailer.sendMail).not.toHaveBeenCalled();
+    expect(s.hostOutbox.completeBookingMail).toHaveBeenCalledWith("506");
+  });
+
+  it("leaves a claimed optional mail for retry when notification settings cannot be read", async () => {
+    s.hostOutbox.claimBookingMails.mockImplementation(hostMailsOneAtATime([hostMailOf(7, {
+      notificationTopic: "host.notify.new_review",
+      payload: { v: 1, reviewId: "00000000-0000-4000-8000-000000000109", experienceTitle: "Synthetic walk" },
+    })]));
+    s.allowed.mockRejectedValue(new Error("synthetic settings outage"));
+    const counts = await runExperienceJobs(withHostMail());
+    expect(counts.hostBookingMails).toEqual({ error: "unavailable" });
+    expect(s.mailer.sendMail).not.toHaveBeenCalled();
+    expect(s.hostOutbox.completeBookingMail).not.toHaveBeenCalled();
+    expect(s.hostOutbox.retryBookingMail).not.toHaveBeenCalled();
+  });
+
   it("sends the confirmation link with a token made right before it goes, and nothing for a request no longer open", async () => {
     const rows = [
       { id: "601", attempts: 1, confirmation: { confirmationId: "7c9e6679-7425-40de-944b-e07fc1f90ae7", email: "desk@example.test", expiresAt: "2026-11-01T01:00:00.000Z" } },

@@ -11,6 +11,8 @@ export {
 } from "./errors.ts";
 export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOccurrenceReason } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
+export { HOST_TEAM_CONTRACT_VERSION, HOST_TEAM_RESOLVE_LIMIT, HostTeamRepository, hostAccessFingerprint } from "./host-team.ts";
+export type { HostAccessProjection, HostTeamActor, HostTeamCandidate, HostTeamCommandReceipt, HostTeamMember, HostTeamMemberRole, HostTeamMutationResult, HostTeamOperation, HostTeamSnapshot } from "./host-team.ts";
 export { ExperiencePublicationBlockedError, ExperiencePublicationRepository, publicationManuscriptReview } from "./experience-publication.ts";
 export { ProviderSellerDisclosureRepository, validateSellerDisclosureInput } from "./provider-seller-disclosures.ts";
 export { EMPTY_HOST_BIO_STATE, ProviderHostBioRepository, hostBioSourceFingerprint } from "./provider-host-bios.ts";

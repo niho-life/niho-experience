@@ -154,6 +154,10 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // The publication BFF binds only the verified NIHO identity to its explicitly mapped Experience seller.
   provider_memberships: { write: IU },
   provider_notification_preferences: { write: IU },
+  // Experience-native team CAS. Receipts are append-only; revisions and fixed-hour lookup buckets are upserted.
+  provider_team_commands: { write: I },
+  provider_team_resolve_buckets: { write: IU },
+  provider_team_revisions: { write: IU },
   // 受取口座の利用同意 (ADR 0003, 0065): the current host-account OWNER records a consent; a withdrawal or a replacement
   // only marks the active row revoked (the rows are the consent's history: no DELETE, no other column changes).
   provider_payout_account_consents: { write: I, updateColumns: ["revoked_at", "revoked_by_niho_user_id"] },
