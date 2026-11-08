@@ -218,9 +218,9 @@ function offerLabel(offer: Product["offers"][number]): string {
   return `${offer.localStartTime}開始・${offer.durationMinutes}分・定員${offer.capacity}人（${recurrence}）`;
 }
 
-function Field({ label, value, onChange, multiline = false, rows = 3, placeholder }: { label: string; value: string; onChange: (value: string) => void; multiline?: boolean; rows?: number; placeholder?: string }) {
+function Field({ label, value, onChange, onBlur, multiline = false, rows = 3, placeholder }: { label: string; value: string; onChange: (value: string) => void; onBlur?: () => void; multiline?: boolean; rows?: number; placeholder?: string }) {
   const common = "mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 text-ink outline-none focus-visible:border-moss focus-visible:ring-2 focus-visible:ring-moss/20";
-  return <label className="block text-sm font-bold text-ink-soft">{label}{multiline ? <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={rows} placeholder={placeholder} className={`${common} resize-y font-normal`} /> : <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={`${common} font-normal`} />}</label>;
+  return <label className="block text-sm font-bold text-ink-soft">{label}{multiline ? <textarea value={value} onChange={(event) => onChange(event.target.value)} onBlur={onBlur} rows={rows} placeholder={placeholder} className={`${common} resize-y font-normal`} /> : <input value={value} onChange={(event) => onChange(event.target.value)} onBlur={onBlur} placeholder={placeholder} className={`${common} font-normal`} />}</label>;
 }
 
 export function HostPublicationWorkspace({
@@ -984,9 +984,17 @@ export function HostPublicationWorkspace({
         multiline
         rows={rows}
         onChange={(next) => {
-          const value = next.split("\n").filter((item) => item.trim().length > 0);
+          // Keep the trailing empty line while typing so Enter can start the next item.
+          const value = next.split("\n");
           if (localeIsJapanese) updateJapanese(key, value);
           else updateEnglishContent(key, value);
+        }}
+        onBlur={() => {
+          const value = localeIsJapanese ? japanese[key] : english[key].split("\n");
+          if (!value.some((item) => !item.trim())) return;
+          const nonempty = value.filter((item) => item.trim().length > 0);
+          if (localeIsJapanese) updateJapanese(key, nonempty);
+          else updateEnglishContent(key, nonempty);
         }}
       />
     );

@@ -43,7 +43,7 @@ vi.mock("@/lib/host/translate-rooms-server", () => ({ translateRoomsEnabled: () 
 import HostBookingsPage from "./page";
 import { HostBookings } from "@/components/host/HostBookings";
 
-const LIVE = { status: "live", bookings: [{ id: "b-1" }], experiences: [], requestedMissing: false, nextCursor: "sample-cursor", today: "2026-10-31", messages: true, preview: false, readOnly: false };
+const LIVE = { status: "live", bookings: [{ id: "b-1" }], experiences: [], requestedMissing: false, nextCursor: "sample-cursor", today: "2026-10-31", messages: true, preview: false, readOnly: false, canCancel: true };
 
 beforeEach(() => {
   state.memberRole = "OWNER";

@@ -3,6 +3,7 @@ import { BOOKING_ACCESS_LIMITS, BOOKING_LINK_TOPIC } from "./booking-access.ts";
 import { REVIEW_INVITATION_TOPIC } from "./booking-attendance.ts";
 import { GUEST_NOTICE_TOPICS } from "./booking-cancellations.ts";
 import { HOST_NOTIFICATION_TOPICS } from "./host-notification-outbox.ts";
+import { enqueueHostBookingMails, HOST_MAIL_TOPICS } from "./host-mail-shared.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import { cancellationTermsOf } from "./cancellation-terms.ts";
 import { validateGuestMeetingGuide } from "./guest-meeting-guides.ts";
@@ -621,6 +622,9 @@ export class GuestMailOutbox {
 
       if (isBounce) {
         const occurrence = record(row.occurrence_snapshot);
+        const payload = { v: 1, bookingId: String(row.public_booking_id), classification: input.classification,
+          experienceTitle: hostNotificationTitle(String(row.public_title)), startsAt: typeof occurrence.startUtc === "string" ? occurrence.startUtc : null,
+          seats: count(row.seats, "seats") };
         await client.query(
           `INSERT INTO outbox_messages (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload)
            VALUES ($1,'booking',$2,$3,$4,jsonb_build_object('v',1,'bookingId',$2::text,'classification',$5::text,
@@ -630,6 +634,10 @@ export class GuestMailOutbox {
             `host-email-delivery-failed:${input.deliveryRef}`, input.classification, hostNotificationTitle(String(row.public_title)),
             typeof occurrence.startUtc === "string" ? occurrence.startUtc : null, count(row.seats, "seats")],
         );
+        await enqueueHostBookingMails(client, {
+          providerId: String(row.provider_id), topic: HOST_MAIL_TOPICS.guestEmailDeliveryFailed, aggregateType: "booking",
+          aggregateId: String(row.public_booking_id), deduplicationKey: `guest-email-delivery-failed:${input.deliveryRef}`, payload,
+        });
       }
       return "RECORDED";
     });

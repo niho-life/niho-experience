@@ -1,6 +1,6 @@
 import "server-only";
 import type { Pool } from "pg";
-import { AdminSessions, BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostAccounts, HostMailOutbox, HostNotificationAddresses, ProviderMediaCleanupRepository } from "@niho-experience/experience-store";
+import { AdminSessions, BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostAccounts, HostMailOutbox, HostNotificationAddresses, HostNotificationOutbox, ProviderMediaCleanupRepository } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
@@ -103,7 +103,7 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       refunds: submit ? { cancellations: new BookingCancellations(pool), submit } : null,
       guests: new GuestBookingRepository(pool),
       otaGuests: new ExternalReservationGuests(pool),
-      hostMail: (dependencies.hostMail ?? config.hostMailEnabled) ? { outbox: new HostMailOutbox(pool), allowed: (providerId, kind) => hostNotificationAllowed(providerId, kind) } : null,
+      hostMail: (dependencies.hostMail ?? config.hostMailEnabled) ? { outbox: new HostMailOutbox(pool), summaries: new HostNotificationOutbox(pool), allowed: (providerId, kind) => hostNotificationAllowed(providerId, kind) } : null,
       hostAddresses: new HostNotificationAddresses(pool),
       hostLogins: (dependencies.hostAccounts ?? config.hostAccountsEnabled) ? new HostAccounts(pool) : null,
       adminSessions: (dependencies.adminGoogleLogin ?? config.adminGoogleLoginEnabled) ? new AdminSessions(pool) : null,

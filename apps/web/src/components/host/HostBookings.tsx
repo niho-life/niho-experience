@@ -91,7 +91,7 @@ export interface HostBookingsProps {
    * slice 6b; メッセージ opens the booking's thread, or its empty one). `preview`: the preview's synthetic ones
    * (`?mock=site-bookings`), read only. Absent in mock mode otherwise.
    */
-  live?: { nextCursor: string | null; messages?: boolean; preview?: boolean; readOnly?: boolean } | null;
+  live?: { nextCursor: string | null; messages?: boolean; preview?: boolean; readOnly?: boolean; canCancel?: boolean } | null;
   /**
    * Bookings made on reservation sites (#194 PR B, EXPERIENCE_OTA_GUEST_DETAILS_ENABLED): on the same list with their
    * site's badge, read only (their site keeps cancelling, refunding and the guest's messages). One opens with `?booking=`
@@ -391,7 +391,7 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
                 onDecline={() => {
                   if (change(shown.id, declineBooking)) report(shown.id, "申込をお断りしました");
                 }}
-                onSiteCancel={live && !live.preview && !live.readOnly && shown.site ? (choice) => void cancelSite(shown.id, choice) : undefined}
+                onSiteCancel={live?.canCancel && shown.site ? (choice) => void cancelSite(shown.id, choice) : undefined}
                 siteCancel={siteCancel?.bookingId === shown.id ? siteCancel : undefined}
                 onCancel={(cancellation: BookingCancellation) => {
                   const done = change(shown.id, (booking, at) => cancelBooking(booking, cancellation, at));

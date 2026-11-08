@@ -2,6 +2,8 @@ import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
+  sessionKind: "niho",
+  hostTeamEnabled: false,
   loadConsole: vi.fn(),
   loadPayout: vi.fn(),
   loadCalendar: vi.fn(),
@@ -12,7 +14,7 @@ const state = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("@/host/data", () => ({
   hostPageContext: async () => ({
-    session: { kind: "niho", displayName: "Synthetic host", iconUrl: null },
+    session: { kind: state.sessionKind, displayName: "Synthetic host", iconUrl: null },
     providers: [],
     provider: { id: "provider-one", displayName: "Synthetic provider", memberRole: "OWNER" },
     providerNotFound: false,
@@ -28,6 +30,7 @@ vi.mock("@/lib/experience/calendar-actor", () => ({ resolveCalendarContext: vi.f
 vi.mock("@/lib/host/server", () => ({ isHostMock: () => true }));
 vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => false }));
 vi.mock("@/lib/config", () => ({ config: {
+  get hostTeamEnabled() { return state.hostTeamEnabled; },
   hostPwaEnabled: true,
   hostPushEnabled: false,
   hostPushVapidPublicKey: "",
@@ -38,6 +41,8 @@ vi.mock("@/lib/config", () => ({ config: {
 } }));
 
 import { HostSettingsIndex } from "@/components/host/HostSettingsIndex";
+import { HostSettingsForm } from "@/components/host/HostSettingsForm";
+import { HostOperatingTeamPanel } from "@/components/host/HostOperatingTeamPanel";
 import HostSettingsPage from "./page";
 
 function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
@@ -47,6 +52,8 @@ function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
 }
 
 beforeEach(() => {
+  state.sessionKind = "niho";
+  state.hostTeamEnabled = false;
   state.loadConsole.mockReset();
   state.loadPayout.mockReset();
   state.loadCalendar.mockReset();
@@ -55,6 +62,17 @@ beforeEach(() => {
 });
 
 describe("host settings server assembly", () => {
+  it("connects the team section to Experience membership commands with the legacy API disabled", async () => {
+    state.sessionKind = "experience";
+    state.hostTeamEnabled = true;
+    state.loadConsole.mockResolvedValue({ settings: { notifications: null } });
+    state.loadExperiencePayout.mockResolvedValue({ status: "setup-required" });
+    const tree = elements(await HostSettingsPage({ searchParams: Promise.resolve({ providerId: "provider-one", section: "team" }) }));
+    const form = tree.find((element) => element.type === HostSettingsForm);
+    const team = elements(form?.props.account as ReactNode).find((element) => element.type === HostOperatingTeamPanel);
+    expect(team?.props).toMatchObject({ providerId: "provider-one", role: "OWNER", mode: "native" });
+  });
+
   it("renders the overview from provider context without loading every setting", async () => {
     const tree = elements(await HostSettingsPage({ searchParams: Promise.resolve({ providerId: "provider-one" }) }));
     expect(tree.find((element) => element.type === HostSettingsIndex)?.props).toMatchObject({

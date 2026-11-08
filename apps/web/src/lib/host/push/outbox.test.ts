@@ -93,7 +93,7 @@ describe("hostPushEventFromOutbox", () => {
       event: {
         providerId: "provider-a", kind: "DAY_BEFORE_SUMMARY",
         note: "明日 2026年11月5日の確定予約：2件・3名",
-        url: "/host/bookings", tag: "day-before-summary-2026-11-05",
+        url: "/host/bookings?providerId=provider-a", tag: "day-before-summary-2026-11-05",
       },
     });
     if (parsed.ok) {

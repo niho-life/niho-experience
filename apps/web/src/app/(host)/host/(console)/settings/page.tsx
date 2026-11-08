@@ -173,10 +173,11 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   const payoutPanel = accountPayout
     ? <HostPayoutAccountPanel providerId={provider.id} load={accountPayout.experience} notice={payoutOutcome ? PAYOUT_CONSENT_OUTCOMES[payoutOutcome] : null} />
     : undefined;
+  const teamMode = config.hostTeamEnabled && session.kind === "experience" ? "native" as const : providerOperationsEnabled() ? "legacy" as const : "off" as const;
 
   const showAccountSection = (part: HostSettingsSection) => section === "all" || section === part;
   const accountContent = <div className="grid gap-3.5">
-    {showAccountSection("team") ? <HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} enabled={providerOperationsEnabled()} /> : null}
+    {showAccountSection("team") ? <HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} mode={teamMode} /> : null}
     {showAccountSection("articles") && provider.memberRole === "OWNER" && config.hostArticleLinksEnabled ? <HostArticleLinksPanel providerId={provider.id} /> : null}
     {showAccountSection("support") ? <HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /> : null}
     {showAccountSection("device") ? devicePanel : null}
@@ -187,7 +188,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
     <HostPageBody>
       <PageHead title={HOST_SETTINGS_SECTION_TITLES[section]}>
         {section === "all"
-          ? provider.memberRole === "OWNER" && providerOperationsEnabled() ? <a href="#settings-team" className={consoleButtonClass("secondary")}>サブホストを管理</a> : null
+          ? provider.memberRole === "OWNER" && teamMode !== "off" ? <a href="#settings-team" className={consoleButtonClass("secondary")}>共同ホストを管理</a> : null
           : <Link href={withProvider(HOST_SETTINGS_PATH, provider.id)} className={consoleButtonClass("secondary")}>設定へ戻る</Link>}
       </PageHead>
       {/* A confirmed departure starts from that provider and section's saved values. */}

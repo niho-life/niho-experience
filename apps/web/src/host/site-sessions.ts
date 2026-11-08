@@ -122,8 +122,8 @@ export function withSiteHome(home: HostHomeData, site: SiteHome): HostHomeData {
 }
 
 /** One booking as この回 shows it: as 予約 does, with the phone the guest gave. この回 is the one screen that has it (#103). */
-export function siteSessionBooking(stored: HostGuestBooking): HostBooking {
-  return { ...siteBooking(stored), phone: stored.guest?.phone ?? null };
+export function siteSessionBooking(stored: HostGuestBooking, ownerFinancial = true): HostBooking {
+  return { ...siteBooking(stored, ownerFinancial), phone: stored.guest?.phone ?? null };
 }
 
 const ATTENDANCE: Record<BookingAttendanceStatus, HostAttendance> = { ATTENDED: "attended", NO_SHOW: "no_show" };
@@ -142,11 +142,11 @@ export function storedAttendance(value: HostAttendance): BookingAttendanceStatus
  * この回 of this site's bookings for the session `query` names; null when it has none of the provider's. With
  * `attendance` (#107, its flag on) each booking carries its mark and the session the occurrence's capacity now.
  */
-export function siteSessionView(stored: readonly HostGuestBooking[], query: SessionQuery, attendance: HostSessionAttendance | null = null): HostSessionView | null {
+export function siteSessionView(stored: readonly HostGuestBooking[], query: SessionQuery, attendance: HostSessionAttendance | null = null, ownerFinancial = true): HostSessionView | null {
   const first = stored[0];
   if (!first) return null;
   const marks = new Map(attendance?.marks.map((mark) => [mark.publicBookingId, siteAttendance(mark.status)]));
-  const bookings = stored.map((booking) => ({ ...siteSessionBooking(booking), attendance: marks.get(booking.publicBookingId) ?? null }));
+  const bookings = stored.map((booking) => ({ ...siteSessionBooking(booking, ownerFinancial), attendance: marks.get(booking.publicBookingId) ?? null }));
   return {
     date: query.date,
     start: query.start,

@@ -9,7 +9,7 @@ import { todayInJapan } from "./format";
 import { HOST_INVALID_INPUT_TEXT } from "./errors";
 import type { HostActionResult } from "./payout";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "./site-bookings";
-import { asOwner, ownerActor, runOwnerCancellation, SITE_BOOKING_OWNER_ONLY_TEXT, SITE_CANCEL_NOT_CANCELLABLE_TEXT, siteBookingMessagesEnabled, startOfJapanDay, type SiteCancelInput } from "./site-bookings-server";
+import { asOwner, bookingReaderActor, runOwnerCancellation, SITE_BOOKING_OWNER_ONLY_TEXT, SITE_CANCEL_NOT_CANCELLABLE_TEXT, siteBookingMessagesEnabled, startOfJapanDay, type SiteCancelInput } from "./site-bookings-server";
 import {
   SITE_ATTENDANCE_FAILED_TEXT,
   SITE_ATTENDANCE_NOT_CONFIRMED_TEXT,
@@ -48,12 +48,12 @@ export type HostSiteHomeLoad =
  */
 export async function loadSiteHome(provider: HostProvider): Promise<HostSiteHomeLoad> {
   const bookings = guestBookingRepository();
-  if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
+  if (!bookings || (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST")) return { status: "closed" };
   const now = Date.now();
   const today = todayInJapan(now);
   try {
-    const sessions = await bookings.listGuestSessionsForHost(ownerActor(provider), { from: startOfJapanDay(today), limit: HOME_SESSION_LIMIT });
-    return { status: "live", sessions: siteHomeSessions(sessions, actionTime(today, now)), todos: siteHomeTodos(sessions) };
+    const sessions = await bookings.listGuestSessionsForHost(bookingReaderActor(provider), { from: startOfJapanDay(today), limit: HOME_SESSION_LIMIT });
+    return { status: "live", sessions: siteHomeSessions(sessions, actionTime(today, now)), todos: provider.memberRole === "OWNER" ? siteHomeTodos(sessions) : [] };
   } catch (error) {
     return error instanceof StoreAccessDeniedError ? { status: "closed" } : { status: "error" };
   }
@@ -82,21 +82,21 @@ export type HostSiteSessionLoad =
  */
 export async function loadSiteSession(provider: HostProvider, query: SessionQuery): Promise<HostSiteSessionLoad> {
   if (isHostMock()) {
-    if (provider.memberRole !== "OWNER") return { status: "closed" };
+    if (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST") return { status: "closed" };
     const stored = mockExperienceBookings(provider.id).filter((booking) => booking.productId === query.experience && booking.offerId === query.offer && booking.localDate === query.date && booking.localStartTime === query.start);
-    return { status: "live", session: siteSessionView(stored, query), now: MOCK_NOW, messages: true, attendance: false, preview: true };
+    return { status: "live", session: siteSessionView(stored, query, null, provider.memberRole === "OWNER"), now: MOCK_NOW, messages: true, attendance: false, preview: true };
   }
   const bookings = guestBookingRepository();
-  if (!bookings || provider.memberRole !== "OWNER") return { status: "closed" };
-  const attendance = bookingAttendance();
+  if (!bookings || (provider.memberRole !== "OWNER" && provider.memberRole !== "COHOST")) return { status: "closed" };
+  const attendance = provider.memberRole === "OWNER" ? bookingAttendance() : null;
   const clock = Date.now();
   const now = actionTime(todayInJapan(clock), clock);
-  const actor = ownerActor(provider);
+  const actor = bookingReaderActor(provider);
   const key = { productId: query.experience, offerId: query.offer, localDate: query.date, localStartTime: query.start };
   try {
     const stored = await bookings.listGuestBookingsForSession(actor, key);
     const marks: HostSessionAttendance | null = attendance && stored.length ? await attendance.readSessionForHost(actor, key) : null;
-    return { status: "live", session: siteSessionView(stored, query, marks), now, messages: siteBookingMessagesEnabled(), attendance: attendance !== null };
+    return { status: "live", session: siteSessionView(stored, query, marks, provider.memberRole === "OWNER"), now, messages: siteBookingMessagesEnabled(), attendance: attendance !== null };
   } catch (error) {
     if (error instanceof StoreAccessDeniedError) return { status: "closed" };
     // An address the store cannot read (an experience or offer that is no identifier) names no session here.

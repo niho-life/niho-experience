@@ -101,7 +101,7 @@ function SiteBookings({ site, provider, linkProviderId, requested, ota }: { site
       supportHistoryEnabled={false}
       feeSummaryEnabled={false}
       translateEnabled={translateRoomsEnabled()}
-      live={{ nextCursor: site.nextCursor, messages: site.messages, preview: site.preview, readOnly: site.readOnly }}
+      live={{ nextCursor: site.nextCursor, messages: site.messages, preview: site.preview, readOnly: site.readOnly, canCancel: site.canCancel }}
       ota={ota}
     />
   );

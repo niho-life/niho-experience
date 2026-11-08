@@ -1,6 +1,7 @@
 import "server-only";
 import { StoreAccessDeniedError, StoreValidationError, type HostActor, type HostNotificationChanges } from "@niho-experience/experience-store";
 import { providerNotificationSettings } from "@/lib/experience/store-server";
+import { config } from "@/lib/config";
 import type { HostProvider } from "@/lib/host/providers";
 import { loadHostProviders, readHostSession } from "@/lib/host/server";
 import { accessTokenUsable } from "@/lib/host/session";
@@ -19,7 +20,7 @@ export type HostNotificationSettingsLoad =
   /** 保存 changes them. */
   | { status: "live"; items: HostNotificationItem[] }
   /** Not kept here yet: the flag is off, no DB, or the experience DB has no OWNER membership for them. */
-  | { status: "preparing" }
+  | { status: "disabled" | "unavailable" | "forbidden" | "expired" | "preparing" }
   | { status: "error" };
 
 function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">): HostActor {
@@ -29,18 +30,23 @@ function ownerActor(provider: Pick<HostProvider, "id" | "nihoUserId" | "memberRo
 
 /** The settings page's 通知 for an OWNER (NIHO's role); anyone else never reads them. */
 export async function loadNotificationSettings(provider: HostProvider): Promise<HostNotificationSettingsLoad> {
+  if (provider.memberRole !== "OWNER") return { status: "forbidden" };
+  if (!config.hostNotificationSettingsEnabled) return { status: "disabled" };
   const settings = providerNotificationSettings();
-  if (!settings || provider.memberRole !== "OWNER") return { status: "preparing" };
+  if (!settings) return { status: "unavailable" };
   try {
     return { status: "live", items: await settings.get(ownerActor(provider)) };
   } catch (error) {
-    return error instanceof StoreAccessDeniedError ? { status: "preparing" } : { status: "error" };
+    return error instanceof StoreAccessDeniedError ? { status: "forbidden" } : { status: "error" };
   }
 }
 
 /** 保存: the changes the browser sent (already checked for shape), for a provider NIHO says this account owns. */
 export async function changeNotificationSettings(providerId: string, changes: HostNotificationChanges): Promise<HostActionResult<{ items: HostNotificationItem[] }>> {
-  const session = await readHostSession();
+  if (!config.hostNotificationSettingsEnabled) return { ok: false, message: NOTIFICATION_SAVE_FAILED_TEXT };
+  let session: Awaited<ReturnType<typeof readHostSession>>;
+  try { session = await readHostSession(); }
+  catch { return { ok: false, message: NOTIFICATION_SAVE_FAILED_TEXT }; }
   if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };
   const settings = providerNotificationSettings();
   if (!settings) return { ok: false, message: NOTIFICATION_SAVE_FAILED_TEXT };

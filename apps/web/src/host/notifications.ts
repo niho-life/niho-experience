@@ -85,7 +85,7 @@ export function notificationChanges(saved: readonly NotificationRow[], now: read
  * (保存 sends the changes), not here yet (準備中: the flag is off or the provider's OWNER is not in
  * the experience DB), or the experience DB could not be read.
  */
-export type NotificationSource = "preview" | "live" | "preparing" | "error";
+export type NotificationSource = "preview" | "live" | "disabled" | "unavailable" | "forbidden" | "expired" | "error" | "preparing";
 
 /** 設定 › 通知 for this person. */
 export type NotificationPanelView =
@@ -104,9 +104,15 @@ export type NotificationPanelView =
 
 /** 通知 as the settings page opens it: the owner changes it in the preview and once the experience DB keeps it. */
 export function notificationPanelView(settings: HostNotificationSettings | null, role: HostProviderRole | null, source: NotificationSource): NotificationPanelView {
-  const preparing = source === "preparing";
-  if (role !== "OWNER" || !settings) return { kind: "owner-only", text: NOTIFICATION_OWNER_ONLY_TEXT, preparing };
+  const preparing = source === "disabled" || source === "unavailable" || source === "preparing";
+  // Do not disclose whether an owner's settings are present or readable to another role.
+  if (role !== "OWNER" || source === "forbidden") return { kind: "owner-only", text: NOTIFICATION_OWNER_ONLY_TEXT, preparing: source === "preparing" };
   if (source === "error") return { kind: "error", text: NOTIFICATION_LOAD_FAILED_TEXT, preparing: false };
+  if (source === "expired") return { kind: "error", text: "ログインの有効期限が切れたため、通知設定を表示できません。", preparing: false };
+  if (source === "disabled") return { kind: "owner-only", text: "通知設定はこの環境ではまだ有効になっていません。", preparing: true };
+  if (source === "unavailable") return { kind: "error", text: "通知設定のデータベースを利用できません。", preparing: false };
+  if (!settings && source === "preview") return { kind: "owner-only", text: NOTIFICATION_OWNER_ONLY_TEXT, preparing: false };
+  if (!settings) return { kind: "error", text: NOTIFICATION_LOAD_FAILED_TEXT, preparing: false };
   const addresses = settings.email.addresses.filter((address) => address.trim() !== "");
   const addressText =
     addresses.length === 0 ? "NIHO からの通知は、ログインで確認したメールアドレスに届きます" : addresses.length === 1 ? "NIHO からの通知はこのメールに届きます" : "NIHO からの通知はこれらのメールに届きます";

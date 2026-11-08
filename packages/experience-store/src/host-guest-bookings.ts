@@ -207,6 +207,13 @@ export async function requireBookingsOwner(client: PoolClient, actor: HostActor)
   if (await calendarMembershipRole(client, actor, ["OWNER"]) !== "OWNER") throw new StoreAccessDeniedError();
 }
 
+/** Current OWNER or COHOST for reservation reading/replying; never use for cancellation, refund, sales or consent. */
+export async function requireBookingsReader(client: PoolClient, actor: HostActor): Promise<void> {
+  assertStoreIdentifier(actor.providerId, "actor.providerId");
+  assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
+  if (!await calendarMembershipRole(client, actor, ["OWNER", "COHOST"])) throw new StoreAccessDeniedError();
+}
+
 export function publicBookingIdOf(value: unknown): string {
   if (typeof value !== "string" || !UUID.test(value)) throw new StoreValidationError("publicBookingId must be a UUID.");
   return value.toLowerCase();

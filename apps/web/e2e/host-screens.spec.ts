@@ -201,7 +201,8 @@ test("設定の後方互換表示 has nine panels, and 保存 checks the fields 
   await expect(provider.getByRole("radio", { name: "個人" })).toBeChecked();
   // The provider's own values come from the host contract's mock (@niho-experience/api-client/host/mock).
   await expect(provider.getByRole("textbox", { name: "紹介" })).toHaveValue("家庭料理を一緒に作る体験の、合成データの提供者です（sample）。");
-  await expect(provider.getByRole("textbox", { name: "特商法表示 URL" })).toHaveValue("https://example.com/sample-kitchen/legal");
+  await expect(provider.getByRole("textbox", { name: "特商法表示 URL" })).toHaveCount(0);
+  await expect(provider.getByRole("link", { name: "販売者情報を確認・編集" })).toHaveAttribute("href", "/host/seller?providerId=sample-provider-kitchen");
   const payout = page.getByRole("region", { name: "売上受取口座" });
   await expect(payout).toContainText("準備済み");
   await expect(payout).toContainText("サンプルの台所の口座");

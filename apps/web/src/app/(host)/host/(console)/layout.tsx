@@ -3,11 +3,13 @@ import { HostAppSurfaceGuard, HostLoginLink, HostResumeRefresh } from "@/compone
 import { HostSharedPhotoNotice } from "@/components/host/HostSharedPhoto";
 import { HostRefreshGate, HostSessionKeeper } from "@/components/host/HostSessionKeeper";
 import { HostShell } from "@/components/host/HostShell";
+import { HostMembershipGuard } from "@/components/host/HostMembershipGuard";
 import { hostButtonClass, HOST_HEADING, HOST_PAGE } from "@/components/host/host-ui";
 import { HostPageBody } from "@/components/host/ui";
 import { config } from "@/lib/config";
 import { calendarConsoleChoices } from "@/lib/experience/calendar-actor";
 import type { ProductOperatorAssignment } from "@niho-experience/experience-store";
+import { renderedHostAccessFingerprint } from "@/lib/host/access-fingerprint";
 import { HOST_HOME_PATH, HOST_INTRO_PATH, HOST_LAUNCH_PATH, HOST_LOGIN_PATH, HOST_LOGOUT_PATH } from "@/lib/host/routes";
 import { hostLoginLabel, isHostMock, loadHostProviders, readHostSession, requireHostConsole, type ProvidersLoad } from "@/lib/host/server";
 import { sessionKeeperExpiresAt, sessionUsableInApp } from "@/lib/host/session";
@@ -63,32 +65,44 @@ export default async function HostConsoleLayout({ children }: { children: React.
 
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
   let assignments: readonly ProductOperatorAssignment[] = [];
+  let assignmentsAvailable = true;
   if (load.status === "ok" && !isHostMock()) {
     const repository = productOperatorRepository();
-    if (repository) {
+    if (!repository) assignmentsAvailable = false;
+    else {
       try { assignments = await repository.listAssignments(load.nihoUserId); }
-      catch { /* Operator grants fail closed. */ }
+      catch { assignmentsAvailable = false; }
     }
   }
   const choices = calendarConsoleChoices(load.status === "ok" ? load.providers : [], assignments);
+  let accessFingerprint: string | null = null;
+  if (config.hostTeamEnabled && session.kind === "experience") {
+    if (load.status === "ok" && assignmentsAvailable) {
+      accessFingerprint = renderedHostAccessFingerprint(load.providers, assignments);
+    }
+    if (!accessFingerprint) return <main className={HOST_PAGE}>{appGuard}<HostPageBody><ProvidersProblem status="error" /></HostPageBody></main>;
+  }
+  const shell = (
+    <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} editorUrl="/write" preview={isHostMock()}>
+      {load.status === "ok" ? (
+        <>
+          {config.hostPwaEnabled ? <HostSharedPhotoNotice /> : null}
+          {children}
+        </>
+      ) : (
+        <HostPageBody>
+          <ProvidersProblem status={load.status} />
+        </HostPageBody>
+      )}
+    </HostShell>
+  );
   return (
     <>
       {appGuard}
       <HostSessionKeeper accessTokenExpiresAt={sessionKeeperExpiresAt(session)} />
       <HostResumeRefresh enabled={config.hostPwaEnabled} />
       {/* The sidebar and the phone menus are client components: they get the id, name and role, not NIHO's internal ids. */}
-      <HostShell account={account} providers={choices} nihoAppUrl={config.nihoWebOrigin} editorUrl="/write" preview={isHostMock()}>
-        {load.status === "ok" ? (
-          <>
-            {config.hostPwaEnabled ? <HostSharedPhotoNotice /> : null}
-            {children}
-          </>
-        ) : (
-          <HostPageBody>
-            <ProvidersProblem status={load.status} />
-          </HostPageBody>
-        )}
-      </HostShell>
+      {accessFingerprint ? <HostMembershipGuard key={accessFingerprint} initialFingerprint={accessFingerprint}>{shell}</HostMembershipGuard> : shell}
     </>
   );
 }

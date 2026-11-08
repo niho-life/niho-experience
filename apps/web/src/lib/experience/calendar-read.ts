@@ -71,7 +71,7 @@ export async function readHostCalendar(pool: Pool, store: ExperienceStore, actor
   return {
     scope,
     preview: false,
-    canEdit: scope === "OPERATOR" || membership?.role === "OWNER" || membership?.role === "EDITOR",
+    canEdit: scope === "OPERATOR" || membership?.role === "OWNER" || membership?.role === "COHOST" || membership?.role === "EDITOR",
     experiences: products.map((product) => ({ id: product.id, title: product.publicTitle })),
     rules, occurrences, busyIntervals,
     google: scope === "OPERATOR"

@@ -30,6 +30,7 @@ import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const ownerA = { providerId: "provider-a", nihoUserId: "owner-a" } as const;
 const editorA = { providerId: "provider-a", nihoUserId: "editor-a" } as const;
+const cohostA = { providerId: "provider-a", nihoUserId: "cohost-a", calendarRoleCeiling: "EDITOR" as const } as const;
 const viewerA = { providerId: "provider-a", nihoUserId: "viewer-a" } as const;
 const ownerB = { providerId: "provider-b", nihoUserId: "owner-b" } as const;
 const CONSENT = "sample-terms-2026-10";
@@ -190,7 +191,7 @@ async function withSchema(run: (context: Context) => Promise<void>): Promise<voi
     await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-a'),('provider-b')");
     await pool.query(
       `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES
-         ('provider-a','owner-a','OWNER',true),('provider-a','editor-a','EDITOR',true),
+         ('provider-a','owner-a','OWNER',true),('provider-a','cohost-a','COHOST',true),('provider-a','editor-a','EDITOR',true),
          ('provider-a','viewer-a','VIEWER',true),('provider-b','owner-b','OWNER',true)`,
     );
     const product = (provider: string, id: string, slug: string, status: string, title: string, currency: string, amount: number) =>
@@ -609,6 +610,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
 
       // Not the OWNER, an inactive OWNER, another provider's OWNER, NIHO capping the role, a product operator.
       for (const actor of [
+        cohostA,
         editorA,
         viewerA,
         { providerId: "provider-a", nihoUserId: "former-a" },
@@ -1687,10 +1689,13 @@ describe("PostgreSQL guest bookings for the host's 予約 (#285 slice 8)", { ski
     });
   });
 
-  it("answers only a current OWNER of the provider in the experience DB, and only for that provider", async () => {
+  it("answers a current OWNER or COHOST, but not EDITOR/OPERATOR, and only for that provider", async () => {
     await withSchema(async (context) => {
       const { tea } = await bookForHost(context);
       const { pool, guests } = context;
+      assert.ok((await guests.listGuestBookingsForHost(cohostA)).bookings.some((booking) => booking.publicBookingId === tea.publicBookingId));
+      assert.equal((await guests.getGuestBookingForHost(cohostA, tea.publicBookingId)).guest?.name, "Sample Guest");
+      assert.ok(await guests.countGuestBookingsForHost(cohostA) > 0);
       const denied = [editorA, viewerA, { ...ownerA, calendarRoleCeiling: "EDITOR" as const }, { ...ownerA, calendarScope: "OPERATOR" as const }, { providerId: "provider-a", nihoUserId: "stranger" }];
       for (const actor of denied) {
         await assert.rejects(() => guests.listGuestBookingsForHost(actor), StoreAccessDeniedError, actor.nihoUserId);
@@ -1827,11 +1832,13 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
     });
   });
 
-  it("answers only a current OWNER of the provider, and only with that provider's sessions", async () => {
+  it("answers a current OWNER or COHOST, but not EDITOR/OPERATOR, and only with that provider's sessions", async () => {
     await withSchema(async (context) => {
       await bookSessions(context);
       const { pool, guests } = context;
       const session = key("tea", "sample-am", day(2), "10:00");
+      assert.ok((await guests.listGuestSessionsForHost(cohostA)).length > 0);
+      assert.ok((await guests.listGuestBookingsForSession(cohostA, session)).length > 0);
       const denied = [editorA, viewerA, { ...ownerA, calendarRoleCeiling: "EDITOR" as const }, { ...ownerA, calendarScope: "OPERATOR" as const }, { providerId: "provider-a", nihoUserId: "stranger" }];
       for (const actor of denied) {
         await assert.rejects(() => guests.listGuestSessionsForHost(actor), StoreAccessDeniedError, actor.nihoUserId);
