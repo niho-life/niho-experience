@@ -1195,6 +1195,9 @@
   .\[stroke-width\:2\.2\] {
     stroke-width: 2.2;
   }
+  .object-contain {
+    object-fit: contain;
+  }
   .object-cover {
     object-fit: cover;
   }
@@ -1886,8 +1889,8 @@
   .aria-\[invalid\=true\]\:border-danger[aria-invalid="true"] {
     border-color: var(--color-danger);
   }
-  @media (width < 359px) {
-    .max-\[359px\]\:sr-only {
+  @media (width < 479px) {
+    .max-\[479px\]\:sr-only {
       position: absolute;
       width: 1px;
       height: 1px;
@@ -1935,6 +1938,10 @@
     }
     .sm\:aspect-\[16\/10\] {
       aspect-ratio: 16/10;
+    }
+    .sm\:size-8 {
+      width: calc(var(--spacing) * 8);
+      height: calc(var(--spacing) * 8);
     }
     .sm\:w-\[200px\] {
       width: 200px;
