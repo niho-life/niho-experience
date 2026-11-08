@@ -39,7 +39,7 @@ test("Japanese and English lists accept typed new lines and survive workspace sw
   await page.evaluate(() => Object.defineProperty(globalThis, "process", { value: { env: { NODE_ENV: "development" } } }));
   await page.addScriptTag({ content: bundle });
   await page.evaluate(() => window.mountHostPublication());
-  for (const [locale, label, first, second] of [["日本語", "見どころ", "一つ目", "二つ目"], ["英語を確認", "Highlights", "First", "Second"]]) {
+  for (const [locale, label, first, second] of [["日本語", "見どころ", "一つ目", "二つ目"], ["英語を確認", "Highlights", "First", "Second"]] as const) {
     await page.getByRole("button", { name: locale, exact: true }).click();
     const list = page.getByRole("textbox", { name: label, exact: true });
     await list.fill(first);

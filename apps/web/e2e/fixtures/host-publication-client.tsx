@@ -11,7 +11,3 @@ window.mountHostPublication = () => createRoot(document.getElementById("root")!)
     <HostPublicationWorkspace productId="synthetic-product" apiBase="/synthetic/products" />
   </AppRouterContext.Provider>,
 );
-
-declare global {
-  interface Window { mountHostPublication: () => void }
-}
