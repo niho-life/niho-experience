@@ -6,6 +6,7 @@ import type { HostAccount } from "./ui";
 /**
  * The signed-in frame (mock v2 of the provider workspace, #84): on PC (md and up)
  * a 232px sidebar beside the page; on phones a brand header and five bottom tabs.
+ * Settings and secondary destinations live in the account menu at both widths.
  * An account with no provider yet keeps the account/support exits, while the
  * provider-specific five-section menu stays hidden.
  */

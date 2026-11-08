@@ -34,9 +34,42 @@ function recordWrites(page: Page): string[] {
   return sent;
 }
 
+test("設定の通常入口は役割に合う一覧で、providerId を保って既存機能へ進める", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/host/settings?providerId=sample-provider-kitchen");
+  const main = page.locator("main");
+  await expect(main.getByRole("heading", { level: 2 })).toHaveText(["販売者", "運営", "アカウント"]);
+  await expect(main.getByRole("link")).toHaveCount(11);
+  for (const label of ["提供者情報", "ホスト紹介", "販売者表示", "受取口座", "通知", "カレンダー連携", "チーム", "NIHOサポート", "集合案内", "ログイン情報", "この端末"]) {
+    await expect(main.getByRole("link", { name: new RegExp(`^${label}`) }), label).toBeVisible();
+  }
+  await expect(main.getByRole("link", { name: /ホスト紹介/ })).toHaveAttribute("href", "/host/profile?providerId=sample-provider-kitchen");
+  await expect(main.getByRole("link", { name: /販売者表示/ })).toHaveAttribute("href", "/host/seller?providerId=sample-provider-kitchen");
+  await expect(main.getByRole("link", { name: /NIHOサポート/ })).toHaveAttribute("href", "/host/support?hostKind=EXPERIENCE_PROVIDER&hostId=sample-provider-kitchen");
+  await audit(page, "settings index");
+
+  await main.getByRole("link", { name: /^通知/ }).click();
+  await page.waitForURL("**/host/settings?providerId=sample-provider-kitchen&section=notifications");
+  await expect(page.getByRole("heading", { level: 1, name: "通知" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "設定へ戻る" })).toHaveAttribute("href", "/host/settings?providerId=sample-provider-kitchen");
+
+  await page.goto("/host/settings?providerId=sample-provider-studio");
+  await expect(main.getByRole("link")).toHaveCount(7);
+  for (const label of ["提供者情報", "通知", "カレンダー連携", "NIHOサポート", "集合案内", "ログイン情報", "この端末"]) {
+    await expect(main.getByRole("link", { name: new RegExp(`^${label}`) }), label).toBeVisible();
+  }
+  for (const ownerOnly of ["ホスト紹介", "販売者表示", "受取口座", "チーム"]) {
+    await expect(main.getByRole("link", { name: new RegExp(ownerOnly) }), ownerOnly).toHaveCount(0);
+  }
+  await main.getByRole("link", { name: /^通知/ }).click();
+  await expect(page.getByRole("region", { name: "通知", exact: true })).toContainText("オーナーが変えられます");
+  await expect(page.getByRole("button", { name: "宛先を変える", exact: true })).toBeVisible();
+  await expect(page.getByRole("switch", { name: "新しいレビュー", exact: true })).toHaveCount(0);
+});
+
 test("preview の提供者設定は審査を出さず、公開条件の案内を残して通常保存する", async ({ page }) => {
   await signIn(page);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const provider = page.getByRole("region", { name: "提供者情報" });
   await expect(provider).toContainText("販売者表示");
   await expect(provider).toContainText("提供者規約");
@@ -64,7 +97,7 @@ test("the studio connects Google Calendar from ホーム's card, sets it up and 
   const connectLink = card.getByRole("link", { name: "つなぐ" });
   await expect(connectLink).toHaveAttribute("href", "/host/settings?providerId=sample-provider-studio#settings-calendar");
   await connectLink.click();
-  await page.waitForURL("**/host/settings?providerId=sample-provider-studio#settings-calendar");
+  await page.waitForURL("**/host/settings?providerId=sample-provider-studio&section=calendar#settings-calendar");
 
   const calendar = calendarPanel(page);
   const status = calendar.getByRole("status");
@@ -146,7 +179,7 @@ test("a calendar whose access was taken away in Google says so on ホーム and 
   expect(await overflowX(page)).toBeLessThanOrEqual(0);
 
   await card.getByRole("link", { name: "もう一度つなぐ" }).click();
-  await page.waitForURL(/\/host\/settings#settings-calendar$/);
+  await page.waitForURL(/\/host\/settings\?section=calendar#settings-calendar$/);
   const calendar = calendarPanel(page);
   await expect(calendar).toContainText("接続が切れました");
   await expect(calendar).toContainText("Google カレンダーの権限が取り消されたため、予定の確認と書き込みを止めています");
@@ -168,7 +201,7 @@ test("a calendar whose access was taken away in Google says so on ホーム and 
 test("ほかのカレンダーで見る: the feed's address is copied, and a new one replaces it after asking", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await signIn(page);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const calendar = calendarPanel(page);
   const status = calendar.getByRole("status");
   await expect(calendar.getByRole("group", { name: "ほかのカレンダーで見る" })).toContainText("Apple・Outlook などに予約の一覧を表示します");
@@ -214,7 +247,7 @@ test("the bookings feed's address answers nothing in the preview, privately", as
 
 test("通知: NIHO's eight notifications in its order; the three the owner may stop are kept by 保存", async ({ page }) => {
   await signIn(page);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const panel = notificationPanel(page);
   // Where the mail goes (#194): the person's own address, the sign-in's by default; 宛先を変える opens the field.
   const to = panel.getByRole("group", { name: "宛先" });
@@ -258,7 +291,7 @@ test("通知: NIHO's eight notifications in its order; the three the owner may s
 
 test("宛先: a new address waits for the link sent to it; 取り消す closes it; the preview sends nothing (#194)", async ({ page }) => {
   await signIn(page);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   const panel = notificationPanel(page);
   const to = panel.getByRole("group", { name: "宛先" });
   const sent = recordWrites(page);
@@ -295,7 +328,7 @@ test("宛先: a new address waits for the link sent to it; 取り消す closes i
 
 test("an editor reads that the notification settings are the owner's", async ({ page }) => {
   await signIn(page, "?providerId=sample-provider-studio");
-  await page.goto("/host/settings?providerId=sample-provider-studio");
+  await page.goto("/host/settings?providerId=sample-provider-studio&section=all");
   const panel = notificationPanel(page);
   await expect(panel).toContainText("通知の設定はオーナーが変えられます");
   await expect(panel.getByRole("switch")).toHaveCount(0);
@@ -304,7 +337,7 @@ test("an editor reads that the notification settings are the owner's", async ({ 
 
 test("カレンダー, 通知 and ホーム's card have no WCAG 2.2 AA violations", async ({ page }) => {
   await signIn(page);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   await expect(calendarPanel(page)).toContainText("接続中");
   await audit(page, "/host/settings (connected)");
   await calendarPanel(page).getByRole("button", { name: "接続を切る" }).click();
@@ -317,20 +350,20 @@ test("カレンダー, 通知 and ホーム's card have no WCAG 2.2 AA violation
 
   await signIn(page, "?providerId=sample-provider-studio");
   await audit(page, "/host/home (calendar card)");
-  await page.goto("/host/settings?providerId=sample-provider-studio");
+  await page.goto("/host/settings?providerId=sample-provider-studio&section=all");
   await expect(calendarPanel(page)).toContainText("未接続");
   await audit(page, "/host/settings (not connected, editor)");
 
   await signIn(page, "?mock=calendar-revoked");
   await audit(page, "/host/home (calendar revoked)");
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   await expect(calendarPanel(page)).toContainText("接続が切れました");
   await audit(page, "/host/settings (revoked)");
 });
 
 test("PC and phones: the panels' fields stay readable and nothing scrolls sideways", async ({ page }, testInfo) => {
   await signIn(page);
-  await page.goto("/host/settings");
+  await page.goto("/host/settings?section=all");
   expect(await overflowX(page)).toBeLessThanOrEqual(0);
   const calendar = calendarPanel(page);
   const url = calendar.getByRole("textbox", { name: "予約の一覧の URL" });
@@ -361,7 +394,7 @@ test.describe("320px narrow phone", () => {
       expect(box && box.x >= 0 && box.x + box.width <= 320, label).toBe(true);
     };
     await signIn(page);
-    await page.goto("/host/settings");
+    await page.goto("/host/settings?section=all");
     expect(await overflowX(page), "settings (connected)").toBeLessThanOrEqual(0);
     const calendar = calendarPanel(page);
     await inside(calendar.getByRole("button", { name: "接続を切る" }), "接続を切る");
@@ -388,14 +421,14 @@ test.describe("320px narrow phone", () => {
     await signIn(page, "?providerId=sample-provider-studio");
     expect(await overflowX(page), "home with the card").toBeLessThanOrEqual(0);
     await inside(page.getByRole("region", { name: "Google カレンダーをつなぐ" }).getByRole("link", { name: "つなぐ" }), "home: つなぐ");
-    await page.goto("/host/settings?providerId=sample-provider-studio");
+    await page.goto("/host/settings?providerId=sample-provider-studio&section=all");
     expect(await overflowX(page), "settings (not connected)").toBeLessThanOrEqual(0);
     await inside(calendarPanel(page).getByRole("button", { name: "Google カレンダーをつなぐ" }), "Google カレンダーをつなぐ");
 
     await signIn(page, "?mock=calendar-revoked");
     expect(await overflowX(page), "home (revoked)").toBeLessThanOrEqual(0);
     await inside(page.getByRole("link", { name: "もう一度つなぐ" }), "home: もう一度つなぐ");
-    await page.goto("/host/settings");
+    await page.goto("/host/settings?section=all");
     expect(await overflowX(page), "settings (revoked)").toBeLessThanOrEqual(0);
     await inside(calendarPanel(page).getByRole("button", { name: "もう一度つなぐ" }), "もう一度つなぐ");
   });

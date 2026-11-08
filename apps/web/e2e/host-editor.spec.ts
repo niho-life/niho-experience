@@ -443,10 +443,11 @@ test("a reload asks through the browser, and 保存せずに移動 to another pa
   expect(browserDialogs).toEqual(["beforeunload"]);
   await expect(lead).toHaveValue(/^地元の人のように/);
 
-  // PC: the sidebar's 体験サイトを見る loads another page. After 保存せずに移動 the browser does not ask a second time.
+  // PC: the account menu's 体験サイトを見る loads another page. After 保存せずに移動 the browser does not ask a second time.
   if (isDesktop(testInfo.project.name)) {
     await lead.click();
     await lead.fill("A shorter introduction.");
+    await page.getByRole("banner").locator("summary", { hasText: "のアカウントメニュー" }).click();
     await page.getByRole("banner").getByRole("link", { name: "体験サイトを見る" }).click();
     const ask = page.getByRole("dialog", { name: "保存していない変更があります" });
     await ask.getByRole("button", { name: "保存せずに移動" }).click();

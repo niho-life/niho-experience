@@ -8,7 +8,7 @@ const ADMIN_READ_PORT = Number(process.env.E2E_ADMIN_READ_PORT ?? 3102);
 const ADMIN_CASE_PORT = Number(process.env.E2E_ADMIN_CASE_PORT ?? 3103);
 const FEE_SUMMARY_PORT = Number(process.env.E2E_FEE_SUMMARY_PORT ?? 3104);
 // The host console and its preview tests run against the second server.
-const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|ota-bookings|sales|messages|session|reviews|settings|support|standalone-translate|pwa)|admin-support)\.spec\.ts/;
+const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|ota-bookings|sales|messages|session|reviews|settings(?:-navigation)?|support|standalone-translate|pwa)|admin-support)\.spec\.ts/;
 const SEPARATE_PREVIEW_SPEC = /(assisted-launch|provider-operations|host-bookings-unified|host-calendar|host-airbnb-google-setup|admin-channel-workspace|write-ui)\.spec\.ts/;
 const ADMIN_READ_SPEC = /admin-http-read\.spec\.ts/;
 const ADMIN_CASE_SPEC = /admin-(support-case|operations|site-bookings)\.spec\.ts/;

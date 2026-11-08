@@ -21,8 +21,10 @@ async function signIn(page: Page, empty = false) {
 
 async function attemptNavigation(page: Page) {
   const logout = page.getByRole("button", { name: "ログアウト" }).filter({ visible: true });
+  const account = page.locator("summary:visible", { hasText: "のアカウント" });
+  if (!(await logout.count()) && await account.count()) await account.click();
   if (await logout.count()) await logout.click();
-  else await page.getByRole("link", { name: "ホームへ戻る", exact: true }).click();
+  else await page.getByRole("link", { name: /^(ホーム|設定)へ戻る$/ }).filter({ visible: true }).click();
 }
 
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", headers: { "cache-control": "private, no-store" }, body: JSON.stringify(body) });
@@ -47,18 +49,14 @@ async function openSupport(page: Page, empty = false) {
   await expect(page.getByRole("heading", { level: 1, name: "NIHOサポート", exact: true })).toBeVisible();
 }
 
-test("providers empty still reaches a normal Spot from prompt, PC footer and mobile account; 320/360/desktop stay accessible", async ({ page }, testInfo) => {
+test("providers empty still reaches a normal Spot from prompt, PC footer and mobile account; 320/360/desktop stay accessible", async ({ page }) => {
   await stub(page, { hosts: { hosts: [spot], limit: 100, truncated: false } });
   await signIn(page, true);
   await expect(page.getByRole("link", { name: "NIHOサポート設定" })).toBeVisible();
-  if (testInfo.project.name === "host-desktop") {
-    await expect(page.getByRole("banner").getByRole("link", { name: "NIHOサポート", exact: true })).toBeVisible();
-  } else {
-    const accountMenu = page.locator("summary:visible", { hasText: "のアカウント" });
-    await accountMenu.click();
-    await expect(page.getByRole("link", { name: "NIHOサポート", exact: true })).toBeVisible();
-    await accountMenu.click();
-  }
+  const accountMenu = page.locator("summary:visible", { hasText: "のアカウント" });
+  await accountMenu.click();
+  await expect(page.getByRole("link", { name: "NIHOサポート", exact: true })).toBeVisible();
+  await accountMenu.click();
   await page.getByRole("link", { name: "NIHOサポート設定" }).click();
   await expect(page.getByRole("region", { name: /合成の通常拠点/ })).toContainText("未設定");
   await expect(page.getByRole("radio", { name: /サポートOFF/ })).not.toBeChecked();

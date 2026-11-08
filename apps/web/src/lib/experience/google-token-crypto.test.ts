@@ -10,6 +10,12 @@ describe("Google refresh token encryption", () => {
     const sealed = sealGoogleRefreshToken(key, "provider-a", "synthetic-refresh-token");
     expect(openGoogleRefreshToken(key, "provider-a", sealed)).toBe("synthetic-refresh-token");
     expect(() => openGoogleRefreshToken(key, "provider-b", sealed)).toThrow();
-    expect(() => openGoogleRefreshToken(key, "provider-a", `${sealed.slice(0, -2)}aa`)).toThrow();
+    // Mutate a decoded byte: replacing base64url characters can preserve the
+    // original tag because its final character contains unused padding bits.
+    const parts = sealed.split(".");
+    const tag = Buffer.from(parts[3]!, "base64url");
+    tag[0] = tag[0]! ^ 1;
+    parts[3] = tag.toString("base64url");
+    expect(() => openGoogleRefreshToken(key, "provider-a", parts.join("."))).toThrow();
   });
 });

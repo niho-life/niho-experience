@@ -225,9 +225,10 @@ test("an idempotency key converges only for the same booking and payload", async
 test("host settings link to the independent support page and booking history stays non-retroactive", async ({ page }) => {
   await hostSignIn(page);
   await page.goto("/host/settings");
-  const support = page.getByRole("region", { name: "NIHOサポート" });
-  await expect(support).toContainText("体験の設定とは分けて確認・変更します");
-  await expect(support.getByRole("link", { name: "NIHOサポート設定を開く" })).toHaveAttribute("href", /\/host\/support\?hostKind=EXPERIENCE_PROVIDER&hostId=/);
+  const support = page.locator("main").getByRole("link", { name: /NIHOサポート/ });
+  await expect(support).toHaveAttribute("href", /\/host\/support\?hostKind=EXPERIENCE_PROVIDER&hostId=/);
+  await support.click();
+  await expect(page.getByRole("heading", { name: "NIHOサポート" })).toBeVisible();
   await page.goto("/host/bookings?booking=00000000-0000-4000-8000-00000000b103");
   await expect(page.getByRole("region", { name: "料金・精算状況" })).toContainText("15%（決済費用込み）");
   await expect(page.getByRole("region", { name: "料金・精算状況" })).toContainText("受付時 サポートON");

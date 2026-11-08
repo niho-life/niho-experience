@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FieldRow, FieldSection } from "@/components/host/fields";
 import { HostAppInstall } from "@/components/host/HostAppInstall";
@@ -7,6 +8,8 @@ import { HostPushToggle } from "@/components/host/HostPushToggle";
 import { HostIcon } from "@/components/host/HostIcon";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HostSettingsForm } from "@/components/host/HostSettingsForm";
+import type { HostSettingsSection } from "@/lib/host/settings-navigation";
+import { HostSettingsIndex } from "@/components/host/HostSettingsIndex";
 import { HostOperatingTeamPanel } from "@/components/host/HostOperatingTeamPanel";
 import { HostSupportSettingsPanel } from "@/components/host/HostSupportSettingsPanel";
 import { HostPayoutAccountPanel } from "@/components/host/HostPayoutAccountPanel";
@@ -21,7 +24,8 @@ import { NOTIFICATION_ADDRESS_TEXT, previewNotificationAddress } from "@/host/no
 import { loadNotificationAddress } from "@/host/notification-address-server";
 import { config } from "@/lib/config";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
-import { HOST_LOGOUT_PATH, withProvider } from "@/lib/host/routes";
+import { HOST_LOGOUT_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
+import { HOST_SETTINGS_SECTION_TITLES, hostSettingsSectionOrNull } from "@/lib/host/settings-navigation";
 import type { HostSession } from "@/lib/host/session";
 import { isHostMock } from "@/lib/host/server";
 import { providerOperationsEnabled } from "@/lib/host/provider-operations-server";
@@ -122,6 +126,21 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   }
   // Stripe's way back belongs to the provider it names, never to the one shown in its place.
   const connect = providerNotFound ? null : connectStep(query.connect);
+  const payoutOutcome = providerNotFound ? null : payoutConsentOutcomeOrNull(query.payout);
+  const section = connect || payoutOutcome ? "payout" : hostSettingsSectionOrNull(query.section);
+  if (!section) {
+    return (
+      <HostPageBody>
+        <PageHead title="設定" />
+        <HostSettingsIndex
+          providerId={provider.id}
+          role={provider.memberRole}
+          deviceEnabled={config.hostPwaEnabled}
+          articlesEnabled={config.hostArticleLinksEnabled}
+        />
+      </HostPageBody>
+    );
+  }
   const accountPayout = await loadAccountPayout(session, provider);
   const [{ settings, googleConnection }, payout, liveCalendar, addressLoad] = await Promise.all([
     loadHostConsoleData(provider, { notifications: true, meetingPoint: true }),
@@ -151,18 +170,31 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   ) : null;
 
   const accountPanel = <AccountPanel session={session} />;
-  const payoutOutcome = providerNotFound ? null : payoutConsentOutcomeOrNull(query.payout);
   const payoutPanel = accountPayout
     ? <HostPayoutAccountPanel providerId={provider.id} load={accountPayout.experience} notice={payoutOutcome ? PAYOUT_CONSENT_OUTCOMES[payoutOutcome] : null} />
     : undefined;
   const teamMode = config.hostTeamEnabled && session.kind === "experience" ? "native" as const : providerOperationsEnabled() ? "legacy" as const : "off" as const;
 
+  const showAccountSection = (part: HostSettingsSection) => section === "all" || section === part;
+  const accountContent = <div className="grid gap-3.5">
+    {showAccountSection("team") ? <HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} mode={teamMode} /> : null}
+    {showAccountSection("articles") && provider.memberRole === "OWNER" && config.hostArticleLinksEnabled ? <HostArticleLinksPanel providerId={provider.id} /> : null}
+    {showAccountSection("support") ? <HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /> : null}
+    {showAccountSection("device") ? devicePanel : null}
+    {showAccountSection("account") ? accountPanel : null}
+  </div>;
+
   return (
     <HostPageBody>
-      <PageHead title="設定">{provider.memberRole === "OWNER" && teamMode !== "off" ? <a href="#settings-team" className={consoleButtonClass("secondary")}>共同ホストを管理</a> : null}</PageHead>
-      {/* Keyed by provider: switching providers starts from that provider's values. */}
+      <PageHead title={HOST_SETTINGS_SECTION_TITLES[section]}>
+        {section === "all"
+          ? provider.memberRole === "OWNER" && teamMode !== "off" ? <a href="#settings-team" className={consoleButtonClass("secondary")}>共同ホストを管理</a> : null
+          : <Link href={withProvider(HOST_SETTINGS_PATH, provider.id)} className={consoleButtonClass("secondary")}>設定へ戻る</Link>}
+      </PageHead>
+      {/* A confirmed departure starts from that provider and section's saved values. */}
       <HostSettingsForm
-        key={provider.id}
+        key={`${provider.id}/${section}`}
+        section={section}
         providerId={provider.id}
         role={provider.memberRole}
         settings={settings}
@@ -174,7 +206,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         notificationAddress={notificationAddress}
         payoutPanel={payoutPanel}
         bookingGuidesHref={config.experienceHostPublicationApiEnabled ? withProvider("/host/booking-guides", provider.id) : null}
-        account={<><HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} mode={teamMode} />{provider.memberRole === "OWNER" && config.hostArticleLinksEnabled ? <div className="mt-3.5"><HostArticleLinksPanel providerId={provider.id} /></div> : null}<div className="mt-3.5"><HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /></div>{devicePanel ? <div className="mt-3.5">{devicePanel}</div> : null}<div className="mt-3.5">{accountPanel}</div></>}
+        account={accountContent}
       />
     </HostPageBody>
   );

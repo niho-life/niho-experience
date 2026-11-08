@@ -61,7 +61,7 @@ test("owner adds two exact-email cohosts and removes one from the current backen
     return json(route, { error: "not_found" }, 404);
   });
   await page.goto("/host/auth/mock-login");
-  await page.goto(`/host/settings?providerId=${PROVIDER}`);
+  await page.goto(`/host/settings?providerId=${PROVIDER}&section=team`);
   await page.getByLabel("登録済みNIHOアカウントのメールアドレス").fill("cohost-one@example.test");
   await page.getByRole("button", { name: "アカウントを確認" }).click();
   await page.getByLabel("登録済みNIHOアカウントのメールアドレス").fill("cohost-two@example.test");
@@ -275,13 +275,17 @@ test("owner saves a page-only meeting point, applies for the listing, withdraws 
 
 test("cohost has operational navigation but no sales, Stripe or member controls", async ({ page }) => {
   await page.goto("/host/auth/mock-login?mock=cohost");
-  await page.goto(`/host/settings?providerId=${PROVIDER}`);
+  await page.goto(`/host/settings?providerId=${PROVIDER}&section=team`);
   await expect(page.getByText("あなたはサブホストです")).toBeVisible();
   await expect(page.getByLabel("登録済みNIHOアカウントのメールアドレス")).toHaveCount(0);
   await expect(page.getByText("売上受取口座")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "売上", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "予約", exact: true })).toBeVisible();
+  const accountMenu = page.locator("summary:visible", { hasText: "のアカウント" });
+  await accountMenu.click();
   await expect(page.getByRole("link", { name: "記事を書く", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "設定", exact: true })).toBeVisible();
+  await accountMenu.click();
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
   await noOverflow(page);
