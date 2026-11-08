@@ -54,14 +54,12 @@ function ErrorMessage({ error, onRetry, onReread }: { error: MutationError; onRe
 export function HostCalendarWorkspace({
   providerId,
   initialExperienceId,
-  legacyManagementUrl,
   apiPath = "/host/calendar/data",
   draftPreparation = false,
   productEditBase = "/host/experiences",
 }: {
   providerId: string;
   initialExperienceId: string | null;
-  legacyManagementUrl: string | null;
   apiPath?: string;
   draftPreparation?: boolean;
   productEditBase?: string;
@@ -217,7 +215,7 @@ export function HostCalendarWorkspace({
 
   return <div className="space-y-3.5">
     <PageHead title={draftPreparation ? "代理登録の開催枠" : "カレンダー"}><span className="hidden lg:inline-flex">{!draftPreparation && allChannelSummary ? <StatusPill status={{ ...allChannelSummary, label: `掲載先 ${allChannelSummary.label}` }} /> : null}</span><button type="button" disabled={!dataFresh || !data?.canEdit || data.preview || data.experiences.length === 0} onClick={openAdd} className={consoleButtonClass("primary", "lg", "disabled:cursor-not-allowed disabled:opacity-50")}>枠を追加</button></PageHead>
-    {draftPreparation ? <p className="rounded-xl bg-sand px-3.5 py-3 text-sm text-ink-soft">非公開下書きの開催枠と定員を準備します。公開・停止・既存枠の販売操作はOWNER本人の通常画面で行います。</p> : data?.scope !== "OPERATOR" ? <details className="rounded-xl bg-warn-pale px-3.5 py-1.5 text-sm text-warn"><summary className="flex min-h-11 cursor-pointer items-center font-extrabold">現行NIHOの受付には未反映です</summary><p className="pb-2">販売中の枠は現行画面でも管理してください。{legacyManagementUrl ? <> <a href={legacyManagementUrl} className="inline-flex min-h-11 items-center font-extrabold underline underline-offset-4">現行画面を開く</a></> : null}</p></details> : null}
+    {draftPreparation ? <p className="rounded-xl bg-sand px-3.5 py-3 text-sm text-ink-soft">非公開下書きの開催枠と定員を準備します。公開・停止・既存枠の販売操作はOWNER本人の通常画面で行います。</p> : null}
     {notice ? <div role="status" className="flex flex-wrap items-center gap-2 rounded-xl bg-leaf-pale px-3.5 py-2.5 font-bold text-moss"><span>{notice}</span>{notice.includes("更新できません") ? <button type="button" onClick={() => setNonce((value) => value + 1)} className="min-h-11 underline underline-offset-4">再読込</button> : null}</div> : null}
     {mutationError && dialog === null ? <ErrorMessage error={mutationError} onRetry={() => void mutate()} onReread={reread} /> : null}
     {readError && dialog === null ? <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl bg-warn-pale px-3.5 py-2.5 text-warn"><span>{readError}</span><button type="button" onClick={reread} className="min-h-11 font-extrabold underline underline-offset-4">再読込</button></div> : null}

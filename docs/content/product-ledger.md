@@ -18,6 +18,8 @@
 
 公開URLは [Kamakura Community Dinner with Locals](https://experience.niho.life/experiences/community-dinner-with-locals)。[candidate](https://github.com/niho-life/niho-experience/actions/runs/42387874462) → [promote](https://github.com/niho-life/niho-experience/actions/runs/42388212552)で、SHA `306613ac0228a33dab1da93eadba911f39c65a21`・revision `niho-experience-00038-but`を100%へ昇格した。`BOOKINGS_ENABLED=true`、ゲスト予約とホスト機能ON、正規SITE_URL、制限済みingressを実環境から読戻し確認した。
 
+**同日の追加決定：NIHO 企画ページの Dinner 受付を統一する。** オーナーは「現行ページは残し、Dinner の予約を Experience へ統一する」を選択した。NIHO の本文・写真・URLを残し、Dinner の開催枠・残席・販売条件を Experience から表示して、新規の予約入力は Experience へ進める。ホストカレンダーの変更と Google の予定は同じ Experience 在庫に反映する。NIHO の既存予約と Tea time の受付は今回の統一対象に含めず、GetYourGuide との併売を継続する。[NIHO #19966](https://github.com/niho-coliving/niho-app/issues/19966) で実装・配備を追い、本番の読戻し受入までは、下記の併売承認と区別して「統一済み」と扱わない。[責任分界](../adr/0002-experience-domain-ownership.md#community-dinner-の-niho-企画ページからの予約2026-11-08)を参照する。
+
 現在値の一覧は[登録引き渡し表](registration-handoff.md)。技術受入の証跡は [#471](https://github.com/niho-life/niho-experience/issues/471#issuecomment-6708625143)・[#472](https://github.com/niho-life/niho-experience/issues/472#issuecomment-6708601329)。以下の過去の決定・掲載元調査・staging仮値は履歴であり、現在の保存状態はこの節を優先する。
 
 **オーナーの決定（2026-11-05）**：初回のExperienceでは実装の簡単さを優先し、Community Dinner／Tea timeを既存実装の即時確定で受け付ける。新サイトの予約前の説明・Checkout・確認メールを即時確定に揃える。以下に残す掲載元の「24時間以内に承認後決済」は既存チャネルの記録であり、Experienceの受付方式ではない。既存チャネルの設定・成立済み予約を変更する決定ではなく、本番販売の受入条件は引き続き満たす必要がある。

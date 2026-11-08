@@ -9,7 +9,6 @@ export default async function AdminProductCalendarPage({ params }: { params: Pro
   return <div className="mx-auto w-full max-w-[1400px] px-4 py-6 md:px-7"><HostCalendarWorkspace
     providerId={providerId}
     initialExperienceId={productId}
-    legacyManagementUrl={null}
     draftPreparation
     apiPath={`/admin/api/product-workspaces/${provider}/products/${product}/calendar`}
     productEditBase={`/admin/products/${provider}`}

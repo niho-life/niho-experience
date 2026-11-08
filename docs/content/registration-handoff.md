@@ -4,6 +4,8 @@
 
 **Dinnerは本番公開・予約受付開始済み。** 2026-11-08に保存済み内容での公開と既存NIHO・GetYourGuideとの併売についてオーナーの個別承認を受け、公式の候補配備・昇格と本番フォームの受入を完了した。人物写真の許諾、受取口座の利用同意、Experienceサポート規約の同意も確認・保存した。Tea timeとP-02〜P-05は引き続きテスト設定で販売しない。公開API・決済経路の受入は [#471](https://github.com/niho-life/niho-experience/issues/471#issuecomment-6708625143)、税付き手数料と取消後精算は [#472](https://github.com/niho-life/niho-experience/issues/472#issuecomment-6708601329) に記録した。
 
+同日の追加決定で、NIHO の現行企画ページを残し、Dinner の新規予約は Experience へ統一する。NIHO にある既存予約・Tea time の受付は今回の統一対象に含めず、GetYourGuide の併売は継続する。実装・配備は [NIHO #19966](https://github.com/niho-coliving/niho-app/issues/19966) で追い、本番読戻し前は統一済みと扱わない。詳しくは[商品台帳の追加決定](product-ledger.md#dinnerの本番登録受入2026-11-08)を参照する。
+
 ## 登録する値と確定状況
 
 曜日・時刻はJST、金額は税込JPY。大人1名の価格を示す。P-01 Dinnerの行は2026-11-08時点の本番保存値である。過去のstaging専用仮値は[商品台帳](product-ledger.md#staging-下書き用の仮条件案2026-11-03-オーナー指示)に履歴として残す。`最少予約人数`は1予約の最少人数、`最少催行`は開催を中止する人数基準を示す。
