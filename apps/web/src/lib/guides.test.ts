@@ -307,8 +307,8 @@ describe("related guides by CMS category", () => {
     ...extra,
   });
 
-  it("names the newest other listed guides of the same category, at most three", () => {
-    const self = categorizedGuide("self", "2026-10-10");
+  it("uses only explicit related-guide links, in editorial order and at most three", () => {
+    const self = categorizedGuide("self", "2026-10-10", { relatedGuideSlugs: ["middle", "newest", "third", "older"] });
     const guides = [
       self,
       categorizedGuide("older", "2026-10-01"),
@@ -318,10 +318,9 @@ describe("related guides by CMS category", () => {
       categorizedGuide("hidden", "2026-10-31", { unlisted: true }),
       categorizedGuide("other", "2026-10-29", { category: { slug: "food", label: "Food", displayOrder: 2 } }),
     ];
-    expect(relatedGuidesOf(guides, self).map((guide) => guide.slug)).toEqual(["newest", "middle", "third"]);
+    expect(relatedGuidesOf(guides, self).map((guide) => guide.slug)).toEqual(["middle", "newest", "third"]);
     expect(relatedGuidesOf([self], self)).toEqual([]);
-    // Without a category there is nothing to match.
-    expect(relatedGuidesOf(guides, { ...self, category: undefined })).toEqual([]);
+    expect(relatedGuidesOf(guides, { ...self, category: undefined }).map((guide) => guide.slug)).toEqual(["middle", "newest", "third"]);
   });
 
   it("leaves static and database guides as they were (their own related guides only)", () => {
