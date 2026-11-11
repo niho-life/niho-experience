@@ -326,6 +326,60 @@ function previewBody(form: NonNullable<Form>): Record<string, unknown> {
     : { action: form.action, ...target };
 }
 
+type ManagedCompensationView = {
+  publicBookingId: string; currency: string; capturedAmount: number; refundedAmount: number; disputedAmount: number;
+  nihoFeeAmount: number; providerAmount: number; dueOn: string; recipientVerified: boolean;
+  status: "REVIEW_REQUIRED" | "READY" | "PREPARED" | "RESULT_UNKNOWN" | "PAID" | "ADJUSTMENT_REQUIRED";
+  version: number; statementReference: string | null; preparedAmount: number | null; paidAmount: number | null; adjustmentAmount: number | null;
+};
+
+function ManagedCompensationPanel({ onSessionExpired }: { onSessionExpired: () => void }) {
+  const [bookingId, setBookingId] = useState("");
+  const [statementReference, setStatementReference] = useState("");
+  const [paidAmount, setPaidAmount] = useState("");
+  const [compensation, setCompensation] = useState<ManagedCompensationView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const endpoint = bookingId.trim() ? `${API}/managed-compensation/${encodeURIComponent(bookingId.trim().toLowerCase())}` : "";
+  const load = async () => {
+    if (!UUID.test(bookingId.trim())) { setMessage("予約番号の形式を確認してください。"); return; }
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch(endpoint, { cache: "no-store", credentials: "same-origin" });
+      if (response.status === 401 || response.status === 403) { onSessionExpired(); return; }
+      const body = await response.json().catch(() => ({})) as { compensation?: ManagedCompensationView; error?: string };
+      if (!response.ok || !body.compensation) { setMessage(body.error === "not_found" ? "報酬記録はまだありません。開催後に計算してください。" : "報酬記録を読み込めませんでした。"); return; }
+      setCompensation(body.compensation); setPaidAmount(String(body.compensation.preparedAmount ?? body.compensation.providerAmount));
+    } catch { setMessage("通信状態を確認してください。"); }
+    finally { setBusy(false); }
+  };
+  const mutate = async (body: Record<string, unknown>) => {
+    if (!UUID.test(bookingId.trim())) { setMessage("予約番号の形式を確認してください。"); return; }
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch(endpoint, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, commandId: crypto.randomUUID() }) });
+      if (response.status === 401 || response.status === 403) { onSessionExpired(); return; }
+      const result = await response.json().catch(() => ({})) as { compensation?: ManagedCompensationView; error?: string };
+      if (!response.ok || !result.compensation) { setMessage(result.error === "conflict" ? "状態が更新されています。読み直してから続けてください。" : "操作を完了できませんでした。"); return; }
+      setCompensation(result.compensation); setPaidAmount(String(result.compensation.preparedAmount ?? result.compensation.providerAmount)); setMessage("記録しました。");
+    } catch { setMessage("結果を確認できません。再送前に同じ予約を読み直してください。"); }
+    finally { setBusy(false); }
+  };
+  const status = compensation ? ({ REVIEW_REQUIRED: "返金・異議申立て確認中", READY: "準備可能", PREPARED: "振込準備済み", RESULT_UNKNOWN: "銀行明細との照合待ち", PAID: "振込済み", ADJUSTMENT_REQUIRED: "支払後調整が必要" } as const)[compensation.status] : "";
+  return <section className="mt-6 rounded-2xl border border-line bg-canvas p-4" aria-labelledby="managed-compensation-heading">
+    <h2 id="managed-compensation-heading" className="text-lg font-extrabold">完全代行の報酬振込</h2>
+    <p className="mt-1 text-sm text-muted">開催後の確定売上から返金・異議申立てと20%を引き、銀行口座情報を保存せず手動振込を記録します。</p>
+    <div className="mt-3"><label className="grid gap-1">予約番号<input className={FIELD} value={bookingId} onChange={(event) => { setBookingId(event.currentTarget.value); setCompensation(null); setMessage(""); }} /></label></div>
+    <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={BUTTON} disabled={busy || !bookingId} onClick={() => void load()}>読み込む</button><button type="button" className={BUTTON} disabled={busy || !bookingId} onClick={() => void mutate({ action: "CALCULATE" })}>開催後の報酬を計算</button></div>
+    {compensation ? <div className="mt-3 rounded-xl bg-sand/50 p-3 text-sm"><p className="font-extrabold">{status}</p><dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1"><dt>確定売上</dt><dd>{yen(compensation.capturedAmount)}</dd><dt>返金</dt><dd>{yen(compensation.refundedAmount)}</dd><dt>異議申立て</dt><dd>{yen(compensation.disputedAmount)}</dd><dt>NIHO 20%</dt><dd>{yen(compensation.nihoFeeAmount)}</dd><dt>提供者報酬</dt><dd className="font-bold">{yen(compensation.providerAmount)}</dd><dt>支払期日</dt><dd>{compensation.dueOn}</dd></dl>
+      <div className="mt-3 flex flex-wrap gap-2">{compensation.status === "READY" ? <button type="button" className={BUTTON} disabled={busy} onClick={() => void mutate({ action: "PREPARE", expectedVersion: compensation.version, recipientVerified: true })}>受取先を照合して振込準備</button> : null}{compensation.status === "PREPARED" ? <button type="button" className={BUTTON} disabled={busy} onClick={() => void mutate({ action: "RESULT_UNKNOWN", expectedVersion: compensation.version })}>結果不明として明細照合へ</button> : null}</div>
+      {compensation.preparedAmount !== null ? <p className="mt-2">準備時固定額: {yen(compensation.preparedAmount)}{compensation.paidAmount !== null ? ` · 実振込額: ${yen(compensation.paidAmount)}` : ""}{compensation.adjustmentAmount ? ` · 差額: ${yen(compensation.adjustmentAmount)}` : ""}</p> : null}
+      {compensation.status === "PREPARED" || compensation.status === "RESULT_UNKNOWN" ? <div className="mt-3 grid gap-2 sm:grid-cols-3"><label className="grid gap-1">銀行明細の照合番号<input className={FIELD} value={statementReference} maxLength={160} onChange={(event) => setStatementReference(event.currentTarget.value)} /></label><label className="grid gap-1">実振込額<input className={FIELD} type="number" min={0} value={paidAmount} onChange={(event) => setPaidAmount(event.currentTarget.value)} /></label><button type="button" className={`${BUTTON} self-end`} disabled={busy || !statementReference.trim() || !Number.isSafeInteger(Number(paidAmount)) || Number(paidAmount) < 0} onClick={() => void mutate({ action: "RECONCILE_PAID", expectedVersion: compensation.version, statementReference: statementReference.trim(), paidAtUtc: new Date().toISOString(), paidAmount: Number(paidAmount) })}>明細と照合して振込済みにする</button></div> : null}
+    </div> : null}
+    {message ? <p role="status" className="mt-3 text-sm font-bold text-warn">{message}</p> : null}
+  </section>;
+}
+
 export function AdminSiteBookings({ initial, supportBookings, notifications = [], settlements = [] }: { initial: SupportQueue; supportBookings?: SupportEnabledBookingsPage; notifications?: ExperienceSupportNotification[]; settlements?: ExperienceSettlementSummary[] }) {
   const financialOwnerId = useId();
   const [queue, setQueue] = useState(initial);
@@ -634,6 +688,7 @@ export function AdminSiteBookings({ initial, supportBookings, notifications = []
       <p className="mt-1 text-ink-soft">このサイトで受けた予約のうち、NIHO サポートの対応が要るもの。全額返金・一部返金とも、NIHO 手数料も返金額に比例して返します（一部返金の額は入力します）。</p>
       <AdminSupportNotifications initial={notifications} onSessionExpired={expireSession} />
       <SettlementSummaryList items={settlements} provider admin heading="Experience予約の決済費用精算" />
+      <ManagedCompensationPanel onSessionExpired={expireSession} />
       <p role="status" className={message ? `mt-4 rounded-xl px-3 py-2 font-bold ${message.tone === "ok" ? "bg-leaf-pale text-moss" : "bg-danger-pale text-danger"}` : "sr-only"}>{message?.text ?? ""}</p>
 
       <section aria-labelledby="site-requests" className="mt-8">

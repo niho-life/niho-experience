@@ -161,6 +161,15 @@ export interface ProductInput {
   readonly sellerNihoAccountRef: string;
   readonly stripeConnectAccountRef: string;
   readonly sellerDisplayName: string;
+  /** Absent on legacy products. New sale-plan products always set this from their immutable active revision. */
+  readonly chargeMode?: ExperienceChargeMode;
+  /** Product-scoped revision shown to the traveler and required again when checkout starts. */
+  readonly salesPlanRevision?: number;
+  readonly salesPlan?: ExperienceSalesPlan;
+  readonly sellerDisclosureUrl?: string;
+  readonly salesAgreementVersion?: string;
+  readonly feeBasisPoints?: 1000 | 1500 | 2000;
+  readonly paymentDueDays?: number | null;
 }
 
 export interface ProductRecord extends ProductInput {
@@ -268,13 +277,15 @@ export interface PricingSnapshot {
  */
 export interface PlatformFeeSnapshot {
   readonly supportEnabled: boolean;
-  readonly basisPoints: 1000 | 1500;
+  readonly basisPoints: 1000 | 1500 | 2000;
   /** floor(totalAmount × basisPoints / 10000) in yen; zero for a free booking, otherwise at least 1 and below totalAmount. */
   readonly amount: number;
   /** Absent on historical rows. Never inferred from the current provider setting. */
   readonly supportConsentVersion?: string;
   /** Host's accepted support agreement revision at booking time; absent on historical rows. */
   readonly supportAgreementRevision?: number;
+  /** MANAGED_20 means this is a revenue-share snapshot, not a Stripe application fee. */
+  readonly salesPlan?: ExperienceSalesPlan;
 }
 
 export interface SellerSnapshot {
@@ -282,7 +293,18 @@ export interface SellerSnapshot {
   readonly nihoAccountRef: string;
   readonly stripeConnectAccountRef: string;
   readonly displayName: string;
+  /** Absent means a historical CONNECT_DIRECT booking. Never fill it from the current product. */
+  readonly chargeMode?: ExperienceChargeMode;
+  readonly salesPlan?: ExperienceSalesPlan;
+  readonly salesPlanRevision?: number;
+  readonly feeBasisPoints?: 1000 | 1500 | 2000;
+  readonly sellerDisclosureUrl?: string;
+  readonly agreementVersion?: string;
+  readonly paymentDueDays?: number | null;
 }
+
+export type ExperienceChargeMode = "PLATFORM" | "CONNECT_DIRECT";
+export type ExperienceSalesPlan = "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10";
 
 export interface BookingRecord {
   readonly publicBookingId: string;

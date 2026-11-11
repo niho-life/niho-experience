@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     listAdminDraftSellers: vi.fn(),
     listAdminProviders: vi.fn(),
     listAdminDraftProducts: vi.fn(),
+    createDraftAsAdmin: vi.fn(),
     createAdminProvider: vi.fn(),
     getAdminProvider: vi.fn(),
     getAdminProviderMedia: vi.fn(),
@@ -22,7 +23,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: mocks.config }));
-vi.mock("@niho-experience/experience-payments", () => ({ retrieveConnectedAccount: mocks.retrieve }));
+vi.mock("@niho-experience/experience-payments", () => ({ retrieveConnectedAccount: mocks.retrieve, retrievePlatformAccount: vi.fn() }));
 vi.mock("./server", () => ({
   isAdminHttp: mocks.http,
   adminMutationAllowed: mocks.mutation,
@@ -34,6 +35,7 @@ vi.mock("./server", () => ({
 }));
 vi.mock("@/lib/experience/store-server", () => ({
   experiencePublicationRepository: () => mocks.repository,
+  managedExperienceSalesRepository: () => null,
   experienceStore: () => null,
 }));
 vi.mock("@/lib/experience/public-media-storage", () => ({ experiencePublicMediaStorage: () => null }));
@@ -171,6 +173,20 @@ describe("Admin product draft BFF", () => {
     );
     expect(response.status).toBe(403);
     expect(mocks.load).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when a managed draft is selected without every server-only Stripe setting", async () => {
+    vi.stubEnv("EXPERIENCE_MANAGED_SALES_ENABLED", "true");
+    const response = await adminDraftProductCollection(
+      new Request(`${SITE}/admin/api/product-workspaces/provider-readable/products`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug: "synthetic", publicTitle: "Synthetic", content: {}, currency: "JPY", unitAmount: 1000,
+          managedSales: { enabled: true, sellerConfirmationMethod: "WRITTEN", paymentDueDays: 14 } }),
+      }),
+      { params: Promise.resolve({ providerId: "provider-readable" }) },
+    );
+    expect(response.status).toBe(503);
+    expect(mocks.repository.createDraftAsAdmin).not.toHaveBeenCalled();
   });
 
   it("requires the dedicated publish endpoint for an Admin publication", async () => {

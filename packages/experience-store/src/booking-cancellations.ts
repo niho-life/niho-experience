@@ -94,6 +94,8 @@ export interface RefundSubmission {
   readonly publicBookingId: string;
   /** The seller's account (Direct charge): the refund is made there. */
   readonly connectedAccountId: string;
+  /** Absent means a historical CONNECT_DIRECT booking. */
+  readonly chargeMode?: "PLATFORM" | "CONNECT_DIRECT";
   readonly stripePaymentRef: string;
   readonly kind: "FULL" | "PARTIAL";
   readonly amount: number;
@@ -378,6 +380,7 @@ interface LockedBooking {
   readonly totalAmount: number;
   readonly currency: string;
   readonly connectedAccountId: string;
+  readonly chargeMode: "PLATFORM" | "CONNECT_DIRECT";
   readonly stripePaymentRef: string | null;
   readonly party: number;
   readonly title: string;
@@ -420,16 +423,18 @@ function lockedFromRow(row: DbRow): LockedBooking {
     totalAmount: amount(pricing.totalAmount, "pricing_snapshot.totalAmount"),
     currency: text(pricing.currency, "pricing_snapshot.currency"),
     connectedAccountId: text(seller.stripeConnectAccountRef, "seller_snapshot.stripeConnectAccountRef"),
+    chargeMode: seller.chargeMode === "PLATFORM" ? "PLATFORM" : "CONNECT_DIRECT",
     stripePaymentRef: typeof row.stripe_payment_ref === "string" ? row.stripe_payment_ref : null,
     party: amount(row.party, "party"),
     title: text(row.public_title, "public_title"),
     nowUtc: isoValue(row, "db_now"),
-    supportEligible: supportConsent.enabled
+    supportEligible: (supportConsent.enabled
       && supportConsent.basisPoints === 1500
       && supportConsent.consentVersion !== null
       && supportConsent.consentVersion.length > 0
       && supportConsent.agreementRevision !== null
-      && supportConsent.agreementRevision > 0,
+      && supportConsent.agreementRevision > 0)
+      || (seller.chargeMode === "PLATFORM" && seller.salesPlan === "MANAGED_20" && seller.feeBasisPoints === 2000),
     supportConsent,
   };
 }
@@ -509,10 +514,12 @@ async function unsubmittedRefunds(client: PoolClient, commandId: string): Promis
 }
 
 function submissionFromRow(row: DbRow): RefundSubmission {
+  const seller = record(row.seller_snapshot);
   return {
     refundId: text(row.id, "booking_refunds.id"),
     publicBookingId: text(row.public_booking_id, "public_booking_id"),
-    connectedAccountId: text(record(row.seller_snapshot).stripeConnectAccountRef, "seller_snapshot.stripeConnectAccountRef"),
+    connectedAccountId: text(seller.stripeConnectAccountRef, "seller_snapshot.stripeConnectAccountRef"),
+    ...(seller.chargeMode === "PLATFORM" ? { chargeMode: "PLATFORM" as const } : {}),
     stripePaymentRef: text(row.stripe_payment_ref, "booking_refunds.stripe_payment_ref"),
     kind: row.kind === "FULL" ? "FULL" : "PARTIAL",
     amount: amount(row.amount, "booking_refunds.amount"),
@@ -699,18 +706,19 @@ async function insertRefund(
     `INSERT INTO booking_refunds
        (id, provider_id, booking_id, command_id, kind, amount, currency, refund_application_fee, requested_by, stripe_payment_ref, status)
      VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10, 'REQUESTED')`,
-    [id, booking.providerId, booking.rowId, input.commandId, kind, refundAmount, money.currency, true, input.requestedBy, booking.stripePaymentRef],
+    [id, booking.providerId, booking.rowId, input.commandId, kind, refundAmount, money.currency, booking.chargeMode !== "PLATFORM", input.requestedBy, booking.stripePaymentRef],
   );
   return {
     refundId: id,
     publicBookingId: booking.publicBookingId,
     connectedAccountId: booking.connectedAccountId,
+    ...(booking.chargeMode === "PLATFORM" ? { chargeMode: "PLATFORM" as const } : {}),
     stripePaymentRef: booking.stripePaymentRef!,
     kind,
     amount: refundAmount,
     currency: money.currency,
     // NIHO's fee goes back with every refund, in proportion to it (owner decision 2026-10-31, #285).
-    refundApplicationFee: true,
+    refundApplicationFee: booking.chargeMode !== "PLATFORM",
   };
 }
 
@@ -879,7 +887,7 @@ async function settleRefund(
 /* ---------- the support queue ---------- */
 
 const QUEUE_BOOKING = `
-  b.public_booking_id::text AS public_booking_id, b.provider_id, b.status, b.occurrence_snapshot, b.pricing_snapshot,
+  b.public_booking_id::text AS public_booking_id, b.provider_id, b.status, b.occurrence_snapshot, b.pricing_snapshot,b.seller_snapshot,
   g.guest_name, ${GUEST_MAIL_SUPPRESSION_CLASSIFICATION}, p.public_title`;
 const QUEUE_JOINS = `
   JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
@@ -891,7 +899,7 @@ const QUEUE_JOINS = `
  * simply not eligible instead of failing the read (AND does not fix the order Postgres evaluates in).
  */
 const FEE = "b.pricing_snapshot->'platformFee'";
-const SUPPORT_ELIGIBLE_SQL = `(
+const SUPPORT_ELIGIBLE_SQL = `((
   jsonb_typeof(${FEE}) = 'object'
   AND ${FEE}->'supportEnabled' = 'true'::jsonb
   AND CASE WHEN jsonb_typeof(${FEE}->'basisPoints') = 'number' THEN (${FEE}->>'basisPoints')::numeric = 1500 ELSE false END
@@ -900,13 +908,19 @@ const SUPPORT_ELIGIBLE_SQL = `(
         THEN (${FEE}->>'supportAgreementRevision')::numeric BETWEEN 1 AND 9007199254740991
          AND (${FEE}->>'supportAgreementRevision')::numeric = trunc((${FEE}->>'supportAgreementRevision')::numeric)
         ELSE false END
-)`;
+) OR (
+  b.seller_snapshot->>'chargeMode'='PLATFORM'
+  AND b.seller_snapshot->>'salesPlan'='MANAGED_20'
+  AND CASE WHEN jsonb_typeof(b.seller_snapshot->'feeBasisPoints')='number'
+    THEN (b.seller_snapshot->>'feeBasisPoints')::numeric=2000 ELSE false END
+))`;
 /** Paid bookings support may act on or answer for; holds and expired holds never were paid. */
 const SUPPORT_LIST_STATUSES = "b.status IN ('CONFIRMED', 'PAYMENT_REVIEW', 'CANCELLED')";
 
 function queueBookingFromRow(row: DbRow): SupportQueueBooking {
   const occurrence = record(row.occurrence_snapshot);
   const pricing = record(row.pricing_snapshot);
+  const seller = record(row.seller_snapshot);
   const fee = record(pricing.platformFee);
   const startUtc = text(occurrence.startUtc, "occurrence_snapshot.startUtc");
   const policy = typeof pricing.cancellationPolicy === "string" && POLICIES.has(pricing.cancellationPolicy) ? pricing.cancellationPolicy as GuestCancellationPolicy : null;
@@ -926,12 +940,13 @@ function queueBookingFromRow(row: DbRow): SupportQueueBooking {
     cancellationPolicy: policy,
     cancellationRefundBasisPoints: cancellation.refundBasisPoints,
     freeCancellationUntilUtc: freeCancellationDeadlineUtc(startUtc, cancellation.cancellationWindowMinutesBeforeStart),
-    supportEligible: fee.supportEnabled === true
+    supportEligible: (fee.supportEnabled === true
       && fee.basisPoints === 1500
       && typeof fee.supportConsentVersion === "string"
       && fee.supportConsentVersion.length > 0
       && Number.isSafeInteger(fee.supportAgreementRevision)
-      && Number(fee.supportAgreementRevision) > 0,
+      && Number(fee.supportAgreementRevision) > 0)
+      || (seller.chargeMode === "PLATFORM" && seller.salesPlan === "MANAGED_20" && seller.feeBasisPoints === 2000),
     ...(row.mail_suppression_classification === "NO_SUCH_ADDRESS" || row.mail_suppression_classification === "NO_SUCH_DOMAIN"
       ? { mailUndeliverable: row.mail_suppression_classification } : {}),
   };

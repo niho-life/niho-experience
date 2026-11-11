@@ -12,7 +12,7 @@ import type { ExperienceDetailForSite, ExperienceOfferForSite } from "./experien
  */
 export type SiteSaleTerms = {
   offers: ExperienceOfferForSite[];
-  booking: { consentVersion: string; checkoutAvailable: true; currency: "JPY"; timeZone: "Asia/Tokyo" };
+  booking: { consentVersion: string; checkoutAvailable: true; currency: "JPY"; timeZone: "Asia/Tokyo"; salesPlanRevision?: number };
   sellerDisplayName: string;
 };
 
@@ -77,7 +77,8 @@ export function siteSaleTerms(terms: PublicBookingTerms, consentVersion: string)
       })),
       bookingQuestionsFingerprint: offer.bookingQuestionsFingerprint,
     })),
-    booking: { consentVersion, checkoutAvailable: true, currency: "JPY", timeZone: "Asia/Tokyo" },
+    booking: { consentVersion, checkoutAvailable: true, currency: "JPY", timeZone: "Asia/Tokyo",
+      ...(terms.salesPlanRevision === undefined ? {} : { salesPlanRevision: terms.salesPlanRevision }) },
     sellerDisplayName: terms.sellerDisplayName,
   };
 }
@@ -146,8 +147,11 @@ export function parseSiteSaleTerms(value: unknown): SiteSaleTerms | null {
   if (!isObject(value) || !hasKeys(value, ["offers", "booking", "sellerDisplayName"])) return null;
   const booking = value.booking;
   const valid = Array.isArray(value.offers) && value.offers.length <= 50 && value.offers.every(isOffer)
-    && isObject(booking) && hasKeys(booking, ["consentVersion", "checkoutAvailable", "currency", "timeZone"])
+    && isObject(booking)
+    && Object.keys(booking).every((key) => ["consentVersion", "checkoutAvailable", "currency", "timeZone", "salesPlanRevision"].includes(key))
+    && ["consentVersion", "checkoutAvailable", "currency", "timeZone"].every((key) => Object.hasOwn(booking, key))
     && isText(booking.consentVersion, 100) && booking.checkoutAvailable === true && booking.currency === "JPY" && booking.timeZone === "Asia/Tokyo"
+    && (!Object.hasOwn(booking, "salesPlanRevision") || (Number.isSafeInteger(booking.salesPlanRevision) && (booking.salesPlanRevision as number) >= 1))
     && isText(value.sellerDisplayName, 300);
   return valid ? value as unknown as SiteSaleTerms : null;
 }

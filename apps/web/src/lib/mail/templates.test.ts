@@ -115,6 +115,16 @@ describe("bookingConfirmationEmail", () => {
     expect(mail.html).toContain('<th scope="row" style="padding:2px 16px 2px 0;text-align:left;vertical-align:top;font-weight:600">Total paid</th><td style="padding:2px 0">¥10,000</td>');
   });
 
+  it("shows the booked seller and the actual provider separately for managed bookings", () => {
+    const mail = bookingConfirmationEmail({
+      ...confirmation,
+      hostDisplayName: "Synthetic NIHO Seller",
+      managedSeller: { displayName: "Synthetic NIHO Seller", providerDisplayName: "Sample Host" },
+    }, { siteUrl: SITE, now: NOW });
+    expect(mail.text).toContain("Seller: Synthetic NIHO Seller\nHost: Sample Host");
+    expect(mail.text).toContain("NIHO support will share the meeting details");
+  });
+
   it("states each policy in plain words, and a deadline already passed as non-refundable", () => {
     const text = (overrides: Partial<BookingConfirmationEmail>, now = NOW) => bookingConfirmationEmail({ ...confirmation, ...overrides }, { siteUrl: SITE, now }).text;
     expect(text({ cancellationPolicy: "FREE_UNTIL_48H", cancellationWindowMinutesBeforeStart: 2_880, cancellationRefundBasisPoints: 10_000 })).toContain("Free cancellation until Thu 12 Nov, 10:00 Japan time (2 days before the start).");

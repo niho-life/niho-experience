@@ -1,5 +1,5 @@
 import type { ExperienceCheckoutResponse } from "@niho-experience/api-client";
-import { createDirectCheckout, ExperiencePaymentsHoldTooShortError, retrieveConnectedAccount, retrieveDirectCheckout, type DirectCheckoutResult, type RetrievedDirectCheckout } from "@niho-experience/experience-payments";
+import { createDirectCheckout, createPlatformCheckout, expireDirectCheckout, expirePlatformCheckout, ExperiencePaymentsHoldTooShortError, retrieveConnectedAccount, retrieveDirectCheckout, retrievePlatformAccount, retrievePlatformCheckout, type DirectCheckoutResult, type RetrievedDirectCheckout } from "@niho-experience/experience-payments";
 import { GuestCheckoutError, StoreNotFoundError, type GuestBookingStart } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { checkoutIpDigest } from "@/lib/experience/checkout-ip-limit";
@@ -66,6 +66,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       checkoutIpDigest: clientIpDigest,
       guestLanguage,
       currentConsentVersion: config.guestBookingConsentVersion,
+      managedSalesEnabled: process.env.EXPERIENCE_MANAGED_SALES_ENABLED === "true"
+        && Boolean(process.env.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET?.trim() && stripeKey?.trim()),
     });
   } catch (error) {
     if (error instanceof GuestCheckoutError) {
@@ -92,9 +94,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   // A publication is durable, but a connected account can lose charge or payout capability at any time.
   // Check the exact recipient saved in this booking before opening a new (or returning an existing) Session.
   try {
-    const account = await retrieveConnectedAccount({ accountId: started.booking.sellerSnapshot.stripeConnectAccountRef, platformStripeKey: stripeKey });
-    if (account.kind === "unreachable") return checkoutError("CHECKOUT_UNAVAILABLE");
-    if (account.kind !== "ready") return checkoutError("UNAVAILABLE");
+    if (started.booking.sellerSnapshot.chargeMode === "PLATFORM") {
+      const account = await retrievePlatformAccount({ expectedAccountId: started.booking.sellerSnapshot.stripeConnectAccountRef, platformStripeKey: stripeKey });
+      if (!account.chargesEnabled || !account.detailsSubmitted || account.country !== "JP" || account.defaultCurrency !== "JPY") return checkoutError("UNAVAILABLE");
+    } else {
+      const account = await retrieveConnectedAccount({ accountId: started.booking.sellerSnapshot.stripeConnectAccountRef, platformStripeKey: stripeKey });
+      if (account.kind === "unreachable") return checkoutError("CHECKOUT_UNAVAILABLE");
+      if (account.kind !== "ready") return checkoutError("UNAVAILABLE");
+    }
   } catch (error) {
     logFailure("stripe", error);
     return checkoutError("CHECKOUT_UNAVAILABLE");
@@ -105,7 +112,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   if (started.checkoutSessionRef !== null) {
     let previous: RetrievedDirectCheckout;
     try {
-      previous = await retrieveDirectCheckout({ booking: started.booking, checkoutSessionId: started.checkoutSessionRef, platformStripeKey: stripeKey });
+      previous = await (started.booking.sellerSnapshot.chargeMode === "PLATFORM" ? retrievePlatformCheckout : retrieveDirectCheckout)({ booking: started.booking, checkoutSessionId: started.checkoutSessionRef, platformStripeKey: stripeKey });
     } catch (error) {
       logFailure("stripe", error);
       return checkoutError("CHECKOUT_UNAVAILABLE");
@@ -117,7 +124,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
 
   let session: DirectCheckoutResult;
   try {
-    session = await createDirectCheckout({
+    const createCheckout = started.booking.sellerSnapshot.chargeMode === "PLATFORM" ? createPlatformCheckout : createDirectCheckout;
+    session = await createCheckout({
       booking: started.booking,
       returnOrigin: siteOrigin,
       returnPath,
@@ -135,6 +143,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   try {
     await bookings.attachCheckoutSession(started.publicBookingId, session.checkoutSessionId);
   } catch (error) {
+    try {
+      const expire = started.booking.sellerSnapshot.chargeMode === "PLATFORM" ? expirePlatformCheckout : expireDirectCheckout;
+      await expire({ booking: started.booking, checkoutSessionId: session.checkoutSessionId, platformStripeKey: stripeKey });
+    } catch { /* The Session URL is never returned; Stripe/webhook reconciliation remains authoritative. */ }
     logFailure("store", error);
     return checkoutError("CHECKOUT_UNAVAILABLE");
   }

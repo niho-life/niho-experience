@@ -235,8 +235,11 @@ export interface PublicBookingTerms {
   readonly title: string;
   readonly currency: "JPY";
   readonly sellerDisplayName: string;
+  readonly sellerDisclosureUrl?: string;
   readonly offers: readonly PublicBookingOffer[];
   readonly conditionsVersion: string | null;
+  /** Required on checkout for products with explicit sales-plan versions; absent for legacy products. */
+  readonly salesPlanRevision?: number;
 }
 
 export type PublicOccurrenceReason = "CUTOFF" | "FULL" | "UNAVAILABLE";
@@ -287,6 +290,9 @@ export interface StartGuestBookingInput {
   readonly childCount: number;
   readonly expectedTotalYen: number;
   readonly bookingQuestionsFingerprint: string;
+  readonly salesPlanRevision?: number;
+  /** An explicit false from the public runtime closes new platform bookings while settlement remains available. */
+  readonly managedSalesEnabled?: boolean;
   readonly answers?: readonly GuestBookingAnswer[];
   /** consent.agreedVersion of the request. */
   readonly termsConsentVersion: string;
@@ -746,7 +752,13 @@ export function saleSettingsFromRow(row: DbRow): ProviderSaleSettings {
 interface Sellable {
   readonly product: ProductRecord;
   readonly terms: ProductSaleTerms;
-  readonly settings: ProviderSaleSettings;
+  readonly settings: {
+    readonly supportEnabled: boolean;
+    readonly platformFeeBasisPoints: 1000 | 1500 | 2000;
+    readonly supportConsentVersion: string;
+    readonly supportAgreementRevision: number;
+    readonly salesPlan?: "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10";
+  };
 }
 
 // loadSellable joins publication/readiness tables that share several product column names.
@@ -776,12 +788,23 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
             pub.seller_niho_account_ref AS publication_seller_niho_account_ref,
             pub.stripe_connect_account_ref AS publication_stripe_connect_account_ref,
             pub.seller_display_name AS publication_seller_display_name,
-            pub.sale_terms_snapshot
+            pub.sale_terms_snapshot,
+            plan.revision AS sales_plan_revision,plan.plan AS sales_plan,plan.charge_mode,
+            plan.seller_display_name AS plan_seller_display_name,plan.seller_disclosure_url,
+            plan.seller_niho_account_ref AS plan_seller_niho_account_ref,
+            plan.stripe_account_ref AS plan_stripe_account_ref,plan.fee_basis_points AS plan_fee_basis_points,
+            plan.agreement_version AS plan_agreement_version,plan.payment_due_days,
+            plan_state.phase AS sales_plan_phase
        FROM experience_products p
        LEFT JOIN experience_product_publication_states s ON s.provider_id=p.provider_id AND s.product_id=p.id
        LEFT JOIN experience_product_publications pub ON pub.id=s.current_publication_id
+       LEFT JOIN experience_product_sales_plan_states plan_state
+         ON plan_state.provider_id=p.provider_id AND plan_state.product_id=p.id
+       LEFT JOIN experience_product_sales_plan_versions plan
+         ON plan.provider_id=plan_state.provider_id AND plan.product_id=plan_state.product_id
+        AND plan.revision=plan_state.current_revision
       WHERE p.status='PUBLISHED' AND pub.slug=$1 AND s.self_stopped_at IS NULL AND s.operations_suspended_at IS NULL
-          AND s.owner_resume_required=false
+          AND s.owner_resume_required=false AND (plan_state.phase IS NULL OR plan_state.phase='ACTIVE')
       ORDER BY p.provider_id,p.id LIMIT 2${lock ? " FOR SHARE OF p" : ""}`,
     [slug],
   );
@@ -789,7 +812,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
   const row = products.rows[0]!;
   const currentProduct = productFromRow(row);
   const isPublication = row.active_publication_id !== null && row.active_publication_id !== undefined;
-  const product: ProductRecord = isPublication ? {
+  let product: ProductRecord = isPublication ? {
     ...currentProduct,
     slug: String(row.publication_slug),
     publicTitle: String(row.publication_title),
@@ -801,12 +824,40 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
     stripeConnectAccountRef: String(row.publication_stripe_connect_account_ref),
     sellerDisplayName: String(row.publication_seller_display_name),
   } : currentProduct;
+  if (row.sales_plan_revision !== null && row.sales_plan_revision !== undefined) {
+    product = {
+      ...product,
+      chargeMode: String(row.charge_mode) as "PLATFORM" | "CONNECT_DIRECT",
+      salesPlan: String(row.sales_plan) as "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10",
+      salesPlanRevision: Number(row.sales_plan_revision),
+      sellerDisplayName: String(row.plan_seller_display_name),
+      sellerDisclosureUrl: String(row.seller_disclosure_url),
+      stripeConnectAccountRef: String(row.plan_stripe_account_ref),
+      sellerNihoAccountRef: String(row.plan_seller_niho_account_ref),
+      salesAgreementVersion: String(row.plan_agreement_version),
+      paymentDueDays: row.payment_due_days === null ? null : Number(row.payment_due_days),
+      feeBasisPoints: Number(row.plan_fee_basis_points) as 1000 | 1500 | 2000,
+    };
+  }
   if (!sellableProduct(product)) return null;
   const terms = isPublication
     ? termsFromPublicationSnapshot(row.sale_terms_snapshot, product.providerId, product.id)
     : await readSaleTerms(client, product.providerId, product.id, lock);
   if (terms === null) return null;
   if (!salePriceSetMatchesProduct(product.unitAmount, terms)) return null;
+  if (product.salesPlanRevision !== undefined) {
+    const basisPoints = product.feeBasisPoints!;
+    const settings: Sellable["settings"] = {
+      supportEnabled: product.salesPlan === "SUPPORTED_15",
+      platformFeeBasisPoints: basisPoints,
+      supportConsentVersion: product.salesAgreementVersion!,
+      supportAgreementRevision: product.salesPlanRevision,
+      ...(product.salesPlan ? { salesPlan: product.salesPlan } : {}),
+    } as const;
+    const sellable = { product, terms, settings };
+    const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [product.unitAmount];
+    return adultPrices.every((price) => chargeableFee(price, terms.childPricing, basisPoints)) ? sellable : null;
+  }
   const settings = await client.query<DbRow>(
     `SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1${lock ? " FOR SHARE" : ""}`,
     [product.providerId],
@@ -816,7 +867,10 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
   // Old rows are deliberately not completed from current policy. The OWNER must explicitly accept the
   // current support agreement before new bookings can be taken.
   if (saleSettings.supportConsentVersion !== EXPERIENCE_SUPPORT_CONSENT_VERSION || saleSettings.supportAgreementRevision === null) return null;
-  const sellable = { product, terms, settings: saleSettings };
+  const sellable = { product, terms, settings: {
+    supportEnabled: saleSettings.supportEnabled, platformFeeBasisPoints: saleSettings.platformFeeBasisPoints,
+    supportConsentVersion: saleSettings.supportConsentVersion, supportAgreementRevision: saleSettings.supportAgreementRevision,
+  } };
   const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [product.unitAmount];
   return salePriceSetMatchesProduct(product.unitAmount, terms)
     && adultPrices.every((price) => chargeableFee(price, sellable.terms.childPricing, sellable.settings.platformFeeBasisPoints))
@@ -1069,6 +1123,7 @@ interface ValidRequest {
   readonly childCount: number;
   readonly expectedTotalYen: number;
   readonly bookingQuestionsFingerprint: string;
+  readonly salesPlanRevision: number | null;
   readonly answers: readonly ValidAnswer[];
   readonly termsConsentVersion: string;
   readonly currentConsentVersion: string;
@@ -1194,6 +1249,9 @@ function validRequest(input: StartGuestBookingInput, defaultHoldSeconds: number)
   if (typeof input.bookingQuestionsFingerprint !== "string" || input.bookingQuestionsFingerprint.length < 1 || input.bookingQuestionsFingerprint.length > 128) {
     throw invalid("bookingQuestionsFingerprint");
   }
+  if (input.salesPlanRevision !== undefined && (!Number.isSafeInteger(input.salesPlanRevision) || input.salesPlanRevision < 1)) {
+    throw invalid("salesPlanRevision");
+  }
   if (typeof input.termsConsentVersion !== "string" || input.termsConsentVersion.length < 1 || input.termsConsentVersion.length > 100) {
     throw invalid("consent.agreedVersion");
   }
@@ -1207,6 +1265,7 @@ function validRequest(input: StartGuestBookingInput, defaultHoldSeconds: number)
     childCount,
     expectedTotalYen: input.expectedTotalYen,
     bookingQuestionsFingerprint: input.bookingQuestionsFingerprint,
+    salesPlanRevision: input.salesPlanRevision ?? null,
     answers,
     termsConsentVersion: input.termsConsentVersion,
     conditionsConsentVersion: input.conditionsConsentVersion ?? null,
@@ -1219,7 +1278,8 @@ function validRequest(input: StartGuestBookingInput, defaultHoldSeconds: number)
   };
   const fingerprint = createHash("sha256").update(JSON.stringify([
     request.offerId, request.occurrenceDate, request.adultCount, request.childCount, request.expectedTotalYen,
-    request.bookingQuestionsFingerprint, request.answers, request.termsConsentVersion, request.conditionsConsentVersion,
+    request.bookingQuestionsFingerprint, ...(request.salesPlanRevision === null ? [] : [request.salesPlanRevision]),
+    request.answers, request.termsConsentVersion, request.conditionsConsentVersion,
     request.guestName, request.guestEmail, request.guestPhone, request.guestLanguage, request.note,
     UTM_KEYS.map((key) => utm[key] ?? null),
   ]), "utf8").digest("hex");
@@ -1657,8 +1717,10 @@ export class GuestBookingRepository {
       title: sellable.product.publicTitle,
       currency: "JPY",
       sellerDisplayName: sellable.product.sellerDisplayName,
+      ...(sellable.product.sellerDisclosureUrl ? { sellerDisclosureUrl: sellable.product.sellerDisclosureUrl } : {}),
       offers: rules.map((stored) => offerFor(sellable, stored)),
       conditionsVersion: sellable.terms.conditionsVersion,
+      ...(sellable.product.salesPlanRevision === undefined ? {} : { salesPlanRevision: sellable.product.salesPlanRevision }),
     };
   }
 
@@ -1678,6 +1740,8 @@ export class GuestBookingRepository {
               pub.currency AS publication_currency,pub.unit_amount AS publication_unit_amount,
               pub.sale_terms_snapshot,
               s.platform_fee_basis_points, s.support_consent_version, s.support_agreement_revision,
+              plan.revision AS sales_plan_revision,plan.fee_basis_points AS sales_plan_fee_basis_points,
+              plan.agreement_version AS sales_plan_agreement_version,plan_state.phase AS sales_plan_phase,
               (SELECT array_agg(r.id ORDER BY r.id COLLATE "C") FROM schedule_rules r
                  WHERE r.provider_id=p.provider_id AND r.product_id=p.id AND (
                    r.ends_on IS NULL OR r.ends_on >= (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date
@@ -1689,6 +1753,11 @@ export class GuestBookingRepository {
          LEFT JOIN experience_product_publication_states state ON state.provider_id=p.provider_id AND state.product_id=p.id
          LEFT JOIN experience_product_publications pub ON pub.id=state.current_publication_id
          LEFT JOIN provider_sale_settings s ON s.provider_id=p.provider_id
+         LEFT JOIN experience_product_sales_plan_states plan_state
+           ON plan_state.provider_id=p.provider_id AND plan_state.product_id=p.id
+         LEFT JOIN experience_product_sales_plan_versions plan
+           ON plan.provider_id=plan_state.provider_id AND plan.product_id=plan_state.product_id
+          AND plan.revision=plan_state.current_revision
         WHERE p.status='PUBLISHED' AND pub.slug=ANY($1::text[]) AND state.self_stopped_at IS NULL
             AND state.operations_suspended_at IS NULL AND state.owner_resume_required=false
         `,
@@ -1701,9 +1770,10 @@ export class GuestBookingRepository {
       // A second active sale source with the slug stops the sale, as in loadSellable.
       if (rows?.length !== 1) return false;
       const row = rows[0]!;
-      if (row.platform_fee_basis_points === null
-        || row.support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
-        || row.support_agreement_revision === null) return false;
+      const explicitPlan = row.sales_plan_revision !== null && row.sales_plan_revision !== undefined;
+      if (explicitPlan ? row.sales_plan_phase !== "ACTIVE"
+        : (row.platform_fee_basis_points === null || row.support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
+          || row.support_agreement_revision === null)) return false;
       const id = String(row.id);
       const currency = String(row.publication_currency);
       const unitAmount = Number(row.publication_unit_amount);
@@ -1717,7 +1787,8 @@ export class GuestBookingRepository {
       }
       if (!salePriceSetMatchesProduct(unitAmount, terms)) return false;
       const adultPrices = terms.offerPrices?.map((price) => price.adultPriceYen) ?? [unitAmount];
-      return adultPrices.every((price) => chargeableFee(price, terms!.childPricing, Number(row.platform_fee_basis_points)));
+      const basisPoints = explicitPlan ? Number(row.sales_plan_fee_basis_points) : Number(row.platform_fee_basis_points);
+      return adultPrices.every((price) => chargeableFee(price, terms!.childPricing, basisPoints));
     });
   }
 
@@ -1837,14 +1908,22 @@ export class GuestBookingRepository {
         );
         const guestRow = guest.rows[0];
         if (guestRow === undefined || guestRow.request_fingerprint !== request.fingerprint) throw new GuestCheckoutError("REQUEST_MISMATCH");
+        const booking = bookingFromRow(previous.rows[0]);
+        if (booking.status === "HOLD" && booking.sellerSnapshot.salesPlanRevision !== product.salesPlanRevision) {
+          throw new GuestCheckoutError("CONSENT_OUTDATED", { field: "salesPlanRevision" });
+        }
+        if (booking.status === "HOLD" && booking.sellerSnapshot.chargeMode === "PLATFORM" && input.managedSalesEnabled === false) {
+          throw new StoreNotFoundError("experience for sale");
+        }
         return { kind: "started", booking: startResult(
-          bookingFromRow(previous.rows[0]),
+          booking,
           product.publicTitle,
           guestRow.guest_email === null ? null : String(guestRow.guest_email),
           guestRow.checkout_session_ref === null ? null : String(guestRow.checkout_session_ref),
         ) };
       }
 
+      if (product.chargeMode === "PLATFORM" && input.managedSalesEnabled === false) throw new StoreNotFoundError("experience for sale");
       const nowUtc = await databaseNow(client);
       const ipWindow = request.checkoutIpDigest === null ? null : await lockCheckoutIpWindow(client, request.checkoutIpDigest, nowUtc);
       if (ipWindow && ipWindow.retryAfterSeconds > 0) {
@@ -1860,6 +1939,9 @@ export class GuestBookingRepository {
       if (adultPriceYen === null) throw new StoreNotFoundError("experience for sale");
       if (request.termsConsentVersion !== request.currentConsentVersion) {
         throw new GuestCheckoutError("CONSENT_OUTDATED", { field: "consent.agreedVersion" });
+      }
+      if (product.salesPlanRevision !== undefined && request.salesPlanRevision !== product.salesPlanRevision) {
+        throw new GuestCheckoutError("CONSENT_OUTDATED", { field: "salesPlanRevision" });
       }
       if (request.conditionsConsentVersion !== null && request.conditionsConsentVersion !== terms.conditionsVersion) {
         throw new GuestCheckoutError("CONSENT_OUTDATED", { field: "conditionsConsent.version" });
@@ -1951,6 +2033,7 @@ export class GuestBookingRepository {
               basisPoints: settings.platformFeeBasisPoints,
               supportConsentVersion: settings.supportConsentVersion!,
               supportAgreementRevision: settings.supportAgreementRevision!,
+              ...(settings.salesPlan ? { salesPlan: settings.salesPlan } : {}),
             },
           },
         });
@@ -2013,9 +2096,13 @@ export class GuestBookingRepository {
   async attachCheckoutSession(publicBookingId: string, sessionRef: string): Promise<void> {
     if (typeof publicBookingId !== "string" || !UUID.test(publicBookingId)) throw new StoreValidationError("publicBookingId must be a UUID.");
     if (typeof sessionRef !== "string" || !SESSION_REF.test(sessionRef)) throw new StoreValidationError("sessionRef is invalid.");
+    const located = await this.#pool.query<DbRow>("SELECT provider_id FROM bookings WHERE public_booking_id=$1::uuid", [publicBookingId]);
+    if (!located.rows[0]) throw new StoreNotFoundError("guest booking");
+    const providerId = String(located.rows[0].provider_id);
     await withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
       const found = await client.query<DbRow>(
-        `SELECT g.provider_id, g.booking_id, g.checkout_session_ref, b.status,
+        `SELECT g.provider_id, g.booking_id, g.checkout_session_ref, b.status,b.product_id,b.seller_snapshot,
                 b.hold_expires_at > clock_timestamp() AS hold_active
            FROM booking_guests g
            JOIN bookings b ON b.provider_id=g.provider_id AND b.id=g.booking_id
@@ -2028,10 +2115,42 @@ export class GuestBookingRepository {
       if (row.checkout_session_ref === sessionRef) return;
       if (row.checkout_session_ref !== null) throw new StoreConflictError("Another Checkout Session is already attached to this booking.");
       if (row.status !== "HOLD" || row.hold_active !== true) throw new StoreConflictError("Only an active hold can take a Checkout Session.");
+      const seller = row.seller_snapshot as Record<string, unknown>;
+      if (Number.isSafeInteger(seller.salesPlanRevision)) {
+        const plan = await client.query<DbRow>(
+          `SELECT current_revision,phase FROM experience_product_sales_plan_states
+            WHERE provider_id=$1 AND product_id=$2 FOR SHARE`, [providerId, row.product_id],
+        );
+        if (plan.rows[0]?.phase !== "ACTIVE" || Number(plan.rows[0]?.current_revision) !== seller.salesPlanRevision) {
+          throw new StoreConflictError("The booking sales-plan revision is no longer accepting Checkout Sessions.");
+        }
+      }
       await client.query(
         "UPDATE booking_guests SET checkout_session_ref=$3 WHERE provider_id=$1 AND booking_id=$2",
         [row.provider_id, row.booking_id, sessionRef],
       );
+    });
+  }
+
+  /** Plan cutover explicitly expires an unpaid hold after Stripe confirms that its old Session is expired. */
+  async expireGuestHoldForSalesPlanSwitch(actor: HostActor, publicBookingId: string, sessionRef: string): Promise<boolean> {
+    if (!UUID.test(publicBookingId) || !SESSION_REF.test(sessionRef)) throw new StoreValidationError("The Checkout hold reference is invalid.");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      await requireMembership(client, actor, ["OWNER"]);
+      const found = await client.query<DbRow>(
+        `SELECT b.id,b.occurrence_id,b.status,g.checkout_session_ref
+           FROM bookings b JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+          WHERE b.provider_id=$1 AND b.public_booking_id=$2::uuid FOR UPDATE OF b,g`,
+        [actor.providerId, publicBookingId],
+      );
+      const row = found.rows[0];
+      if (!row) throw new StoreNotFoundError("guest booking");
+      if (row.status !== "HOLD" || row.checkout_session_ref !== sessionRef) return false;
+      await client.query("UPDATE bookings SET status='EXPIRED',updated_at=clock_timestamp() WHERE provider_id=$1 AND id=$2", [actor.providerId, row.id]);
+      await enqueueCalendarRecalculation(client, { providerId: actor.providerId, aggregateType: "schedule_occurrence",
+        aggregateId: String(row.occurrence_id), cause: "booking_hold_released" });
+      return true;
     });
   }
 

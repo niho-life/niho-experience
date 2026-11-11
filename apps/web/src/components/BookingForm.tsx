@@ -149,11 +149,12 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
     const missing = offer.bookingQuestions.find((question) => question.required && !answered.some((answer) => answer.questionId === question.id));
     if (missing) { setProblem(copy.text("booking.requiredQuestion")); setInvalidField(missing.id); return; }
     if (!agreed) { setProblem(copy.text("booking.requiredTerms")); setInvalidField("consent"); return; }
-    const draft: Omit<ExperienceCheckoutRequest, "clientRequestKey"> & ExperienceCheckoutJourneyFields = {
+    const draft: Omit<ExperienceCheckoutRequest, "clientRequestKey"> & ExperienceCheckoutJourneyFields & { salesPlanRevision?: number } = {
       offerId: offer.id, occurrenceDate: selection.date, adultCount: selection.adultCount, childCount: selection.childCount,
       expectedTotalYen: total, bookingQuestionsFingerprint: offer.bookingQuestionsFingerprint,
       guestName: guestName.trim(), guestEmail: guestEmail.trim(), ...(collectsPhone && guestPhone.trim() ? { guestPhone: normalizeGuestPhone(guestPhone) } : {}), ...(note.trim() ? { note: note.trim() } : {}),
       answers: answered, consent: { agreedVersion: experience.booking.consentVersion },
+      ...("salesPlanRevision" in experience.booking && typeof experience.booking.salesPlanRevision === "number" ? { salesPlanRevision: experience.booking.salesPlanRevision } : {}),
       ...(conditions && consentTexts.length ? { conditionsConsent: { version: conditions.version } } : {}),
       ...(attributionEnabled ? readBookingAttribution(navigator.doNotTrack) : {}),
     };

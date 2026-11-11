@@ -176,6 +176,8 @@ export function bookingConfirmationEmail(
 ): RenderedMail {
   const experience = oneLine(email.experienceTitle);
   const host = oneLine(email.hostDisplayName);
+  const managed = email.managedSeller;
+  const provider = managed?.providerDisplayName ? oneLine(managed.providerDisplayName) : null;
   const time = `${email.localStartTime} ${zoneName(email.timeZone)}`;
   const policy = email.totalAmount === 0
     ? "You can cancel this free booking any time before the experience ends."
@@ -192,7 +194,7 @@ export function bookingConfirmationEmail(
         ["Time", time],
         ["Guests", party(email.adultCount, email.childCount)],
         [email.totalAmount === 0 ? "Total" : "Total paid", email.totalAmount === 0 ? "Free" : money(email.totalAmount, email.currency)],
-        ["Host", host],
+        ...(managed ? [["Seller", oneLine(managed.displayName)] as const, ...(provider ? [["Host", provider] as const] : [])] : [["Host", host] as const]),
         ["Booking reference", email.publicBookingId],
       ],
     },
@@ -205,7 +207,7 @@ export function bookingConfirmationEmail(
           href: bookingPageLink(options.siteUrl, grant),
         } as const]
       : []),
-    { kind: "p", text: `${host} will share the meeting details with you before the day.` },
+    { kind: "p", text: `${managed ? "NIHO support" : host} will share the meeting details with you before the day.` },
     { kind: "link", lead: "The experience page:", label: experience, href: absolute(options.siteUrl, `/experiences/${encodeURIComponent(email.experienceSlug)}`) },
     { kind: "p", text: "Questions, or need to change or cancel? Reply to this email and NIHO support will help." },
   ]);

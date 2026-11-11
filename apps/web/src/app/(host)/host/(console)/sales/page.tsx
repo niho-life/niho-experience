@@ -14,7 +14,7 @@ import { SITE_PAYOUTS_LOADING_TEXT } from "@/host/site-sales-payouts";
 import { loadSitePayouts } from "@/host/site-sales-payouts-server";
 import { loadSiteSales } from "@/host/site-sales-server";
 import { ownerActor } from "@/host/site-bookings-server";
-import { experienceSupportRepository } from "@/lib/experience/store-server";
+import { experienceSupportRepository, managedExperienceSalesRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
 import type { HostSession } from "@/lib/host/session";
@@ -86,6 +86,9 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
         {noticeView}
         <SalesSummaryPanel page={site.page} providerId={stripeLoginProviderId} />
         <SalesLines page={site.page} />
+        {process.env.EXPERIENCE_MANAGED_SALES_ENABLED === "true" ? <Suspense fallback={<p role="status" className="mt-4 text-sm text-muted">事務局振込の状態を読み込んでいます…</p>}>
+          <HostManagedCompensationPanel provider={provider} />
+        </Suspense> : null}
         <Suspense fallback={<p role="status" className="mt-4 text-sm text-muted">決済費用の実費を読み込んでいます…</p>}>
           <HostExperienceSettlementPanel provider={provider} />
         </Suspense>
@@ -127,6 +130,26 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
       <SalesLines page={page} />
     </SalesFrame>
   );
+}
+
+async function HostManagedCompensationPanel({ provider }: { provider: HostProvider }) {
+  const repository = managedExperienceSalesRepository();
+  if (!repository || process.env.EXPERIENCE_MANAGED_SALES_ENABLED !== "true") return null;
+  const rows = await repository.listHostCompensations(ownerActor(provider)).catch(() => null);
+  if (rows === null) return <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-sm text-warn">事務局振込の状態を読み込めませんでした。</p>;
+  if (!rows.length) return null;
+  const status: Record<(typeof rows)[number]["status"], string> = {
+    REVIEW_REQUIRED: "確認中", READY: "振込準備前", PREPARED: "振込準備済み", RESULT_UNKNOWN: "明細照合中",
+    PAID: "振込済み", ADJUSTMENT_REQUIRED: "支払後の調整あり",
+  };
+  return <section className={`${HOST_SURFACE} mt-4 p-4 md:p-5`} aria-labelledby="managed-compensation-title">
+    <h2 id="managed-compensation-title" className="font-extrabold">事務局からの報酬振込</h2>
+    <p className="mt-1 text-sm text-muted">完全代行で受けた予約の報酬です。Stripeの口座入金とは別に、開催後に事務局が銀行振込します。</p>
+    <ul className="mt-3 divide-y divide-line">{rows.map((row) => <li key={row.publicBookingId} className="grid gap-1 py-3 text-sm sm:grid-cols-[1fr_auto]">
+      <span className="break-all font-bold">予約 {row.publicBookingId}</span><span>{row.currency === "JPY" ? `${row.providerAmount.toLocaleString("ja-JP")}円` : `${row.providerAmount} ${row.currency}`}</span>
+      <span className="text-muted">支払期日 {row.dueOn}</span><span className="font-bold">{status[row.status]}</span>
+    </li>)}</ul>
+  </section>;
 }
 
 async function HostExperienceSettlementPanel({ provider }: { provider: HostProvider }) {

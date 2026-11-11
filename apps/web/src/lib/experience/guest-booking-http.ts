@@ -84,12 +84,12 @@ export function storeCheckoutError(error: GuestCheckoutError): Response {
   });
 }
 
-type CheckoutBody = ExperienceCheckoutRequest & ExperienceCheckoutJourneyFields;
+type CheckoutBody = ExperienceCheckoutRequest & ExperienceCheckoutJourneyFields & { readonly salesPlanRevision?: number };
 
 const UTM_KEYS = ["utmSource", "utmMedium", "utmCampaign", "utmContent"] as const satisfies readonly (keyof CheckoutBody)[];
 const REQUEST_KEYS: readonly string[] = [
   "offerId", "occurrenceDate", "adultCount", "childCount", "expectedTotalYen", "guestName", "guestEmail", "note", "answers",
-  "bookingQuestionsFingerprint", "consent", "clientRequestKey", ...UTM_KEYS, "guestPhone", "conditionsConsent",
+  "bookingQuestionsFingerprint", "salesPlanRevision", "consent", "clientRequestKey", ...UTM_KEYS, "guestPhone", "conditionsConsent",
 ] satisfies readonly (keyof CheckoutBody)[];
 const STRING_FIELDS = ["offerId", "occurrenceDate", "guestName", "guestEmail", "bookingQuestionsFingerprint", "clientRequestKey"] as const;
 const NUMBER_FIELDS = ["adultCount", "childCount", "expectedTotalYen"] as const;
@@ -127,6 +127,7 @@ export async function readGuestCheckout(request: Request): Promise<ParsedGuestCh
   for (const field of NUMBER_FIELDS) if (typeof value[field] !== "number") return invalid(field);
   if (value.note !== undefined && value.note !== null && typeof value.note !== "string") return invalid("note");
   if (value.guestPhone !== undefined && typeof value.guestPhone !== "string") return invalid("guestPhone");
+  if (value.salesPlanRevision !== undefined && (!Number.isSafeInteger(value.salesPlanRevision) || (value.salesPlanRevision as number) < 1)) return invalid("salesPlanRevision");
 
   const consent = value.consent;
   if (!isObject(consent)) return invalid("consent.agreedVersion");
@@ -165,6 +166,7 @@ export async function readGuestCheckout(request: Request): Promise<ParsedGuestCh
       childCount: value.childCount as number,
       expectedTotalYen: value.expectedTotalYen as number,
       bookingQuestionsFingerprint: value.bookingQuestionsFingerprint as string,
+      salesPlanRevision: value.salesPlanRevision as number | undefined,
       answers: answers as readonly GuestBookingAnswer[] | undefined,
       termsConsentVersion: consent.agreedVersion,
       conditionsConsentVersion: conditions === undefined ? null : (conditions.version as string),

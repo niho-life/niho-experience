@@ -17,7 +17,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   const { publication, saleTerms, sellerDisclosure } = item;
   const ja = locale === "ja";
   const sellerInformationUrl = siteSellerInformationHref(item, locale);
-  const sellerInformationName = sellerDisclosure?.sellerDisplayName ?? publication.sellerDisplayName;
+  const sellerInformationName = saleTerms?.sellerDisplayName ?? sellerDisclosure?.sellerDisplayName ?? publication.sellerDisplayName;
   const offers = saleTerms?.offers ?? [];
   const [api] = useState<ExperienceApiClient>(() => getSiteBookingApi(siteOrigin, locale));
   const [offerId, setOfferId] = useState(offers[0]?.id ?? "");
@@ -65,7 +65,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
     if (!api || !offer || !selectedOccurrence?.bookable || total === null || !agreed || !validAnswers || submitting) return;
     setProblem("");
     const answersBody = answersForCheckout(offer.bookingQuestions, answers);
-    const bodyWithoutKey: Omit<ExperienceCheckoutRequest, "clientRequestKey"> = {
+    const bodyWithoutKey: Omit<ExperienceCheckoutRequest, "clientRequestKey"> & { salesPlanRevision?: number } = {
       offerId: offer.id,
       occurrenceDate: date,
       adultCount: adults,
@@ -77,10 +77,11 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       ...(note.trim() ? { note: note.trim() } : {}),
       answers: answersBody,
       consent: { agreedVersion: consentVersion },
+      ...(saleTerms?.salesPlanRevision === undefined ? {} : { salesPlanRevision: saleTerms.salesPlanRevision }),
     };
     const signature = JSON.stringify(bodyWithoutKey);
     if (attempt.current?.signature !== signature) attempt.current = { signature, key: createClientRequestKey() };
-    const body: ExperienceCheckoutRequest = { ...bodyWithoutKey, clientRequestKey: attempt.current.key };
+    const body: ExperienceCheckoutRequest & { salesPlanRevision?: number } = { ...bodyWithoutKey, clientRequestKey: attempt.current.key };
     setSubmitting(true);
     try {
       const result = await api.startCheckout(publication.slug, body);

@@ -44,7 +44,7 @@ vi.mock("./publication-host-boundary", () => ({
   publicationHostBoundary: mocks.boundary,
   publicationHostMutationAllowed: mocks.mutationAllowed,
 }));
-vi.mock("./store-server", () => ({ experiencePublicationRepository: () => mocks.repository, guestMeetingGuideRepository: () => mocks.meetingGuides }));
+vi.mock("./store-server", () => ({ experiencePublicationRepository: () => mocks.repository, guestMeetingGuideRepository: () => mocks.meetingGuides, managedExperienceSalesRepository: () => null }));
 vi.mock("@/lib/translation/anthropic", () => ({ anthropicTranslator: () => mocks.translator }));
 vi.mock("./public-media-storage", () => ({ experiencePublicMediaStorage: () => mocks.mediaStorage }));
 vi.mock("@/lib/guide-cover-image", () => ({

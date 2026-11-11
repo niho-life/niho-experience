@@ -15,14 +15,14 @@ type Provider = {
 };
 type Profile = { providerId: string; publicDisplayName: string; providerKind: "PERSON" | "BUSINESS" | null; consentVersion: string; consentedAtUtc: string; version: number };
 type MediaAsset = { id: string; placement: "PROVIDER_PHOTO" | "BUSINESS_LOGO"; altText: string; altTextJa: string; publicCredit: string | null; previewUrl: string };
-type Body = { provider: Provider; profile: Profile | null; providerMedia: { version: number; assets: MediaAsset[] }; consentVersion: string };
+type Body = { provider: Provider; profile: Profile | null; providerMedia: { version: number; assets: MediaAsset[] }; consentVersion: string; managedSalesAvailable: boolean };
 
 function isBody(value: unknown): value is Body {
   if (!value || typeof value !== "object") return false;
   const body = value as Partial<Body>;
   return Boolean(body.provider && typeof body.provider.providerId === "string"
     && body.providerMedia && Number.isSafeInteger(body.providerMedia.version) && Array.isArray(body.providerMedia.assets)
-    && typeof body.consentVersion === "string");
+    && typeof body.consentVersion === "string" && typeof body.managedSalesAvailable === "boolean");
 }
 
 function utf8Base64Url(value: string): string {
@@ -158,7 +158,7 @@ export function AdminProviderWorkspace({ providerId }: { providerId: string }) {
           <div><button className={consoleButtonClass("primary")} disabled={busy || !file || !photoConsent || !altText.trim() || !altTextJa.trim() || !body.profile}>{busy ? "登録中…" : "公開写真を登録・差替え"}</button></div>
         </form>
       </section>
-      {body.provider.sellerDisplayName ? <div className="mt-8"><HostPublicationWorkspace mode="admin-draft" apiBase={`/admin/api/product-workspaces/${encoded}/products`} experiencesBase={`/admin/products/${encoded}`} createHref={`/admin/products/${encoded}/new`} /></div> : <section className={`${HOST_SURFACE} mt-5 p-4 md:p-6`}><h2 className="font-extrabold">商品の下書き</h2><p className="mt-2 text-ink-soft">この提供者には販売者・決済設定がありません。提供者情報と写真だけを保存し、有料販売やStripe設定は開始しません。</p></section>}
+      {body.provider.sellerDisplayName || body.managedSalesAvailable ? <div className="mt-8"><HostPublicationWorkspace mode="admin-draft" apiBase={`/admin/api/product-workspaces/${encoded}/products`} experiencesBase={`/admin/products/${encoded}`} createHref={`/admin/products/${encoded}/new`} /></div> : <section className={`${HOST_SURFACE} mt-5 p-4 md:p-6`}><h2 className="font-extrabold">商品の下書き</h2><p className="mt-2 text-ink-soft">この提供者には販売者・決済設定がなく、完全代行の明示的な試験対象にも含まれていません。提供者情報と写真だけを保存し、有料販売やStripe設定は開始しません。</p></section>}
     </> : null}
   </div>;
 }
