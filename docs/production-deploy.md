@@ -138,7 +138,7 @@ mock で出している機能を http mode で開くフラグを、repository va
 - job（メール・push・Google）を開くフラグは、呼び手の Cloud Scheduler と、上の名前のサービスアカウント（project の role なし、このサービスの `run.invoker` だけ）を先に作る。workflow はそれらを作らない。
 - 順番：設定と Secret の参照を先に入れ、最後にフラグの variable を `true` にする。`candidate` → 候補 URL で確認 → 同じ variable のまま `promote`。止めるときはフラグを `false` に戻して新しい候補を作るか、前の revision に traffic を戻す。
 
-**NIHO完全代行の試験販売**では、migration `0070_managed_experience_sales.sql` とruntime grantsを適用する。NIHO-platformのアカウント用Webhookを正規サイトの `/api/experience/stripe/platform-webhook` に登録し、署名秘密はConnect用と分けてSecret Managerへ登録する。イベントと販売者・委託の確認項目は [体験ごとの販売プランと精算](experience-sales-plans.md) を参照する。
+**NIHO完全代行の試験販売**のコードを配備する前に、`0069`（提供者の公開プロフィール）・`0070`（完全代行の販売条件）とruntime grantsを適用する。既存商品の公開・予約処理もこれらのテーブルを参照するため、試験販売をOFFのまま配備する場合も先に適用する。試験販売を開くには、NIHO-platformのアカウント用Webhookを正規サイトの `/api/experience/stripe/platform-webhook` に登録し、署名秘密はConnect用と分けてSecret Managerへ登録する。イベントと販売者・委託の確認項目は [体験ごとの販売プランと精算](experience-sales-plans.md) を参照する。
 
 `PROD_MANAGED_SALES_WEBHOOKS_ENABLED=true` でWebhookの設定を配備し、販売条件を確認した1件を事務局で公開する配備では `PROD_MANAGED_SALES_ENABLED=true` も設定する。完全代行の新規受付を止める場合は、販売のフラグを `false` にして候補を作り直す。受付済みの予約の決済確定・返金・精算に使うため、Webhookのフラグと口座・署名秘密の参照は維持する。
 
