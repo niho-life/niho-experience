@@ -373,7 +373,7 @@ function ManagedCompensationPanel({ onSessionExpired }: { onSessionExpired: () =
   return <section className="mt-6 rounded-2xl border border-line bg-canvas p-4" aria-labelledby="managed-compensation-heading">
     <h2 id="managed-compensation-heading" className="text-lg font-extrabold">完全代行の報酬振込</h2>
     <p className="mt-1 text-sm text-muted">開催後の確定売上から返金・異議申立てと20%を引き、銀行口座情報を保存せず手動振込を記録します。</p>
-    <div className="mt-3"><label className="grid gap-1">予約番号<input className={FIELD} value={bookingId} disabled={busy} onChange={(event) => {
+    <div className="mt-3"><label className="grid gap-1">報酬を確認する予約番号<input className={FIELD} value={bookingId} disabled={busy} onChange={(event) => {
       setBookingId(event.currentTarget.value); setCompensation(null); setStatementReference(""); setPaidDate(""); setMessage("");
     }} /></label></div>
     <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={BUTTON} disabled={busy || !bookingId} onClick={() => void load()}>読み込む</button><button type="button" className={BUTTON} disabled={busy || !bookingId} onClick={() => void mutate({ action: "CALCULATE" })}>開催後の報酬を計算</button></div>
@@ -401,7 +401,13 @@ function ManagedCompensationPanel({ onSessionExpired }: { onSessionExpired: () =
   </section>;
 }
 
-export function AdminSiteBookings({ initial, supportBookings, notifications = [], settlements = [] }: { initial: SupportQueue; supportBookings?: SupportEnabledBookingsPage; notifications?: ExperienceSupportNotification[]; settlements?: ExperienceSettlementSummary[] }) {
+export function AdminSiteBookings({ initial, supportBookings, notifications = [], settlements = [], managedCompensationAvailable = false }: {
+  initial: SupportQueue;
+  supportBookings?: SupportEnabledBookingsPage;
+  notifications?: ExperienceSupportNotification[];
+  settlements?: ExperienceSettlementSummary[];
+  managedCompensationAvailable?: boolean;
+}) {
   const financialOwnerId = useId();
   const [queue, setQueue] = useState(initial);
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -709,7 +715,7 @@ export function AdminSiteBookings({ initial, supportBookings, notifications = []
       <p className="mt-1 text-ink-soft">このサイトで受けた予約のうち、NIHO サポートの対応が要るもの。全額返金・一部返金とも、NIHO 手数料も返金額に比例して返します（一部返金の額は入力します）。</p>
       <AdminSupportNotifications initial={notifications} onSessionExpired={expireSession} />
       <SettlementSummaryList items={settlements} provider admin heading="Experience予約の決済費用精算" />
-      <ManagedCompensationPanel onSessionExpired={expireSession} />
+      {managedCompensationAvailable ? <ManagedCompensationPanel onSessionExpired={expireSession} /> : null}
       <p role="status" className={message ? `mt-4 rounded-xl px-3 py-2 font-bold ${message.tone === "ok" ? "bg-leaf-pale text-moss" : "bg-danger-pale text-danger"}` : "sr-only"}>{message?.text ?? ""}</p>
 
       <section aria-labelledby="site-requests" className="mt-8">
