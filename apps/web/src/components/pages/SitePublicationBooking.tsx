@@ -9,15 +9,14 @@ import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-
 import { expectedSiteBookingTotalYen } from "@/lib/experience/site-booking-rules";
 import { answersForCheckout } from "@/lib/experience/site-booking-answers";
 import type { SitePublicExperience, SitePublicOffer } from "@/lib/experience/site-publications";
+import { siteSellerInformationHref } from "@/lib/experience/site-seller-information";
 
 type QuestionAnswers = Record<string, string | string[]>;
 
 export function SitePublicationBooking({ item, siteOrigin, consentVersion, bookingsEnabled, locale = "en" }: { item: SitePublicExperience; siteOrigin: string; consentVersion: string; bookingsEnabled: boolean; locale?: "en" | "ja" }) {
   const { publication, saleTerms, sellerDisclosure } = item;
   const ja = locale === "ja";
-  const sellerInformationUrl = sellerDisclosure?.method === "EXTERNAL"
-    ? sellerDisclosure.externalUrl
-    : sellerDisclosure?.method === "NATIVE" ? `/experiences/${encodeURIComponent(publication.slug)}/seller` : null;
+  const sellerInformationUrl = siteSellerInformationHref(item, locale);
   const sellerInformationName = sellerDisclosure?.sellerDisplayName ?? publication.sellerDisplayName;
   const offers = saleTerms?.offers ?? [];
   const [api] = useState<ExperienceApiClient>(() => getSiteBookingApi(siteOrigin, locale));
@@ -160,7 +159,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       </div>
       <label className="flex items-start gap-3 text-sm text-ink-soft">
         <input type="checkbox" required checked={agreed} onChange={(event) => setAgreed(event.target.checked)} className="mt-1 size-4" />
-        <span>{ja ? "上記の予約・キャンセル条件と" : "I agree to the booking and cancellation conditions shown above and the "}<a className="font-extrabold underline" href="/privacy" target="_blank" rel="noreferrer">{ja ? "プライバシーポリシー" : "Privacy Policy"}</a>{sellerInformationUrl ? <>{ja ? "、および" : ", and "}<a className="font-extrabold underline" href={sellerInformationUrl} target="_blank" rel="noreferrer">{ja ? `${sellerInformationName}の販売者情報` : `seller information for ${sellerInformationName}`}</a></> : null}{ja ? "に同意します。" : "."}</span>
+        <span>{ja ? "上記の予約・キャンセル条件と" : "I agree to the booking and cancellation conditions shown above and the "}<a className="font-extrabold underline" href="/privacy" target="_blank" rel="noreferrer">{ja ? "プライバシーポリシー" : "Privacy Policy"}</a>{sellerInformationUrl ? <>{ja ? "、および" : ", and "}<a className="underline underline-offset-2" href={sellerInformationUrl} target="_blank" rel="noreferrer">{ja ? `${sellerInformationName}の販売者情報` : `seller information for ${sellerInformationName}`}</a></> : null}{ja ? "に同意します。" : "."}</span>
       </label>
       {problem ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{problem}</p> : null}
       <button type="submit" disabled={!api || !selectedOccurrence?.bookable || total === null || !agreed || !validAnswers || submitting || loading || loadError} className="min-h-12 rounded-full bg-ink px-6 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-45">{submitting ? ja ? "決済を開いています…" : "Opening secure checkout…" : ja ? "安全な決済へ進む" : "Continue to secure checkout"}</button>

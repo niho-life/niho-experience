@@ -17,9 +17,12 @@ const offer = {
 };
 
 describe("site publication booking seller terms", () => {
-  it("links the booking consent to the native seller information", () => {
+  it.each([
+    ["en", "seller information for Synthetic Legal Seller", "/experiences/synthetic-experience/seller"],
+    ["ja", "Synthetic Legal Sellerの販売者情報", "/ja/experiences/synthetic-experience/seller"],
+  ] as const)("links booking consent to the native seller information in %s", (locale, label, href) => {
     const item = {
-      publication: { slug: "synthetic-experience", publicTitle: "Synthetic experience", sellerDisplayName: "Synthetic Legal Seller" },
+      publication: { slug: "synthetic-experience", publicTitle: "Synthetic experience", japanese: { title: "体験サンプル" }, sellerDisplayName: "Synthetic Legal Seller" },
       saleTerms: { title: "Synthetic experience", currency: "JPY" as const, sellerDisplayName: "Synthetic Legal Seller", offers: [offer], conditionsVersion: null },
       sellerDisclosure: {
         method: "NATIVE" as const, sellerKind: "PERSON" as const, sellerDisplayName: "Synthetic Legal Seller", representativeName: null,
@@ -27,9 +30,9 @@ describe("site publication booking seller terms", () => {
       },
     };
     const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
-      item: item as never, siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true,
+      item: item as never, siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true, locale,
     }));
-    expect(html).toContain("seller information for Synthetic Legal Seller");
-    expect(html).toContain("/experiences/synthetic-experience/seller");
+    expect(html).toContain(`href="${href}"`);
+    expect(html).toContain(label);
   });
 });
