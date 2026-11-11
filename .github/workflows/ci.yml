@@ -192,7 +192,7 @@ jobs:
       - uses: ./.github/actions/setup-workspace
       - run: npm run build
       - name: Install Chromium for Playwright
-        run: npx -w @niho-experience/web playwright install --with-deps chromium
+        uses: ./.github/actions/setup-playwright-chromium
       - name: Run this half of the Playwright matrix
         run: npm -w @niho-experience/web run test:e2e -- --shard=${{ matrix.shard }}/2
       - name: Upload Playwright report
@@ -215,7 +215,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
       - name: Install Chromium for Playwright
-        run: npx -w @niho-experience/web playwright install --with-deps chromium
+        uses: ./.github/actions/setup-playwright-chromium
       - name: Test provider owner and cohost operations with synthetic data
         run: npm -w @niho-experience/web run test:e2e:provider-operations
       - name: Upload Playwright report
@@ -239,7 +239,7 @@ jobs:
       - uses: ./.github/actions/setup-workspace
       - run: npm run build
       - name: Install Chromium for Playwright
-        run: npx -w @niho-experience/web playwright install --with-deps chromium
+        uses: ./.github/actions/setup-playwright-chromium
       - name: Test OTA browser adapter with synthetic data
         run: npm -w @niho-experience/ota-worker run test:browser
       - name: Test assisted registration and representative consent with synthetic data
