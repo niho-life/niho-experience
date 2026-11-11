@@ -58,6 +58,7 @@ type Product = {
     current: { revision: number; plan: "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10"; feeBasisPoints: 1000 | 1500 | 2000; agreementVersion: string };
     phase: "ACTIVE" | "EXPIRING_OLD_CHECKOUTS" | "RECONCILING";
     pending: { revision: number; plan: "SUPPORTED_15" | "INDEPENDENT_10"; feeBasisPoints: 1000 | 1500; agreementVersion: string } | null;
+    transitionCommandId: string | null;
     version: number;
   } | null;
   ownerSalesPlanAgreementVersion: string | null;
@@ -815,21 +816,33 @@ export function HostPublicationWorkspace({
   }
 
   async function switchManagedSalesPlan() {
-    if (!product || !product.salesPlan || !product.ownerSalesPlanAgreementVersion || !ownerSalesPlanAccepted
-      || ownerSalesPlan === product.salesPlan.current.plan || busy) return;
-    const commandId = salesPlanCommandId ?? crypto.randomUUID();
+    const state = product?.salesPlan;
+    if (!product || !state || busy) return;
+    const pending = state.pending;
+    if (pending ? !state.transitionCommandId : !ownerSalesPlanAccepted || ownerSalesPlan === state.current.plan) return;
+    const agreementVersion = pending?.agreementVersion ?? product.ownerSalesPlanAgreementVersion;
+    if (!agreementVersion) return;
+    const commandId = state.transitionCommandId ?? salesPlanCommandId ?? crypto.randomUUID();
+    const targetPlan = pending?.plan ?? ownerSalesPlan;
+    const readBack = async () => {
+      const updated = await refresh(false, dirty);
+      if (dirty) setProduct((current) => current ? { ...current, salesPlan: updated.salesPlan } : current);
+      if (updated.salesPlan?.phase === "ACTIVE" && updated.salesPlan.current.plan === targetPlan) {
+        setSalesPlanCommandId(null); setOwnerSalesPlanAccepted(false);
+      }
+    };
     setSalesPlanCommandId(commandId); setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/sales-plan`, {
         method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ commandId, expectedVersion: product.salesPlan.version, plan: ownerSalesPlan, agreementVersion: product.ownerSalesPlanAgreementVersion }),
+        body: JSON.stringify({ commandId, expectedVersion: state.version, plan: targetPlan, agreementVersion }),
       });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
-      setSalesPlanCommandId(null); setOwnerSalesPlanAccepted(false);
-      await refresh(false);
+      await readBack();
       setNotice("販売プランを切り替えました。URL・商品・開催枠・在庫は引き継ぎ、以後の新規予約は選択した料率で本人のStripe口座に決済します。");
     } catch (reason) {
+      await readBack().catch(() => undefined);
       setError(reason instanceof Error ? reason.message : "切替結果を確認できませんでした。同じ操作として再確認してください。");
     } finally { setBusy(false); }
   }
@@ -1178,7 +1191,10 @@ export function HostPublicationWorkspace({
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm"><dt>現在</dt><dd>{product.salesPlan.current.plan === "MANAGED_20" ? "完全代行 20%" : product.salesPlan.current.plan === "SUPPORTED_15" ? "本人販売＋サポート 15%" : "本人販売 10%"}（版 {product.salesPlan.current.revision}）</dd><dt>切替状態</dt><dd>{product.salesPlan.phase === "ACTIVE" ? "受付中" : "旧決済の照合中（新規受付停止）"}</dd></dl>
       <fieldset disabled={busy || product.salesPlan.phase !== "ACTIVE" || !product.ownerSalesPlanAgreementVersion} className="space-y-2"><legend className="text-sm font-extrabold">切替後の条件</legend><label className="flex items-start gap-2 text-sm"><input type="radio" checked={ownerSalesPlan === "SUPPORTED_15"} onChange={() => setOwnerSalesPlan("SUPPORTED_15")} className="mt-1" /><span><strong>本人販売＋サポート 15%</strong><br />本人の同じ販売者プロフィール・同意済み受取口座で直接決済します。</span></label><label className="flex items-start gap-2 text-sm"><input type="radio" checked={ownerSalesPlan === "INDEPENDENT_10"} onChange={() => setOwnerSalesPlan("INDEPENDENT_10")} className="mt-1" /><span><strong>本人販売 10%</strong><br />本人の同じ販売者プロフィール・同意済み受取口座で直接決済します。</span></label></fieldset>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={ownerSalesPlanAccepted} disabled={busy || product.salesPlan.phase !== "ACTIVE" || !product.ownerSalesPlanAgreementVersion} onChange={(event) => setOwnerSalesPlanAccepted(event.target.checked)} className="mt-1" /><span>現在のOWNERとして、選択した料率・販売者・決済経路と同意版（{product.ownerSalesPlanAgreementVersion ?? "未設定"}）を確認し、この体験だけを切り替えます。</span></label>
-      <button type="button" disabled={busy || dirty || !ownerSalesPlanAccepted || ownerSalesPlan === product.salesPlan.current.plan || product.salesPlan.phase !== "ACTIVE" || !product.ownerSalesPlanAgreementVersion} className={consoleButtonClass("primary")} onClick={() => void switchManagedSalesPlan()}>{salesPlanCommandId ? "同じ切替結果を確認" : "新規受付を止めて切り替える"}</button>
+      {product.salesPlan.pending ? <div className="space-y-2">
+        <p className="text-sm">切替先は{product.salesPlan.pending.plan === "SUPPORTED_15" ? "本人販売＋サポート 15%" : "本人販売 10%"}です。</p>
+        <button type="button" disabled={busy || !product.salesPlan.transitionCommandId} className={consoleButtonClass("primary")} onClick={() => void switchManagedSalesPlan()}>旧決済の照合を再開</button>
+      </div> : <button type="button" disabled={busy || dirty || product.salesPlan.phase !== "ACTIVE" || !ownerSalesPlanAccepted || ownerSalesPlan === product.salesPlan.current.plan || !product.ownerSalesPlanAgreementVersion} className={consoleButtonClass("primary")} onClick={() => void switchManagedSalesPlan()}>{salesPlanCommandId ? "同じ切替結果を確認" : "新規受付を止めて切り替える"}</button>}
     </section> : null}
     {dirty ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">未保存の変更があります。公開・停止は保存後に実行できます。</p> : null}
     {product.publicationNeedsUpdate ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">現在の掲載版を維持しています。公開条件を満たす変更を反映すると、確認後に新しい掲載版へ切り替わります。</p> : null}

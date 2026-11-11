@@ -9,6 +9,7 @@ import { GuestBookingRepository, type StartGuestBookingInput } from "../src/gues
 import { HostAccounts } from "../src/host-accounts.ts";
 import { ManagedExperienceSalesRepository } from "../src/managed-sales.ts";
 import { ProviderPayoutAccountConsents } from "../src/payout-account-consents.ts";
+import { ProviderSellerDisclosureRepository } from "../src/provider-seller-disclosures.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { SiteSaleRegistration } from "../src/site-sale-registration.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
@@ -119,23 +120,34 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       });
       assert.equal((await accounts.grantProviderOwner({ providerId: owner.providerId, hostAccountId: owner.nihoUserId, nowUtc })).kind, "granted");
       await new ProviderPayoutAccountConsents(pool).record(owner, { stripeConnectAccountRef: CONNECT, consentVersion: "payout-synthetic-v1", nowUtc: new Date().toISOString() });
-      await pool.query(
-        `INSERT INTO provider_seller_disclosures
-          (provider_id,method,seller_kind,seller_display_name,external_url,consent_version,consented_at,consented_by_niho_user_id)
-         VALUES ($1,'EXTERNAL','PERSON','Synthetic Owner Seller','https://example.test/owner-seller','seller-disclosure-v1',clock_timestamp(),$2)`,
-        [profile.providerId, owner.nihoUserId],
-      );
+      const disclosures = new ProviderSellerDisclosureRepository(pool);
+      const disclosure = {
+        method: "NATIVE", sellerKind: "PERSON", sellerDisplayName: "Synthetic Owner Seller", representativeName: null,
+        publicAddress: "Synthetic address", publicPhone: "+81 90 0000 0000", publicEmail: "owner-seller@example.test",
+        consentVersion: "seller-disclosure-v1", accepted: true,
+      } as const;
+      await disclosures.save(owner, { commandId: randomUUID(), expectedVersion: null, disclosure });
+      assert.equal(await disclosures.getPublicBySlug(draft.slug), null, "the future seller's disclosure stays private during platform sales");
+      assert.equal((await guests.publicBookingTerms(draft.slug))?.sellerDisclosureUrl, "https://example.test/niho-seller");
 
       const commandId = randomUUID();
+      const sellerDisclosureUrl = `https://example.test/experiences/${draft.slug}/seller`;
       const switchToSupported = {
         commandId, expectedVersion: 1, plan: "SUPPORTED_15", agreementVersion: "owner-supported-synthetic-v1",
-        agreementConfirmedAtUtc: new Date().toISOString(), sellerDisclosureUrl: "https://example.test/owner-seller", stripeReady: true,
+        agreementConfirmedAtUtc: new Date().toISOString(), sellerDisclosureUrl, stripeReady: true,
       } as const;
       const transition = await managed.beginOwnerSwitch(owner, draft.id, switchToSupported);
       assert.deepEqual(transition.openCheckouts, [{ publicBookingId: openOld.publicBookingId, checkoutSessionRef: "cs_test_platform_open_old" }]);
       assert.equal(await guests.publicBookingTerms(draft.slug), null, "new acceptance is durably fenced during cutover");
       await assert.rejects(guests.startGuestBooking(bookingRequest(draft.slug, offerId, day(2), 1, "stale-page@example.test")), StoreNotFoundError);
       await assert.rejects(guests.attachCheckoutSession(unattachedOld.publicBookingId, "cs_test_platform_raced_old"), StoreConflictError);
+      const interrupted = await managed.recordCheckoutOutcome(owner, draft.id, commandId, "cs_test_platform_open_old", "UNKNOWN");
+      await assert.rejects(managed.finalizeSwitch(owner, draft.id, commandId, interrupted.version), StoreConflictError);
+      const saved = await new ManagedExperienceSalesRepository(pool).get(profile.providerId, draft.id);
+      assert.equal(saved?.transitionCommandId, commandId);
+      assert.equal(saved?.pending?.agreementVersion, switchToSupported.agreementVersion);
+      const resumed = await managed.beginOwnerSwitch(owner, draft.id, { ...switchToSupported, expectedVersion: interrupted.version });
+      assert.deepEqual(resumed.openCheckouts, transition.openCheckouts);
       assert.equal(await guests.expireGuestHoldForSalesPlanSwitch(owner, openOld.publicBookingId, "cs_test_platform_open_old"), true);
       assert.equal((await store.getBooking(owner, openOld.publicBookingId)).status, "EXPIRED");
       const reconciled = await managed.recordCheckoutOutcome(owner, draft.id, commandId, "cs_test_platform_open_old", "EXPIRED");
@@ -145,6 +157,11 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
 
       const directTerms = await guests.publicBookingTerms(draft.slug);
       assert.equal(directTerms?.salesPlanRevision, 2);
+      assert.equal(directTerms?.sellerDisclosureUrl, sellerDisclosureUrl);
+      assert.deepEqual(await disclosures.getPublicBySlug(draft.slug), {
+        method: "NATIVE", sellerKind: "PERSON", sellerDisplayName: "Synthetic Owner Seller", representativeName: null,
+        publicAddress: disclosure.publicAddress, publicPhone: disclosure.publicPhone, publicEmail: disclosure.publicEmail,
+      });
       const direct = await guests.startGuestBooking(bookingRequest(draft.slug, offerId, day(2), 2, "direct@example.test"));
       assert.deepEqual([direct.booking.sellerSnapshot.chargeMode, direct.booking.sellerSnapshot.salesPlan, direct.booking.sellerSnapshot.stripeConnectAccountRef], ["CONNECT_DIRECT", "SUPPORTED_15", CONNECT]);
       const registeredSeller = await publications.currentHostAccountSellerProfile(owner.nihoUserId);
@@ -160,7 +177,7 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       const directTransition = await managed.beginOwnerSwitch(owner, draft.id, {
         commandId: directCommand, expectedVersion: supportedState.version, plan: "INDEPENDENT_10",
         agreementVersion: "owner-independent-synthetic-v1", agreementConfirmedAtUtc: new Date().toISOString(),
-        sellerDisclosureUrl: "https://example.test/owner-seller", stripeReady: true,
+        sellerDisclosureUrl, stripeReady: true,
       });
       assert.equal((await guests.publicBookingTerms(draft.slug)), null);
       assert.deepEqual(directTransition.openCheckouts, [{ publicBookingId: direct.publicBookingId, checkoutSessionRef: "cs_test_direct_supported_old" }]);

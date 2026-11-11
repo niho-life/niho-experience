@@ -24,7 +24,10 @@ function salesPlanDto(state: SalesPlanState | null) {
   if (!state) return null;
   const revision = (value: SalesPlanState["current"]) => ({ revision: value.revision, plan: value.plan,
     feeBasisPoints: value.feeBasisPoints, agreementVersion: value.agreementVersion });
-  return { current: revision(state.current), phase: state.phase, pending: state.pending ? revision(state.pending) : null, version: state.version };
+  return {
+    current: revision(state.current), phase: state.phase, pending: state.pending ? revision(state.pending) : null,
+    transitionCommandId: state.transitionCommandId, version: state.version,
+  };
 }
 
 function failure(error: unknown): Response {
@@ -47,7 +50,6 @@ export async function GET(request: Request, context: Context): Promise<Response>
 }
 
 export async function POST(request: Request, context: Context): Promise<Response> {
-  if (process.env.EXPERIENCE_MANAGED_SALES_ENABLED !== "true") return noStoreJson({ error: { code: "NOT_FOUND" } }, 404);
   if (!publicationHostMutationAllowed(request)) return noStoreJson({ error: { code: "FORBIDDEN" } }, 403);
   if (request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json" || new URL(request.url).search) return noStoreJson({ error: { code: "INVALID_INPUT" } }, 400);
   const boundary = await publicationHostBoundary("OWNER"); if (!boundary.ok) return boundary.response;
@@ -68,17 +70,23 @@ export async function POST(request: Request, context: Context): Promise<Response
     || typeof body.agreementVersion !== "string" || !VERSION.test(body.agreementVersion)) {
     return noStoreJson({ error: { code: "INVALID_INPUT" } }, 400);
   }
-  const requiredAgreementVersion = process.env.EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION;
-  if (!requiredAgreementVersion || body.agreementVersion !== requiredAgreementVersion) {
-    return noStoreJson({ error: { code: "CONSENT_OUTDATED" } }, 409);
-  }
   const repository = managedExperienceSalesRepository();
   const publications = experiencePublicationRepository();
   const disclosures = providerSellerDisclosureRepository();
   const bookings = experienceStore();
-  if (!repository || !publications || !disclosures || !bookings) return noStoreJson({ error: { code: "UNAVAILABLE" } }, 503);
+  const releases = guestHoldReleases();
+  if (!repository || !publications || !disclosures || !bookings || !releases) return noStoreJson({ error: { code: "UNAVAILABLE" } }, 503);
   try {
     const { productId } = await context.params;
+    const state = await repository.get(boundary.value.actor.providerId, productId);
+    const resuming = state?.transitionCommandId === body.commandId
+      && state.pending?.plan === body.plan && state.pending.agreementVersion === body.agreementVersion;
+    if (!resuming) {
+      if (process.env.EXPERIENCE_MANAGED_SALES_ENABLED !== "true") return noStoreJson({ error: { code: "NOT_FOUND" } }, 404);
+      if (body.agreementVersion !== process.env.EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION) {
+        return noStoreJson({ error: { code: "CONSENT_OUTDATED" } }, 409);
+      }
+    }
     const product = await publications.getProduct(boundary.value.actor, productId);
     const disclosure = (await disclosures.getForOwner(boundary.value.actor)).disclosure;
     if (!disclosure || disclosure.sellerDisplayName !== boundary.value.provider.sellerDisplayName) throw new StoreConflictError("Seller disclosure is not current.");
@@ -97,7 +105,7 @@ export async function POST(request: Request, context: Context): Promise<Response
         booking, checkoutSessionId: checkout.checkoutSessionRef,
         platformStripeKey: process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY,
       });
-      if (outcome === "expired") await guestHoldReleases()?.expireGuestHoldForSalesPlanSwitch(boundary.value.actor, checkout.publicBookingId, checkout.checkoutSessionRef);
+      if (outcome === "expired") await releases.expireGuestHoldForSalesPlanSwitch(boundary.value.actor, checkout.publicBookingId, checkout.checkoutSessionRef);
       transition = {
         state: await repository.recordCheckoutOutcome(boundary.value.actor, productId, body.commandId, checkout.checkoutSessionRef,
           outcome === "paid" ? "PAID" : outcome === "expired" ? "EXPIRED" : "UNKNOWN"),

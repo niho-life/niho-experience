@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "./errors.ts";
 import { sellerOwnerSql } from "./host-sellers.ts";
+import { lockProviderInventory } from "./inventory.ts";
 import type { HostActor } from "./types.ts";
 import { withTransaction } from "./transaction.ts";
 import { assertStoreIdentifier } from "./validation.ts";
@@ -152,6 +153,11 @@ function fingerprint(value: unknown): string {
 
 type OwnerSeller = { readonly sellerDisplayName: string; readonly sellerNihoAccountRef: string; readonly stripeConnectAccountRef: string };
 
+const CURRENT_SALES_PLAN = `
+  LEFT JOIN experience_product_sales_plan_states sales ON sales.provider_id=state.provider_id AND sales.product_id=state.product_id
+  LEFT JOIN experience_product_sales_plan_versions plan ON plan.provider_id=sales.provider_id AND plan.product_id=sales.product_id
+    AND plan.revision=sales.current_revision`;
+
 async function ownerSeller(client: PoolClient, actor: HostActor): Promise<OwnerSeller> {
   assertStoreIdentifier(actor.providerId, "providerId");
   assertStoreIdentifier(actor.nihoUserId, "nihoUserId");
@@ -180,9 +186,13 @@ async function activePublicationsMatchSeller(client: PoolClient, actor: HostActo
        JOIN experience_product_publications publication
          ON publication.id=state.current_publication_id
         AND publication.provider_id=state.provider_id AND publication.product_id=state.product_id
+       ${CURRENT_SALES_PLAN}
       WHERE state.provider_id=$1 AND state.self_stopped_at IS NULL AND state.operations_suspended_at IS NULL
         AND state.owner_resume_required=false
-        AND (publication.seller_display_name<>$2 OR publication.seller_niho_account_ref<>$3 OR publication.stripe_connect_account_ref<>$4)
+        AND (plan.charge_mode IS NULL OR plan.charge_mode='CONNECT_DIRECT')
+        AND (COALESCE(plan.seller_display_name,publication.seller_display_name)<>$2
+          OR COALESCE(plan.seller_niho_account_ref,publication.seller_niho_account_ref)<>$3
+          OR COALESCE(plan.stripe_account_ref,publication.stripe_connect_account_ref)<>$4)
       LIMIT 1`,
     [actor.providerId, seller.sellerDisplayName, seller.sellerNihoAccountRef, seller.stripeConnectAccountRef],
   );
@@ -251,6 +261,7 @@ export class ProviderSellerDisclosureRepository {
     const disclosure = validateSellerDisclosureInput(command.disclosure);
     const requestFingerprint = fingerprint(["SAVE", command.expectedVersion, disclosure]);
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       const seller = await ownerSeller(client, actor);
       await lockProviderDisclosure(client, actor.providerId);
       const previous = await previousResult(client, actor, command.commandId, requestFingerprint);
@@ -291,6 +302,7 @@ export class ProviderSellerDisclosureRepository {
     if (!Number.isSafeInteger(command.expectedVersion) || command.expectedVersion < 1) throw new StoreValidationError("expectedVersion is invalid.");
     const requestFingerprint = fingerprint(["WITHDRAW", command.expectedVersion]);
     return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
       await ownerSeller(client, actor);
       await lockProviderDisclosure(client, actor.providerId);
       const previous = await previousResult(client, actor, command.commandId, requestFingerprint);
@@ -322,15 +334,17 @@ export class ProviderSellerDisclosureRepository {
          JOIN experience_product_publications publication
            ON publication.id=state.current_publication_id
           AND publication.provider_id=state.provider_id AND publication.product_id=state.product_id
+         ${CURRENT_SALES_PLAN}
          JOIN experience_host_seller_profiles profile ON profile.provider_id=publication.provider_id
          JOIN provider_seller_disclosures disclosure ON disclosure.provider_id=publication.provider_id
         WHERE publication.slug=$1
           AND state.self_stopped_at IS NULL AND state.operations_suspended_at IS NULL AND state.owner_resume_required=false
           AND disclosure.method IN ('NATIVE','EXTERNAL')
-          AND disclosure.seller_display_name=publication.seller_display_name
+          AND (plan.charge_mode IS NULL OR plan.charge_mode='CONNECT_DIRECT')
+          AND disclosure.seller_display_name=COALESCE(plan.seller_display_name,publication.seller_display_name)
           AND disclosure.seller_display_name=profile.seller_display_name
-          AND publication.seller_niho_account_ref=profile.seller_niho_account_ref
-          AND publication.stripe_connect_account_ref=profile.stripe_connect_account_ref
+          AND COALESCE(plan.seller_niho_account_ref,publication.seller_niho_account_ref)=profile.seller_niho_account_ref
+          AND COALESCE(plan.stripe_account_ref,publication.stripe_connect_account_ref)=profile.stripe_connect_account_ref
           AND EXISTS (
             SELECT 1 FROM provider_memberships owner
              WHERE owner.provider_id=publication.provider_id

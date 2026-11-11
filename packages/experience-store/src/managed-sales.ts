@@ -349,11 +349,14 @@ export class ManagedExperienceSalesRepository {
         `SELECT 1 FROM experience_host_seller_profiles p
            JOIN provider_payout_account_consents c ON c.provider_id=p.provider_id
             AND c.stripe_connect_account_ref=p.stripe_connect_account_ref AND c.revoked_at IS NULL
+           JOIN provider_seller_disclosures d ON d.provider_id=p.provider_id AND d.withdrawn_at IS NULL
+            AND d.seller_display_name=p.seller_display_name AND (d.method='NATIVE' OR (d.method='EXTERNAL' AND d.external_url=$6))
           WHERE p.provider_id=$1 AND p.seller_niho_account_ref=$2 AND p.stripe_connect_account_ref=$3
-            AND p.seller_display_name=$4 AND c.consented_by_niho_user_id=$5 FOR SHARE OF p,c`,
-        [actor.providerId, state.pending.sellerNihoAccountRef, state.pending.stripeAccountRef, state.pending.sellerDisplayName, actor.nihoUserId],
+            AND p.seller_display_name=$4 AND c.consented_by_niho_user_id=$5 FOR SHARE OF p,c,d`,
+        [actor.providerId, state.pending.sellerNihoAccountRef, state.pending.stripeAccountRef,
+          state.pending.sellerDisplayName, actor.nihoUserId, state.pending.sellerDisclosureUrl],
       );
-      if (!ready.rows[0]) throw new StoreConflictError("The registered payout account or OWNER consent changed during the switch.");
+      if (!ready.rows[0]) throw new StoreConflictError("The registered payout account, consent or seller disclosure changed during the switch.");
       const unresolved = await client.query<DbRow>(
         `SELECT count(*)::int AS n FROM experience_sales_plan_transition_checkouts
           WHERE provider_id=$1 AND product_id=$2 AND command_id=$3::uuid AND status IN ('PENDING','UNKNOWN')`,

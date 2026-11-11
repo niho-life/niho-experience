@@ -227,6 +227,7 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
       phase: salesPlan.phase,
       pending: salesPlan.pending ? { revision: salesPlan.pending.revision, plan: salesPlan.pending.plan,
         feeBasisPoints: salesPlan.pending.feeBasisPoints, agreementVersion: salesPlan.pending.agreementVersion } : null,
+      transitionCommandId: salesPlan.transitionCommandId,
       version: salesPlan.version,
     } : null,
     ownerSalesPlanAgreementVersion: process.env.EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION ?? null,
