@@ -54,6 +54,9 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   channel_workers: { write: IU },
   experience_offer_prices: { write: IUD },
   experience_product_sale_terms: { write: IU },
+  experience_product_sales_plan_versions: { write: I },
+  experience_product_sales_plan_states: { write: IU },
+  experience_sales_plan_transition_checkouts: { write: IU },
   experience_product_media_assets: { write: I },
   experience_product_media_selection: { write: ID },
   // Provider originals are append-only except for revoking the replaced or removed asset.
@@ -138,6 +141,10 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   host_push_subscriptions: { write: IUD },
   host_sessions: { write: IUD },
   inventory_resources: { write: IU },
+  managed_booking_disputes: { write: IU },
+  managed_booking_dispute_events: { write: I },
+  managed_provider_compensations: { write: IU },
+  managed_provider_compensation_events: { write: I },
   // Read by the host notification and guest mail jobs, which also mark rows done and move their lease.
   outbox_messages: { write: IU },
   // Append-only; the ledger trigger also rejects mutation.

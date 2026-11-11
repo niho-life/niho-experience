@@ -94,6 +94,11 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `EXPERIENCE_PUBLICATIONS_ENABLED` | `false` | #330/#369のExperience公開readとhost publication基盤。HTTP modeではhost console・DB・掲載同意version・GCS公開media bucketが必要 |
 | `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` | `false` | NIHO Host v1のidentity/Connect readとExperience OWNER boundaryを使うhost BFF。NIHO v1の配備・service identity許可・exact origin・stg受入までOFF。提供者一覧やNIHO商品APIは使わない。audienceはhost consoleの基礎設定として別途必要。詳細は[consumer contract](host-niho-v1-consumer.md) |
 | `EXPERIENCE_PUBLICATION_CONSENT_VERSION` | 未設定 | 掲載同意の承認済み版。BFFからホストへ返す版識別子で、承認された同意文と対にしてのみ設定する。未設定なら同意不足として公開不可 |
+| `EXPERIENCE_MANAGED_SALES_ENABLED` | `false` | NIHO完全代行の試験販売を許可する。事務局の掲載準備とゲスト予約の既存設定が前提。提供者の掲載・委託・報酬の合意を確認した体験に適用する |
+| `EXPERIENCE_MANAGED_SELLER_NIHO_ACCOUNT_REF` / `EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID` / `EXPERIENCE_MANAGED_LEGAL_SELLER_NAME` / `EXPERIENCE_MANAGED_COMMERCIAL_TRANSACTIONS_URL` | 未設定 | NIHO運営法人の販売者参照、Stripeプラットフォーム口座ID、正式な販売者名、HTTPSの特定商取引法表示。公開時はサーバーで口座をStripeに照会する |
+| `EXPERIENCE_MANAGED_AGREEMENT_VERSION` | 未設定 | 試験導入で使う委託・報酬条件の承認済み版。事務局が体験ごとに確認方法と支払期日を記録する |
+| `EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION` | 未設定 | 本人販売へ切り替える際にOWNERが同意する販売・支援条件の承認済み版 |
+| `EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET` | 未設定 | `/api/experience/stripe/platform-webhook` のアカウント用署名秘密。Connect用の署名秘密と分け、Secret Managerから渡す |
 | `EXPERIENCE_PROVIDER_PAGES_API_ENABLED` | `false` | legacy NIHO provider-pages API。Experience商品の原稿・写真・公開には使わず、flagを開かない |
 | `EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED` | `false` | OWNER/COHOSTの提供者メンバー操作と体験ページAPI。NIHO予約操作はExperience consumerから撤去済み。認証PR #19282/#19353、API PR #19405、consumer PR #170の配備・受入後にだけ開く。Admin consoleとは独立 |
 | `EXPERIENCE_PROVIDER_OPERATIONS_PREVIEW_ENABLED` | `false` | mock mode専用の合成UI確認。HTTP失敗時のfallbackには使わない |

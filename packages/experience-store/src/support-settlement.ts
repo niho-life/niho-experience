@@ -433,6 +433,9 @@ export class ExperienceSupportRepository {
       const pricing = record(row.pricing_snapshot);
       const platformFee = record(pricing.platformFee);
       const seller = record(row.seller_snapshot);
+      if (seller.chargeMode === "PLATFORM") {
+        throw new StoreValidationError("Platform-account bookings use manual provider compensation, not Connect settlement.");
+      }
       const providerId = text(row, "provider_id");
       const bookingRowId = text(row, "booking_id");
       const account = seller.stripeConnectAccountRef;
@@ -475,6 +478,7 @@ export class ExperienceSupportRepository {
            AND l.kind='PAYMENT_CAPTURED' AND l.stripe_payment_ref=b.stripe_payment_ref
          LEFT JOIN experience_booking_settlements s ON s.provider_id=b.provider_id AND s.booking_id=b.id
         WHERE s.booking_id IS NULL AND b.pricing_snapshot->'platformFee'->>'basisPoints' IN ('1000','1500')
+          AND COALESCE(b.seller_snapshot->>'chargeMode','CONNECT_DIRECT') <> 'PLATFORM'
         ORDER BY l.created_at,b.id LIMIT $1`, [limit],
     );
     let initialized = 0;

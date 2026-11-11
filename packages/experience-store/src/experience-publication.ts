@@ -39,6 +39,7 @@ import {
   validPublicationLocaleManuscript,
 } from "./experience-publication-manuscript.ts";
 import type { HostActor, JsonValue, ProductRecord, PublicationAdminDraftActor } from "./types.ts";
+import type { ManagedPlatformSellerConfig } from "./managed-sales.ts";
 import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier, normalizeCurrency } from "./validation.ts";
 
 export type ExperiencePublicationBlocker =
@@ -590,8 +591,24 @@ async function requireAdminProvider(client: PoolClient, providerId: string, lock
   if (!result.rows[0]) throw new StoreNotFoundError("provider");
 }
 
-async function adminDraftSeller(client: PoolClient, providerId: string): Promise<ExperienceHostSellerProfile> {
+async function adminDraftSeller(client: PoolClient, providerId: string, productId: string): Promise<ExperienceHostSellerProfile> {
   assertStoreIdentifier(providerId, "providerId");
+  assertStoreIdentifier(productId, "productId");
+  const managed = await client.query<DbRow>(
+    `SELECT profile.public_display_name,plan.seller_display_name,plan.seller_niho_account_ref,plan.stripe_account_ref
+       FROM experience_product_sales_plan_states state
+       JOIN experience_product_sales_plan_versions plan
+         ON plan.provider_id=state.provider_id AND plan.product_id=state.product_id AND plan.revision=state.current_revision
+       JOIN experience_provider_public_profiles profile ON profile.provider_id=state.provider_id
+      WHERE state.provider_id=$1 AND state.product_id=$2 AND plan.plan='MANAGED_20' FOR SHARE OF state`,
+    [providerId, productId],
+  );
+  const managedRow = managed.rows[0];
+  if (managedRow) return {
+    providerId, legacyProviderId: "managed-platform", providerDisplayName: String(managedRow.public_display_name),
+    sellerNihoAccountRef: String(managedRow.seller_niho_account_ref), stripeConnectAccountRef: String(managedRow.stripe_account_ref),
+    sellerDisplayName: String(managedRow.seller_display_name),
+  };
   const result = await client.query<DbRow>(
     `SELECT provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,
             stripe_connect_account_ref,seller_display_name
@@ -888,9 +905,19 @@ async function blockers(
     "SELECT provider_id,support_consent_version,support_agreement_revision FROM provider_sale_settings WHERE provider_id=$1 FOR SHARE",
     [product.providerId],
   );
-  if (!feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
-  else if (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
-    || feeSettings.rows[0].support_agreement_revision === null) result.push("SUPPORT_CONSENT_REQUIRED");
+  const managedPlan = await client.query<DbRow>(
+    `SELECT plan.plan,plan.charge_mode,plan.seller_display_name,plan.seller_niho_account_ref,
+            plan.stripe_account_ref,plan.pilot_approved,state.phase
+       FROM experience_product_sales_plan_states state
+       JOIN experience_product_sales_plan_versions plan
+         ON plan.provider_id=state.provider_id AND plan.product_id=state.product_id AND plan.revision=state.current_revision
+      WHERE state.provider_id=$1 AND state.product_id=$2 FOR SHARE OF state`,
+    [product.providerId, product.id],
+  );
+  const managed = managedPlan.rows[0]?.plan === "MANAGED_20" && managedPlan.rows[0]?.charge_mode === "PLATFORM";
+  if (!managed && !feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
+  else if (!managed && (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
+    || feeSettings.rows[0].support_agreement_revision === null)) result.push("SUPPORT_CONSENT_REQUIRED");
   if (facts.rows[0]?.sale_terms !== true || product.cancellationTermsRef.trim() === "") result.push("CANCELLATION_TERMS_REQUIRED");
   if (facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
   const terms = await readSaleTerms(client, product.providerId, product.id, true);
@@ -901,6 +928,20 @@ async function blockers(
   }
   if (facts.rows[0]?.slug_in_use === true) result.push("SLUG_IN_USE");
   if (state?.operationsSuspendedAtUtc !== null && state?.operationsSuspendedAtUtc !== undefined) result.push("OPERATIONS_SUSPENDED");
+
+  if (managed) {
+    if (managedPlan.rows[0]?.phase !== "ACTIVE" || managedPlan.rows[0]?.pilot_approved !== true
+      || managedPlan.rows[0]?.seller_display_name !== product.sellerDisplayName
+      || managedPlan.rows[0]?.seller_niho_account_ref !== product.sellerNihoAccountRef
+      || managedPlan.rows[0]?.stripe_account_ref !== product.stripeConnectAccountRef) result.push("SELLER_MISMATCH");
+    if (adminPayout?.accountCheck !== undefined) {
+      const checkedAt = adminPayout.accountCheck ? Date.parse(adminPayout.accountCheck.checkedAtUtc) : NaN;
+      const now = Date.parse(await databaseNow(client));
+      if (adminPayout.accountCheck?.stripeConnectAccountRef !== managedPlan.rows[0]?.stripe_account_ref
+        || !Number.isFinite(checkedAt) || checkedAt > now || now - checkedAt >= 5 * 60_000) result.push("CONNECT_NOT_READY");
+    }
+    return result;
+  }
 
   if (adminPayout && isExperienceSeller(adminPayout.seller)) {
     const { seller, payoutConsentVersion, accountCheck } = adminPayout;
@@ -1172,7 +1213,12 @@ export class ExperiencePublicationRepository {
     validateAdminDraftActor(actor);
     assertStoreIdentifier(providerId, "providerId");
     return withTransaction(this.#pool, async (client) => {
-      await adminDraftSeller(client, providerId);
+      const provider = await client.query(
+        `SELECT 1 FROM experience_providers provider
+          JOIN experience_provider_public_profiles profile ON profile.provider_id=provider.id
+         WHERE provider.id=$1 FOR SHARE OF provider,profile`, [providerId],
+      );
+      if (!provider.rows[0]) throw new StoreNotFoundError("consented provider");
       const result = await client.query<DbRow>(
         `SELECT ${PRODUCT_COLUMNS} FROM experience_products p
           WHERE p.provider_id=$1 AND p.status='DRAFT'
@@ -1195,7 +1241,7 @@ export class ExperiencePublicationRepository {
   async getAdminDraftProduct(actor: PublicationAdminDraftActor, providerId: string, productId: string): Promise<ProductRecord> {
     validateAdminDraftActor(actor);
     return withTransaction(this.#pool, async (client) => {
-      await adminDraftSeller(client, providerId);
+      await adminDraftSeller(client, providerId, productId);
       return requireNeverPublishedAdminDraft(client, providerId, productId);
     });
   }
@@ -1210,7 +1256,7 @@ export class ExperiencePublicationRepository {
     validateAdminDraftActor(actor);
     assertNonEmptyText(consentVersion, "consentVersion", 160);
     return withTransaction(this.#pool, async (client) => {
-      const seller = await adminDraftSeller(client, providerId);
+      const seller = await adminDraftSeller(client, providerId, productId);
       const product = await requireNeverPublishedAdminDraft(client, providerId, productId);
       const manuscript = publicationManuscriptReview(product.content, product.publicTitle);
       const state = await lockedState(client, providerId, productId, false);
@@ -1252,7 +1298,7 @@ export class ExperiencePublicationRepository {
     validateExpectedVersion(expectedDraftVersion, "expectedDraftVersion");
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      await adminDraftSeller(client, providerId);
+      await adminDraftSeller(client, providerId, productId);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${providerId}:${productId}`]);
       const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
       if (product.version !== expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
@@ -1307,7 +1353,7 @@ export class ExperiencePublicationRepository {
     }
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      const seller = await adminDraftSeller(client, providerId);
+      const seller = await adminDraftSeller(client, providerId, productId);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${providerId}:${productId}`]);
       const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
       if (product.version !== input.expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
@@ -1373,7 +1419,7 @@ export class ExperiencePublicationRepository {
   async listAdminDraftSaleOffers(actor: PublicationAdminDraftActor, providerId: string, productId: string): Promise<readonly ExperienceHostSaleOffer[]> {
     validateAdminDraftActor(actor);
     return withTransaction(this.#pool, async (client) => {
-      await adminDraftSeller(client, providerId);
+      await adminDraftSeller(client, providerId, productId);
       await requireNeverPublishedAdminDraft(client, providerId, productId);
       const today = tokyoDate(await databaseNow(client));
       return (await activeRules(client, providerId, productId, today)).map(({ rule }) => ({
@@ -1386,7 +1432,7 @@ export class ExperiencePublicationRepository {
   async getAdminDraftSaleTerms(actor: PublicationAdminDraftActor, providerId: string, productId: string): Promise<ExperienceHostSaleTermsState> {
     validateAdminDraftActor(actor);
     return withTransaction(this.#pool, async (client) => {
-      await adminDraftSeller(client, providerId);
+      await adminDraftSeller(client, providerId, productId);
       const product = await requireNeverPublishedAdminDraft(client, providerId, productId);
       const terms = await readSaleTerms(client, providerId, productId);
       return { draftVersion: product.version, stateVersion: null, saleTerms: terms ? hostSaleTerms(terms) : null };
@@ -1396,7 +1442,7 @@ export class ExperiencePublicationRepository {
   async listAdminDraftMedia(actor: PublicationAdminDraftActor, providerId: string, productId: string): Promise<readonly ExperienceHostMediaAsset[]> {
     validateAdminDraftActor(actor);
     return withTransaction(this.#pool, async (client) => {
-      await adminDraftSeller(client, providerId);
+      await adminDraftSeller(client, providerId, productId);
       await requireNeverPublishedAdminDraft(client, providerId, productId);
       const result = await client.query<DbRow>(
         `SELECT asset.id,asset.source_position,selection.position,selection.placement,asset.width,asset.height,asset.byte_size,
@@ -1422,13 +1468,40 @@ export class ExperiencePublicationRepository {
     actor: PublicationAdminDraftActor,
     providerId: string,
     rawInput: ExperiencePublicationDraftCreateInput,
+    managed?: {
+      readonly seller: ManagedPlatformSellerConfig;
+      readonly agreementVersion: string;
+      readonly agreementConfirmedAtUtc: string;
+      readonly agreementConfirmationMethod: AdminSellerConfirmationMethod;
+      readonly paymentDueDays: number;
+      readonly pilotApproved: true;
+    },
   ): Promise<ProductRecord> {
     validateAdminDraftActor(actor);
     const id = randomUUID();
     const input = validateDraft({ ...rawInput, id, cancellationTermsRef: randomUUID() });
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      const seller = await adminDraftSeller(client, providerId);
+      let seller: ExperienceHostSellerProfile;
+      if (managed) {
+        const profile = await client.query<DbRow>(
+          "SELECT public_display_name,version FROM experience_provider_public_profiles WHERE provider_id=$1 FOR SHARE", [providerId],
+        );
+        if (!profile.rows[0]) throw new StoreNotFoundError("provider public profile");
+        if (!managed.seller.legalSellerName.trim() || !managed.seller.commercialTransactionsUrl.startsWith("https://")
+          || !/^acct_[A-Za-z0-9]{8,}$/.test(managed.seller.platformAccountId)
+          || managed.pilotApproved !== true || !Number.isInteger(managed.paymentDueDays)
+          || managed.paymentDueDays < 0 || managed.paymentDueDays > 180
+          || (managed.agreementConfirmationMethod !== "VERBAL" && managed.agreementConfirmationMethod !== "WRITTEN")) throw new StoreValidationError("Managed sales configuration is invalid.");
+        assertStoreIdentifier(managed.seller.sellerNihoAccountRef, "sellerNihoAccountRef");
+        assertCanonicalInstant(managed.agreementConfirmedAtUtc, "agreementConfirmedAtUtc");
+        assertNonEmptyText(managed.agreementVersion, "agreementVersion", 160);
+        seller = {
+          providerId, legacyProviderId: "managed-platform", providerDisplayName: String(profile.rows[0].public_display_name),
+          sellerNihoAccountRef: managed.seller.sellerNihoAccountRef, stripeConnectAccountRef: managed.seller.platformAccountId,
+          sellerDisplayName: managed.seller.legalSellerName.trim(),
+        };
+      } else seller = await adminDraftSeller(client, providerId, id);
       const result = await client.query<DbRow>(
         `INSERT INTO experience_products
            (provider_id,id,slug,status,public_title,content,currency,unit_amount,cancellation_terms_ref,
@@ -1440,6 +1513,20 @@ export class ExperiencePublicationRepository {
           seller.stripeConnectAccountRef, seller.sellerDisplayName],
       );
       if (!result.rows[0]) throw new StoreConflictError("A product with this slug already exists for the seller.");
+      if (managed) {
+        const profile = await client.query<DbRow>("SELECT version FROM experience_provider_public_profiles WHERE provider_id=$1 FOR SHARE", [providerId]);
+        await client.query(
+          `INSERT INTO experience_product_sales_plan_versions
+             (provider_id,product_id,revision,plan,charge_mode,provider_public_profile_version,seller_display_name,
+              seller_disclosure_url,seller_niho_account_ref,stripe_account_ref,fee_basis_points,agreement_version,agreement_confirmed_by,
+              agreement_confirmed_at,agreement_confirmation_method,payment_due_days,pilot_approved,activated_by_admin_niho_user_id)
+           VALUES ($1,$2,1,'MANAGED_20','PLATFORM',$3,$4,$5,$6,$7,2000,$8,$11,$9,$10,$12,true,$11)`,
+          [providerId, id, profile.rows[0]!.version, seller.sellerDisplayName, managed.seller.commercialTransactionsUrl,
+            seller.sellerNihoAccountRef, seller.stripeConnectAccountRef, managed.agreementVersion, managed.agreementConfirmedAtUtc,
+            managed.agreementConfirmationMethod, actor.nihoUserId, managed.paymentDueDays],
+        );
+        await client.query("INSERT INTO experience_product_sales_plan_states (provider_id,product_id,current_revision) VALUES ($1,$2,1)", [providerId, id]);
+      }
       await auditAdminDraft(client, actor, providerId, id, "DRAFT_CREATED");
       return productFromRow(result.rows[0]);
     });
@@ -1457,7 +1544,7 @@ export class ExperiencePublicationRepository {
     if (input.id === "" || expectedDraftVersion === null) throw new StoreValidationError("expectedDraftVersion is required.");
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      await adminDraftSeller(client, providerId);
+      await adminDraftSeller(client, providerId, input.id);
       const current = await requireNeverPublishedAdminDraft(client, providerId, input.id, " FOR UPDATE");
       if (current.version !== expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
       await lockPublicationSlugs(client, [current.slug, input.slug]);
@@ -1488,7 +1575,7 @@ export class ExperiencePublicationRepository {
     validateExpectedVersion(input.expectedSaleTermsVersion, "expectedSaleTermsVersion");
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      await adminDraftSeller(client, providerId);
+      await adminDraftSeller(client, providerId, productId);
       const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
       if (product.version !== input.expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
       if (!salePriceSetMatchesProduct(product.unitAmount, terms)) {
@@ -1552,7 +1639,7 @@ export class ExperiencePublicationRepository {
     }
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      await adminDraftSeller(client, providerId);
+      await adminDraftSeller(client, providerId, productId);
       const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
       const asset = await selectUploadedGalleryMedia(client, providerId, productId, input);
       const bumped = await client.query(
@@ -1588,7 +1675,7 @@ export class ExperiencePublicationRepository {
     }
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      await adminDraftSeller(client, providerId);
+      await adminDraftSeller(client, providerId, productId);
       const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
       if (product.version !== expectedProductVersion) throw new StoreConflictError("Product changed while saving media selection.");
       const existing = await client.query<{ count: string }>(

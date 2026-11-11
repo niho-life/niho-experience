@@ -25,7 +25,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { config } from "@/lib/config";
 import { noStoreJson } from "@/lib/host/server";
 import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";
-import { experiencePublicationRepository, guestMeetingGuideRepository } from "./store-server";
+import { experiencePublicationRepository, guestMeetingGuideRepository, managedExperienceSalesRepository } from "./store-server";
 import {
   publicationHostBoundary,
   publicationHostMutationAllowed,
@@ -183,13 +183,15 @@ function publicationStatus(state: ExperiencePublicationState | null): ProductSta
 }
 
 async function productDto(repository: NonNullable<ReturnType<typeof experiencePublicationRepository>>, actor: PublicationHostContext["actor"], productId: string) {
-  const [product, state, termsState, media, publicationNeedsUpdate, offers] = await Promise.all([
+  const managedSales = managedExperienceSalesRepository();
+  const [product, state, termsState, media, publicationNeedsUpdate, offers, salesPlan] = await Promise.all([
     repository.getProduct(actor, productId),
     repository.getState(actor, productId),
     repository.getSaleTerms(actor, productId),
     repository.listMedia(actor, productId),
     repository.hasPendingPublicationChanges(actor, productId),
     repository.listActiveSaleOffers(actor, productId),
+    managedSales?.get(actor.providerId, productId) ?? null,
   ]);
   const gallery = media.filter((asset) => asset.placement === "GALLERY");
   const photosReady = gallery.length > 0 && gallery.every((asset) => asset.altText.trim() !== "" && asset.altTextJa.trim() !== "");
@@ -219,6 +221,16 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
     },
     sellerDisplayName: product.sellerDisplayName,
     saleTerms: termsState.saleTerms,
+    salesPlan: salesPlan ? {
+      current: { revision: salesPlan.current.revision, plan: salesPlan.current.plan,
+        feeBasisPoints: salesPlan.current.feeBasisPoints, agreementVersion: salesPlan.current.agreementVersion },
+      phase: salesPlan.phase,
+      pending: salesPlan.pending ? { revision: salesPlan.pending.revision, plan: salesPlan.pending.plan,
+        feeBasisPoints: salesPlan.pending.feeBasisPoints, agreementVersion: salesPlan.pending.agreementVersion } : null,
+      transitionCommandId: salesPlan.transitionCommandId,
+      version: salesPlan.version,
+    } : null,
+    ownerSalesPlanAgreementVersion: process.env.EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION ?? null,
     offers,
     media: media.map((asset) => ({
       ...asset,

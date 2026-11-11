@@ -42,5 +42,6 @@ export default async function AdminSiteBookingsPage() {
   } catch {
     return failed;
   }
-  return <AdminSiteBookings initial={queue} supportBookings={supportBookings} notifications={notifications} settlements={settlements} />;
+  return <AdminSiteBookings initial={queue} supportBookings={supportBookings} notifications={notifications} settlements={settlements}
+    managedCompensationAvailable={Boolean(process.env.EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID?.trim())} />;
 }

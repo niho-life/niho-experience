@@ -53,6 +53,33 @@ export interface DirectCheckoutResult {
   readonly checkoutUrl: string;
 }
 
+export interface PlatformAccountSummary {
+  readonly id: string;
+  readonly chargesEnabled: boolean;
+  readonly detailsSubmitted: boolean;
+  readonly country: string | null;
+  readonly defaultCurrency: string | null;
+}
+
+/** Verifies that the dedicated key belongs to the configured platform itself. */
+export async function retrievePlatformAccount(input: {
+  readonly expectedAccountId: string;
+  readonly platformStripeKey?: string;
+  readonly stripe?: Pick<Stripe, "accounts">;
+}): Promise<PlatformAccountSummary> {
+  if (!CONNECTED_ACCOUNT_ID.test(input.expectedAccountId)) throw new ExperiencePaymentsValidationError("The configured platform account ID is malformed.");
+  const stripe = accountsClient(input.platformStripeKey, input.stripe);
+  // `retrieveCurrent` is deliberately used instead of retrieving an arbitrary
+  // Connect account by ID: the configured ID must identify the account that
+  // owns this dedicated secret key.
+  const account = await stripe.accounts.retrieveCurrent();
+  if (account.id !== input.expectedAccountId) throw new ExperiencePaymentsValidationError("The Stripe key does not belong to the configured platform account.");
+  return {
+    id: account.id, chargesEnabled: account.charges_enabled === true, detailsSubmitted: account.details_submitted === true,
+    country: account.country ?? null, defaultCurrency: account.default_currency?.toUpperCase() ?? null,
+  };
+}
+
 export interface RetrieveDirectCheckoutInput {
   /** The booking the Session was created for; its seller's account holds the Session. */
   readonly booking: Readonly<BookingRecord>;
@@ -75,6 +102,24 @@ export interface VerifyDirectCheckoutWebhookInput {
   readonly platformStripeKey?: string;
   readonly stripe?: PaymentsStripeClient;
 }
+
+export interface VerifyPlatformCheckoutWebhookInput extends VerifyDirectCheckoutWebhookInput {
+  readonly expectedPlatformAccountId: string;
+}
+
+export interface VerifiedPlatformDisputeEvent {
+  readonly eventId: string;
+  readonly eventType: "charge.dispute.created" | "charge.dispute.updated" | "charge.dispute.closed";
+  readonly eventOccurredAtUtc: string;
+  readonly platformAccountId: string;
+  readonly stripeDisputeRef: string;
+  readonly paymentIntentRef: string;
+  readonly amount: number;
+  readonly currency: string;
+  readonly status: "NEEDS_RESPONSE" | "UNDER_REVIEW" | "WON" | "LOST" | "WARNING_CLOSED";
+}
+
+export type VerifiedPlatformEvent = VerifiedDirectCheckoutEvent | VerifiedPlatformDisputeEvent;
 
 /** A paid Session: Experience Store's confirmBookingPayment takes it. */
 export interface VerifiedDirectCheckoutPaidEvent {
@@ -394,6 +439,95 @@ export async function createDirectCheckout(input: CreateDirectCheckoutInput): Pr
   return { checkoutSessionId: session.id, checkoutUrl: session.url };
 }
 
+/** PLATFORM charge: deliberately no Stripe-Account option and no application_fee_amount. */
+export async function createPlatformCheckout(input: Omit<CreateDirectCheckoutInput, "applicationFeeAmount">): Promise<DirectCheckoutResult> {
+  assertBookingForCheckout(input.booking);
+  if (input.booking.sellerSnapshot.chargeMode !== "PLATFORM" || input.booking.sellerSnapshot.salesPlan !== "MANAGED_20") {
+    throw new ExperiencePaymentsValidationError("The booking is not a managed platform charge.");
+  }
+  const customerEmail = checkoutEmail(input.customerEmail);
+  const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
+  const expiresAt = checkoutExpiry(input.booking, input.now ?? new Date(), input.holdSafetyMarginSeconds ?? DEFAULT_HOLD_SAFETY_MARGIN_SECONDS);
+  const origin = trustedOrigin(input.returnOrigin);
+  const successUrl = trustedUrl(origin, input.returnPath, "returnPath");
+  const cancelUrl = input.cancelPath === undefined ? undefined : trustedUrl(origin, input.cancelPath, "cancelPath");
+  const bookingId = input.booking.publicBookingId.toLowerCase();
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment", locale: input.locale ?? "auto", success_url: successUrl,
+    ...(cancelUrl === undefined ? {} : { cancel_url: cancelUrl }),
+    ...(customerEmail === undefined ? {} : { customer_email: customerEmail }), expires_at: expiresAt,
+    line_items: [{ quantity: 1, price_data: { currency: input.booking.pricingSnapshot.currency.toLowerCase(),
+      unit_amount: input.booking.pricingSnapshot.totalAmount, product_data: { name: snapshotTitle(input.booking) } } }],
+    metadata: { source: "niho-experience-platform", booking_id: bookingId },
+    payment_intent_data: { metadata: { source: "niho-experience-platform", booking_id: bookingId } },
+  }, { idempotencyKey: `experience-platform-checkout:${bookingId}` });
+  if (!session.id || !session.url) throw new ExperiencePaymentsValidationError("Stripe returned a Checkout Session without a redirect URL.");
+  return { checkoutSessionId: session.id, checkoutUrl: session.url };
+}
+
+export async function retrievePlatformCheckout(input: RetrieveDirectCheckoutInput): Promise<RetrievedDirectCheckout> {
+  if (input.booking.sellerSnapshot.chargeMode !== "PLATFORM" || !CHECKOUT_SESSION_ID.test(input.checkoutSessionId)) {
+    throw new ExperiencePaymentsValidationError("The platform Checkout input is invalid.");
+  }
+  const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
+  const session = await stripe.checkout.sessions.retrieve(input.checkoutSessionId);
+  if (session.id !== input.checkoutSessionId || session.metadata?.source !== "niho-experience-platform"
+    || session.metadata?.booking_id !== input.booking.publicBookingId.toLowerCase()) {
+    throw new ExperiencePaymentsValidationError("The Checkout Session belongs to another booking or source.");
+  }
+  if (session.status === "complete") return { status: "complete" };
+  if (session.status === "open" && session.url) return { status: "open", checkoutUrl: session.url };
+  return { status: "expired" };
+}
+
+export async function expirePlatformCheckout(input: RetrieveDirectCheckoutInput): Promise<"expired" | "paid" | "unknown"> {
+  if (input.booking.sellerSnapshot.chargeMode !== "PLATFORM" || !CHECKOUT_SESSION_ID.test(input.checkoutSessionId)) {
+    throw new ExperiencePaymentsValidationError("The platform Checkout input is invalid.");
+  }
+  const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
+  const existing = await stripe.checkout.sessions.retrieve(input.checkoutSessionId);
+  if (existing.metadata?.source !== "niho-experience-platform" || existing.metadata.booking_id !== input.booking.publicBookingId.toLowerCase()) {
+    throw new ExperiencePaymentsValidationError("The Checkout Session belongs to another booking or source.");
+  }
+  if (existing.payment_status === "paid" || existing.status === "complete") return "paid";
+  if (existing.status === "expired") return "expired";
+  try {
+    const expired = await stripe.checkout.sessions.expire(input.checkoutSessionId);
+    return expired.status === "expired" ? "expired" : "unknown";
+  } catch {
+    const after = await stripe.checkout.sessions.retrieve(input.checkoutSessionId);
+    if (after.payment_status === "paid" || after.status === "complete") return "paid";
+    if (after.status === "expired") return "expired";
+    return "unknown";
+  }
+}
+
+/** Direct charge cutover: expires the Session on its original connected account. */
+export async function expireDirectCheckout(input: RetrieveDirectCheckoutInput): Promise<"expired" | "paid" | "unknown"> {
+  if (input.booking.sellerSnapshot.chargeMode === "PLATFORM" || !CHECKOUT_SESSION_ID.test(input.checkoutSessionId)) {
+    throw new ExperiencePaymentsValidationError("The Direct Checkout input is invalid.");
+  }
+  const account = input.booking.sellerSnapshot.stripeConnectAccountRef;
+  if (!CONNECTED_ACCOUNT_ID.test(account)) throw new ExperiencePaymentsValidationError("The booking connected account is invalid.");
+  const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
+  const options = { stripeAccount: account };
+  const existing = await stripe.checkout.sessions.retrieve(input.checkoutSessionId, undefined, options);
+  if (existing.metadata?.source !== "niho-experience" || existing.metadata.booking_id !== input.booking.publicBookingId.toLowerCase()) {
+    throw new ExperiencePaymentsValidationError("The Checkout Session belongs to another booking or source.");
+  }
+  if (existing.payment_status === "paid" || existing.status === "complete") return "paid";
+  if (existing.status === "expired") return "expired";
+  try {
+    const expired = await stripe.checkout.sessions.expire(input.checkoutSessionId, undefined, options);
+    return expired.status === "expired" ? "expired" : "unknown";
+  } catch {
+    const after = await stripe.checkout.sessions.retrieve(input.checkoutSessionId, undefined, options);
+    if (after.payment_status === "paid" || after.status === "complete") return "paid";
+    if (after.status === "expired") return "expired";
+    return "unknown";
+  }
+}
+
 /**
  * Reads back the Checkout Session created for a booking, on the seller's account, so a repeated request
  * returns the same Session even after the hold is too short for a new one. A Session of another booking
@@ -424,7 +558,9 @@ function assertRefundSubmission(refund: RefundSubmission): void {
   if (typeof refund.currency !== "string" || !CURRENCY.test(refund.currency)) throw new ExperiencePaymentsValidationError("refund.currency must be three uppercase letters.");
   if (refund.kind !== "FULL" && refund.kind !== "PARTIAL") throw new ExperiencePaymentsValidationError("refund.kind must be FULL or PARTIAL.");
   // Stripe returns the proportional part of NIHO's application fee on both full and partial refunds.
-  if (refund.refundApplicationFee !== true) throw new ExperiencePaymentsValidationError("refund.refundApplicationFee must be true so the application fee follows the refund proportion.");
+  if (refund.chargeMode === "PLATFORM" ? refund.refundApplicationFee !== false : refund.refundApplicationFee !== true) {
+    throw new ExperiencePaymentsValidationError("refundApplicationFee does not match the booking charge mode.");
+  }
 }
 
 function refundStatusOf(value: unknown): StripeRefundStatus {
@@ -458,7 +594,7 @@ export async function submitBookingRefund(input: SubmitBookingRefundInput): Prom
   const refund = input.refund;
   assertRefundSubmission(refund);
   const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
-  const options = { stripeAccount: refund.connectedAccountId };
+  const options = refund.chargeMode === "PLATFORM" ? {} : { stripeAccount: refund.connectedAccountId };
   const existing = await stripe.refunds.list({ payment_intent: refund.stripePaymentRef, limit: 100 }, options);
   const found = existing.data.find((item) => item.metadata?.refund_id === refund.refundId);
   let created: Stripe.Refund;
@@ -470,8 +606,8 @@ export async function submitBookingRefund(input: SubmitBookingRefundInput): Prom
         {
           payment_intent: refund.stripePaymentRef,
           amount: refund.amount,
-          refund_application_fee: refund.refundApplicationFee,
-          metadata: { source: "niho-experience", booking_id: refund.publicBookingId.toLowerCase(), refund_id: refund.refundId.toLowerCase() },
+          ...(refund.chargeMode === "PLATFORM" ? {} : { refund_application_fee: refund.refundApplicationFee }),
+          metadata: { source: refund.chargeMode === "PLATFORM" ? "niho-experience-platform" : "niho-experience", booking_id: refund.publicBookingId.toLowerCase(), refund_id: refund.refundId.toLowerCase() },
         },
         { ...options, idempotencyKey: `experience-refund:${refund.refundId.toLowerCase()}` },
       );
@@ -953,6 +1089,73 @@ export function verifyDirectCheckoutWebhook(
     amountTotal,
     currency: currency.toUpperCase(),
   };
+}
+
+/** Verifies the separate account-level endpoint. Connected-account events are always rejected. */
+export function verifyPlatformCheckoutWebhook(input: VerifyPlatformCheckoutWebhookInput): VerifiedPlatformEvent | null {
+  if (!CONNECTED_ACCOUNT_ID.test(input.expectedPlatformAccountId) || input.rawBody.byteLength === 0
+    || !input.stripeSignature || !input.endpointSecret) throw new ExperiencePaymentsValidationError("The platform webhook input is invalid.");
+  const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
+  let event: Stripe.Event;
+  try { event = stripe.webhooks.constructEvent(Buffer.from(input.rawBody), input.stripeSignature, input.endpointSecret); }
+  catch (error) { throw new ExperiencePaymentsValidationError("Stripe webhook signature verification failed.", { cause: error }); }
+  if (!EVENT_ID.test(event.id) || !Number.isSafeInteger(event.created) || event.created <= 0) throw new ExperiencePaymentsValidationError("The platform event envelope is invalid.");
+  if (event.account !== undefined) throw new ExperiencePaymentsValidationError("Connected-account events are not accepted by the platform endpoint.");
+  const occurred = new Date(event.created * 1000).toISOString();
+  if (event.type === "refund.created" || event.type === "refund.updated" || event.type === "refund.failed") {
+    const refund = asRecord(event.data.object, "refund");
+    const metadata = asRecord(refund.metadata, "refund metadata");
+    if (refund.object !== "refund" || metadata.source !== "niho-experience-platform"
+      || Object.keys(metadata).length !== 3 || typeof metadata.booking_id !== "string" || typeof metadata.refund_id !== "string"
+      || !UUID_V4.test(metadata.booking_id) || !UUID.test(metadata.refund_id)
+      || typeof refund.id !== "string" || !REFUND_ID.test(refund.id) || typeof refund.amount !== "number") return null;
+    assertPositiveAmount(refund.amount, "refund amount");
+    const currency = typeof refund.currency === "string" ? refund.currency.toUpperCase() : "";
+    if (!CURRENCY.test(currency)) throw new ExperiencePaymentsValidationError("The platform Refund currency is invalid.");
+    return { eventId: event.id, eventType: event.type, eventOccurredAtUtc: occurred,
+      connectedAccountId: input.expectedPlatformAccountId, publicBookingId: metadata.booking_id.toLowerCase(),
+      refundId: metadata.refund_id.toLowerCase(), stripeRefundRef: refund.id,
+      paymentIntentRef: paymentIntentReference(refund.payment_intent), amount: refund.amount, currency,
+      status: refundStatusOf(refund.status), failureCode: failureCodeOf(refund.failure_reason) };
+  }
+  if (event.type === "charge.dispute.created" || event.type === "charge.dispute.updated" || event.type === "charge.dispute.closed") {
+    const dispute = asRecord(event.data.object, "dispute");
+    if (dispute.object !== "dispute" || typeof dispute.id !== "string" || !/^dp_[A-Za-z0-9_]{1,250}$/.test(dispute.id)) throw new ExperiencePaymentsValidationError("The dispute is malformed.");
+    if (typeof dispute.amount !== "number") throw new ExperiencePaymentsValidationError("The dispute amount is missing.");
+    assertPositiveAmount(dispute.amount, "dispute amount");
+    const currency = typeof dispute.currency === "string" ? dispute.currency.toUpperCase() : "";
+    if (!CURRENCY.test(currency)) throw new ExperiencePaymentsValidationError("The dispute currency is invalid.");
+    const statusMap: Record<string, VerifiedPlatformDisputeEvent["status"]> = {
+      needs_response: "NEEDS_RESPONSE", warning_needs_response: "NEEDS_RESPONSE", under_review: "UNDER_REVIEW",
+      warning_under_review: "UNDER_REVIEW", won: "WON", lost: "LOST", warning_closed: "WARNING_CLOSED",
+    };
+    const status = typeof dispute.status === "string" ? statusMap[dispute.status] : undefined;
+    if (!status) throw new ExperiencePaymentsValidationError("The dispute status is unknown.");
+    return { eventId: event.id, eventType: event.type, eventOccurredAtUtc: occurred, platformAccountId: input.expectedPlatformAccountId,
+      stripeDisputeRef: dispute.id, paymentIntentRef: paymentIntentReference(dispute.payment_intent), amount: dispute.amount, currency, status };
+  }
+  if (event.type !== "checkout.session.completed" && event.type !== "checkout.session.async_payment_succeeded"
+    && event.type !== "checkout.session.expired" && event.type !== "checkout.session.async_payment_failed") return null;
+  const session = asRecord(event.data.object, "checkout session");
+  if (session.object !== "checkout.session" || session.mode !== "payment") throw new ExperiencePaymentsValidationError("The platform event is not a payment Checkout Session.");
+  const metadata = asRecord(session.metadata, "checkout session metadata");
+  if (Object.keys(metadata).length !== 2 || metadata.source !== "niho-experience-platform"
+    || typeof metadata.booking_id !== "string" || !UUID_V4.test(metadata.booking_id)) return null;
+  const base = { eventId: event.id, eventOccurredAtUtc: occurred,
+    connectedAccountId: input.expectedPlatformAccountId, publicBookingId: metadata.booking_id.toLowerCase() };
+  if (event.type === "checkout.session.expired" || event.type === "checkout.session.async_payment_failed") {
+    if (session.payment_status === "paid" || typeof session.id !== "string" || !CHECKOUT_SESSION_ID.test(session.id)) throw new ExperiencePaymentsValidationError("The ended platform Session is invalid.");
+    return { ...base, eventType: event.type, checkoutSessionId: session.id };
+  }
+  if (session.payment_status !== "paid") {
+    if (event.type === "checkout.session.completed") return null;
+    throw new ExperiencePaymentsValidationError("The platform Checkout Session is not paid.");
+  }
+  if (typeof session.amount_total !== "number") throw new ExperiencePaymentsValidationError("The platform Checkout Session amount is missing.");
+  assertPositiveAmount(session.amount_total, "checkout session amount_total");
+  const currency = typeof session.currency === "string" ? session.currency.toUpperCase() : "";
+  if (!CURRENCY.test(currency)) throw new ExperiencePaymentsValidationError("The platform Checkout currency is invalid.");
+  return { ...base, eventType: event.type, paymentIntentRef: paymentIntentReference(session.payment_intent), amountTotal: session.amount_total, currency };
 }
 
 /* ---------- the seller's connected account (#285 slice 9: the operator's registration) ---------- */

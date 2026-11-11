@@ -132,6 +132,7 @@ const SELECT_SALES = `
       ON r.provider_id = l.provider_id AND r.booking_id = l.booking_id
      AND l.entry_id IN ('${REFUND_PREFIX}' || r.id::text, '${REVERSAL_PREFIX}' || r.id::text)
    WHERE l.provider_id = $1 AND b.status = ANY($2::text[])
+     AND COALESCE(b.seller_snapshot->>'chargeMode','CONNECT_DIRECT') <> 'PLATFORM'
      AND l.occurred_at >= $3::timestamptz AND l.occurred_at < $4::timestamptz
    ORDER BY l.occurred_at DESC, (l.entry_id LIKE '${REVERSAL_PREFIX}%')::int DESC, l.entry_id DESC
    LIMIT $5`;
@@ -167,6 +168,7 @@ export async function selectSales(client: PoolClient, providerId: string, window
          JOIN bookings b ON b.provider_id = l.provider_id AND b.id = l.booking_id
          JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
         WHERE l.provider_id = $1 AND b.status = ANY($2::text[])
+          AND COALESCE(b.seller_snapshot->>'chargeMode','CONNECT_DIRECT') <> 'PLATFORM'
        UNION ALL
        SELECT b.created_at AS occurred_at
          FROM bookings b JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
@@ -195,11 +197,18 @@ const SELECT_PAYOUT_ACCOUNTS = `
       FROM experience_products p
       JOIN experience_product_sale_terms t ON t.provider_id = p.provider_id AND t.product_id = p.id
      WHERE p.provider_id = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM experience_product_sales_plan_states s
+         JOIN experience_product_sales_plan_versions v
+           ON v.provider_id=s.provider_id AND v.product_id=s.product_id AND v.revision=s.current_revision
+         WHERE s.provider_id=p.provider_id AND s.product_id=p.id AND v.charge_mode='PLATFORM'
+       )
     UNION
     SELECT b.seller_snapshot->>'stripeConnectAccountRef'
       FROM bookings b
       JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
      WHERE b.provider_id = $1
+       AND COALESCE(b.seller_snapshot->>'chargeMode','CONNECT_DIRECT') <> 'PLATFORM'
   ) a
    WHERE account ~ '^acct_[A-Za-z0-9]{8,}$'
    ORDER BY account

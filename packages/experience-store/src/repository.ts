@@ -709,12 +709,19 @@ export class ExperienceStore {
     return this.#saveScheduleRule(providerId, productId, rule, expectedVersion, commandId, requestFingerprint, async (client) => {
       const product = await client.query(
         `SELECT 1 FROM experience_products product
-          JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
          WHERE product.provider_id=$1 AND product.id=$2 AND product.status='DRAFT'
+           AND (EXISTS (SELECT 1 FROM experience_host_seller_profiles seller WHERE seller.provider_id=product.provider_id)
+             OR EXISTS (
+               SELECT 1 FROM experience_product_sales_plan_states state
+               JOIN experience_product_sales_plan_versions plan
+                 ON plan.provider_id=state.provider_id AND plan.product_id=state.product_id AND plan.revision=state.current_revision
+               JOIN experience_provider_public_profiles profile ON profile.provider_id=state.provider_id
+               WHERE state.provider_id=product.provider_id AND state.product_id=product.id AND plan.plan='MANAGED_20'
+             ))
            AND NOT EXISTS (
              SELECT 1 FROM experience_product_publications publication
               WHERE publication.provider_id=product.provider_id AND publication.product_id=product.id
-           ) FOR SHARE OF product,seller`,
+           ) FOR SHARE OF product`,
         [providerId, productId],
       );
       if (!product.rows[0]) throw new StoreAccessDeniedError();
@@ -738,8 +745,15 @@ export class ExperienceStore {
     assertStoreIdentifier(productId, "productId");
     const product = await this.#pool.query(
       `SELECT 1 FROM experience_products product
-        JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
        WHERE product.provider_id=$1 AND product.id=$2 AND product.status='DRAFT'
+         AND (EXISTS (SELECT 1 FROM experience_host_seller_profiles seller WHERE seller.provider_id=product.provider_id)
+           OR EXISTS (
+             SELECT 1 FROM experience_product_sales_plan_states state
+             JOIN experience_product_sales_plan_versions plan
+               ON plan.provider_id=state.provider_id AND plan.product_id=state.product_id AND plan.revision=state.current_revision
+             JOIN experience_provider_public_profiles profile ON profile.provider_id=state.provider_id
+             WHERE state.provider_id=product.provider_id AND state.product_id=product.id AND plan.plan='MANAGED_20'
+           ))
          AND NOT EXISTS (
            SELECT 1 FROM experience_product_publications publication
             WHERE publication.provider_id=product.provider_id AND publication.product_id=product.id

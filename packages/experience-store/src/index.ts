@@ -11,6 +11,8 @@ export {
 } from "./errors.ts";
 export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOccurrenceReason } from "./errors.ts";
 export { ExperienceStore } from "./repository.ts";
+export { ManagedExperienceSalesRepository, validateManagedPlatformSellerConfig } from "./managed-sales.ts";
+export type { CheckoutTransitionOutcome, ManagedCompensation, ManagedPlatformSellerConfig, SalesPlanRevision, SalesPlanState, SalesPlanTransition } from "./managed-sales.ts";
 export { HOST_TEAM_CONTRACT_VERSION, HOST_TEAM_RESOLVE_LIMIT, HostTeamRepository, hostAccessFingerprint } from "./host-team.ts";
 export type { HostAccessProjection, HostTeamActor, HostTeamCandidate, HostTeamCommandReceipt, HostTeamMember, HostTeamMemberRole, HostTeamMutationResult, HostTeamOperation, HostTeamSnapshot } from "./host-team.ts";
 export { ExperiencePublicationBlockedError, ExperiencePublicationRepository, publicationManuscriptReview } from "./experience-publication.ts";
@@ -89,7 +91,7 @@ export type {
   PublicExperienceMediaAsset,
   PublicExperienceProviderMedia,
 } from "./experience-publication.ts";
-export type { BookingTermsSnapshot } from "./types.ts";
+export type { BookingTermsSnapshot, ExperienceChargeMode, ExperienceSalesPlan } from "./types.ts";
 export { evaluateStoredInventories, evaluateStoredInventory, lockGoogleCalendarUsage, lockProviderInventory } from "./inventory.ts";
 export { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 export { ResourceGoogleRepository } from "./resource-google.ts";

@@ -213,6 +213,7 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
       utm: { utmSource: "newsletter" },
       clientRequestKey: KEY,
       checkoutIpDigest: CHECKOUT_IP_DIGEST,
+      managedSalesEnabled: false,
     });
     expect(state.stripeKeys).toEqual(["sk_test_sample", "sk_test_sample"]);
     expect(state.stripeAccountRetrieve).toHaveBeenCalledWith("acct_SampleA0001");

@@ -54,10 +54,18 @@ type Product = {
   draft: { slug: string; publicTitle: string; content: Record<string, unknown>; currency: "JPY"; unitAmount: number };
   sellerDisplayName: string;
   saleTerms: SaleTerms | null;
+  salesPlan: {
+    current: { revision: number; plan: "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10"; feeBasisPoints: 1000 | 1500 | 2000; agreementVersion: string };
+    phase: "ACTIVE" | "EXPIRING_OLD_CHECKOUTS" | "RECONCILING";
+    pending: { revision: number; plan: "SUPPORTED_15" | "INDEPENDENT_10"; feeBasisPoints: 1000 | 1500; agreementVersion: string } | null;
+    transitionCommandId: string | null;
+    version: number;
+  } | null;
+  ownerSalesPlanAgreementVersion: string | null;
   offers: { id: string; localStartTime: string; durationMinutes: number; capacity: number; recurrence: { kind: string; weekdays?: readonly string[] } }[];
   media: Media[];
 };
-type ProductResponse = { product: Product; publicationConsentVersion?: string };
+type ProductResponse = { product: Product; publicationConsentVersion?: string; managedSalesAvailable?: boolean };
 type TimelineItem = { time: string; title: string; text: string; photoIndex: number | null };
 type LocaleManuscript = { title: string; lead: string; description: string; language: string; highlights: string[]; included: string[]; notIncluded: string[]; knowBeforeYouGo: string[]; notSuitableFor: string[]; timeline: TimelineItem[]; faq?: PublicationFaqRow[] };
 type Props = {
@@ -244,6 +252,10 @@ export function HostPublicationWorkspace({
   const [slug, setSlug] = useState("");
   const [title, setTitle] = useState("");
   const [unitAmount, setUnitAmount] = useState("");
+  const [managedSalesAvailable, setManagedSalesAvailable] = useState(false);
+  const [createManagedSales, setCreateManagedSales] = useState(false);
+  const [createManagedConfirmation, setCreateManagedConfirmation] = useState<"" | "VERBAL" | "WRITTEN">("");
+  const [createManagedDueDays, setCreateManagedDueDays] = useState("14");
   const [content, setContent] = useState<Record<string, unknown>>(blankContent);
   const [terms, setTerms] = useState<PublicationTermsForm>(emptyTerms);
   const [baseline, setBaseline] = useState("");
@@ -270,6 +282,9 @@ export function HostPublicationWorkspace({
   const [sellerConfirmationMethod, setSellerConfirmationMethod] = useState<"" | "VERBAL" | "WRITTEN">("");
   const [sellerConfirmed, setSellerConfirmed] = useState(false);
   const [publicationPhotoRightsConfirmed, setPublicationPhotoRightsConfirmed] = useState(false);
+  const [ownerSalesPlan, setOwnerSalesPlan] = useState<"SUPPORTED_15" | "INDEPENDENT_10">("SUPPORTED_15");
+  const [ownerSalesPlanAccepted, setOwnerSalesPlanAccepted] = useState(false);
+  const [salesPlanCommandId, setSalesPlanCommandId] = useState<string | null>(null);
   const [createDraftRestored, setCreateDraftRestored] = useState(false);
   /** 公開・停止 waiting for its confirmation in the page's dialog. */
   const [stateConfirm, setStateConfirm] = useState<"publish" | "stop" | null>(null);
@@ -443,7 +458,10 @@ export function HostPublicationWorkspace({
       queueMicrotask(() => { if (active) void fetch(apiBase, { cache: "no-store", credentials: "same-origin" }).then(async (response) => {
         const body = await response.json().catch(() => null);
         if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
-        if (active && isRecord(body) && typeof body.publicationConsentVersion === "string") setConsentVersion(body.publicationConsentVersion);
+        if (active && isRecord(body)) {
+          if (typeof body.publicationConsentVersion === "string") setConsentVersion(body.publicationConsentVersion);
+          setManagedSalesAvailable(body.managedSalesAvailable === true);
+        }
       }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "販売者情報を読み込めませんでした。"); }); });
       return () => { active = false; };
     }
@@ -475,7 +493,14 @@ export function HostPublicationWorkspace({
     setBusy(true); setError(""); setNotice("");
     const draftContent = { ...blankContent, ...content };
     try {
-      const response = await fetch(apiBase, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: slug.trim(), publicTitle: title.trim(), content: draftContent, currency: "JPY", unitAmount: asPublicationPrice(unitAmount) }) });
+      const dueDays = Number(createManagedDueDays);
+      const managedSales = adminDraft && createManagedSales
+        ? { enabled: true as const, sellerConfirmationMethod: createManagedConfirmation, paymentDueDays: dueDays }
+        : undefined;
+      if (managedSales && (!managedSalesAvailable || !createManagedConfirmation || !Number.isInteger(dueDays) || dueDays < 0 || dueDays > 180)) {
+        throw new Error("完全代行の対象確認・合意確認方法・支払期日を確認してください。");
+      }
+      const response = await fetch(apiBase, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: slug.trim(), publicTitle: title.trim(), content: draftContent, currency: "JPY", unitAmount: asPublicationPrice(unitAmount), ...(managedSales ? { managedSales } : {}) }) });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       const created = (body as ProductResponse).product;
@@ -790,6 +815,38 @@ export function HostPublicationWorkspace({
     } catch (reason) { setError(reason instanceof Error ? reason.message : "確認できませんでした。原稿は保持しています。"); }
   }
 
+  async function switchManagedSalesPlan() {
+    const state = product?.salesPlan;
+    if (!product || !state || busy) return;
+    const pending = state.pending;
+    if (pending ? !state.transitionCommandId : !ownerSalesPlanAccepted || ownerSalesPlan === state.current.plan) return;
+    const agreementVersion = pending?.agreementVersion ?? product.ownerSalesPlanAgreementVersion;
+    if (!agreementVersion) return;
+    const commandId = state.transitionCommandId ?? salesPlanCommandId ?? crypto.randomUUID();
+    const targetPlan = pending?.plan ?? ownerSalesPlan;
+    const readBack = async () => {
+      const updated = await refresh(false, dirty);
+      if (dirty) setProduct((current) => current ? { ...current, salesPlan: updated.salesPlan } : current);
+      if (updated.salesPlan?.phase === "ACTIVE" && updated.salesPlan.current.plan === targetPlan) {
+        setSalesPlanCommandId(null); setOwnerSalesPlanAccepted(false);
+      }
+    };
+    setSalesPlanCommandId(commandId); setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/sales-plan`, {
+        method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ commandId, expectedVersion: state.version, plan: targetPlan, agreementVersion }),
+      });
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
+      await readBack();
+      setNotice("販売プランを切り替えました。URL・商品・開催枠・在庫は引き継ぎ、以後の新規予約は選択した料率で本人のStripe口座に決済します。");
+    } catch (reason) {
+      await readBack().catch(() => undefined);
+      setError(reason instanceof Error ? reason.message : "切替結果を確認できませんでした。同じ操作として再確認してください。");
+    } finally { setBusy(false); }
+  }
+
   async function uploadPhoto() {
     if (!product || !selectedPhoto || !rightsConfirmed || busy || conflictProduct) return;
     setBusy(true); setError(""); setNotice("");
@@ -844,8 +901,9 @@ export function HostPublicationWorkspace({
     <Field label="公開URL用の英数字slug" value={slug} onChange={setSlug} placeholder="kamakura-community-dinner" />
     <Field label="商品名（公開用）" value={title} onChange={setTitle} />
     <Field label="大人1人の基本料金（税込・円）" value={unitAmount} onChange={setUnitAmount} />
+    {adminDraft ? <fieldset className="space-y-3 rounded-xl border border-line p-4"><legend className="px-1 font-extrabold">販売方式</legend><label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={createManagedSales} disabled={!managedSalesAvailable} onChange={(event) => setCreateManagedSales(event.target.checked)} className="mt-1" /><span><strong>この体験だけを完全代行（20%）の初回試験対象として作成する</strong><br />本人アカウント・OWNER・本人の販売者プロフィール・Connect口座を作らず、NIHO名義の決済設定を使います。</span></label>{createManagedSales ? <div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 text-sm font-bold">提供者との合意確認方法<select className="rounded-xl border border-line bg-white px-3 py-2 font-normal" value={createManagedConfirmation} onChange={(event) => setCreateManagedConfirmation(event.target.value as "" | "VERBAL" | "WRITTEN")}><option value="">選択してください</option><option value="VERBAL">口頭</option><option value="WRITTEN">書面・メッセージ</option></select></label><label className="grid gap-1 text-sm font-bold">開催日からの支払期日（日）<input className="rounded-xl border border-line bg-white px-3 py-2 font-normal" type="number" min={0} max={180} value={createManagedDueDays} onChange={(event) => setCreateManagedDueDays(event.target.value)} /></label></div> : null}{!managedSalesAvailable ? <p className="text-sm text-amber-900">完全代行のサーバー設定・専用Stripe鍵・署名秘密が揃っていないため選択できません。</p> : null}</fieldset> : null}
     <p className="text-sm text-muted">無料体験は0円、有料体験は50円以上で入力してください。作成後に開催日程と販売条件を設定します。</p>
-    <button disabled={busy || !slug.trim() || !title.trim() || asPublicationPrice(unitAmount) === null} className={consoleButtonClass("primary")}>{busy ? "作成中…" : "下書きを作成"}</button>
+    <button disabled={busy || !slug.trim() || !title.trim() || asPublicationPrice(unitAmount) === null || (createManagedSales && (!managedSalesAvailable || !createManagedConfirmation || !Number.isInteger(Number(createManagedDueDays)) || Number(createManagedDueDays) < 0 || Number(createManagedDueDays) > 180))} className={consoleButtonClass("primary")}>{busy ? "作成中…" : "下書きを作成"}</button>
   </form></HostPageBody>;
 
   if (!productId) return <HostPageBody><PageHead title={adminDraft ? "代理登録の商品" : "体験"}>{bookingGuideHref ? <Link className={consoleButtonClass("secondary")} href={bookingGuideHref}>予約後の集合案内</Link> : null}</PageHead><section className={`${HOST_SURFACE} p-4 md:p-6`}>
@@ -1126,6 +1184,17 @@ export function HostPublicationWorkspace({
       <label className="block text-sm font-bold text-ink-soft">販売者への確認方法<select value={sellerConfirmationMethod} onChange={(event) => setSellerConfirmationMethod(event.target.value as "" | "VERBAL" | "WRITTEN")} className="mt-1 block w-full rounded-xl border border-line bg-white px-3 py-2 font-normal"><option value="">選択してください</option><option value="VERBAL">口頭</option><option value="WRITTEN">書面・メッセージ</option></select></label>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={sellerConfirmed} onChange={(event) => setSellerConfirmed(event.target.checked)} className="mt-1" /><span>販売者へ現在の公開内容・販売条件・掲載条件を確認済みです。</span></label>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={publicationPhotoRightsConfirmed} onChange={(event) => setPublicationPhotoRightsConfirmed(event.target.checked)} className="mt-1" /><span>公開対象の写真について掲載権利を確認済みです。</span></label>
+    </section> : null}
+    {!adminDraft && product.salesPlan ? <section className={`${HOST_SURFACE} mb-4 space-y-3 p-4 md:p-5`} aria-labelledby="owner-sales-plan-title">
+      <h2 id="owner-sales-plan-title" className="font-extrabold">{product.salesPlan.current.plan === "MANAGED_20" ? "NIHO完全代行から本人販売へ切り替える" : "本人販売のプランを変更する"}</h2>
+      <p className="text-sm text-ink-soft">この体験だけを切り替えます。公開URL・商品・開催枠・在庫は変わりません。切替中は新しい受付を止め、残っている旧条件の決済を元のStripeアカウントで失効または照合してから新条件へ切り替えます。</p>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm"><dt>現在</dt><dd>{product.salesPlan.current.plan === "MANAGED_20" ? "完全代行 20%" : product.salesPlan.current.plan === "SUPPORTED_15" ? "本人販売＋サポート 15%" : "本人販売 10%"}（版 {product.salesPlan.current.revision}）</dd><dt>切替状態</dt><dd>{product.salesPlan.phase === "ACTIVE" ? "受付中" : "旧決済の照合中（新規受付停止）"}</dd></dl>
+      <fieldset disabled={busy || product.salesPlan.phase !== "ACTIVE" || !product.ownerSalesPlanAgreementVersion} className="space-y-2"><legend className="text-sm font-extrabold">切替後の条件</legend><label className="flex items-start gap-2 text-sm"><input type="radio" checked={ownerSalesPlan === "SUPPORTED_15"} onChange={() => setOwnerSalesPlan("SUPPORTED_15")} className="mt-1" /><span><strong>本人販売＋サポート 15%</strong><br />本人の同じ販売者プロフィール・同意済み受取口座で直接決済します。</span></label><label className="flex items-start gap-2 text-sm"><input type="radio" checked={ownerSalesPlan === "INDEPENDENT_10"} onChange={() => setOwnerSalesPlan("INDEPENDENT_10")} className="mt-1" /><span><strong>本人販売 10%</strong><br />本人の同じ販売者プロフィール・同意済み受取口座で直接決済します。</span></label></fieldset>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={ownerSalesPlanAccepted} disabled={busy || product.salesPlan.phase !== "ACTIVE" || !product.ownerSalesPlanAgreementVersion} onChange={(event) => setOwnerSalesPlanAccepted(event.target.checked)} className="mt-1" /><span>現在のOWNERとして、選択した料率・販売者・決済経路と同意版（{product.ownerSalesPlanAgreementVersion ?? "未設定"}）を確認し、この体験だけを切り替えます。</span></label>
+      {product.salesPlan.pending ? <div className="space-y-2">
+        <p className="text-sm">切替先は{product.salesPlan.pending.plan === "SUPPORTED_15" ? "本人販売＋サポート 15%" : "本人販売 10%"}です。</p>
+        <button type="button" disabled={busy || !product.salesPlan.transitionCommandId} className={consoleButtonClass("primary")} onClick={() => void switchManagedSalesPlan()}>旧決済の照合を再開</button>
+      </div> : <button type="button" disabled={busy || dirty || product.salesPlan.phase !== "ACTIVE" || !ownerSalesPlanAccepted || ownerSalesPlan === product.salesPlan.current.plan || !product.ownerSalesPlanAgreementVersion} className={consoleButtonClass("primary")} onClick={() => void switchManagedSalesPlan()}>{salesPlanCommandId ? "同じ切替結果を確認" : "新規受付を止めて切り替える"}</button>}
     </section> : null}
     {dirty ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">未保存の変更があります。公開・停止は保存後に実行できます。</p> : null}
     {product.publicationNeedsUpdate ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">現在の掲載版を維持しています。公開条件を満たす変更を反映すると、確認後に新しい掲載版へ切り替わります。</p> : null}

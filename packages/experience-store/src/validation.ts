@@ -98,17 +98,19 @@ export function chargeablePlatformFee(totalAmount: number, basisPoints: number):
 }
 
 function guestPlatformFee(settings: GuestPricingInput["platformFee"], totalAmount: number): PlatformFeeSnapshot {
-  const { supportEnabled, basisPoints, supportConsentVersion, supportAgreementRevision } = settings;
-  if (basisPoints !== (supportEnabled ? 1500 : 1000)) throw new StoreValidationError("The platform fee does not match the support setting.");
+  const { supportEnabled, basisPoints, supportConsentVersion, supportAgreementRevision, salesPlan } = settings;
+  if (salesPlan === "MANAGED_20") {
+    if (basisPoints !== 2000 || supportEnabled) throw new StoreValidationError("The managed revenue share is invalid.");
+  } else if (basisPoints !== (supportEnabled ? 1500 : 1000)) throw new StoreValidationError("The platform fee does not match the support setting.");
   if (typeof supportConsentVersion !== "string" || supportConsentVersion.length < 1 || supportConsentVersion.length > 64) {
     throw new StoreValidationError("The support consent version is missing.");
   }
   if (!Number.isSafeInteger(supportAgreementRevision) || supportAgreementRevision < 1) {
     throw new StoreValidationError("The support agreement revision is missing.");
   }
-  if (totalAmount === 0) return { supportEnabled, basisPoints, amount: 0, supportConsentVersion, supportAgreementRevision };
+  if (totalAmount === 0) return { supportEnabled, basisPoints, amount: 0, supportConsentVersion, supportAgreementRevision, ...(salesPlan ? { salesPlan } : {}) };
   if (!chargeablePlatformFee(totalAmount, basisPoints)) throw new StoreValidationError("The platform fee must be at least 1 and below the booking total.");
-  return { supportEnabled, basisPoints, amount: platformFeeAmount(totalAmount, basisPoints), supportConsentVersion, supportAgreementRevision };
+  return { supportEnabled, basisPoints, amount: platformFeeAmount(totalAmount, basisPoints), supportConsentVersion, supportAgreementRevision, ...(salesPlan ? { salesPlan } : {}) };
 }
 
 export function buildSnapshots(
@@ -123,6 +125,13 @@ export function buildSnapshots(
     readonly sellerNihoAccountRef: string;
     readonly stripeConnectAccountRef: string;
     readonly sellerDisplayName: string;
+    readonly chargeMode?: "PLATFORM" | "CONNECT_DIRECT";
+    readonly salesPlan?: "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10";
+    readonly salesPlanRevision?: number;
+    readonly feeBasisPoints?: 1000 | 1500 | 2000;
+    readonly sellerDisclosureUrl?: string;
+    readonly salesAgreementVersion?: string;
+    readonly paymentDueDays?: number | null;
   },
   guest?: GuestPricingInput,
 ): {
@@ -167,6 +176,13 @@ export function buildSnapshots(
       nihoAccountRef: product.sellerNihoAccountRef,
       stripeConnectAccountRef: product.stripeConnectAccountRef,
       displayName: product.sellerDisplayName,
+      ...(product.chargeMode ? { chargeMode: product.chargeMode } : {}),
+      ...(product.salesPlan ? { salesPlan: product.salesPlan } : {}),
+      ...(product.salesPlanRevision ? { salesPlanRevision: product.salesPlanRevision } : {}),
+      ...(product.feeBasisPoints ? { feeBasisPoints: product.feeBasisPoints } : {}),
+      ...(product.sellerDisclosureUrl ? { sellerDisclosureUrl: product.sellerDisclosureUrl } : {}),
+      ...(product.salesAgreementVersion ? { agreementVersion: product.salesAgreementVersion } : {}),
+      ...(product.paymentDueDays !== undefined ? { paymentDueDays: product.paymentDueDays } : {}),
     },
   };
 }

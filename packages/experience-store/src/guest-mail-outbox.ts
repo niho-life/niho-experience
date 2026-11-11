@@ -62,6 +62,8 @@ export interface BookingConfirmationEmail {
   readonly cancellationRefundBasisPoints: number;
   /** The seller's name fixed at booking. */
   readonly hostDisplayName: string;
+  /** A platform booking has a separate seller and a consented public provider name. */
+  readonly managedSeller?: { readonly displayName: string; readonly providerDisplayName: string | null };
 }
 
 /** One claimed `booking.confirmed` row. */
@@ -305,6 +307,7 @@ function emailFromRow(row: DbRow): BookingConfirmationEmail | null {
   const seller = record(row.seller_snapshot);
   const policy = pricing.cancellationPolicy;
   const cancellation = cancellationTermsOf(pricing);
+  const sellerName = text(seller.displayName, "seller_snapshot.displayName");
   return {
     publicBookingId: text(row.public_booking_id, "public_booking_id"),
     guestEmail: text(row.guest_email, "guest_email"),
@@ -322,7 +325,13 @@ function emailFromRow(row: DbRow): BookingConfirmationEmail | null {
     cancellationPolicy: typeof policy === "string" && POLICIES.has(policy) ? policy as GuestCancellationPolicy : null,
     cancellationWindowMinutesBeforeStart: cancellation.cancellationWindowMinutesBeforeStart,
     cancellationRefundBasisPoints: cancellation.refundBasisPoints,
-    hostDisplayName: text(seller.displayName, "seller_snapshot.displayName"),
+    hostDisplayName: sellerName,
+    ...(seller.chargeMode === "PLATFORM" && seller.salesPlan === "MANAGED_20" ? {
+      managedSeller: {
+        displayName: sellerName,
+        providerDisplayName: typeof row.provider_public_name === "string" ? row.provider_public_name : null,
+      },
+    } : {}),
   };
 }
 
@@ -688,6 +697,7 @@ export class GuestMailOutbox {
                 (b.occurrence_snapshot->>'endUtc')::timestamptz + make_interval(days => $5) > clock_timestamp() AS link_open,
                 (b.occurrence_snapshot->>'startUtc')::timestamptz > clock_timestamp() AS before_start,
                 g.guest_email, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug,
+                provider.public_display_name AS provider_public_name,
                 guide_snapshot.guide AS meeting_guide,
                 (SELECT COALESCE(sum(x.amount), 0)::text FROM booking_refunds x
                   WHERE x.provider_id = b.provider_id AND x.booking_id = b.id AND x.status <> 'FAILED') AS refunding_amount,
@@ -697,6 +707,8 @@ export class GuestMailOutbox {
            JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
            ${reviewInvitation ? "LEFT JOIN booking_attendance a ON a.provider_id = b.provider_id AND a.booking_id = b.id" : ""}
            JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
+           LEFT JOIN experience_provider_public_profiles provider ON provider.provider_id=b.provider_id
+             AND b.seller_snapshot->>'chargeMode'='PLATFORM'
            LEFT JOIN booking_meeting_guide_snapshots guide_snapshot ON guide_snapshot.provider_id=b.provider_id AND guide_snapshot.booking_id=b.id
            LEFT JOIN booking_refunds r ON r.provider_id = b.provider_id AND r.booking_id = b.id
                  AND r.id = (CASE WHEN c.payload->>'refundId' ~ ${UUID_TEXT} THEN (c.payload->>'refundId')::uuid END)

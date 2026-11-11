@@ -89,13 +89,14 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
   const providerKind = publication.providerPublicName ? publication.providerKind : disclosure?.sellerKind;
   const hostAvatar = providerPhoto ?? (publication.providerPublicName && providerKind === "BUSINESS" ? businessLogo : null);
   const canonicalUrl = `${config.siteUrl}${locale === "ja" ? "/ja" : ""}/experiences/${encodeURIComponent(publication.slug)}`;
-  const sellerLegalUrl = disclosure?.method === "EXTERNAL"
+  const sellerLegalUrl = terms?.sellerDisclosureUrl ?? (disclosure?.method === "EXTERNAL"
     ? disclosure.externalUrl
-    : disclosure?.method === "NATIVE" ? `${config.siteUrl}/experiences/${encodeURIComponent(publication.slug)}/seller` : "";
+    : disclosure?.method === "NATIVE" ? `${config.siteUrl}/experiences/${encodeURIComponent(publication.slug)}/seller` : "");
   return {
     booking: {
       checkoutAvailable: Boolean(terms?.offers.length && config.guestBookingEnabled),
       consentVersion: config.guestBookingConsentVersion,
+      ...(terms?.salesPlanRevision === undefined ? {} : { salesPlanRevision: terms.salesPlanRevision }),
       currency: "JPY",
       legalDocuments: sellerLegalUrl ? [{ kind: "COMMERCIAL_TRANSACTIONS", url: sellerLegalUrl }] : [],
       timeZone: "Asia/Tokyo",

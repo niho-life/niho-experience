@@ -2,7 +2,7 @@ import "server-only";
 import { config } from "@/lib/config";
 import { parseChannelAdapters } from "./channel-adapters";
 import { Pool } from "pg";
-import { AdminSessions, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { AdminSessions, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GuideRepository, HostAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedExperienceSalesRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -25,6 +25,11 @@ export function experienceStore(): ExperienceStore | null {
 export function experiencePublicationRepository(): ExperiencePublicationRepository | null {
   const pool = experiencePool();
   return pool ? new ExperiencePublicationRepository(pool) : null;
+}
+
+export function managedExperienceSalesRepository(): ManagedExperienceSalesRepository | null {
+  const pool = experiencePool();
+  return pool ? new ManagedExperienceSalesRepository(pool) : null;
 }
 
 /** OWNER-entered, public-only seller disclosure. It never reads NIHO profile or KYC fields. */
@@ -249,7 +254,7 @@ export function siteThreadRepository(): { repository: GuestQuestionRepository; k
  * The Stripe webhook's view of 旅行者の予約 (#285 slice 4). A Session this service created can end after the
  * flag is turned off, so releasing its hold needs only the experience DB, like confirming its payment.
  */
-export function guestHoldReleases(): Pick<GuestBookingRepository, "releaseGuestHold"> | null {
+export function guestHoldReleases(): Pick<GuestBookingRepository, "releaseGuestHold" | "expireGuestHoldForSalesPlanSwitch"> | null {
   const pool = experiencePool();
   return pool ? new GuestBookingRepository(pool) : null;
 }

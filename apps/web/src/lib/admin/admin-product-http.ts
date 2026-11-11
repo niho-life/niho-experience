@@ -8,7 +8,7 @@ import {
   parseScheduleRule,
   type ScheduleRule,
 } from "@niho-experience/experience-domain";
-import { retrieveConnectedAccount } from "@niho-experience/experience-payments";
+import { retrieveConnectedAccount, retrievePlatformAccount } from "@niho-experience/experience-payments";
 import {
   ExperiencePublicationBlockedError,
   StoreAccessDeniedError,
@@ -28,7 +28,7 @@ import {
 } from "@niho-experience/experience-store";
 import { GuideCoverImageError, processGuideCoverImage, readGuideCoverInput } from "@/lib/guide-cover-image";
 import { experiencePublicMediaStorage } from "@/lib/experience/public-media-storage";
-import { experiencePublicationRepository, experienceStore } from "@/lib/experience/store-server";
+import { experiencePublicationRepository, experienceStore, managedExperienceSalesRepository } from "@/lib/experience/store-server";
 import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";
 import { config } from "@/lib/config";
 import {
@@ -51,6 +51,7 @@ type ProductDraftBody = {
   readonly content: Readonly<Record<string, JsonValue>>;
   readonly currency: string;
   readonly unitAmount: number;
+  readonly managedSales?: { readonly enabled: true; readonly sellerConfirmationMethod: "VERBAL" | "WRITTEN"; readonly paymentDueDays: number };
 };
 
 const BODY_LIMIT = 256 * 1024;
@@ -62,6 +63,30 @@ const TERMS_KEYS = [
   "cancellationPolicy", "cancellationWindowMinutesBeforeStart", "cancellationRefundBasisPoints",
   "minimumAttendance", "bookingQuestions", "conditionsVersion",
 ] as const;
+
+function managedServerSettings() {
+  if (process.env.EXPERIENCE_MANAGED_SALES_ENABLED !== "true") return null;
+  if (!process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY?.trim()
+    || !process.env.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET?.trim()) return null;
+  const legalSellerName = process.env.EXPERIENCE_MANAGED_LEGAL_SELLER_NAME?.trim() ?? "";
+  const commercialTransactionsUrl = process.env.EXPERIENCE_MANAGED_COMMERCIAL_TRANSACTIONS_URL?.trim() ?? "";
+  const sellerNihoAccountRef = process.env.EXPERIENCE_MANAGED_SELLER_NIHO_ACCOUNT_REF?.trim() ?? "";
+  const platformAccountId = process.env.EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID?.trim() ?? "";
+  const agreementVersion = process.env.EXPERIENCE_MANAGED_AGREEMENT_VERSION?.trim() ?? "";
+  if (!legalSellerName || legalSellerName.length > 300 || !commercialTransactionsUrl.startsWith("https://")
+    || !ID.test(sellerNihoAccountRef)
+    || !/^acct_[A-Za-z0-9]{8,}$/.test(platformAccountId) || !/^[\x21-\x7e]{1,160}$/.test(agreementVersion)
+  ) return null;
+  return { seller: { legalSellerName, commercialTransactionsUrl, sellerNihoAccountRef, platformAccountId }, agreementVersion };
+}
+
+function managedDraftSettings(input: ProductDraftBody["managedSales"]) {
+  if (!input?.enabled) return null;
+  const server = managedServerSettings();
+  if (!server) return null;
+  return { ...server, agreementConfirmedAtUtc: new Date().toISOString(),
+    agreementConfirmationMethod: input.sellerConfirmationMethod, paymentDueDays: input.paymentDueDays, pilotApproved: true as const };
+}
 
 function adminJson(body: unknown, status = 200): ReturnType<typeof baseAdminJson> {
   const response = baseAdminJson(body, status);
@@ -79,12 +104,18 @@ function exactKeys(value: RecordValue, allowed: readonly string[], required: rea
 }
 
 function validDraft(value: unknown): value is ProductDraftBody {
-  return isRecord(value) && exactKeys(value, ["slug", "publicTitle", "content", "currency", "unitAmount"])
+  return isRecord(value) && exactKeys(value, ["slug", "publicTitle", "content", "currency", "unitAmount", "managedSales"], ["slug", "publicTitle", "content", "currency", "unitAmount"])
     && typeof value.slug === "string" && value.slug.length >= 1 && value.slug.length <= 160
     && typeof value.publicTitle === "string" && value.publicTitle.length >= 1 && value.publicTitle.length <= 300
     && isRecord(value.content) && value.currency === "JPY"
     && typeof value.unitAmount === "number" && Number.isSafeInteger(value.unitAmount)
-    && (value.unitAmount === 0 || value.unitAmount >= 50);
+    && (value.unitAmount === 0 || value.unitAmount >= 50)
+    && (value.managedSales === undefined || (isRecord(value.managedSales)
+      && exactKeys(value.managedSales, ["enabled", "sellerConfirmationMethod", "paymentDueDays"])
+      && value.managedSales.enabled === true
+      && (value.managedSales.sellerConfirmationMethod === "VERBAL" || value.managedSales.sellerConfirmationMethod === "WRITTEN")
+      && Number.isInteger(value.managedSales.paymentDueDays) && (value.managedSales.paymentDueDays as number) >= 0
+      && (value.managedSales.paymentDueDays as number) <= 180));
 }
 
 function validProviderProfile(value: unknown): value is ExperienceAdminProviderPublicProfileInput & { readonly consentConfirmed: true } {
@@ -228,6 +259,7 @@ async function providerProfileDto(actor: PublicationAdminDraftActor, providerId:
       })),
     },
     consentVersion: PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION,
+    managedSalesAvailable: managedServerSettings() !== null,
   };
 }
 
@@ -296,11 +328,15 @@ export async function adminDraftProductCollection(request: Request, context: Pro
       return adminJson({
         products: await Promise.all(products.map((product) => productDto(auth.actor, providerId, product.id))),
         publicationConsentVersion: config.experiencePublicationConsentVersion,
+        managedSalesAvailable: managedServerSettings() !== null,
       });
     }
     const body = await parseJson(request);
     if (body instanceof Response || !validDraft(body)) return body instanceof Response ? body : adminJson({ error: { code: "INVALID_INPUT" } }, 400);
-    const created = await repository.createDraftAsAdmin(auth.actor, providerId, body as ExperiencePublicationDraftCreateInput);
+    const managed = managedDraftSettings((body as ProductDraftBody).managedSales);
+    if ((body as ProductDraftBody).managedSales && !managed) return adminJson({ error: { code: "MANAGED_SALES_UNAVAILABLE" } }, 503);
+    const draft = { slug: body.slug, publicTitle: body.publicTitle, content: body.content, currency: body.currency, unitAmount: body.unitAmount };
+    const created = await repository.createDraftAsAdmin(auth.actor, providerId, draft as ExperiencePublicationDraftCreateInput, managed ?? undefined);
     return adminJson({ product: await productDto(auth.actor, providerId, created.id), publicationConsentVersion: config.experiencePublicationConsentVersion }, 201);
   } catch (error) { return mapStoreError(error); }
 }
@@ -385,6 +421,19 @@ export async function adminDraftPublishRequest(request: Request, context: Produc
       if (stripe === null || stripe.kind === "unreachable") return unavailable();
       if (stripe.kind !== "ready") throw new ExperiencePublicationBlockedError(["CONNECT_NOT_READY"]);
       accountCheck = { stripeConnectAccountRef: current.payoutAccountRef, checkedAtUtc: new Date().toISOString() };
+    }
+    const managed = await managedExperienceSalesRepository()?.get(providerId, productId);
+    if (managed?.current.chargeMode === "PLATFORM") {
+      const settings = managedServerSettings();
+      const platformStripeKey = process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY?.trim();
+      if (!settings || !platformStripeKey || settings.seller.platformAccountId !== managed.current.stripeAccountRef) {
+        return adminJson({ error: { code: "PAYOUT_CHECK_UNAVAILABLE" } }, 503);
+      }
+      const platform = await retrievePlatformAccount({ expectedAccountId: settings.seller.platformAccountId, platformStripeKey }).catch(() => null);
+      if (!platform || !platform.chargesEnabled || !platform.detailsSubmitted || platform.country !== "JP" || platform.defaultCurrency !== "JPY") {
+        throw new ExperiencePublicationBlockedError(["CONNECT_NOT_READY"]);
+      }
+      accountCheck = { stripeConnectAccountRef: settings.seller.platformAccountId, checkedAtUtc: new Date().toISOString() };
     }
 
     const state = await repository.publishAdminDraft(auth.actor, providerId, productId, {
