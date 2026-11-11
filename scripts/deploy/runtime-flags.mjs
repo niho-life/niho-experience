@@ -42,6 +42,9 @@ const CHANNEL_ADAPTER = `[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[0-9]+=${CHANNEL_CAPABI
 /** Plain settings' shapes: what resolve-config accepts, narrowed to what --set-env-vars carries (never a comma). */
 export const SHAPES = Object.freeze({
   consentVersion: { pattern: /^[A-Za-z0-9._:+-]{1,100}$/, words: "letters, digits and ._:+- (1-100)" },
+  sellerReference: { pattern: /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/, words: "a seller reference (1-256 characters)" },
+  sellerName: { pattern: /^(?=.*\S)[^,\p{Cc}]{1,300}$/u, words: "a seller name without commas or control characters (1-300 characters)" },
+  stripeAccount: { pattern: /^acct_[A-Za-z0-9]{8,}$/, words: "a Stripe account ID" },
   bucketName: { pattern: /^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/, words: "a 3-63 character lower-case GCS bucket name" },
   mailbox: { pattern: new RegExp(`^(${ADDRESS}|[^<>",\\u0000-\\u001F\\u007F\\s][^<>",\\u0000-\\u001F\\u007F]{0,99} <${ADDRESS}>)$`), words: "an address, or Name <address> without commas or quotes" },
   httpsUrl: { pattern: new RegExp(`^${HTTPS_URL}$`), words: "an https URL with a lower-case host, no query or comma" },
@@ -132,6 +135,28 @@ export const FLAGS = Object.freeze([
     settings: [
       { env: "EXPERIENCE_BOOKING_CONSENT_VERSION", variable: "BOOKING_CONSENT_VERSION", shape: "consentVersion" },
       { env: "EXPERIENCE_PRIVACY_POLICY_URL", variable: "PRIVACY_POLICY_URL", shape: "httpsUrl", optional: true },
+    ],
+  },
+  {
+    env: "EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED",
+    variable: "MANAGED_SALES_WEBHOOKS_ENABLED",
+    needs: ["EXPERIENCE_GUEST_BOOKING_ENABLED"],
+    secrets: [{
+      env: "EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET", variable: "STRIPE_PLATFORM_WEBHOOK_SECRET_REF",
+      stg: "experience-stg-stripe-platform-webhook-secret",
+    }],
+    settings: [{ env: "EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID", variable: "MANAGED_PLATFORM_ACCOUNT_ID", shape: "stripeAccount" }],
+  },
+  {
+    env: "EXPERIENCE_MANAGED_SALES_ENABLED",
+    variable: "MANAGED_SALES_ENABLED",
+    needs: ["EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED", "EXPERIENCE_HOST_PUBLICATION_API_ENABLED", "ADMIN_SUPPORT_CONSOLE_ENABLED"],
+    settings: [
+      { env: "EXPERIENCE_MANAGED_LEGAL_SELLER_NAME", variable: "MANAGED_LEGAL_SELLER_NAME", shape: "sellerName" },
+      { env: "EXPERIENCE_MANAGED_COMMERCIAL_TRANSACTIONS_URL", variable: "MANAGED_COMMERCIAL_TRANSACTIONS_URL", shape: "httpsUrl" },
+      { env: "EXPERIENCE_MANAGED_SELLER_NIHO_ACCOUNT_REF", variable: "MANAGED_SELLER_NIHO_ACCOUNT_REF", shape: "sellerReference" },
+      { env: "EXPERIENCE_MANAGED_AGREEMENT_VERSION", variable: "MANAGED_AGREEMENT_VERSION", shape: "consentVersion" },
+      { env: "EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION", variable: "OWNER_SALES_PLAN_AGREEMENT_VERSION", shape: "consentVersion", optional: true },
     ],
   },
   {
@@ -388,6 +413,10 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
       else env[setting.env] = text;
     }
     for (const [key, derive] of Object.entries(flag.fixed ?? {})) env[key] = derive(context);
+  }
+  if (secrets.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET
+    && secrets.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET === secrets.EXPERIENCE_STRIPE_WEBHOOK_SECRET) {
+    problems.push(`${name("STRIPE_PLATFORM_WEBHOOK_SECRET_REF")} must differ from ${name("STRIPE_WEBHOOK_SECRET_REF")}`);
   }
   return { problems: [...new Set(problems)], on: FLAGS.map(flagId).filter((id) => on.has(id)), env, secrets, names: tableNames() };
 }
