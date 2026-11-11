@@ -189,13 +189,27 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       await managed.markCompensationResultUnknown(ADMIN, paid.publicBookingId, { commandId: randomUUID(), expectedVersion: recalculatedPrepared.version });
       const recalculatedUnknown = await managed.calculateCompensation(ADMIN, paid.publicBookingId, randomUUID(), afterExperience);
       assert.equal(recalculatedUnknown.status, "RESULT_UNKNOWN");
+      await assert.rejects(managed.prepareCompensation(ADMIN, paid.publicBookingId, {
+        commandId: randomUUID(), expectedVersion: recalculatedUnknown.version, recipientVerified: true,
+      }), StoreConflictError);
+      const noDebit = { commandId: randomUUID(), expectedVersion: recalculatedUnknown.version, statementReference: "synthetic-no-debit-001" };
+      const cleared = await managed.reconcileCompensationNotPaid(ADMIN, paid.publicBookingId, noDebit);
+      assert.deepEqual([cleared.status, cleared.preparationId, cleared.recipientVerified], ["REVIEW_REQUIRED", null, false]);
+      assert.equal((await managed.reconcileCompensationNotPaid(ADMIN, paid.publicBookingId, noDebit)).version, cleared.version);
+      const fresh = await managed.calculateCompensation(ADMIN, paid.publicBookingId, randomUUID(), afterExperience);
+      const secondPreparation = await managed.prepareCompensation(ADMIN, paid.publicBookingId, {
+        commandId: randomUUID(), expectedVersion: fresh.version, recipientVerified: true,
+      });
+      const secondUnknown = await managed.markCompensationResultUnknown(ADMIN, paid.publicBookingId, {
+        commandId: randomUUID(), expectedVersion: secondPreparation.version,
+      });
       const paidCommand = randomUUID();
       const paidCompensation = await managed.reconcileCompensation(ADMIN, paid.publicBookingId, {
-        commandId: paidCommand, expectedVersion: recalculatedUnknown.version, statementReference: "synthetic-statement-001", paidAtUtc: afterExperience.toISOString(), paidAmount: 6_400,
+        commandId: paidCommand, expectedVersion: secondUnknown.version, statementReference: "synthetic-statement-001", paidAtUtc: afterExperience.toISOString(), paidAmount: 6_400,
       });
       assert.equal(paidCompensation.status, "PAID");
       assert.equal((await managed.reconcileCompensation(ADMIN, paid.publicBookingId, {
-        commandId: paidCommand, expectedVersion: recalculatedUnknown.version, statementReference: "synthetic-statement-001", paidAtUtc: afterExperience.toISOString(), paidAmount: 6_400,
+        commandId: paidCommand, expectedVersion: secondUnknown.version, statementReference: "synthetic-statement-001", paidAtUtc: afterExperience.toISOString(), paidAmount: 6_400,
       })).paidAmount, 6_400, "a result-unknown retry cannot double-record payment");
       await assert.rejects(managed.reconcileCompensation(ADMIN, paid.publicBookingId, {
         commandId: randomUUID(), expectedVersion: paidCompensation.version, statementReference: "synthetic-statement-duplicate", paidAtUtc: afterExperience.toISOString(), paidAmount: 6_400,

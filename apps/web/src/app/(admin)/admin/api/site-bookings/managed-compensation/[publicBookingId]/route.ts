@@ -70,8 +70,15 @@ export async function POST(request: Request, context: Context): Promise<Response
     if (body.action === "RESULT_UNKNOWN" && Object.keys(body).every((key) => ["action", "commandId", "expectedVersion"].includes(key))) {
       return adminJson({ compensation: await loaded.repository.markCompensationResultUnknown(loaded.actor, loaded.publicBookingId, { commandId, expectedVersion: body.expectedVersion }) });
     }
-    if (body.action === "RECONCILE_PAID" && Object.keys(body).every((key) => ["action", "commandId", "expectedVersion", "statementReference", "paidAtUtc", "paidAmount"].includes(key)) && typeof body.statementReference === "string" && typeof body.paidAtUtc === "string" && Number.isSafeInteger(body.paidAmount)) {
+    if (body.action === "RECONCILE_PAID" && Object.keys(body).every((key) => ["action", "commandId", "expectedVersion", "statementReference", "paidAtUtc", "paidAmount"].includes(key)) && typeof body.statementReference === "string" && typeof body.paidAtUtc === "string"
+      && Date.parse(body.paidAtUtc) <= Date.now() && Number.isSafeInteger(body.paidAmount)) {
       return adminJson({ compensation: await loaded.repository.reconcileCompensation(loaded.actor, loaded.publicBookingId, { commandId, expectedVersion: body.expectedVersion, statementReference: body.statementReference, paidAtUtc: body.paidAtUtc, paidAmount: body.paidAmount as number }) });
+    }
+    if (body.action === "RECONCILE_NOT_PAID" && Object.keys(body).every((key) => ["action", "commandId", "expectedVersion", "statementReference"].includes(key))
+      && typeof body.statementReference === "string") {
+      return adminJson({ compensation: await loaded.repository.reconcileCompensationNotPaid(loaded.actor, loaded.publicBookingId, {
+        commandId, expectedVersion: body.expectedVersion, statementReference: body.statementReference,
+      }) });
     }
     return adminJson({ error: "invalid_input" }, 400);
   } catch (error) { return failure(error); }

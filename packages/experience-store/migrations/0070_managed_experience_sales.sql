@@ -163,9 +163,11 @@ CREATE TABLE managed_provider_compensation_events (
   booking_id bigint NOT NULL,
   command_id uuid NOT NULL,
   actor_admin_niho_user_id text NOT NULL CHECK (length(actor_admin_niho_user_id) BETWEEN 1 AND 256),
-  action text NOT NULL CHECK (action IN ('CALCULATED','RECIPIENT_VERIFIED','PREPARED','RESULT_UNKNOWN','RECONCILED_PAID','ADJUSTED')),
+  action text NOT NULL CHECK (action IN ('CALCULATED','PREPARED','RESULT_UNKNOWN','RECONCILED_PAID','RECONCILED_NOT_PAID')),
   amount bigint NOT NULL CHECK (amount >= 0),
+  statement_reference text CHECK (statement_reference IS NULL OR length(statement_reference) BETWEEN 1 AND 160),
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK ((action='RECONCILED_NOT_PAID') = (statement_reference IS NOT NULL)),
   UNIQUE (provider_id, booking_id, command_id),
   FOREIGN KEY (provider_id, booking_id)
     REFERENCES managed_provider_compensations(provider_id, booking_id) ON DELETE RESTRICT

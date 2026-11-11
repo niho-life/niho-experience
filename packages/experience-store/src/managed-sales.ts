@@ -457,7 +457,7 @@ export class ManagedExperienceSalesRepository {
             status='PREPARED',preparation_id=$2::uuid,prepared_amount=provider_amount,
             prepared_by_admin_niho_user_id=$3,version=version+1,updated_at=clock_timestamp()
           FROM bookings b WHERE b.provider_id=c.provider_id AND b.id=c.booking_id AND b.public_booking_id=$1::uuid
-            AND c.version=$4 AND c.status='READY'
+            AND c.version=$4 AND c.status='READY' AND c.provider_amount>0
             AND c.refunded_amount=COALESCE((SELECT sum(r.amount) FROM booking_refunds r
               WHERE r.provider_id=b.provider_id AND r.booking_id=b.id AND r.status='SUCCEEDED'),0)
             AND c.disputed_amount=COALESCE((SELECT sum(d.amount) FROM managed_booking_disputes d
@@ -505,7 +505,7 @@ export class ManagedExperienceSalesRepository {
   async reconcileCompensation(actor: PublicationAdminDraftActor, publicBookingId: string, input: { readonly commandId: string; readonly expectedVersion: number; readonly statementReference: string; readonly paidAtUtc: string; readonly paidAmount: number }): Promise<ManagedCompensation> {
     validateAdmin(actor); assertCanonicalInstant(input.paidAtUtc, "paidAtUtc");
     if (!UUID_V4.test(input.commandId) || input.statementReference.trim().length < 1 || input.statementReference.length > 160
-      || !Number.isSafeInteger(input.paidAmount) || input.paidAmount < 0) throw new StoreValidationError("The reconciliation command is invalid.");
+      || !Number.isSafeInteger(input.paidAmount) || input.paidAmount <= 0) throw new StoreValidationError("The reconciliation command is invalid.");
     return withTransaction(this.#pool, async (client) => {
       const repeated = await this.#repeatedCompensationCommand(client, publicBookingId, input.commandId, "RECONCILED_PAID");
       if (repeated) return repeated;
@@ -530,6 +530,37 @@ export class ManagedExperienceSalesRepository {
   async getCompensation(publicBookingId: string): Promise<ManagedCompensation> {
     if (!UUID_V4.test(publicBookingId)) throw new StoreValidationError("publicBookingId is invalid.");
     return this.#compensation(this.#pool, publicBookingId);
+  }
+
+  async reconcileCompensationNotPaid(actor: PublicationAdminDraftActor, publicBookingId: string, input: {
+    readonly commandId: string; readonly expectedVersion: number; readonly statementReference: string;
+  }): Promise<ManagedCompensation> {
+    validateAdmin(actor);
+    const reference = input.statementReference.trim();
+    if (!UUID_V4.test(input.commandId) || reference.length < 1 || reference.length > 160) {
+      throw new StoreValidationError("The unpaid reconciliation command is invalid.");
+    }
+    return withTransaction(this.#pool, async (client) => {
+      await client.query("SELECT id FROM bookings WHERE public_booking_id=$1::uuid FOR UPDATE", [publicBookingId]);
+      const repeated = await this.#repeatedCompensationCommand(client, publicBookingId, input.commandId, "RECONCILED_NOT_PAID");
+      if (repeated) return repeated;
+      const changed = await client.query<DbRow>(
+        `UPDATE managed_provider_compensations c SET status='REVIEW_REQUIRED',recipient_verified_at=NULL,
+            preparation_id=NULL,prepared_amount=NULL,prepared_by_admin_niho_user_id=NULL,version=version+1,updated_at=clock_timestamp()
+          FROM bookings b WHERE b.provider_id=c.provider_id AND b.id=c.booking_id AND b.public_booking_id=$1::uuid
+            AND c.version=$2 AND c.status='RESULT_UNKNOWN' RETURNING c.provider_id,c.booking_id`,
+        [publicBookingId, input.expectedVersion],
+      );
+      const booking = changed.rows[0];
+      if (!booking) throw new StoreConflictError("Only an unknown result can be reconciled as unpaid.");
+      await client.query(
+        `INSERT INTO managed_provider_compensation_events
+           (provider_id,booking_id,command_id,actor_admin_niho_user_id,action,amount,statement_reference)
+         VALUES ($1,$2,$3::uuid,$4,'RECONCILED_NOT_PAID',0,$5)`,
+        [booking.provider_id, booking.booking_id, input.commandId, actor.nihoUserId, reference],
+      );
+      return this.#compensation(client, publicBookingId);
+    });
   }
 
   /** Host-safe projection: no platform account, bank detail, operator, statement or Stripe reference leaves the store. */
@@ -558,7 +589,7 @@ export class ManagedExperienceSalesRepository {
     client: Pick<PoolClient, "query">,
     publicBookingId: string,
     commandId: string,
-    action: "PREPARED" | "RESULT_UNKNOWN" | "RECONCILED_PAID",
+    action: "PREPARED" | "RESULT_UNKNOWN" | "RECONCILED_PAID" | "RECONCILED_NOT_PAID",
   ): Promise<ManagedCompensation | null> {
     const found = await client.query<DbRow>(
       `SELECT 1 FROM managed_provider_compensation_events e

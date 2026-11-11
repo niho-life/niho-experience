@@ -337,6 +337,7 @@ function ManagedCompensationPanel({ onSessionExpired }: { onSessionExpired: () =
   const [bookingId, setBookingId] = useState("");
   const [statementReference, setStatementReference] = useState("");
   const [paidAmount, setPaidAmount] = useState("");
+  const [paidDate, setPaidDate] = useState("");
   const [compensation, setCompensation] = useState<ManagedCompensationView | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -365,16 +366,36 @@ function ManagedCompensationPanel({ onSessionExpired }: { onSessionExpired: () =
     } catch { setMessage("結果を確認できません。再送前に同じ予約を読み直してください。"); }
     finally { setBusy(false); }
   };
-  const status = compensation ? ({ REVIEW_REQUIRED: "返金・異議申立て確認中", READY: "準備可能", PREPARED: "振込準備済み", RESULT_UNKNOWN: "銀行明細との照合待ち", PAID: "振込済み", ADJUSTMENT_REQUIRED: "支払後調整が必要" } as const)[compensation.status] : "";
+  const status = compensation ? ({ REVIEW_REQUIRED: "要確認・再計算", READY: "準備可能", PREPARED: "振込準備済み", RESULT_UNKNOWN: "銀行明細との照合待ち", PAID: "振込済み", ADJUSTMENT_REQUIRED: "支払後調整が必要" } as const)[compensation.status] : "";
+  const paidAt = Date.parse(`${paidDate}T00:00:00+09:00`);
+  const canRecordPayment = Number.isFinite(paidAt) && paidAmount.trim() !== ""
+    && Number.isSafeInteger(Number(paidAmount)) && Number(paidAmount) > 0;
   return <section className="mt-6 rounded-2xl border border-line bg-canvas p-4" aria-labelledby="managed-compensation-heading">
     <h2 id="managed-compensation-heading" className="text-lg font-extrabold">完全代行の報酬振込</h2>
     <p className="mt-1 text-sm text-muted">開催後の確定売上から返金・異議申立てと20%を引き、銀行口座情報を保存せず手動振込を記録します。</p>
-    <div className="mt-3"><label className="grid gap-1">予約番号<input className={FIELD} value={bookingId} onChange={(event) => { setBookingId(event.currentTarget.value); setCompensation(null); setMessage(""); }} /></label></div>
+    <div className="mt-3"><label className="grid gap-1">予約番号<input className={FIELD} value={bookingId} disabled={busy} onChange={(event) => {
+      setBookingId(event.currentTarget.value); setCompensation(null); setStatementReference(""); setPaidDate(""); setMessage("");
+    }} /></label></div>
     <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={BUTTON} disabled={busy || !bookingId} onClick={() => void load()}>読み込む</button><button type="button" className={BUTTON} disabled={busy || !bookingId} onClick={() => void mutate({ action: "CALCULATE" })}>開催後の報酬を計算</button></div>
     {compensation ? <div className="mt-3 rounded-xl bg-sand/50 p-3 text-sm"><p className="font-extrabold">{status}</p><dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1"><dt>確定売上</dt><dd>{yen(compensation.capturedAmount)}</dd><dt>返金</dt><dd>{yen(compensation.refundedAmount)}</dd><dt>異議申立て</dt><dd>{yen(compensation.disputedAmount)}</dd><dt>NIHO 20%</dt><dd>{yen(compensation.nihoFeeAmount)}</dd><dt>提供者報酬</dt><dd className="font-bold">{yen(compensation.providerAmount)}</dd><dt>支払期日</dt><dd>{compensation.dueOn}</dd></dl>
-      <div className="mt-3 flex flex-wrap gap-2">{compensation.status === "READY" ? <button type="button" className={BUTTON} disabled={busy} onClick={() => void mutate({ action: "PREPARE", expectedVersion: compensation.version, recipientVerified: true })}>受取先を照合して振込準備</button> : null}{compensation.status === "PREPARED" ? <button type="button" className={BUTTON} disabled={busy} onClick={() => void mutate({ action: "RESULT_UNKNOWN", expectedVersion: compensation.version })}>結果不明として明細照合へ</button> : null}</div>
+      <div className="mt-3 flex flex-wrap gap-2">{compensation.status === "READY" && compensation.providerAmount > 0 ? <button type="button" className={BUTTON} disabled={busy} onClick={() => void mutate({ action: "PREPARE", expectedVersion: compensation.version, recipientVerified: true })}>受取先を照合して振込準備</button> : null}{compensation.status === "PREPARED" ? <button type="button" className={BUTTON} disabled={busy} onClick={() => void mutate({ action: "RESULT_UNKNOWN", expectedVersion: compensation.version })}>結果不明として明細照合へ</button> : null}</div>
       {compensation.preparedAmount !== null ? <p className="mt-2">準備時固定額: {yen(compensation.preparedAmount)}{compensation.paidAmount !== null ? ` · 実振込額: ${yen(compensation.paidAmount)}` : ""}{compensation.adjustmentAmount ? ` · 差額: ${yen(compensation.adjustmentAmount)}` : ""}</p> : null}
-      {compensation.status === "PREPARED" || compensation.status === "RESULT_UNKNOWN" ? <div className="mt-3 grid gap-2 sm:grid-cols-3"><label className="grid gap-1">銀行明細の照合番号<input className={FIELD} value={statementReference} maxLength={160} onChange={(event) => setStatementReference(event.currentTarget.value)} /></label><label className="grid gap-1">実振込額<input className={FIELD} type="number" min={0} value={paidAmount} onChange={(event) => setPaidAmount(event.currentTarget.value)} /></label><button type="button" className={`${BUTTON} self-end`} disabled={busy || !statementReference.trim() || !Number.isSafeInteger(Number(paidAmount)) || Number(paidAmount) < 0} onClick={() => void mutate({ action: "RECONCILE_PAID", expectedVersion: compensation.version, statementReference: statementReference.trim(), paidAtUtc: new Date().toISOString(), paidAmount: Number(paidAmount) })}>明細と照合して振込済みにする</button></div> : null}
+      {compensation.status === "PREPARED" || compensation.status === "RESULT_UNKNOWN" ? <div className="mt-3 space-y-2">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <label className="grid gap-1">銀行明細の照合番号<input className={FIELD} value={statementReference} maxLength={160} onChange={(event) => setStatementReference(event.currentTarget.value)} /></label>
+          <label className="grid gap-1">振込日<input className={FIELD} type="date" value={paidDate} onChange={(event) => setPaidDate(event.currentTarget.value)} /></label>
+          <label className="grid gap-1">実振込額<input className={FIELD} type="number" min={1} value={paidAmount} onChange={(event) => setPaidAmount(event.currentTarget.value)} /></label>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={BUTTON} disabled={busy || !statementReference.trim() || !canRecordPayment} onClick={() => void mutate({
+            action: "RECONCILE_PAID", expectedVersion: compensation.version, statementReference: statementReference.trim(),
+            paidAtUtc: new Date(paidAt).toISOString(), paidAmount: Number(paidAmount),
+          })}>明細と照合して振込済みにする</button>
+          {compensation.status === "RESULT_UNKNOWN" ? <button type="button" className={BUTTON} disabled={busy || !statementReference.trim()} onClick={() => void mutate({
+            action: "RECONCILE_NOT_PAID", expectedVersion: compensation.version, statementReference: statementReference.trim(),
+          })}>明細で未振込を確認</button> : null}
+        </div>
+      </div> : null}
     </div> : null}
     {message ? <p role="status" className="mt-3 text-sm font-bold text-warn">{message}</p> : null}
   </section>;
