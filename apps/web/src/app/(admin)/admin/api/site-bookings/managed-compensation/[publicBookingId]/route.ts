@@ -5,6 +5,7 @@ import {
   StoreValidationError,
 } from "@niho-experience/experience-store";
 import { adminJson, adminMutationAllowed, isAdminHttp, loadAdminHttpSession } from "@/lib/admin/server";
+import { config } from "@/lib/config";
 import { managedExperienceSalesRepository } from "@/lib/experience/store-server";
 import { readBoundedJson } from "@/lib/read-bounded-json";
 
@@ -17,7 +18,8 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const BODY_LIMIT = 8 * 1024;
 
 function enabled(): boolean {
-  return isAdminHttp() && process.env.EXPERIENCE_MANAGED_SALES_ENABLED === "true";
+  // Settlement remains available while the platform still services accepted reservations.
+  return isAdminHttp() && config.managedSalesWebhooksEnabled;
 }
 
 function failure(error: unknown): Response {

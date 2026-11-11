@@ -14,6 +14,7 @@ import { SITE_PAYOUTS_LOADING_TEXT } from "@/host/site-sales-payouts";
 import { loadSitePayouts } from "@/host/site-sales-payouts-server";
 import { loadSiteSales } from "@/host/site-sales-server";
 import { ownerActor } from "@/host/site-bookings-server";
+import { config } from "@/lib/config";
 import { experienceSupportRepository, managedExperienceSalesRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
@@ -86,7 +87,7 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
         {noticeView}
         <SalesSummaryPanel page={site.page} providerId={stripeLoginProviderId} />
         <SalesLines page={site.page} />
-        {process.env.EXPERIENCE_MANAGED_SALES_ENABLED === "true" ? <Suspense fallback={<p role="status" className="mt-4 text-sm text-muted">事務局振込の状態を読み込んでいます…</p>}>
+        {config.managedSalesWebhooksEnabled ? <Suspense fallback={<p role="status" className="mt-4 text-sm text-muted">事務局振込の状態を読み込んでいます…</p>}>
           <HostManagedCompensationPanel provider={provider} />
         </Suspense> : null}
         <Suspense fallback={<p role="status" className="mt-4 text-sm text-muted">決済費用の実費を読み込んでいます…</p>}>
@@ -134,7 +135,7 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
 
 async function HostManagedCompensationPanel({ provider }: { provider: HostProvider }) {
   const repository = managedExperienceSalesRepository();
-  if (!repository || process.env.EXPERIENCE_MANAGED_SALES_ENABLED !== "true") return null;
+  if (!repository) return null;
   const rows = await repository.listHostCompensations(ownerActor(provider)).catch(() => null);
   if (rows === null) return <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-sm text-warn">事務局振込の状態を読み込めませんでした。</p>;
   if (!rows.length) return null;
