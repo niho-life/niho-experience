@@ -38,12 +38,12 @@ import { SitePublicationPage } from "./SitePublicationPage";
 const saleTerms = {
   title: SAMPLE_TERMS.title,
   currency: SAMPLE_TERMS.currency,
-  sellerDisplayName: SAMPLE_TERMS.sellerDisplayName,
+  sellerDisplayName: "Synthetic Legal Seller",
   offers: SAMPLE_TERMS.offers,
   conditionsVersion: SAMPLE_TERMS.conditionsVersion,
 };
 const item = {
-  sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Host", externalUrl: "https://seller.example.test/legal" },
+  sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Legal Seller", externalUrl: "https://seller.example.test/legal" },
   publication: {
     slug: "native-review-page",
     publicTitle: "Native review page",
@@ -51,8 +51,10 @@ const item = {
       lead: "A synthetic native experience.", description: "Only public manuscript appears here.", facts: { language: "English" },
       highlights: [], included: ["Materials"], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [],
     },
-    currency: "JPY", unitAmount: 4_000, sellerDisplayName: "Synthetic Host", meetingOverview: null,
-    meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null, photos: [], providerPhoto: null, businessLogo: null,
+    currency: "JPY", unitAmount: 4_000, sellerDisplayName: "Synthetic Legal Seller",
+    providerPublicName: "Synthetic Actual Host", providerKind: "PERSON", meetingOverview: null,
+    meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null, photos: [],
+    providerPhoto: { src: "/api/public/experience-provider-media/00000000-0000-4000-8000-000000000001", alt: "Synthetic actual host", altJa: "合成の実提供者", publicCredit: null }, businessLogo: null,
     japanese: null, publishedAtUtc: "2026-11-05T00:00:00.000Z",
   },
   saleTerms,
@@ -122,6 +124,18 @@ describe("native publication reviews", () => {
       expect(JSON.stringify(node.review)).toContain("</script><script>alert(1)</script>");
       expect(JSON.stringify(node)).not.toMatch(/providerId|productId|bookingId|noteToHost|bodyJa/);
     }
+  });
+
+  it("shows the actual provider in the host introduction while retaining the legal seller for the sale", async () => {
+    const html = await render(null);
+    expect(html).toContain("Hosted by <b class=\"text-ink\">Synthetic Actual Host</b>");
+    expect(html).toContain("About your host");
+    expect(html).toContain("Synthetic Actual Host");
+    expect(html).toContain("Synthetic Legal Seller is the seller");
+    const nodes = jsonLd(html);
+    expect(nodes[0]).toMatchObject({ provider: { name: "Synthetic Actual Host" } });
+    expect(nodes[1]).not.toHaveProperty("brand");
+    expect(JSON.stringify(nodes[1])).not.toContain("Synthetic Actual Host");
   });
 });
 
@@ -219,26 +233,30 @@ describe("native publication host bio (#146)", () => {
     const html = await render(ok(2), withBio({ ja: "鎌倉で茶道を教えています。", en: "I teach tea ceremony.\n\n<b>Synthetic</b> host." }));
     expect(html).toContain('<section id="host" aria-labelledby="host-heading"');
     expect(html).toMatch(/<h2 id="host-heading"[^>]*>About your host<\/h2>/);
-    expect(html).toContain("Synthetic Host");
+    expect(html).toContain("Synthetic Actual Host");
     expect(html).toContain("I teach tea ceremony.\n\n&lt;b&gt;Synthetic&lt;/b&gt; host.");
     expect(html).not.toContain("鎌倉で茶道を教えています。");
     expect(html.indexOf('id="host"')).toBeLessThan(html.indexOf('id="reviews"'));
   });
 
-  it("shows no English section while the English is missing or unconfirmed, and no section without a bio", async () => {
+  it("keeps the consented host introduction while omitting missing or unconfirmed English bio text", async () => {
     for (const page of [withBio({ ja: "鎌倉で茶道を教えています。", en: null }), withBio(null)]) {
       const html = await render(null, page);
-      expect(html).not.toContain('id="host"');
-      expect(html).not.toContain("About your host");
+      expect(html).toContain('id="host"');
+      expect(html).toContain("About your host");
+      expect(html).toContain("Synthetic Actual Host");
+      expect(html).not.toContain("鎌倉で茶道を教えています。");
     }
   });
 
-  it("shows the Japanese bio on the Japanese page, and nothing there without one", async () => {
+  it("shows the Japanese bio and keeps the consented host identity when no bio is present", async () => {
     const html = await renderJa(withBio({ ja: "鎌倉で茶道を教えています。\n合成データです。", en: null }));
     expect(html).toMatch(/<h2 id="host-heading"[^>]*>ホストについて<\/h2>/);
     expect(html).toContain("鎌倉で茶道を教えています。\n合成データです。");
     expect(html).not.toContain("About your host");
-    expect(await renderJa(withBio(null))).not.toContain('id="host"');
+    const withoutBio = await renderJa(withBio(null));
+    expect(withoutBio).toContain('id="host"');
+    expect(withoutBio).toContain("Synthetic Actual Host");
   });
 });
 
@@ -267,7 +285,7 @@ describe("native publication context under the title and below the sections (#14
     const html = await page();
     expect(html).toContain("Kamakura · 1 hour from Tokyo<");
     expect(html.indexOf("Kamakura · 1 hour from Tokyo")).toBeGreaterThan(html.indexOf("<h1"));
-    expect(html.indexOf("Kamakura · 1 hour from Tokyo")).toBeLessThan(html.indexOf("Offered by"));
+    expect(html.indexOf("Kamakura · 1 hour from Tokyo")).toBeLessThan(html.indexOf("Hosted by"));
     expect(await page("en", withOverview("Meet at the gate. It is a 2-minute walk from Kamakura Station."))).toContain("Kamakura · 1 hour from Tokyo · 2-minute walk from Kamakura Station");
     expect(await page("en", withOverview("Meet near the nearest station."))).toContain("Kamakura · 1 hour from Tokyo<");
   });

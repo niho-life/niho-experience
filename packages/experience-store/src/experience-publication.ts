@@ -237,6 +237,33 @@ export interface ExperienceAdminDraftSeller {
   readonly sellerDisplayName: string;
 }
 
+export type ExperienceProviderPublicKind = "PERSON" | "BUSINESS";
+
+export interface ExperienceAdminProviderSummary {
+  readonly providerId: string;
+  readonly publicDisplayName: string | null;
+  readonly providerKind: ExperienceProviderPublicKind | null;
+  readonly profileVersion: number | null;
+  /** Existing operational label only; it is never substituted into the public DTO. */
+  readonly sellerProviderDisplayName: string | null;
+  readonly sellerDisplayName: string | null;
+}
+
+export interface ExperienceAdminProviderPublicProfile {
+  readonly providerId: string;
+  readonly publicDisplayName: string;
+  readonly providerKind: ExperienceProviderPublicKind | null;
+  readonly consentVersion: string;
+  readonly consentedAtUtc: string;
+  readonly version: number;
+}
+
+export interface ExperienceAdminProviderPublicProfileInput {
+  readonly publicDisplayName: string;
+  readonly providerKind: ExperienceProviderPublicKind | null;
+  readonly consentVersion: string;
+}
+
 export interface ExperiencePublicationState {
   readonly providerId: string;
   readonly productId: string;
@@ -349,6 +376,10 @@ const SALE_TERMS_COLUMNS = `provider_id,product_id,child_price_amount,child_min_
 const PUBLIC_READER_COLUMNS = `
   draft_version,publisher_kind,admin_proxy_review,
   slug,public_title,content,currency,unit_amount,seller_display_name,published_at,
+  (SELECT profile.public_display_name FROM experience_provider_public_profiles profile
+    WHERE profile.provider_id=visible_publications.provider_id) AS provider_public_name,
+  (SELECT profile.provider_kind FROM experience_provider_public_profiles profile
+    WHERE profile.provider_id=visible_publications.provider_id) AS provider_kind,
   COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
       'asset_id',media.asset_id::text,'alt_text',media.alt_text,'alt_text_ja',media.alt_text_ja,
@@ -507,6 +538,56 @@ export function publicationManuscriptReview(
 
 function validateAdminDraftActor(actor: PublicationAdminDraftActor): void {
   assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
+}
+
+function validateAdminProviderProfileInput(
+  input: ExperienceAdminProviderPublicProfileInput,
+): ExperienceAdminProviderPublicProfileInput {
+  assertNonEmptyText(input.publicDisplayName, "publicDisplayName", 300);
+  assertNonEmptyText(input.consentVersion, "consentVersion", 160);
+  if (input.publicDisplayName !== input.publicDisplayName.trim()
+    || /[\u0000-\u001f\u007f]/.test(input.publicDisplayName)
+    || input.consentVersion !== input.consentVersion.trim()
+    || (input.providerKind !== null && input.providerKind !== "PERSON" && input.providerKind !== "BUSINESS")) {
+    throw new StoreValidationError("Provider public profile is invalid.");
+  }
+  return input;
+}
+
+function adminProviderSummaryFromRow(row: DbRow): ExperienceAdminProviderSummary {
+  const kind = row.provider_kind === null ? null : String(row.provider_kind);
+  if (kind !== null && kind !== "PERSON" && kind !== "BUSINESS") {
+    throw new StoreValidationError("Database returned an invalid provider kind.");
+  }
+  return {
+    providerId: String(row.provider_id),
+    publicDisplayName: row.public_display_name === null ? null : String(row.public_display_name),
+    providerKind: kind,
+    profileVersion: row.profile_version === null ? null : safeInteger(row.profile_version, "provider profile version"),
+    sellerProviderDisplayName: row.seller_provider_display_name === null ? null : String(row.seller_provider_display_name),
+    sellerDisplayName: row.seller_display_name === null ? null : String(row.seller_display_name),
+  };
+}
+
+function adminProviderProfileFromRow(row: DbRow): ExperienceAdminProviderPublicProfile {
+  const kind = row.provider_kind === null ? null : String(row.provider_kind);
+  if (kind !== null && kind !== "PERSON" && kind !== "BUSINESS") {
+    throw new StoreValidationError("Database returned an invalid provider kind.");
+  }
+  return {
+    providerId: String(row.provider_id),
+    publicDisplayName: String(row.public_display_name),
+    providerKind: kind,
+    consentVersion: String(row.consent_version),
+    consentedAtUtc: iso(row.consented_at, "provider profile consented_at"),
+    version: safeInteger(row.version, "provider profile version"),
+  };
+}
+
+async function requireAdminProvider(client: PoolClient, providerId: string, lock: "" | " FOR SHARE" | " FOR UPDATE" = ""): Promise<void> {
+  assertStoreIdentifier(providerId, "providerId");
+  const result = await client.query(`SELECT 1 FROM experience_providers WHERE id=$1${lock}`, [providerId]);
+  if (!result.rows[0]) throw new StoreNotFoundError("provider");
 }
 
 async function adminDraftSeller(client: PoolClient, providerId: string): Promise<ExperienceHostSellerProfile> {
@@ -973,6 +1054,103 @@ export class ExperiencePublicationRepository {
   readonly #pool: Pool;
 
   constructor(pool: Pool) { this.#pool = pool; }
+
+  /** Every Experience provider, including an identity-only provider with no seller, account, membership, or Stripe reference. */
+  async listAdminProviders(actor: PublicationAdminDraftActor): Promise<readonly ExperienceAdminProviderSummary[]> {
+    validateAdminDraftActor(actor);
+    const result = await this.#pool.query<DbRow>(
+      `SELECT provider.id AS provider_id,profile.public_display_name,profile.provider_kind,
+              profile.version AS profile_version,seller.provider_display_name AS seller_provider_display_name,
+              seller.seller_display_name
+         FROM experience_providers provider
+         LEFT JOIN experience_provider_public_profiles profile ON profile.provider_id=provider.id
+         LEFT JOIN experience_host_seller_profiles seller ON seller.provider_id=provider.id
+        ORDER BY COALESCE(profile.public_display_name,seller.provider_display_name,provider.id) COLLATE "C",provider.id COLLATE "C"
+        LIMIT 500`,
+    );
+    return result.rows.map(adminProviderSummaryFromRow);
+  }
+
+  async createAdminProvider(
+    actor: PublicationAdminDraftActor,
+    rawInput: ExperienceAdminProviderPublicProfileInput,
+  ): Promise<ExperienceAdminProviderPublicProfile> {
+    validateAdminDraftActor(actor);
+    const input = validateAdminProviderProfileInput(rawInput);
+    return withTransaction(this.#pool, async (client) => {
+      const providerId = `prv_${randomUUID().replaceAll("-", "")}`;
+      await client.query("INSERT INTO experience_providers (id) VALUES ($1)", [providerId]);
+      await client.query("INSERT INTO experience_provider_media_state (provider_id) VALUES ($1)", [providerId]);
+      const result = await client.query<DbRow>(
+        `INSERT INTO experience_provider_public_profiles
+           (provider_id,public_display_name,provider_kind,consent_version,consented_at,consented_by_admin_niho_user_id)
+         VALUES ($1,$2,$3,$4,clock_timestamp(),$5)
+         RETURNING provider_id,public_display_name,provider_kind,consent_version,consented_at,version`,
+        [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId],
+      );
+      return adminProviderProfileFromRow(result.rows[0]!);
+    });
+  }
+
+  async getAdminProvider(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+  ): Promise<{ readonly provider: ExperienceAdminProviderSummary; readonly profile: ExperienceAdminProviderPublicProfile | null }> {
+    validateAdminDraftActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    const result = await this.#pool.query<DbRow>(
+      `SELECT provider.id AS provider_id,profile.public_display_name,profile.provider_kind,
+              profile.version AS profile_version,profile.consent_version,profile.consented_at,
+              seller.provider_display_name AS seller_provider_display_name,seller.seller_display_name,
+              profile.version
+         FROM experience_providers provider
+         LEFT JOIN experience_provider_public_profiles profile ON profile.provider_id=provider.id
+         LEFT JOIN experience_host_seller_profiles seller ON seller.provider_id=provider.id
+        WHERE provider.id=$1`,
+      [providerId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new StoreNotFoundError("provider");
+    return {
+      provider: adminProviderSummaryFromRow(row),
+      profile: row.profile_version === null ? null : adminProviderProfileFromRow(row),
+    };
+  }
+
+  async saveAdminProviderPublicProfile(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    expectedVersion: number | null,
+    rawInput: ExperienceAdminProviderPublicProfileInput,
+  ): Promise<ExperienceAdminProviderPublicProfile> {
+    validateAdminDraftActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    validateExpectedVersion(expectedVersion, "expectedVersion");
+    const input = validateAdminProviderProfileInput(rawInput);
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await requireAdminProvider(client, providerId, " FOR SHARE");
+      const result = expectedVersion === null
+        ? await client.query<DbRow>(
+          `INSERT INTO experience_provider_public_profiles
+             (provider_id,public_display_name,provider_kind,consent_version,consented_at,consented_by_admin_niho_user_id)
+           VALUES ($1,$2,$3,$4,clock_timestamp(),$5)
+           ON CONFLICT DO NOTHING
+           RETURNING provider_id,public_display_name,provider_kind,consent_version,consented_at,version`,
+          [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId],
+        )
+        : await client.query<DbRow>(
+          `UPDATE experience_provider_public_profiles
+              SET public_display_name=$2,provider_kind=$3,consent_version=$4,consented_at=clock_timestamp(),
+                  consented_by_admin_niho_user_id=$5,version=version+1,updated_at=clock_timestamp()
+            WHERE provider_id=$1 AND version=$6
+            RETURNING provider_id,public_display_name,provider_kind,consent_version,consented_at,version`,
+          [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId, expectedVersion],
+        );
+      if (!result.rows[0]) throw new StoreConflictError("Provider public profile version mismatch.");
+      return adminProviderProfileFromRow(result.rows[0]);
+    });
+  }
 
   /** Operator-provisioned seller workspaces; payment and NIHO identity references never leave the store. */
   async listAdminDraftSellers(actor: PublicationAdminDraftActor): Promise<readonly ExperienceAdminDraftSeller[]> {
@@ -1747,6 +1925,105 @@ export class ExperiencePublicationRepository {
         byteSize: safeInteger(row.byte_size, "media byte_size"), altText: String(row.alt_text), altTextJa: String(row.alt_text_ja),
         publicCredit: row.public_credit === null ? null : String(row.public_credit),
       }));
+    });
+  }
+
+  async getAdminProviderMedia(actor: PublicationAdminDraftActor, providerId: string): Promise<ExperienceHostProviderMedia> {
+    validateAdminDraftActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    return withTransaction(this.#pool, async (client) => {
+      await requireAdminProvider(client, providerId, " FOR SHARE");
+      await client.query("INSERT INTO experience_provider_media_state (provider_id) VALUES ($1) ON CONFLICT DO NOTHING", [providerId]);
+      return readProviderMedia(client, providerId);
+    });
+  }
+
+  async addProviderMediaAsAdmin(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    expectedVersion: number,
+    rightsConsentVersion: string,
+    input: ExperienceHostProviderMediaAssetInput,
+  ): Promise<ExperienceHostProviderMedia> {
+    validateAdminDraftActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    validateExpectedVersion(expectedVersion, "expectedVersion");
+    assertNonEmptyText(rightsConsentVersion, "rightsConsentVersion", 160);
+    if (rightsConsentVersion !== rightsConsentVersion.trim()) throw new StoreValidationError("Provider media consent version is invalid.");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id)) throw new StoreValidationError("provider media.id must be a UUID v4.");
+    assertNonEmptyText(input.objectKey, "provider media.objectKey", 512);
+    if (!/^[0-9a-f]{64}$/.test(input.sourceRefHash)) throw new StoreValidationError("provider media.sourceRefHash must be a SHA-256 digest.");
+    if (!Number.isSafeInteger(input.width) || input.width < 1 || input.width > 2400
+      || !Number.isSafeInteger(input.height) || input.height < 1 || input.height > 2400
+      || !Number.isSafeInteger(input.byteSize) || input.byteSize < 1 || input.byteSize > 10 * 1024 * 1024) throw new StoreValidationError("provider media dimensions and size are invalid.");
+    if (input.placement !== "PROVIDER_PHOTO" && input.placement !== "BUSINESS_LOGO") throw new StoreValidationError("provider media placement is invalid.");
+    if (typeof input.altText !== "string" || input.altText.trim().length === 0 || input.altText.length > 500
+      || typeof input.altTextJa !== "string" || input.altTextJa.trim().length === 0 || input.altTextJa.length > 500
+      || (input.publicCredit !== null && (typeof input.publicCredit !== "string" || input.publicCredit.trim().length === 0 || input.publicCredit.length > 300))) {
+      throw new StoreValidationError("provider media metadata is invalid.");
+    }
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await requireAdminProvider(client, providerId, " FOR SHARE");
+      await client.query("INSERT INTO experience_provider_media_state (provider_id) VALUES ($1) ON CONFLICT DO NOTHING", [providerId]);
+      const state = await client.query<{ version: number }>("SELECT version FROM experience_provider_media_state WHERE provider_id=$1 FOR UPDATE", [providerId]);
+      if (!state.rows[0] || Number(state.rows[0].version) !== expectedVersion) throw new StoreConflictError("Provider media version mismatch.");
+      const old = await client.query<{ asset_id: string }>(
+        "SELECT asset_id FROM experience_provider_media_selection WHERE provider_id=$1 AND placement=$2 FOR UPDATE",
+        [providerId, input.placement],
+      );
+      await client.query("DELETE FROM experience_provider_media_selection WHERE provider_id=$1 AND placement=$2", [providerId, input.placement]);
+      if (old.rows[0]) await client.query("UPDATE experience_provider_media_assets SET state='REVOKED' WHERE provider_id=$1 AND id=$2::uuid", [providerId, old.rows[0].asset_id]);
+      await client.query(
+        `INSERT INTO experience_provider_media_assets
+           (id,provider_id,object_key,source_ref_hash,width,height,byte_size,rights_confirmed_at,
+            rights_confirmed_by_admin_niho_user_id,rights_consent_version)
+         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,clock_timestamp(),$8,$9)`,
+        [input.id, providerId, input.objectKey, input.sourceRefHash, input.width, input.height, input.byteSize,
+          actor.nihoUserId, rightsConsentVersion],
+      );
+      await client.query(
+        `INSERT INTO experience_provider_media_selection
+           (provider_id,placement,asset_id,alt_text,alt_text_ja,public_credit)
+         VALUES ($1,$2,$3::uuid,$4,$5,$6)`,
+        [providerId, input.placement, input.id, input.altText, input.altTextJa, input.publicCredit],
+      );
+      const bumped = await client.query(
+        "UPDATE experience_provider_media_state SET version=version+1,updated_at=clock_timestamp() WHERE provider_id=$1 AND version=$2",
+        [providerId, expectedVersion],
+      );
+      if (bumped.rowCount !== 1) throw new StoreConflictError("Provider media version mismatch.");
+      return readProviderMedia(client, providerId);
+    });
+  }
+
+  async revokeProviderMediaAsAdmin(
+    actor: PublicationAdminDraftActor,
+    providerId: string,
+    assetId: string,
+    expectedVersion: number,
+  ): Promise<ExperienceHostProviderMedia> {
+    validateAdminDraftActor(actor);
+    assertStoreIdentifier(providerId, "providerId");
+    validateExpectedVersion(expectedVersion, "expectedVersion");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assetId)) throw new StoreNotFoundError("provider media");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      await requireAdminProvider(client, providerId, " FOR SHARE");
+      const state = await client.query<{ version: number }>("SELECT version FROM experience_provider_media_state WHERE provider_id=$1 FOR UPDATE", [providerId]);
+      if (!state.rows[0] || Number(state.rows[0].version) !== expectedVersion) throw new StoreConflictError("Provider media version mismatch.");
+      const selected = await client.query(
+        "DELETE FROM experience_provider_media_selection WHERE provider_id=$1 AND asset_id=$2::uuid RETURNING asset_id",
+        [providerId, assetId],
+      );
+      if (selected.rowCount !== 1) throw new StoreNotFoundError("provider media");
+      await client.query("UPDATE experience_provider_media_assets SET state='REVOKED' WHERE provider_id=$1 AND id=$2::uuid", [providerId, assetId]);
+      const bumped = await client.query(
+        "UPDATE experience_provider_media_state SET version=version+1,updated_at=clock_timestamp() WHERE provider_id=$1 AND version=$2",
+        [providerId, expectedVersion],
+      );
+      if (bumped.rowCount !== 1) throw new StoreConflictError("Provider media version mismatch.");
+      return readProviderMedia(client, providerId);
     });
   }
 

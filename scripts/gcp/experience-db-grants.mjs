@@ -60,6 +60,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_provider_media_assets: { write: IU },
   experience_provider_media_selection: { write: IUD },
   experience_provider_media_state: { write: IU },
+  // Admin-confirmed public identity is provider-owned, not seller- or membership-owned.
+  experience_provider_public_profiles: { write: IU },
   experience_product_publication_media: { write: I },
   // Immutable public copies are inserted; state and short-lived NIHO/Connect readiness move independently.
   experience_product_publications: { write: I },

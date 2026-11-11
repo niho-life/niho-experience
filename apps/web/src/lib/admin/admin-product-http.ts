@@ -18,6 +18,8 @@ import {
   validSaleTerms,
   type ExperienceHostMediaAssetInput,
   type ExperienceHostMediaSelectionInput,
+  type ExperienceHostProviderMediaAssetInput,
+  type ExperienceAdminProviderPublicProfileInput,
   type ExperiencePublicationDraftCreateInput,
   type ExperiencePublicationDraftInput,
   type JsonValue,
@@ -42,6 +44,7 @@ type Revision = { readonly draft: number; readonly state: number | null; readonl
 type ProductContext = { params: Promise<{ providerId: string; productId: string }> };
 type ProviderContext = { params: Promise<{ providerId: string }> };
 type AssetContext = { params: Promise<{ providerId: string; productId: string; assetId: string }> };
+type ProviderAssetContext = { params: Promise<{ providerId: string; assetId: string }> };
 type ProductDraftBody = {
   readonly slug: string;
   readonly publicTitle: string;
@@ -53,6 +56,7 @@ type ProductDraftBody = {
 const BODY_LIMIT = 256 * 1024;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION = "provider-public-profile-v1";
 const TERMS_KEYS = [
   "offerPrices", "childPricing", "minimumParticipants", "minimumChargeableParticipants", "maxPartySize",
   "cancellationPolicy", "cancellationWindowMinutesBeforeStart", "cancellationRefundBasisPoints",
@@ -81,6 +85,16 @@ function validDraft(value: unknown): value is ProductDraftBody {
     && isRecord(value.content) && value.currency === "JPY"
     && typeof value.unitAmount === "number" && Number.isSafeInteger(value.unitAmount)
     && (value.unitAmount === 0 || value.unitAmount >= 50);
+}
+
+function validProviderProfile(value: unknown): value is ExperienceAdminProviderPublicProfileInput & { readonly consentConfirmed: true } {
+  return isRecord(value)
+    && exactKeys(value, ["publicDisplayName", "providerKind", "consentVersion", "consentConfirmed"])
+    && typeof value.publicDisplayName === "string" && value.publicDisplayName.length >= 1 && value.publicDisplayName.length <= 300
+    && value.publicDisplayName === value.publicDisplayName.trim() && !/[\u0000-\u001f\u007f]/.test(value.publicDisplayName)
+    && (value.providerKind === null || value.providerKind === "PERSON" || value.providerKind === "BUSINESS")
+    && value.consentVersion === PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION
+    && value.consentConfirmed === true;
 }
 
 function validSaleTermsShape(value: unknown): value is ProductSaleTermsInput {
@@ -196,14 +210,77 @@ async function productDto(actor: PublicationAdminDraftActor, providerId: string,
   };
 }
 
+async function providerProfileDto(actor: PublicationAdminDraftActor, providerId: string) {
+  const repository = experiencePublicationRepository();
+  if (!repository) throw new Error("store unavailable");
+  const [{ provider, profile }, media] = await Promise.all([
+    repository.getAdminProvider(actor, providerId),
+    repository.getAdminProviderMedia(actor, providerId),
+  ]);
+  return {
+    provider,
+    profile,
+    providerMedia: {
+      ...media,
+      assets: media.assets.map((asset) => ({
+        ...asset,
+        previewUrl: `/admin/api/product-workspaces/${encodeURIComponent(providerId)}/provider-media/${encodeURIComponent(asset.id)}`,
+      })),
+    },
+    consentVersion: PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION,
+  };
+}
+
 export async function adminDraftSellerCollection(request: Request): Promise<Response> {
   const auth = await authorize(request, request.method !== "GET");
   if (!auth.ok) return auth.response;
-  if (request.method !== "GET" || new URL(request.url).search) return adminJson({ error: { code: "NOT_FOUND" } }, 404);
+  if ((request.method !== "GET" && request.method !== "POST") || new URL(request.url).search) return adminJson({ error: { code: "NOT_FOUND" } }, 404);
   const repository = experiencePublicationRepository();
   if (!repository) return adminJson({ error: { code: "UNAVAILABLE" } }, 503);
-  try { return adminJson({ sellers: await repository.listAdminDraftSellers(auth.actor) }); }
+  try {
+    if (request.method === "GET") {
+      const [sellers, providers] = await Promise.all([
+        repository.listAdminDraftSellers(auth.actor),
+        repository.listAdminProviders(auth.actor),
+      ]);
+      return adminJson({ sellers, providers, consentVersion: PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION });
+    }
+    const body = await parseJson(request);
+    if (body instanceof Response || !validProviderProfile(body)) return body instanceof Response ? body : adminJson({ error: { code: "INVALID_INPUT" } }, 400);
+    const profile = await repository.createAdminProvider(auth.actor, {
+      publicDisplayName: body.publicDisplayName,
+      providerKind: body.providerKind,
+      consentVersion: body.consentVersion,
+    });
+    return adminJson({ profile, consentVersion: PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION }, 201);
+  }
   catch (error) { return mapStoreError(error); }
+}
+
+export async function adminProviderProfileRequest(request: Request, context: ProviderContext): Promise<Response> {
+  const auth = await authorize(request, request.method !== "GET");
+  if (!auth.ok) return auth.response;
+  const { providerId } = await context.params;
+  if (!ID.test(providerId) || new URL(request.url).search || (request.method !== "GET" && request.method !== "PUT")) {
+    return adminJson({ error: { code: "NOT_FOUND" } }, 404);
+  }
+  const repository = experiencePublicationRepository();
+  if (!repository) return adminJson({ error: { code: "UNAVAILABLE" } }, 503);
+  try {
+    if (request.method === "GET") return adminJson(await providerProfileDto(auth.actor, providerId));
+    const body = await parseJson(request);
+    if (body instanceof Response || !exactKeys(body, ["expectedVersion", "profile"]) || !validProviderProfile(body.profile)
+      || (body.expectedVersion !== null && (!Number.isSafeInteger(body.expectedVersion) || (body.expectedVersion as number) < 1))) {
+      return body instanceof Response ? body : adminJson({ error: { code: "INVALID_INPUT" } }, 400);
+    }
+    const validated = body.profile as ExperienceAdminProviderPublicProfileInput & { readonly consentConfirmed: true };
+    await repository.saveAdminProviderPublicProfile(auth.actor, providerId, body.expectedVersion as number | null, {
+      publicDisplayName: validated.publicDisplayName,
+      providerKind: validated.providerKind,
+      consentVersion: validated.consentVersion,
+    });
+    return adminJson(await providerProfileDto(auth.actor, providerId));
+  } catch (error) { return mapStoreError(error); }
 }
 
 export async function adminDraftProductCollection(request: Request, context: ProviderContext): Promise<Response> {
@@ -426,6 +503,100 @@ export async function adminDraftMediaAssetRequest(request: Request, context: Ass
       "cache-control": "private, no-store", "content-type": "image/jpeg", "content-length": String(bytes.byteLength),
       "referrer-policy": "no-referrer", "x-content-type-options": "nosniff", "x-robots-tag": "noindex, nofollow",
     } });
+  } catch (error) { return mapStoreError(error); }
+}
+
+export async function adminProviderMediaRequest(request: Request, context: ProviderContext): Promise<Response> {
+  const auth = await authorize(request, true);
+  if (!auth.ok) return auth.response;
+  const { providerId } = await context.params;
+  if (request.method !== "POST" || !ID.test(providerId) || new URL(request.url).search) return adminJson({ error: { code: "NOT_FOUND" } }, 404);
+  if (request.headers.get("x-experience-photo-rights-confirmed") !== "true"
+    || request.headers.get("x-experience-provider-profile-consent-version") !== PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION) {
+    return adminJson({ error: { code: "PHOTO_RIGHTS_CONFIRMATION_REQUIRED" } }, 422);
+  }
+  const placement = request.headers.get("x-experience-media-placement");
+  const versionHeader = request.headers.get("x-experience-provider-media-version");
+  const mediaVersion = versionHeader && /^\d+$/.test(versionHeader) ? Number(versionHeader) : Number.NaN;
+  const altText = decodeBase64UrlHeader(request.headers.get("x-experience-photo-alt-text-utf8-base64url")) ?? "";
+  const altTextJa = decodeBase64UrlHeader(request.headers.get("x-experience-photo-alt-text-ja-utf8-base64url")) ?? "";
+  const creditHeader = request.headers.get("x-experience-photo-credit-utf8-base64url");
+  const publicCredit = creditHeader === null ? null : decodeBase64UrlHeader(creditHeader);
+  const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if ((placement !== "PROVIDER_PHOTO" && placement !== "BUSINESS_LOGO")
+    || !Number.isSafeInteger(mediaVersion) || mediaVersion < 1
+    || altText.trim() === "" || altText.length > 500 || altTextJa.trim() === "" || altTextJa.length > 500
+    || (creditHeader !== null && publicCredit === null)
+    || (publicCredit !== null && (publicCredit.trim() === "" || publicCredit.length > 300))) {
+    return adminJson({ error: { code: "INVALID_INPUT" } }, 400);
+  }
+  if (mediaType !== "image/jpeg" && mediaType !== "image/png") return adminJson({ error: { code: "UNSUPPORTED_FORMAT" } }, 415);
+  const repository = experiencePublicationRepository();
+  const storage = experiencePublicMediaStorage();
+  if (!repository || !storage) return adminJson({ error: { code: "UNAVAILABLE" } }, 503);
+  try {
+    const current = await repository.getAdminProvider(auth.actor, providerId);
+    if (!current.profile) return adminJson({ error: { code: "PROFILE_REQUIRED" } }, 422);
+  } catch (error) { return mapStoreError(error); }
+  let original: Buffer;
+  let processed: Awaited<ReturnType<typeof processGuideCoverImage>>;
+  try { original = await readGuideCoverInput(request); processed = await processGuideCoverImage(original); }
+  catch (error) {
+    if (error instanceof GuideCoverImageError) return adminJson({ error: { code: error.code.toUpperCase() } }, error.code === "payload_too_large" ? 413 : error.code === "unsupported_format" ? 415 : 400);
+    return adminJson({ error: { code: "INVALID_INPUT" } }, 400);
+  }
+  const id = randomUUID();
+  const objectKey = `experience-provider-media/${id}.jpg`;
+  let stored = false;
+  let registered = false;
+  try {
+    const before = await repository.getAdminProviderMedia(auth.actor, providerId);
+    const old = before.assets.find((asset) => asset.placement === placement);
+    await storage.write(objectKey, processed.bytes); stored = true;
+    const asset: ExperienceHostProviderMediaAssetInput = {
+      id, objectKey, sourceRefHash: createHash("sha256").update(original).digest("hex"),
+      width: processed.width, height: processed.height, byteSize: processed.bytes.byteLength,
+      placement, altText, altTextJa, publicCredit,
+    };
+    await repository.addProviderMediaAsAdmin(
+      auth.actor, providerId, mediaVersion, PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION, asset,
+    );
+    registered = true;
+    if (old) await storage.remove(`experience-provider-media/${old.id}.jpg`).catch(() => undefined);
+    return adminJson(await providerProfileDto(auth.actor, providerId), 201);
+  } catch (error) {
+    if (stored && !registered) await storage.remove(objectKey).catch(() => undefined);
+    return mapStoreError(error);
+  }
+}
+
+export async function adminProviderMediaAssetRequest(request: Request, context: ProviderAssetContext): Promise<Response> {
+  const auth = await authorize(request, request.method !== "GET");
+  if (!auth.ok) return auth.response;
+  const { providerId, assetId } = await context.params;
+  if (!ID.test(providerId) || !UUID_V4.test(assetId) || new URL(request.url).search
+    || (request.method !== "GET" && request.method !== "DELETE")) return adminJson({ error: { code: "NOT_FOUND" } }, 404);
+  const repository = experiencePublicationRepository();
+  const storage = experiencePublicMediaStorage();
+  if (!repository || !storage) return adminJson({ error: { code: "UNAVAILABLE" } }, 503);
+  try {
+    const media = await repository.getAdminProviderMedia(auth.actor, providerId);
+    const asset = media.assets.find((item) => item.id === assetId);
+    if (!asset) return adminJson({ error: { code: "NOT_FOUND" } }, 404);
+    if (request.method === "GET") {
+      const bytes = await storage.read(`experience-provider-media/${asset.id}.jpg`);
+      if (bytes.byteLength !== asset.byteSize) return adminJson({ error: { code: "UNAVAILABLE" } }, 503);
+      return new Response(Uint8Array.from(bytes).buffer, { headers: {
+        "cache-control": "private, no-store", "content-type": "image/jpeg", "content-length": String(bytes.byteLength),
+        "referrer-policy": "no-referrer", "x-content-type-options": "nosniff", "x-robots-tag": "noindex, nofollow",
+      } });
+    }
+    const versionHeader = request.headers.get("x-experience-provider-media-version");
+    const expectedVersion = versionHeader && /^\d+$/.test(versionHeader) ? Number(versionHeader) : Number.NaN;
+    if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) return adminJson({ error: { code: "INVALID_INPUT" } }, 400);
+    await repository.revokeProviderMediaAsAdmin(auth.actor, providerId, assetId, expectedVersion);
+    await storage.remove(`experience-provider-media/${assetId}.jpg`).catch(() => undefined);
+    return adminJson(await providerProfileDto(auth.actor, providerId));
   } catch (error) { return mapStoreError(error); }
 }
 

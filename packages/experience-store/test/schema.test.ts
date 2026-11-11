@@ -559,4 +559,20 @@ describe("database invariants", () => {
     assert.match(code, /DROP TABLE IF EXISTS experience_product_cutovers/);
     assert.doesNotMatch(code, /UPDATE experience_products|DELETE FROM experience_products|UPDATE bookings|DELETE FROM bookings/i);
   });
+
+  it("separates consented provider identity from seller, membership and Stripe state (#507 #378)", async () => {
+    const sql = await readFile(new URL("../migrations/0069_provider_public_profiles.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    const profile = sql.match(/CREATE TABLE experience_provider_public_profiles \(([\s\S]*?)\n\);/)?.[1] ?? "";
+    assert.match(profile, /provider_id text PRIMARY KEY REFERENCES experience_providers/);
+    assert.match(profile, /public_display_name text NOT NULL/);
+    assert.match(profile, /provider_kind IS NULL OR provider_kind IN \('PERSON','BUSINESS'\)/);
+    assert.match(profile, /consent_version text NOT NULL/);
+    assert.match(profile, /consented_by_admin_niho_user_id text NOT NULL/);
+    assert.doesNotMatch(profile, /seller|stripe|owner|membership|account_ref/i);
+    assert.match(sql, /rights_confirmed_by_admin_niho_user_id/);
+    assert.match(sql, /rights_consent_version/);
+    assert.doesNotMatch(sql.replace(/--.*$/gm, ""), /INSERT INTO provider_memberships|INSERT INTO experience_host_seller_profiles/);
+  });
 });
