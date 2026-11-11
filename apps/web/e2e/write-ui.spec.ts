@@ -267,6 +267,7 @@ test("401 keeps the editor mounted for a separate-tab relogin, then 409 freezes 
   test.skip(testInfo.project.name !== "write-desktop", "desktop states");
   const api = await mockWriterApi(page);
   await page.goto(`/write/write-e2e-fixture/edit/${ID}`);
+  await expect(page.locator(".write-prosemirror")).toBeVisible();
   api.setNextSave("401");
   await page.getByLabel("タイトル", { exact: true }).fill("A title kept through relogin");
   await expect(page.getByText("ログインの有効期限が切れました。編集内容はこのタブに残っています。")).toBeVisible();

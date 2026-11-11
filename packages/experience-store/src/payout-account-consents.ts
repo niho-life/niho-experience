@@ -114,19 +114,25 @@ async function hostAccountSellerAccount(client: PoolClient, providerId: string):
  * The consent that counts now for `account` (the provider's registered payout account), read in the caller's
  * transaction: active, for that account, given by a host account that is still an active ACTIVE OWNER. null otherwise.
  */
-async function countingConsent(client: PoolClient, providerId: string, account: string): Promise<DbRow | null> {
+async function countingConsent(client: PoolClient, providerId: string, account: string, lockOwner = false): Promise<DbRow | null> {
   const found = await client.query<DbRow>(
     `SELECT ${CONSENT_COLUMNS} FROM provider_payout_account_consents consent
+      JOIN provider_memberships owner ON owner.provider_id=consent.provider_id
+        AND owner.niho_user_id=consent.consented_by_niho_user_id AND owner.active=true AND owner.role='OWNER'
+      JOIN host_accounts owner_account ON owner_account.id=owner.niho_user_id AND owner_account.status='ACTIVE'
       WHERE consent.provider_id=$1 AND consent.revoked_at IS NULL AND consent.stripe_connect_account_ref=$2
-        AND EXISTS (
-          SELECT 1 FROM provider_memberships owner
-            JOIN host_accounts owner_account ON owner_account.id=owner.niho_user_id AND owner_account.status='ACTIVE'
-           WHERE owner.provider_id=consent.provider_id AND owner.niho_user_id=consent.consented_by_niho_user_id
-             AND owner.active=true AND owner.role='OWNER'
-        )`,
+      ${lockOwner ? "FOR SHARE OF owner, owner_account" : ""}`,
     [providerId, account],
   );
   return found.rows[0] ?? null;
+}
+
+/** Recheck the recorded consent under the provider inventory lock when an Admin publishes. */
+export async function adminPayoutConsentIsCurrent(
+  client: PoolClient, providerId: string, account: string, version: string, lockOwner: boolean,
+): Promise<boolean> {
+  if (!version) return false;
+  return (await countingConsent(client, providerId, account, lockOwner))?.consent_version === version;
 }
 
 /**

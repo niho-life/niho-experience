@@ -92,6 +92,7 @@ const readError: Record<string, string> = {
   VERSION_CONFLICT: "別の更新が先に保存されました。最新状態を確認できます。入力は保持しています。",
   UNAVAILABLE: "保存結果を確認できませんでした。入力は保持しています。最新状態を読み直してから続けてください。",
   TRANSLATION_UNAVAILABLE: "英語案を作成できませんでした。入力はそのまま保持しています。",
+  PAYOUT_CHECK_UNAVAILABLE: "Stripeで販売者の受取口座を確認できませんでした。時間をおいて再度お試しください。",
 };
 
 const BLOCKER_COPY: Record<string, string> = {
@@ -1224,7 +1225,7 @@ export function HostPublicationWorkspace({
         description={stateConfirm === "stop"
           ? "この商品の新しい予約を停止します。受け付けた予約はそのまま残ります。"
           : adminDraft
-            ? "販売者への確認と公開条件を記録し、事務局の代理公開として公開します。"
+            ? "販売者への確認を記録します。公開条件と受取口座の状態を確認し、公開します。"
             : "掲載条件を確認し、この商品を公開します。公開内容と販売条件に同意します。"}
         focusRef={stateConfirmStay}
         stayRef={stateConfirmStay}
