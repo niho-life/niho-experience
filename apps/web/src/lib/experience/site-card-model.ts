@@ -14,19 +14,21 @@ export function sitePublicationCard(item: SitePublicExperience): CardModel {
   const firstPhoto = publication.photos[0];
   const prices = offers.map((offer) => offer.pricing.adultPriceYen);
   const image = firstPhoto ? { url: firstPhoto.src, alt: firstPhoto.alt } : null;
-  const faceMedia = sellerDisclosure?.sellerKind === "BUSINESS"
+  const providerName = publication.providerPublicName ?? publication.sellerDisplayName;
+  const legacyFaceMedia = sellerDisclosure?.sellerKind === "BUSINESS"
     ? publication.businessLogo
-    : sellerDisclosure?.sellerKind === "PERSON"
-      ? publication.providerPhoto
-      : publication.providerPhoto ?? publication.businessLogo;
+    : sellerDisclosure?.sellerKind === "PERSON" ? publication.providerPhoto : publication.providerPhoto ?? publication.businessLogo;
+  const faceMedia = publication.providerPublicName
+    ? publication.providerPhoto ?? (publication.providerKind === "BUSINESS" ? publication.businessLogo : null)
+    : legacyFaceMedia;
   const faceImage = faceMedia ? { url: faceMedia.src, alt: faceMedia.alt } : null;
   return {
     slug: publication.slug,
     title: publication.publicTitle,
     lead: publication.content.lead,
     cover: image,
-    withLabel: `with ${publication.sellerDisplayName}`,
-    face: { name: publication.sellerDisplayName, initial: initialOf(publication.sellerDisplayName), image: faceImage },
+    withLabel: `with ${providerName}`,
+    face: { name: providerName, initial: initialOf(providerName), image: faceImage },
     groupLabel: offers.length ? groupSizeLabel(offers.map((offer) => ({ capacity: offer.capacity, maxPartySize: offer.maxPartySize, minimumParticipants: offer.minimumParticipants }))) : null,
     durationLabel: durations.length ? durations[0] === durations.at(-1) ? formatDuration(durations[0]!, "en") : `${formatDuration(durations[0]!, "en")}–${formatDuration(durations.at(-1)!, "en")}` : "See details",
     language: language ? { short: shortLanguageNote(language), full: language } : null,

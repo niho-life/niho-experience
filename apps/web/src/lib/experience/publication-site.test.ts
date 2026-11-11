@@ -29,6 +29,8 @@ const publication = {
   currency: "JPY",
   unitAmount: 30000,
   sellerDisplayName: "Panasonic",
+  providerPublicName: "Synthetic Actual Host",
+  providerKind: "PERSON" as const,
   meetingOverview: "At the synthetic station.",
   meetingPointDisclosure: "AFTER_BOOKING" as const,
   meetingPoint: null,
@@ -71,20 +73,42 @@ describe("Experience public site DTO", () => {
     expect(english).toMatchObject({
       canonicalUrl: "https://experience.example.test/experiences/synthetic-dinner",
       seller: { displayName: "Panasonic", legalNoticeUrl: "https://experience.example.test/experiences/synthetic-dinner/seller" },
-      provider: { kind: "INDIVIDUAL", name: "Panasonic", logo: { alt: "Synthetic business logo" } },
+      provider: { kind: "INDIVIDUAL", name: "Synthetic Actual Host", logo: null },
       booking: { legalDocuments: [{ kind: "COMMERCIAL_TRANSACTIONS", url: "https://experience.example.test/experiences/synthetic-dinner/seller" }] },
-      hosts: [{ displayName: "Panasonic", avatar: { alt: "Synthetic provider" } }],
+      hosts: [{ displayName: "Synthetic Actual Host", avatar: { alt: "Synthetic provider" } }],
       photos: [{ alt: "Synthetic meal" }], timeline: [{ title: "Welcome", photoIndex: 0 }],
     });
     expect(japanese).toMatchObject({
       canonicalUrl: "https://experience.example.test/ja/experiences/synthetic-dinner",
-      title: "合成ディナー", photos: [{ alt: "合成料理" }], provider: { logo: { alt: "合成事業者ロゴ" } },
+      title: "合成ディナー", photos: [{ alt: "合成料理" }], provider: { logo: null },
       timeline: [{ title: "歓迎", photoIndex: 0 }],
       offers: expect.arrayContaining([expect.objectContaining({
         saleCancellation: { policyCode: "CUSTOM", cancellationWindowMinutesBeforeStart: 90, refundBasisPoints: 3750 },
       })]),
     });
     expect(JSON.stringify({ english, japanese })).not.toMatch(/providerId|stripeConnectAccountRef|sellerNihoAccountRef/);
+  });
+
+  it("keeps the legal seller while cards and detail identify the actual provider", async () => {
+    const detail = await getPublicationDetail(publication.slug, "en");
+    expect(detail).toMatchObject({
+      provider: { name: "Synthetic Actual Host" },
+      hosts: [{ displayName: "Synthetic Actual Host", avatar: { alt: "Synthetic provider" } }],
+      seller: { displayName: "Panasonic" },
+    });
+    expect(await listPublicationSummaries("kamakura", "en")).toMatchObject([
+      { provider: { name: "Synthetic Actual Host", kind: "INDIVIDUAL" } },
+    ]);
+  });
+
+  it("preserves existing host identity and media for legacy publications", async () => {
+    state.publications.getPublicBySlug.mockResolvedValueOnce({ ...publication, providerPublicName: null, providerKind: null });
+    const detail = await getPublicationDetail(publication.slug, "en");
+    expect(detail).toMatchObject({
+      provider: { name: "Panasonic", kind: "INDIVIDUAL", logo: { alt: "Synthetic business logo" } },
+      hosts: [{ displayName: "Panasonic", avatar: { alt: "Synthetic provider" } }],
+      seller: { displayName: "Panasonic" },
+    });
   });
 
   it("lists only published summaries and exposes Japanese copy only after its source is confirmed", async () => {

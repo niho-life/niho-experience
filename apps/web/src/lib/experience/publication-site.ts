@@ -17,7 +17,10 @@ function summaryOf(publication: PublicExperiencePublication, terms: PublicBookin
     duration: { minMinutes: durations.length ? Math.min(...durations) : 0, maxMinutes: durations.length ? Math.max(...durations) : 0 },
     lead: locale === "ja" && publication.japanese ? publication.japanese.lead : publication.content.lead,
     priceFrom: { amountYen: prices.length ? Math.min(...prices) : publication.unitAmount, taxIncluded: true, unit: "PER_ADULT" },
-    provider: { kind: disclosure?.sellerKind === "PERSON" ? "INDIVIDUAL" : "BUSINESS", name: publication.sellerDisplayName },
+    provider: {
+      kind: (publication.providerPublicName ? publication.providerKind : disclosure?.sellerKind) === "PERSON" ? "INDIVIDUAL" : "BUSINESS",
+      name: publication.providerPublicName ?? publication.sellerDisplayName,
+    },
     region: { key: "kamakura", name: "Kamakura" },
     slug: publication.slug,
     title: locale === "ja" && publication.japanese ? publication.japanese.title : publication.publicTitle,
@@ -82,6 +85,9 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
   const photos = publication.photos.map(localizedPhoto);
   const providerPhoto = publication.providerPhoto ? localizedPhoto(publication.providerPhoto) : null;
   const businessLogo = publication.businessLogo ? localizedPhoto(publication.businessLogo) : null;
+  const providerName = publication.providerPublicName ?? publication.sellerDisplayName;
+  const providerKind = publication.providerPublicName ? publication.providerKind : disclosure?.sellerKind;
+  const hostAvatar = providerPhoto ?? (publication.providerPublicName && providerKind === "BUSINESS" ? businessLogo : null);
   const canonicalUrl = `${config.siteUrl}${locale === "ja" ? "/ja" : ""}/experiences/${encodeURIComponent(publication.slug)}`;
   const sellerLegalUrl = disclosure?.method === "EXTERNAL"
     ? disclosure.externalUrl
@@ -99,7 +105,7 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
     cover: photos[0] ?? null,
     description: content.description,
     highlights: [...content.highlights],
-    hosts: providerPhoto ? [{ avatar: providerPhoto, bio: null, displayName: publication.sellerDisplayName }] : [],
+    hosts: publication.providerPublicName || hostAvatar ? [{ avatar: hostAvatar, bio: null, displayName: providerName }] : [],
     included: [...content.included],
     knowBeforeYouGo: [...content.knowBeforeYouGo],
     languageNote: content.language,
@@ -113,7 +119,12 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
     notSuitableFor: [...content.notSuitableFor],
     offers,
     photos,
-    provider: { kind: disclosure?.sellerKind === "PERSON" ? "INDIVIDUAL" : "BUSINESS", name: publication.sellerDisplayName, tagline: null, logo: businessLogo },
+    provider: {
+      kind: providerKind === "PERSON" ? "INDIVIDUAL" : "BUSINESS",
+      name: providerName,
+      tagline: null,
+      logo: !publication.providerPublicName || providerKind === "BUSINESS" ? businessLogo : null,
+    },
     region: { key: "kamakura", name: "Kamakura" },
     seller: { displayName: publication.sellerDisplayName, legalNoticeUrl: sellerLegalUrl },
     slug: publication.slug,
@@ -154,9 +165,10 @@ export async function listPublicationSummaries(region?: string, locale: Locale =
     .map(async (publication) => {
       const [terms, disclosure] = await Promise.all([
         booking ? booking.publicBookingTerms(publication.slug) : null,
-        disclosures ? disclosures.getPublicBySlug(publication.slug) : null,
+        publication.providerPublicName ? null : disclosures?.getPublicBySlug(publication.slug) ?? null,
       ]);
-      return terms?.conditionsVersion === null && terms.offers.length ? summaryOf(publication, terms, locale, disclosure && terms.sellerDisplayName === disclosure.sellerDisplayName ? disclosure : null) : null;
+      const safeDisclosure = disclosure && terms?.sellerDisplayName === disclosure.sellerDisplayName ? disclosure : null;
+      return terms?.conditionsVersion === null && terms.offers.length ? summaryOf(publication, terms, locale, safeDisclosure) : null;
     }));
   return summaries.filter((item): item is ExperienceSummaryV11 => item !== null);
 }

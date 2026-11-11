@@ -51,7 +51,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const items = filterExperienceSummaries(catalog, searchQuery);
   const legacyCards = buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview);
   const nativeCards = sitePublications
-    .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && (!searchQuery || `${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.sellerDisplayName}`.toLocaleLowerCase("en").includes(searchQuery)))
+    .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && (!searchQuery || `${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicName ?? publication.sellerDisplayName}`.toLocaleLowerCase("en").includes(searchQuery)))
     .map(sitePublicationCard);
   const cardsWithoutReviews = [...legacyCards, ...nativeCards];
   const cards = withReviewLines(cardsWithoutReviews, await getReviewSummaries(cardsWithoutReviews.map((card) => card.slug)));

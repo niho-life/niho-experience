@@ -144,10 +144,16 @@ export function sitePublicationJsonLd(item: SitePublicExperience, siteUrl: strin
         }
       : {}),
   };
-  const provider = { "@type": "Organization", name: publication.sellerDisplayName };
+  const provider = {
+    "@type": publication.providerKind === "PERSON" ? "Person" : "Organization",
+    name: publication.providerPublicName ?? publication.sellerDisplayName,
+  };
   return {
     touristTrip: { "@context": "https://schema.org", "@type": "TouristTrip", ...facts, inLanguage: locale, provider },
-    product: { "@context": "https://schema.org", "@type": "Product", ...facts, brand: provider },
+    product: {
+      "@context": "https://schema.org", "@type": "Product", ...facts,
+      ...(!publication.providerPublicName || publication.providerKind === "BUSINESS" ? { brand: provider } : {}),
+    },
   };
 }
 

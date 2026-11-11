@@ -54,6 +54,8 @@ const row = (disclosure: "PUBLIC" | "AFTER_BOOKING") => ({
   currency: "JPY",
   unit_amount: "4000",
   seller_display_name: "Synthetic Legal Seller",
+  provider_public_name: null,
+  provider_kind: null,
   photos: [{ asset_id: "00000000-0000-4000-8000-000000000401", source_position: 0, placement: "GALLERY", alt_text: "Synthetic photo", alt_text_ja: "合成写真", public_credit: null }],
   published_at: "2026-11-03T00:00:00.000Z",
 });
@@ -63,7 +65,8 @@ describe("experience publication public projection", () => {
     const projected = projectPublicExperiencePublication(row("PUBLIC"));
     assert.deepEqual(Object.keys(projected ?? {}), [
       "slug", "publicTitle", "content", "meetingOverview", "meetingPointDisclosure", "meetingPoint",
-      "currency", "unitAmount", "sellerDisplayName", "photos", "providerPhoto", "businessLogo", "japanese", "publishedAtUtc",
+      "currency", "unitAmount", "sellerDisplayName", "providerPublicName", "providerKind",
+      "photos", "providerPhoto", "businessLogo", "japanese", "publishedAtUtc",
     ]);
     assert.deepEqual(projected?.meetingPoint, { name: "Synthetic meeting area", exteriorPhotoIndex: 0 });
     assert.deepEqual(projected?.photos, [{
@@ -107,6 +110,16 @@ describe("experience publication public projection", () => {
       alt: "Seller logo", altJa: "販売者のロゴ", publicCredit: "Synthetic designer",
     });
     assert.equal(projectPublicExperiencePublication({ ...row("AFTER_BOOKING"), provider_media: [] })?.providerPhoto, null);
+  });
+
+  it("projects only the separately consented provider name and kind, never a seller-name fallback", () => {
+    const consented = projectPublicExperiencePublication({
+      ...row("AFTER_BOOKING"), provider_public_name: "Synthetic Actual Host", provider_kind: "PERSON",
+    });
+    assert.equal(consented?.providerPublicName, "Synthetic Actual Host");
+    assert.equal(consented?.providerKind, "PERSON");
+    assert.equal(consented?.sellerDisplayName, "Synthetic Legal Seller");
+    assert.equal(projectPublicExperiencePublication({ ...row("AFTER_BOOKING"), provider_kind: "UNKNOWN" }), null);
   });
 
   it("fails closed when an approved content field has the wrong shape", () => {

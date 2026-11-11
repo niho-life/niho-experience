@@ -43,6 +43,9 @@ export interface PublicExperiencePublication {
   readonly currency: string;
   readonly unitAmount: number;
   readonly sellerDisplayName: string;
+  /** Admin-confirmed public identity of the person or business delivering the experience. */
+  readonly providerPublicName?: string | null;
+  readonly providerKind?: "PERSON" | "BUSINESS" | null;
   readonly meetingOverview: string | null;
   readonly meetingPointDisclosure: "PUBLIC" | "AFTER_BOOKING";
   readonly meetingPoint: {
@@ -342,16 +345,20 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   const currency = typeof row.currency === "string" && /^[A-Z]{3}$/.test(row.currency) ? row.currency : null;
   const unitAmount = safeInteger(row.unit_amount);
   const sellerDisplayName = text(row.seller_display_name, false);
+  const providerPublicName = text(row.provider_public_name, false);
+  const providerKind = row.provider_kind === null || row.provider_kind === undefined
+    ? null : row.provider_kind === "PERSON" || row.provider_kind === "BUSINESS" ? row.provider_kind : undefined;
   const media = projectPhotos(row.photos);
   const providerMedia = projectProviderMedia(row.provider_media);
   const publishedAtUtc = instant(row.published_at);
   if (slug === null || publicTitle === null || manuscript === null || currency === null || unitAmount === null
-      || sellerDisplayName === null || media === null || providerMedia === null || publishedAtUtc === null) return null;
+      || sellerDisplayName === null || providerKind === undefined
+      || media === null || providerMedia === null || publishedAtUtc === null) return null;
   manuscript = remapPhotoReferences(manuscript, source, media.galleryPositionBySourcePosition);
   if (!manuscript) return null;
   const japanese = projectJapaneseManuscript(row, source, publicTitle, media.galleryPositionBySourcePosition);
   return {
-    slug, publicTitle, ...manuscript, currency, unitAmount, sellerDisplayName,
+    slug, publicTitle, ...manuscript, currency, unitAmount, sellerDisplayName, providerPublicName, providerKind,
     photos: media.photos, providerPhoto: providerMedia.providerPhoto, businessLogo: providerMedia.businessLogo, japanese, publishedAtUtc,
   };
 }

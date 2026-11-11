@@ -68,6 +68,13 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   const faq = content ? content.faq : publication.content.faq;
   // The host's own bio (#146) in the page's language only: English needs the host's confirmed English. No filler.
   const hostBioText = (ja ? hostBio?.ja : hostBio?.en) ?? null;
+  const providerName = publication.providerPublicName ?? null;
+  const providerIdentityMedia = providerName
+    ? publication.providerPhoto ?? (publication.providerKind === "BUSINESS" ? publication.businessLogo : null)
+    : null;
+  const providerIdentityPhoto = providerIdentityMedia
+    ? { url: providerIdentityMedia.src, alt: ja ? providerIdentityMedia.altJa : providerIdentityMedia.alt }
+    : null;
   // Every experience sold here is in Kamakura for now (the catalogue is one region). The station and walk come only from an
   // explicit "N-minute walk from X Station" in the public meeting overview; otherwise the line says no more than the region.
   const locationLine = detailFromTokyoLine(ja ? "鎌倉" : "Kamakura", publication.meetingOverview, locale);
@@ -97,7 +104,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
             ? <Link href={headline.href} aria-label={headline.accessibleLabel} className="mt-3 inline-flex font-extrabold text-moss hover:underline">{headline.label}</Link>
             : <span className="mt-3 inline-flex rounded-full bg-sand px-3 py-1 text-sm font-extrabold">{headline.label}</span>
           : null}
-          <p className="mt-4 text-[0.9375rem] text-ink-soft">{ja ? "提供者: " : "Offered by "}<b className="text-ink">{publication.sellerDisplayName}</b></p>
+          <p className="mt-4 text-[0.9375rem] text-ink-soft">{providerName ? (ja ? "ホスト: " : "Hosted by ") : (ja ? "提供者: " : "Offered by ")}<b className="text-ink">{providerName ?? publication.sellerDisplayName}</b></p>
           {hostStoryGuide ? <p className="mt-2"><Link href={`/guides/${hostStoryGuide.slug}`} className="link-leaf">Read the host story</Link></p> : null}
           <ul className="mt-[18px] grid grid-cols-2 gap-x-3 gap-y-4 border-y border-line py-[18px] lg:flex lg:flex-wrap lg:gap-x-9 lg:border-0 lg:py-0">
             {durations ? <li><span className="eyebrow">{ja ? "所要時間" : "Duration"}</span><p className="font-extrabold">{durations}</p></li> : null}
@@ -158,10 +165,12 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 {publication.meetingPoint.exteriorPhotoIndex !== null && photos[publication.meetingPoint.exteriorPhotoIndex] ? <Photo image={photos[publication.meetingPoint.exteriorPhotoIndex]!} alt={photos[publication.meetingPoint.exteriorPhotoIndex]!.alt || `${publication.meetingPoint.name} exterior`} aspect="" rounded="rounded-xl" className="mt-4 h-52 w-64" sizes="256px" /> : null}
               </div> : publication.meetingPointDisclosure === "AFTER_BOOKING" ? <p className="mt-4 text-ink-soft">The meeting point is shared after your booking is confirmed.</p> : null}
             </section> : null}
-            {hostBioText ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
+            {providerName || hostBioText ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 id="host-heading" className="text-2xl">{ja ? "ホストについて" : "About your host"}</h2>
-              <p className="mt-4 font-extrabold">{publication.sellerDisplayName}</p>
-              <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{hostBioText}</p>
+              <div className="mt-4 flex items-start gap-4">
+                {providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt={providerIdentityPhoto.alt} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" /> : null}
+                <div><p className="font-extrabold">{providerName ?? publication.sellerDisplayName}</p>{hostBioText ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{hostBioText}</p> : null}</div>
+              </div>
             </section> : null}
             {reviews ? <section id="reviews" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 className="text-2xl">{ja ? "レビュー" : "Reviews"}</h2>

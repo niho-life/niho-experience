@@ -533,6 +533,11 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
       }
       assert.equal((await pool.query("SELECT count(*)::int AS n FROM experience_product_media_assets WHERE provider_id=$1 AND product_id=$2 AND source_ref_hash=$3", [OWNER.providerId, original.id, "4".repeat(64)])).rows[0]?.n, 1);
 
+      await publications.saveAdminProviderPublicProfile({ nihoUserId: "admin-synthetic" }, OWNER.providerId, null, {
+        publicDisplayName: "Synthetic Actual Host",
+        providerKind: "PERSON",
+        consentVersion: "provider-public-profile-v1",
+      });
       const providerPhotoId = randomUUID();
       const logoId = randomUUID();
       const profileWithPhoto = await publications.addProviderMedia(OWNER, 1, {
@@ -571,6 +576,9 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         checks: CHECKS,
       });
       const editedPublic = await publications.getPublicBySlug(original.slug);
+      assert.equal(editedPublic?.providerPublicName, "Synthetic Actual Host");
+      assert.equal(editedPublic?.providerKind, "PERSON");
+      assert.equal(editedPublic?.sellerDisplayName, "Synthetic Legal Seller");
       assert.equal(editedPublic?.photos.length, 1);
       assert.equal(editedPublic?.photos[0]?.altJa, "2枚目の合成写真");
       assert.equal(editedPublic?.providerPhoto?.altJa, "合成提供者 確認済");
