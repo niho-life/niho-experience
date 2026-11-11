@@ -32,6 +32,9 @@ export function sitePublicationMetadata(item: SitePublicExperience, locale: "en"
   const base = publicMetadata(ja ? publication.japanese!.title : publication.publicTitle, seoDescription(ja ? publication.japanese!.lead : publication.content.lead), canonical);
   return {
     ...base,
+    title: !ja && publication.slug === "community-dinner-with-locals"
+      ? "Kamakura Cooking & Dinner with Locals"
+      : base.title,
     alternates: { canonical, languages: publication.japanese && config.japaneseSiteEnabled ? { en: english, ja: japanese, "x-default": english } : { en: english, "x-default": english } },
     openGraph: { ...base.openGraph, locale: ja ? "ja_JP" : "en_US" },
     robots: config.indexingAllowed ? undefined : { index: false, follow: false },
