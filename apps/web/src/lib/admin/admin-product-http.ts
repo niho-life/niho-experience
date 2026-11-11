@@ -8,6 +8,7 @@ import {
   parseScheduleRule,
   type ScheduleRule,
 } from "@niho-experience/experience-domain";
+import { retrieveConnectedAccount } from "@niho-experience/experience-payments";
 import {
   ExperiencePublicationBlockedError,
   StoreAccessDeniedError,
@@ -173,7 +174,7 @@ async function productDto(actor: PublicationAdminDraftActor, providerId: string,
     repository.getAdminDraftSaleTerms(actor, providerId, productId),
     repository.listAdminDraftMedia(actor, providerId, productId),
     repository.listAdminDraftSaleOffers(actor, providerId, productId),
-    repository.getAdminDraftPublicationStatus(actor, providerId, productId, config.experiencePublicationConsentVersion),
+    repository.getAdminDraftPublicationStatus(actor, providerId, productId, config.experiencePublicationConsentVersion, config.experiencePayoutAccountConsentVersion),
   ]);
   if (product.version !== publication.draftVersion
     || terms.draftVersion !== publication.draftVersion
@@ -291,6 +292,24 @@ export async function adminDraftPublishRequest(request: Request, context: Produc
   const repository = experiencePublicationRepository();
   if (!repository) return adminJson({ error: { code: "UNAVAILABLE" } }, 503);
   try {
+    const payoutConsentVersion = config.experiencePayoutAccountConsentVersion;
+    const current = await repository.getAdminDraftPublicationStatus(auth.actor, providerId, productId, body.consentVersion, payoutConsentVersion);
+    if (current.draftVersion !== revision.draft || current.stateVersion !== revision.state || current.saleTermsVersion !== revision.saleTerms) {
+      throw new StoreConflictError("Publication changed before the payout account check.");
+    }
+    if (current.blockers.length) throw new ExperiencePublicationBlockedError(current.blockers);
+
+    let accountCheck = null;
+    if (current.payoutAccountRef !== null) {
+      const platformStripeKey = process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY?.trim();
+      const unavailable = () => adminJson({ error: { code: "PAYOUT_CHECK_UNAVAILABLE" } }, 503);
+      if (!platformStripeKey) return unavailable();
+      const stripe = await retrieveConnectedAccount({ accountId: current.payoutAccountRef, platformStripeKey }).catch(() => null);
+      if (stripe === null || stripe.kind === "unreachable") return unavailable();
+      if (stripe.kind !== "ready") throw new ExperiencePublicationBlockedError(["CONNECT_NOT_READY"]);
+      accountCheck = { stripeConnectAccountRef: current.payoutAccountRef, checkedAtUtc: new Date().toISOString() };
+    }
+
     const state = await repository.publishAdminDraft(auth.actor, providerId, productId, {
       expectedDraftVersion: revision.draft,
       expectedStateVersion: revision.state,
@@ -299,6 +318,8 @@ export async function adminDraftPublishRequest(request: Request, context: Produc
       accepted: true,
       sellerConfirmationMethod: body.sellerConfirmationMethod,
       photoRightsConfirmed: true,
+      payoutConsentVersion,
+      accountCheck,
     });
     return adminJson({ publication: { status: "PUBLISHED", version: state.version } });
   } catch (error) { return mapStoreError(error); }

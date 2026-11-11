@@ -3,27 +3,37 @@ import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import type { ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreAccessDeniedError } from "../src/errors.ts";
-import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
+import { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "../src/experience-publication.ts";
+import { HostAccounts } from "../src/host-accounts.ts";
+import { ProviderPayoutAccountConsents } from "../src/payout-account-consents.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
+const publicationConsent = "publication-consent-synthetic-v1";
+const payoutConsent = "synthetic-payout-v1";
+const stripeAccount = "acct_SyntheticAssisted";
 
 describe("Admin product draft handoff (#169)", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
-  it("keeps ADMIN explicit through preparation and lets only the mapped OWNER publish", async () => {
+  for (const kind of ["legacy", "experience"] as const) it(`prepares and publishes a ${kind} seller's draft under the correct actor`, async () => {
     const db = await createIsolatedDatabase(databaseUrl, "admin_product_draft", { max: 4 });
     const pool = db.pool;
     const providerId = "provider-assisted-synthetic";
-    const owner = { providerId, nihoUserId: "owner-assisted-synthetic" } as const;
     const admin = { nihoUserId: "admin-assisted-synthetic" } as const;
     try {
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", [providerId]);
+      const accounts = new HostAccounts(pool);
+      const ownerId = kind === "experience"
+        ? (await accounts.provisionHostAccount({ email: "synthetic-owner@example.test", nowUtc: new Date().toISOString() })).hostAccountId
+        : "owner-assisted-synthetic";
+      const owner = { providerId, nihoUserId: ownerId };
       await pool.query(
         `INSERT INTO experience_host_seller_profiles
            (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
-         VALUES ($1,'legacy-assisted-synthetic','Synthetic craft host',$2,'acct_SyntheticAssisted','Synthetic Craft Seller')`,
-        [providerId, owner.nihoUserId],
+         VALUES ($1,$2,'Synthetic craft host',$3,$4,'Synthetic Craft Seller')`,
+        [providerId, kind === "experience" ? null : "legacy-assisted-synthetic",
+          kind === "experience" ? `sel_${"a".repeat(32)}` : ownerId, stripeAccount],
       );
       await pool.query(
         "INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points) VALUES ($1,false,1000)",
@@ -114,7 +124,11 @@ describe("Admin product draft handoff (#169)", { skip: databaseUrl === undefined
         "an authenticated Admin is not an OWNER and cannot publish",
       );
 
-      assert.deepEqual(await publications.ensureMappedOwnerMembership(owner.nihoUserId), { kind: "linked" });
+      if (kind === "experience") {
+        assert.equal((await accounts.grantProviderOwner({ providerId, hostAccountId: ownerId, nowUtc: new Date().toISOString() })).kind, "granted");
+      } else {
+        assert.deepEqual(await publications.ensureMappedOwnerMembership(owner.nihoUserId), { kind: "linked" });
+      }
       await new GuestBookingRepository(pool).setProviderSupportSettings(owner, {
         supportEnabled: false, consentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, expectedVersion: 1,
       });
@@ -125,28 +139,51 @@ describe("Admin product draft handoff (#169)", { skip: databaseUrl === undefined
       assert.equal((await publications.listActiveSaleOffers(owner, draft.id))[0]?.capacity, 6);
       assert.equal((await publications.getSaleTerms(owner, draft.id)).saleTerms?.cancellationPolicy, "FREE_UNTIL_24H");
 
-      const now = Date.now();
-      const ready = await publications.recordReadiness(owner, {
-        accountUsable: true,
-        connectReady: true,
-        paymentReuseConsentAccepted: true,
-        paymentReuseConsentVersion: "synthetic-payment-reuse-v1",
-        paymentReuseConsentedAtUtc: new Date(now - 2_000).toISOString(),
-        sellerDisplayReady: true,
-        sellerNihoAccountRef: owner.nihoUserId,
-        stripeConnectAccountRef: "acct_SyntheticAssisted",
-        sellerDisplayName: "Synthetic Craft Seller",
-        requiredConsentVersion: "publication-consent-synthetic-v1",
-        observedAtUtc: new Date(now - 1_000).toISOString(),
-        validUntilUtc: new Date(now + 60_000).toISOString(),
-      }, null);
-      await publications.publish(owner, draft.id, {
-        expectedDraftVersion: inherited.version,
-        expectedStateVersion: null,
-        expectedSaleTermsVersion: 1,
-        consentVersion: ready.requiredConsentVersion,
-        checks: { manuscriptReady: true, photosReady: true },
-      });
+      const revision = { expectedDraftVersion: inherited.version, expectedStateVersion: null, expectedSaleTermsVersion: 1 };
+      if (kind === "experience") {
+        await publications.reviewAdminDraftEnglish(admin, providerId, draft.id, inherited.version);
+        const status = () => publications.getAdminDraftPublicationStatus(admin, providerId, draft.id, publicationConsent, payoutConsent);
+        assert.deepEqual((await status()).blockers, ["PAYMENT_REUSE_CONSENT_REQUIRED"]);
+        const consents = new ProviderPayoutAccountConsents(pool);
+        const recordConsent = () => consents.record(owner, {
+          stripeConnectAccountRef: stripeAccount, consentVersion: payoutConsent, nowUtc: new Date().toISOString(),
+        });
+        await recordConsent();
+        assert.deepEqual((await status()).blockers, []);
+        const accountCheck = { stripeConnectAccountRef: stripeAccount, checkedAtUtc: new Date().toISOString() };
+        const publish = (check: typeof accountCheck | null) => publications.publishAdminDraft(admin, providerId, draft.id, {
+          ...revision, consentVersion: publicationConsent, payoutConsentVersion: payoutConsent,
+          accepted: true, sellerConfirmationMethod: "WRITTEN", photoRightsConfirmed: true, accountCheck: check,
+        });
+        const blockedBy = (blocker: string) => (error: unknown) => error instanceof ExperiencePublicationBlockedError
+          && error.blockers.some((item) => item === blocker);
+        await assert.rejects(publish(null), blockedBy("CONNECT_NOT_READY"));
+        await assert.rejects(publish({ ...accountCheck, stripeConnectAccountRef: "acct_SyntheticOther" }), blockedBy("CONNECT_NOT_READY"));
+        await assert.rejects(publish({ ...accountCheck, checkedAtUtc: new Date(Date.now() - 6 * 60_000).toISOString() }), blockedBy("CONNECT_NOT_READY"));
+        await consents.revoke(owner, { nowUtc: new Date().toISOString() });
+        await assert.rejects(publish(accountCheck), blockedBy("PAYMENT_REUSE_CONSENT_REQUIRED"));
+        await recordConsent();
+        await publish(accountCheck);
+        assert.equal((await pool.query("SELECT count(*)::int AS n FROM provider_publication_readiness")).rows[0]?.n, 0);
+        const proxyAudit = await pool.query(
+          "SELECT actor_niho_user_id, seller_confirmation_method FROM admin_proxy_publication_audit_events WHERE provider_id=$1 AND product_id=$2",
+          [providerId, draft.id],
+        );
+        assert.deepEqual(proxyAudit.rows, [{ actor_niho_user_id: admin.nihoUserId, seller_confirmation_method: "WRITTEN" }]);
+      } else {
+        const now = Date.now();
+        await publications.recordReadiness(owner, {
+          accountUsable: true, connectReady: true, paymentReuseConsentAccepted: true,
+          paymentReuseConsentVersion: "synthetic-payment-reuse-v1",
+          paymentReuseConsentedAtUtc: new Date(now - 2_000).toISOString(), sellerDisplayReady: true,
+          sellerNihoAccountRef: owner.nihoUserId, stripeConnectAccountRef: stripeAccount,
+          sellerDisplayName: "Synthetic Craft Seller", requiredConsentVersion: publicationConsent,
+          observedAtUtc: new Date(now - 1_000).toISOString(), validUntilUtc: new Date(now + 60_000).toISOString(),
+        }, null);
+        await publications.publish(owner, draft.id, {
+          ...revision, consentVersion: publicationConsent, checks: { manuscriptReady: true, photosReady: true },
+        });
+      }
       const publicProduct = await publications.getPublicBySlug(draft.slug);
       assert.equal(publicProduct?.publicTitle, draft.publicTitle);
       assert.equal(publicProduct?.unitAmount, 4_000);

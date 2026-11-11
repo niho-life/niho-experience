@@ -1,19 +1,23 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  config: { experienceHostPublicationApiEnabled: true },
+  config: { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", experiencePayoutAccountConsentVersion: "payout-v1" },
   http: vi.fn(() => true),
   mutation: vi.fn(() => true),
   load: vi.fn(),
   clear: vi.fn(),
+  retrieve: vi.fn(),
   repository: {
     listAdminDraftSellers: vi.fn(),
     listAdminDraftProducts: vi.fn(),
+    getAdminDraftPublicationStatus: vi.fn(),
+    publishAdminDraft: vi.fn(),
   },
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: mocks.config }));
+vi.mock("@niho-experience/experience-payments", () => ({ retrieveConnectedAccount: mocks.retrieve }));
 vi.mock("./server", () => ({
   isAdminHttp: mocks.http,
   adminMutationAllowed: mocks.mutation,
@@ -35,10 +39,24 @@ vi.mock("@/lib/guide-cover-image", () => ({
 import {
   adminDraftProductCollection,
   adminDraftProductRequest,
+  adminDraftPublishRequest,
   adminDraftSellerCollection,
 } from "./admin-product-http";
 
 const SITE = "https://experience.example";
+const account = "acct_SyntheticPayout01";
+const publication = { draftVersion: 1, stateVersion: null, saleTermsVersion: 2, payoutAccountRef: account, blockers: [] };
+const publishContext = { params: Promise.resolve({ providerId: "provider-readable", productId: "product-one" }) };
+function publishRequest() {
+  return new Request(`${SITE}/admin/api/product-workspaces/provider-readable/products/product-one/publish`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      version: Buffer.from("1:1:0:2").toString("base64url"),
+      accepted: true, sellerConfirmationMethod: "WRITTEN", photoRightsConfirmed: true, consentVersion: "listing-v1",
+    }),
+  });
+}
 const verified = (id = "admin-current") => ({
   status: "ok",
   kind: "niho",
@@ -57,7 +75,13 @@ beforeEach(() => {
     { providerId: "provider-readable", providerDisplayName: "鎌倉の工房", sellerDisplayName: "工房販売者" },
   ]);
   mocks.repository.listAdminDraftProducts.mockResolvedValue([]);
+  mocks.repository.getAdminDraftPublicationStatus.mockResolvedValue(publication);
+  mocks.repository.publishAdminDraft.mockResolvedValue({ version: 1 });
+  mocks.retrieve.mockResolvedValue({ kind: "ready" });
+  vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "synthetic-test-key");
 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("Admin product draft BFF", () => {
   it("re-verifies the dedicated ADMIN and returns only the name-based seller DTO", async () => {
@@ -98,7 +122,7 @@ describe("Admin product draft BFF", () => {
     expect(mocks.load).toHaveBeenCalledOnce();
   });
 
-  it("has no Admin publish or stop action", async () => {
+  it("requires the dedicated publish endpoint for an Admin publication", async () => {
     const response = await adminDraftProductRequest(
       new Request(`${SITE}/admin/api/product-workspaces/provider-readable/products/product-one`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "publish" }),
@@ -107,6 +131,32 @@ describe("Admin product draft BFF", () => {
     );
     expect(response.status).toBe(404);
     expect(mocks.load).toHaveBeenCalledOnce();
+  });
+
+  it("checks the registered account during Admin publication and keeps it out of the response", async () => {
+    const response = await adminDraftPublishRequest(publishRequest(), publishContext);
+    expect(mocks.retrieve).toHaveBeenCalledWith({ accountId: account, platformStripeKey: "synthetic-test-key" });
+    expect(mocks.repository.publishAdminDraft).toHaveBeenCalledWith(
+      { nihoUserId: "admin-current" }, "provider-readable", "product-one",
+      expect.objectContaining({ payoutConsentVersion: "payout-v1", accountCheck: { stripeConnectAccountRef: account, checkedAtUtc: expect.any(String) } }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ publication: { status: "PUBLISHED", version: 1 } });
+  });
+
+  it("stops before consulting Stripe when payout consent is missing", async () => {
+    mocks.repository.getAdminDraftPublicationStatus.mockResolvedValue({ ...publication, blockers: ["PAYMENT_REUSE_CONSENT_REQUIRED"] });
+    const response = await adminDraftPublishRequest(publishRequest(), publishContext);
+    expect(response.status).toBe(422);
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+    expect(mocks.repository.publishAdminDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([["not_ready", 422], ["unreachable", 503]])("leaves the draft unpublished when Stripe answers %s", async (kind, status) => {
+    mocks.retrieve.mockResolvedValue({ kind });
+    const response = await adminDraftPublishRequest(publishRequest(), publishContext);
+    expect(response.status).toBe(status);
+    expect(mocks.repository.publishAdminDraft).not.toHaveBeenCalled();
   });
 
   it("fails closed and clears a rejected Admin session", async () => {
