@@ -8,6 +8,7 @@ import {
   ExperiencePublicationRepository,
   GuestBookingRepository,
   ExperienceStore,
+  ManagedExperienceSalesRepository,
 } from "@niho-experience/experience-store";
 import { SiteSaleRegistration } from "@niho-experience/experience-store/site-sale-registration";
 
@@ -35,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   repository: undefined as unknown,
   clearSessionCookie: vi.fn(),
   bookingRepository: undefined as unknown,
+  managedSalesRepository: undefined as unknown,
 }));
 
 vi.mock("server-only", () => ({}));
@@ -52,6 +54,7 @@ vi.mock("@/lib/host/server", () => ({
 vi.mock("@/lib/experience/store-server", () => ({
   experiencePublicationRepository: () => mocks.repository,
   guestBookingRepository: () => mocks.bookingRepository,
+  managedExperienceSalesRepository: () => mocks.managedSalesRepository,
   // This existing flow has no seller disclosure configured yet.
   providerSellerDisclosureRepository: () => null,
 }));
@@ -145,6 +148,7 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
     mocks.session.mockResolvedValue({ accessToken: "synthetic-niho-session-bearer" });
     mocks.accessTokenUsable.mockReturnValue(true);
     mocks.bookingRepository = undefined;
+    mocks.managedSalesRepository = undefined;
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -155,6 +159,7 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       const experienceStore = new ExperienceStore(pool);
       const bookingRepository = new GuestBookingRepository(pool);
       mocks.bookingRepository = bookingRepository;
+      mocks.managedSalesRepository = new ManagedExperienceSalesRepository(pool);
       const stripe = await registration.provisionHostSeller({
         providerId: EXPERIENCE_PROVIDER_ID,
         legacyProviderId: LEGACY_PROVIDER_ID,
