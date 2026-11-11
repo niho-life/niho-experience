@@ -11,6 +11,7 @@
 - 事務局はホストと同じ商品フォーム・写真処理・料金/取消条件・calendar処理を使い、未公開かつ一度も公開されていない下書きだけを作成・更新する。操作actorはOWNERへ置き換えず、同じtransactionの`admin_product_draft_audit_events`へ記録する。
 - オーナー決定（2026-11-05）により、事務局は販売者へ口頭または書面・メッセージで確認した後、Admin準備の一度も公開されていないDRAFTだけを事務局判断で代理公開できる。stop・再開、販売者変更、Connect/本人状態の変更、提供者共通写真・ロゴの変更は提供しない。
 - 代理公開は現在Admin session、same-origin、現行DRAFT/販売条件revision、現在の掲載同意version、確認方法、写真掲載権利確認を固定BFFで再検証する。Host公開と同じserver blockerを通し、readinessが不明・期限切れなら閉じる。Admin actorは実際のverified NIHO user IDを`ADMIN_PROXY` publisherとimmutable監査へ記録し、OWNER membershipや販売者OWNERとして保存しない。
+- Experienceのホストアカウントに移行済みの販売者では、事務局が代理公開を実行するたびに、サーバーが登録済み口座をStripeへ直接照会する。公開時に照会した口座と登録口座の一致、現在のOWNERによる口座利用同意の有効性を再検証する。販売者本人の公開直前のホスト画面操作は不要。旧NIHOアカウントに紐づく販売者には従来の確認手順を適用する。
 - 手入力の日英原稿は、OWNER本人確認とは別のAdmin reviewとして日英fingerprintとactorをimmutable記録する。公開時に現行revision/fingerprintとの一致を再検証し、写真はupload時のserver権利確認に加えて代理公開時にも明示確認を必須とする。自由記入やPIIは監査へ保存しない。
 - OWNERは本人の初回Experienceログイン時に従来どおりmembershipを得る。代理公開しない場合は`/host/experiences`で同じ下書きを確認して通常公開できる。代理公開後のpublic SSR、availability、checkoutも通常経路を使う。
 - 開閉条件は既存のAdmin console、Experience host publication、DB接続だけで、新しいflagはない。migration `0058_admin_product_drafts.sql`と`0061_admin_proxy_publication.sql`、runtime grant、seller profileの運営provisioning、現在OWNER/Connect readiness、承認済み掲載同意versionの適用・受入が配備前提である。いずれかのflag・Admin secret・現在ADMIN検証が欠ける場合、固定BFFは404または認証失敗で閉じる。

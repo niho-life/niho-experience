@@ -19,7 +19,7 @@ import {
 } from "./guest-bookings.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { isHostAccountId } from "./host-accounts.ts";
-import { payoutConsentStillCounts } from "./payout-account-consents.ts";
+import { adminPayoutConsentIsCurrent, payoutConsentStillCounts } from "./payout-account-consents.ts";
 import { enqueueListingSuspensionNotification, type ListingSuspensionChange } from "./host-notification-outbox.ts";
 import { isHostSellerRef } from "./host-sellers.ts";
 import {
@@ -100,6 +100,8 @@ export interface ExperienceAdminEnglishReview {
 }
 
 export interface ExperienceAdminPublicationStatus {
+  /** Used server-side for the Stripe check during proxy publication. */
+  readonly payoutAccountRef: string | null;
   readonly draftVersion: number;
   readonly stateVersion: number | null;
   readonly saleTermsVersion: number | null;
@@ -731,12 +733,26 @@ async function lockPublicationSlugs(client: PoolClient, slugs: readonly string[]
   }
 }
 
+type AdminStripeAccountCheck = { readonly stripeConnectAccountRef: string; readonly checkedAtUtc: string };
+
+type AdminPayoutCheck = {
+  readonly seller: ExperienceHostSellerProfile;
+  readonly payoutConsentVersion: string;
+  // undefined is a draft preview. A publish request must supply a fresh account check.
+  readonly accountCheck?: AdminStripeAccountCheck | null;
+};
+
+function isExperienceSeller(seller: ExperienceHostSellerProfile): boolean {
+  return seller.legacyProviderId === null && isHostSellerRef(seller.sellerNihoAccountRef);
+}
+
 async function blockers(
   client: PoolClient,
   product: ProductRecord,
   checks: ExperiencePublicationContentChecks,
   consentVersion: string | null,
   state: ExperiencePublicationState | null,
+  adminPayout?: AdminPayoutCheck,
 ): Promise<ExperiencePublicationBlocker[]> {
   const result: ExperiencePublicationBlocker[] = [];
   if (!checks.manuscriptReady) result.push("MANUSCRIPT_REQUIRED");
@@ -804,6 +820,23 @@ async function blockers(
   }
   if (facts.rows[0]?.slug_in_use === true) result.push("SLUG_IN_USE");
   if (state?.operationsSuspendedAtUtc !== null && state?.operationsSuspendedAtUtc !== undefined) result.push("OPERATIONS_SUSPENDED");
+
+  if (adminPayout && isExperienceSeller(adminPayout.seller)) {
+    const { seller, payoutConsentVersion, accountCheck } = adminPayout;
+    if (seller.sellerNihoAccountRef !== product.sellerNihoAccountRef
+        || seller.stripeConnectAccountRef !== product.stripeConnectAccountRef
+        || seller.sellerDisplayName !== product.sellerDisplayName) result.push("SELLER_MISMATCH");
+    if (!await adminPayoutConsentIsCurrent(client, product.providerId, seller.stripeConnectAccountRef, payoutConsentVersion, accountCheck !== undefined)) {
+      result.push("PAYMENT_REUSE_CONSENT_REQUIRED");
+    }
+    if (accountCheck !== undefined) {
+      const now = Date.parse(await databaseNow(client));
+      const checkedAt = accountCheck ? Date.parse(accountCheck.checkedAtUtc) : NaN;
+      if (accountCheck?.stripeConnectAccountRef !== seller.stripeConnectAccountRef
+          || !Number.isFinite(checkedAt) || checkedAt > now || now - checkedAt >= 5 * 60_000) result.push("CONNECT_NOT_READY");
+    }
+    return result;
+  }
 
   const row = await readinessRow(client, product.providerId, true);
   if (!row) return [...result, "READINESS_MISSING"];
@@ -994,20 +1027,20 @@ export class ExperiencePublicationRepository {
     providerId: string,
     productId: string,
     consentVersion: string,
+    payoutConsentVersion: string,
   ): Promise<ExperienceAdminPublicationStatus> {
     validateAdminDraftActor(actor);
     assertNonEmptyText(consentVersion, "consentVersion", 160);
     return withTransaction(this.#pool, async (client) => {
-      await adminDraftSeller(client, providerId);
+      const seller = await adminDraftSeller(client, providerId);
       const product = await requireNeverPublishedAdminDraft(client, providerId, productId);
       const manuscript = publicationManuscriptReview(product.content, product.publicTitle);
-      const [state, terms, photosReady, review] = await Promise.all([
-        lockedState(client, providerId, productId, false),
-        readSaleTerms(client, providerId, productId),
-        adminPhotosReady(client, providerId, productId),
-        matchingAdminEnglishReview(client, actor, product),
-      ]);
+      const state = await lockedState(client, providerId, productId, false);
+      const terms = await readSaleTerms(client, providerId, productId);
+      const photosReady = await adminPhotosReady(client, providerId, productId);
+      const review = await matchingAdminEnglishReview(client, actor, product);
       return {
+        payoutAccountRef: isExperienceSeller(seller) ? seller.stripeConnectAccountRef : null,
         draftVersion: product.version,
         stateVersion: state?.version ?? null,
         saleTermsVersion: terms?.version ?? null,
@@ -1019,7 +1052,7 @@ export class ExperiencePublicationRepository {
             japaneseFingerprint: review.japaneseFingerprint,
             englishFingerprint: review.englishFingerprint,
           } } : {}),
-        }, consentVersion, state),
+        }, consentVersion, state, { seller, payoutConsentVersion }),
         englishReview: {
           reviewed: review !== null,
           reviewedAtUtc: review?.reviewedAtUtc ?? null,
@@ -1081,6 +1114,8 @@ export class ExperiencePublicationRepository {
       readonly accepted: true;
       readonly sellerConfirmationMethod: AdminSellerConfirmationMethod;
       readonly photoRightsConfirmed: true;
+      readonly payoutConsentVersion: string;
+      readonly accountCheck: AdminStripeAccountCheck | null;
     },
   ): Promise<ExperiencePublicationState> {
     validateAdminDraftActor(actor);
@@ -1094,7 +1129,7 @@ export class ExperiencePublicationRepository {
     }
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      await adminDraftSeller(client, providerId);
+      const seller = await adminDraftSeller(client, providerId);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${providerId}:${productId}`]);
       const product = await requireNeverPublishedAdminDraft(client, providerId, productId, " FOR UPDATE");
       if (product.version !== input.expectedDraftVersion) throw new StoreConflictError("Product version mismatch: read the draft again.");
@@ -1113,7 +1148,7 @@ export class ExperiencePublicationRepository {
           japaneseFingerprint: review.japaneseFingerprint,
           englishFingerprint: review.englishFingerprint,
         } } : {}),
-      }, input.consentVersion, state);
+      }, input.consentVersion, state, { seller, payoutConsentVersion: input.payoutConsentVersion, accountCheck: input.accountCheck ?? null });
       if (blocked.length > 0) throw new ExperiencePublicationBlockedError(blocked);
       if (!review || !terms) throw new StoreConflictError("Publication review or sale terms changed while publishing.");
       const changed = await client.query(
