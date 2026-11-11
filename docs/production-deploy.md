@@ -74,6 +74,8 @@ mock で出している機能を http mode で開くフラグを、repository va
 | --- | --- | --- | --- | --- | --- |
 | `ADMIN_SUPPORT_CONSOLE_ENABLED` | `ADMIN_SUPPORT_CONSOLE_ENABLED` | ホストの画面・DB（配備capability） | — | `ADMIN_SESSION_SECRET_REF` → `ADMIN_SESSION_SECRET`（専用の32文字以上の乱数、数値version固定） | `NIHO_EXPERIENCE_ADMIN_ORIGIN`＝サイトのURL |
 | `EXPERIENCE_GUEST_BOOKING_ENABLED` | `GUEST_BOOKING_ENABLED` | ホストの画面・DB、メール | `BOOKING_CONSENT_VERSION`、`PRIVACY_POLICY_URL`（任意） | `STRIPE_PLATFORM_SECRET_KEY_REF` → `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET_REF` → `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | — |
+| `EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED` | `MANAGED_SALES_WEBHOOKS_ENABLED` | ゲスト予約 | `MANAGED_PLATFORM_ACCOUNT_ID` | `STRIPE_PLATFORM_WEBHOOK_SECRET_REF` → `EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET`（Connect用と別の数値version固定参照） | — |
+| `EXPERIENCE_MANAGED_SALES_ENABLED` | `MANAGED_SALES_ENABLED` | 完全代行Webhook、掲載API、Admin | `MANAGED_LEGAL_SELLER_NAME`、`MANAGED_COMMERCIAL_TRANSACTIONS_URL`、`MANAGED_SELLER_NIHO_ACCOUNT_REF`、`MANAGED_AGREEMENT_VERSION`、`OWNER_SALES_PLAN_AGREEMENT_VERSION`（任意） | — | — |
 | `EXPERIENCE_GUEST_MAIL_ENABLED` | `GUEST_MAIL_ENABLED` | DB | `MAIL_FROM`、`MAIL_REPLY_TO` | `SMTP_HOST_REF`・`SMTP_PORT_REF`・`SMTP_USER_REF`・`SMTP_PASSWORD_REF` → `EXPERIENCE_SMTP_*` | `EXPERIENCE_JOBS_AUDIENCE`＝サイトの URL、`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL`＝`experience-jobs@<project>` |
 | `EXPERIENCE_PUBLICATIONS_ENABLED` | `PUBLICATIONS_ENABLED` | ホストの画面・DB | `PUBLICATION_CONSENT_VERSION`、`PUBLIC_MEDIA_BUCKET` | DB capability → `EXPERIENCE_DATABASE_URL` | — |
 | `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` | `HOST_PUBLICATION_API_ENABLED` | Experience publications | — | — | — |
@@ -135,6 +137,10 @@ mock で出している機能を http mode で開くフラグを、repository va
 - 各 Secret は Secret Manager に作り、実行 ID `experience-runtime` にその Secret だけの `secretAccessor` を付けてから参照を入れる。値と接続情報は GitHub の variable・PR に書かない。
 - job（メール・push・Google）を開くフラグは、呼び手の Cloud Scheduler と、上の名前のサービスアカウント（project の role なし、このサービスの `run.invoker` だけ）を先に作る。workflow はそれらを作らない。
 - 順番：設定と Secret の参照を先に入れ、最後にフラグの variable を `true` にする。`candidate` → 候補 URL で確認 → 同じ variable のまま `promote`。止めるときはフラグを `false` に戻して新しい候補を作るか、前の revision に traffic を戻す。
+
+**NIHO完全代行の試験販売**では、migration `0070_managed_experience_sales.sql` とruntime grantsを適用する。NIHO-platformのアカウント用Webhookを正規サイトの `/api/experience/stripe/platform-webhook` に登録し、署名秘密はConnect用と分けてSecret Managerへ登録する。イベントと販売者・委託の確認項目は [体験ごとの販売プランと精算](experience-sales-plans.md) を参照する。
+
+`PROD_MANAGED_SALES_WEBHOOKS_ENABLED=true` でWebhookの設定を配備し、販売条件を確認した1件を事務局で公開する配備では `PROD_MANAGED_SALES_ENABLED=true` も設定する。完全代行の新規受付を止める場合は、販売のフラグを `false` にして候補を作り直す。受付済みの予約の決済確定・返金・精算に使うため、Webhookのフラグと口座・署名秘密の参照は維持する。
 
 **フラグを足すとき**（paneB-1・paneB-2 など）：`scripts/deploy/runtime-flags.mjs` の `FLAGS` に 1 項目（Cloud Run の名前、variable、前提、設定・Secret、workflow が入れる値）、`deploy-runtime-flags.test.ts` の `CONFIG_KEY` に 1 行、この表と [stg の表](host-calendar-staging.md#機能のフラグ84) に 1 行。workflow は変えなくてよい。
 

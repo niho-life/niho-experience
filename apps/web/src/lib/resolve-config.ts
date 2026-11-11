@@ -896,6 +896,8 @@ export function resolveConfig(env: Env) {
     guestQuestionsEnabled,
     guestReviewsEnabled,
     guestBookingEnabled: guestBooking.enabled,
+    managedSalesEnabled: apiMode === "http" && env.EXPERIENCE_MANAGED_SALES_ENABLED === "true",
+    managedSalesWebhooksEnabled: apiMode === "http" && env.EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED === "true",
     // The terms version travelers agree to at checkout (consent.agreedVersion); empty while guest booking is off.
     guestBookingConsentVersion: guestBooking.consentVersion,
     experiencePublicationsEnabled: experiencePublication.enabled,

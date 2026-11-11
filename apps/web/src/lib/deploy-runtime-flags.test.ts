@@ -56,6 +56,9 @@ const PREFIX: Record<Target, string> = { stg: "STG", prod: "PROD" };
 const NIHO_API_AUDIENCE: Record<Target, string> = { stg: "https://api-stg.niho.life", prod: "https://api.niho.life" };
 const SETTING: Record<string, string> = {
   consentVersion: "sample-terms-2026-11",
+  sellerReference: "seller_sample",
+  sellerName: "試験用販売事業者",
+  stripeAccount: "acct_SampleManaged1",
   bucketName: "experience-test-public-media",
   mailbox: "NIHO Sample <noreply@example.com>",
   httpsUrl: "https://example.com/privacy",
@@ -78,6 +81,8 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED: "hostArticleLinksEnabled",
   DATABASE_GUIDE_PUBLICATIONS: "guidePublicSource",
   EXPERIENCE_GUEST_BOOKING_ENABLED: "guestBookingEnabled",
+  EXPERIENCE_MANAGED_SALES_ENABLED: "managedSalesEnabled",
+  EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED: "managedSalesWebhooksEnabled",
   EXPERIENCE_GUEST_MAIL_ENABLED: "guestMailEnabled",
   EXPERIENCE_PUBLICATIONS_ENABLED: "experiencePublicationsEnabled",
   EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "experienceHostPublicationApiEnabled",
@@ -346,6 +351,23 @@ describe("the deploy workflows' feature flags", () => {
     expect(resolve("stg", { STG_HOST_PWA_ENABLED: "false" })).toMatchObject({ problems: [], on: [], env: { NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.stg } });
     // Variables of the other workflow are not read.
     expect(resolve("prod", { STG_GUEST_REVIEWS_ENABLED: "true" }).on).toEqual([]);
+  });
+
+  it("keeps the account webhook wired when the pilot stops new sales", () => {
+    const vars = closure("prod", "EXPERIENCE_MANAGED_SALES_ENABLED");
+    const open = resolve("prod", vars);
+    expect(open.problems).toEqual([]);
+    expect(open.env.EXPERIENCE_MANAGED_SALES_ENABLED).toBe("true");
+    expect(open.secrets.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET).not.toBe(open.secrets.EXPERIENCE_STRIPE_WEBHOOK_SECRET);
+
+    const stopped = resolve("prod", { ...vars, PROD_MANAGED_SALES_ENABLED: "false" });
+    expect(stopped.problems).toEqual([]);
+    expect(stopped.env.EXPERIENCE_MANAGED_SALES_ENABLED).toBeUndefined();
+    expect(stopped.env.EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID).toBe(open.env.EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID);
+    expect(stopped.secrets.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET).toBe(open.secrets.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET);
+
+    const sharedSecret = resolve("prod", { ...vars, PROD_STRIPE_PLATFORM_WEBHOOK_SECRET_REF: vars.PROD_STRIPE_WEBHOOK_SECRET_REF! });
+    expect(sharedSecret.problems).toContain("PROD_STRIPE_PLATFORM_WEBHOOK_SECRET_REF must differ from PROD_STRIPE_WEBHOOK_SECRET_REF");
   });
 
   for (const target of ["stg", "prod"] as const) {
