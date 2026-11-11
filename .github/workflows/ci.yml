@@ -176,10 +176,12 @@ jobs:
 
   e2e:
     # The default Playwright matrix (mobile and desktop, five servers), split in two. Each half builds the site itself.
+    # Use the image matching @playwright/test and playwright-core in package-lock.json.
     name: e2e (${{ matrix.shard }}/2)
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-24.04
+    container: mcr.microsoft.com/playwright:v1.56.1-noble@sha256:f1e7e01021efd65dd1a2c56064be399f3e4de00fd021ac561325f2bfbb2b837a
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -191,8 +193,6 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
       - run: npm run build
-      - name: Install Chromium for Playwright
-        uses: ./.github/actions/setup-playwright-chromium
       - name: Run this half of the Playwright matrix
         run: npm -w @niho-experience/web run test:e2e -- --shard=${{ matrix.shard }}/2
       - name: Upload Playwright report
@@ -208,14 +208,13 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-24.04
+    container: mcr.microsoft.com/playwright:v1.56.1-noble@sha256:f1e7e01021efd65dd1a2c56064be399f3e4de00fd021ac561325f2bfbb2b837a
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
-      - name: Install Chromium for Playwright
-        uses: ./.github/actions/setup-playwright-chromium
       - name: Test provider owner and cohost operations with synthetic data
         run: npm -w @niho-experience/web run test:e2e:provider-operations
       - name: Upload Playwright report
@@ -231,6 +230,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-24.04
+    container: mcr.microsoft.com/playwright:v1.56.1-noble@sha256:f1e7e01021efd65dd1a2c56064be399f3e4de00fd021ac561325f2bfbb2b837a
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -238,8 +238,6 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
       - run: npm run build
-      - name: Install Chromium for Playwright
-        uses: ./.github/actions/setup-playwright-chromium
       - name: Test OTA browser adapter with synthetic data
         run: npm -w @niho-experience/ota-worker run test:browser
       - name: Test assisted registration and representative consent with synthetic data
