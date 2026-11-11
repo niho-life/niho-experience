@@ -19,6 +19,7 @@ import { seoDescription } from "@/lib/seo-description";
 import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-card-model";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import { relatedSiteExperienceCards } from "@/lib/experience/site-related";
+import { siteSellerInformationHref } from "@/lib/experience/site-seller-information";
 import { getLiveReviews } from "@/lib/journey";
 import { reviewDisplay, reviewHeadline } from "@/lib/reviews-ui";
 import { reviewsForJsonLd, sitePublicationJsonLd } from "@/lib/structured-data";
@@ -44,8 +45,9 @@ export function sitePublicationMetadata(item: SitePublicExperience, locale: "en"
 const NO_GUIDES: Awaited<ReturnType<typeof guidesAboutExperience>> = { guides: [], draftSlugs: [] };
 
 export async function SitePublicationPage({ item, cancelled = false, locale = "en" }: { item: SitePublicExperience; cancelled?: boolean; locale?: "en" | "ja" }) {
-  const { publication, saleTerms, sellerDisclosure, hostBio } = item;
+  const { publication, saleTerms, hostBio } = item;
   const ja = locale === "ja";
+  const sellerInformationHref = siteSellerInformationHref(item, locale);
   const content = ja ? publication.japanese! : null;
   const title = content?.title ?? publication.publicTitle;
   const photos = publication.photos.map((photo) => ({ url: photo.src, alt: ja ? (photo.altJa || `${title}の写真`) : photo.alt }));
@@ -95,13 +97,18 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
             ? <Link href={headline.href} aria-label={headline.accessibleLabel} className="mt-3 inline-flex font-extrabold text-moss hover:underline">{headline.label}</Link>
             : <span className="mt-3 inline-flex rounded-full bg-sand px-3 py-1 text-sm font-extrabold">{headline.label}</span>
           : null}
-          <p className="mt-4 text-[0.9375rem] text-ink-soft">{ja ? "提供者: " : "Offered by "}<b className="text-ink">{publication.sellerDisplayName}</b>{sellerDisclosure ? <> · <a className="font-bold text-ink underline" href={sellerDisclosure.method === "EXTERNAL" ? sellerDisclosure.externalUrl : `/experiences/${encodeURIComponent(publication.slug)}/seller`} rel="noopener noreferrer">{ja ? "販売者情報" : "Seller information"}</a></> : null}</p>
+          <p className="mt-4 text-[0.9375rem] text-ink-soft">{ja ? "提供者: " : "Offered by "}<b className="text-ink">{publication.sellerDisplayName}</b></p>
           {hostStoryGuide ? <p className="mt-2"><Link href={`/guides/${hostStoryGuide.slug}`} className="link-leaf">Read the host story</Link></p> : null}
           <ul className="mt-[18px] grid grid-cols-2 gap-x-3 gap-y-4 border-y border-line py-[18px] lg:flex lg:flex-wrap lg:gap-x-9 lg:border-0 lg:py-0">
             {durations ? <li><span className="eyebrow">{ja ? "所要時間" : "Duration"}</span><p className="font-extrabold">{durations}</p></li> : null}
             {language ? <li><span className="eyebrow">{ja ? "対応言語" : "Language"}</span><p className="font-extrabold">{language}</p></li> : null}
             {offers.length ? <li><span className="eyebrow">{ja ? "参加人数" : "Group size"}</span><p className="font-extrabold">{Math.min(...offers.map((offer) => offer.minimumParticipants))}–{Math.max(...offers.map((offer) => offer.maxPartySize))}{ja ? "名" : " guests"}</p></li> : null}
           </ul>
+          {sellerInformationHref ? (
+            <a href={sellerInformationHref} rel="noopener noreferrer" className="mt-1 inline-flex min-h-6 items-center text-sm text-muted underline underline-offset-2 hover:text-ink">
+              {ja ? "販売者情報" : "Seller information"}
+            </a>
+          ) : null}
         </header>
         {nextDates.length ? <NextDateBand dates={nextDates} locale={locale} bookingHref={bookingHref} allDatesHref={bookingHref} /> : null}
         <DesktopGallery photos={photos} title={title} />
