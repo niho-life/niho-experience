@@ -12,7 +12,11 @@ export async function readHostCalendar(pool: Pool, store: ExperienceStore, actor
   const membership = scope === "MEMBER" ? await store.verifyActiveMembership(actor) : null;
   if (scope === "MEMBER" && !membership) throw new StoreAccessDeniedError();
   const schedule = await Promise.all(products.map(async (product) => ({ product, views: await store.listSchedule(actor, product.id) })));
-  const rules = schedule.flatMap(({ product, views }) => views.map((view) => ({ ...view.rule.rule, experienceId: product.id })));
+  const rules = schedule.flatMap(({ product, views }) => views.map(({ rule }) => ({
+    ...rule.rule,
+    experienceId: product.id,
+    version: rule.version,
+  })));
   const expanded = schedule.flatMap(({ product, views }) => views.flatMap((view) => {
     const overrideVersions = new Map(view.overrides.map((entry) => [entry.override.occurrenceId, entry.version]));
     const salesStateVersions = new Map(view.salesStates.map((entry) => [entry.state.occurrenceId, entry.version]));

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   role: "OWNER" as "OWNER" | "EDITOR" | "VIEWER",
   saveRule: vi.fn(),
+  listSchedule: vi.fn(),
   reschedule: vi.fn(),
   salesState: vi.fn(),
   resolveProduct: vi.fn(),
@@ -14,7 +15,7 @@ vi.mock("@/lib/config", () => ({ config: { hostConsoleEnabled: true } }));
 vi.mock("@/lib/experience/calendar-actor", () => ({ calendarActor: async () => ({ actor: { providerId: "provider-1", nihoUserId: "user-1" }, access: { kind: "MEMBER", nihoRole: mocks.role } }) }));
 vi.mock("@/lib/experience/store-server", () => ({
   experiencePool: () => ({ query: mocks.poolQuery }),
-  experienceStore: () => ({ saveScheduleRule: mocks.saveRule, saveOccurrenceOverride: mocks.reschedule, setOccurrenceSalesState: mocks.salesState, resolveScheduleRuleProduct: mocks.resolveProduct }),
+  experienceStore: () => ({ saveScheduleRule: mocks.saveRule, listSchedule: mocks.listSchedule, saveOccurrenceOverride: mocks.reschedule, setOccurrenceSalesState: mocks.salesState, resolveScheduleRuleProduct: mocks.resolveProduct }),
 }));
 vi.mock("@/lib/experience/google-connection", () => ({ syncGoogleBusy: vi.fn() }));
 vi.mock("@/lib/experience/calendar-read", () => ({ readHostCalendar: vi.fn() }));
@@ -29,6 +30,11 @@ vi.mock("@/lib/host/server", () => ({
 import { POST } from "./route";
 
 const COMMAND = "00000000-0000-4000-8000-000000000111";
+const recurringRule = {
+  id: "rule-1", timeZone: "Asia/Tokyo", startsOn: "2099-01-01",
+  localStartTime: "18:00", durationMinutes: 120, capacity: 8, bookingCutoffMinutes: 2880,
+  busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0, recurrence: { kind: "WEEKENDS" },
+};
 const request = (body: unknown) => new NextRequest("https://experience.example/host/calendar/data", {
   method: "POST",
   headers: { origin: "https://experience.example", "sec-fetch-site": "same-origin", "content-type": "application/json" },
@@ -66,6 +72,21 @@ describe("host calendar mutation route", () => {
     expect(response.status).toBe(200);
     expect(mocks.salesState).toHaveBeenCalledWith(expect.anything(), "experience-1", "rule-1", { occurrenceId: "rule-1@2099-01-01", desiredState: "OPEN" }, 2, COMMAND);
     expect(mocks.reschedule).not.toHaveBeenCalled();
+  });
+
+  it("removes only the end date from the existing rule and uses its observed version", async () => {
+    mocks.listSchedule.mockResolvedValue([{ rule: { rule: { ...recurringRule, endsOn: "2099-02-01" }, version: 7 } }]);
+    const body = { action: "removeRuleEnd", commandId: COMMAND, experienceId: "experience-1", ruleId: "rule-1", expectedVersion: 7 };
+    expect((await POST(request(body))).status).toBe(200);
+    expect(mocks.listSchedule).toHaveBeenCalledWith(expect.anything(), "experience-1");
+    expect(mocks.saveRule).toHaveBeenCalledWith(expect.anything(), "experience-1", recurringRule, 7, COMMAND);
+  });
+
+  it("rejects turning a one-day rule into a permanent recurrence", async () => {
+    mocks.listSchedule.mockResolvedValue([{ rule: { rule: { ...recurringRule, endsOn: recurringRule.startsOn }, version: 7 } }]);
+    const body = { action: "removeRuleEnd", commandId: COMMAND, experienceId: "experience-1", ruleId: "rule-1", expectedVersion: 7 };
+    expect((await POST(request(body))).status).toBe(400);
+    expect(mocks.saveRule).not.toHaveBeenCalled();
   });
 
   it("rejects missing or non-v4 commands", async () => {

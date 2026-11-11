@@ -90,6 +90,20 @@ export async function POST(request: NextRequest) {
       const saved = await store.saveScheduleRule(result.actor, body.experienceId, rule, null, body.commandId);
       return noStoreJson({ id: saved.aggregateId, version: saved.version }, saved.repeated ? 200 : 201);
     }
+    if (body.action === "removeRuleEnd") {
+      const { experienceId, ruleId, expectedVersion } = body;
+      if (typeof experienceId !== "string" || typeof ruleId !== "string" ||
+        typeof expectedVersion !== "number" || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+        return noStoreJson({ error: "invalid_body" }, 400);
+      }
+      const stored = (await store.listSchedule(result.actor, experienceId)).find(({ rule }) => rule.rule.id === ruleId)?.rule;
+      if (!stored) return noStoreJson({ error: "not_found" }, 404);
+      if (stored.rule.endsOn === stored.rule.startsOn) return noStoreJson({ error: "invalid_input" }, 400);
+      const rule = { ...stored.rule };
+      delete rule.endsOn;
+      const saved = await store.saveScheduleRule(result.actor, experienceId, rule, expectedVersion, body.commandId);
+      return noStoreJson({ id: saved.aggregateId, version: saved.version });
+    }
     if (body.action === "setSalesState" || body.action === "rescheduleOccurrence") {
       if (typeof body.occurrenceId !== "string" || body.occurrenceId.length > 256) return noStoreJson({ error: "invalid_body" }, 400);
       if (body.expectedVersion !== null && (!Number.isSafeInteger(body.expectedVersion) || (body.expectedVersion as number) < 1)) return noStoreJson({ error: "invalid_body" }, 400);

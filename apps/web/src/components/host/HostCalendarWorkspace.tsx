@@ -203,6 +203,7 @@ export function HostCalendarWorkspace({
   const selectedProductId = experienceId || (data?.experiences.length === 1 ? data.experiences[0]!.id : "");
   const productIndexes = useMemo(() => new Map((data?.experiences ?? []).map((item, index) => [item.id, index])), [data]);
   const selectedOccurrences = visibleOccurrences.filter((item) => item.localDate === selectedDate);
+  const occurrenceRule = dialog?.kind === "occurrence" ? data?.rules.find(({ id }) => id === dialog.item.ruleId) : undefined;
   const selectWeek = (next: string) => { invalidateData(); setActiveWeek(weekStart(next)); setSelectedDate(next); };
   const closeDialog = () => {
     if (saving || pendingCommand !== null) return;
@@ -256,6 +257,19 @@ export function HostCalendarWorkspace({
       {dialogFeedback}
       <div className="border-y border-line py-4"><strong className="block text-base">{dateLabel(dialog.item.localDate)}</strong><span className="mt-1 block font-display text-2xl tabular-nums">{timeLabel(dialog.item.startUtc)}–{timeLabel(dialog.item.endUtc)}</span></div>
       <div className="flex flex-wrap items-center gap-2">{statePill(dialog.item)}{(dialog.item.confirmedSeats ?? 0) > 0 || (dialog.item.heldSeats ?? 0) > 0 ? <strong className="text-sm text-info">予約あり</strong> : null}{data?.scope === "MEMBER" ? <span className="text-sm text-ink-soft">定員 {dialog.item.capacity}人</span> : null}</div>
+      {!draftPreparation && occurrenceRule && occurrenceRule.endsOn !== occurrenceRule.startsOn ? <div className="border-t border-line pt-3 text-sm">
+        <p>繰り返しの終了日：{occurrenceRule.endsOn ?? "なし"}</p>
+        {data?.canEdit && occurrenceRule.endsOn && occurrenceRule.version !== undefined ? <details className="mt-2">
+          <summary className="flex min-h-11 cursor-pointer items-center font-bold">終了日を外す</summary>
+          <p className="mb-2 text-ink-soft">現在の終了日より先も、同じ曜日と時刻で開催枠を作ります。</p>
+          <button type="button" disabled={saving || !dataFresh || pendingCommand !== null || airbnbBusy} className={consoleButtonClass("secondary", "lg", "disabled:opacity-50")} onClick={() => void mutate({
+            action: "removeRuleEnd",
+            experienceId: occurrenceRule.experienceId,
+            ruleId: occurrenceRule.id,
+            expectedVersion: occurrenceRule.version,
+          }, dialog.item.localDate)}>終了日なしにする</button>
+        </details> : null}
+      </div> : null}
       {!draftPreparation ? <><HostCalendarChannelDetails state={channels} occurrenceId={dialog.item.id} /><HostAirbnbGoogleSetup key={`${providerId}:${dialog.item.experienceId}:${dialog.item.id}:${data?.google.canManage}`} providerId={providerId} productId={dialog.item.experienceId} occurrenceId={dialog.item.id} canManage={data?.scope === "MEMBER" && data.google.canManage} onBusyChange={setAirbnbBusy} /></> : null}
       {!draftPreparation && data?.canEdit ? <>{!dialog.item.canReschedule ? null : <details className="group"><summary className="flex min-h-11 cursor-pointer items-center justify-between text-sm font-bold">日時を変更<span aria-hidden="true">⌄</span></summary><form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const localDate = String(form.get("localDate")); void mutate({ action: "rescheduleOccurrence", occurrenceId: dialog.item.id, expectedVersion: dialog.item.overrideVersion ?? null, localDate, localStartTime: String(form.get("localStartTime")) }, localDate); }} className="grid gap-3 rounded-xl bg-sand p-3"><fieldset disabled={saving || pendingCommand !== null || airbnbBusy} className="contents"><div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 text-sm font-extrabold">日付<input name="localDate" type="date" defaultValue={dialog.item.localDate} required className={FIELD} /></label><label className="grid gap-1 text-sm font-extrabold">開始<input name="localStartTime" type="time" defaultValue={dialog.item.localStartTime} required className={FIELD} /></label></div><button type="submit" disabled={saving || !dataFresh || pendingCommand !== null || airbnbBusy} className={consoleButtonClass("secondary", "lg", "w-full disabled:opacity-50")}>保存</button></fieldset></form></details>}
       <div className="sticky -bottom-4 z-10 bg-canvas pt-2 pb-1"><button type="button" disabled={saving || !dataFresh || pendingCommand !== null || airbnbBusy} onClick={() => void mutate({ action: "setSalesState", occurrenceId: dialog.item.id, expectedVersion: dialog.item.salesStateVersion ?? null, desiredState: dialog.item.status === "CLOSED" ? "OPEN" : "CLOSED" }, dialog.item.localDate)} className={consoleButtonClass("primary", "lg", "w-full disabled:opacity-50")}>{dialog.item.status === "CLOSED" ? "受付を再開" : "受付を休止"}</button></div></> : <p className="text-sm font-bold text-warn">このカレンダーは変更できません</p>}

@@ -5,7 +5,7 @@ export interface HostCalendarData {
   preview: boolean;
   canEdit: boolean;
   experiences: readonly { id: string; title: string }[];
-  rules: readonly (ScheduleRule & { experienceId: string })[];
+  rules: readonly (ScheduleRule & { experienceId: string; version?: number })[];
   occurrences: readonly (Occurrence & {
     experienceId: string;
     experienceTitle: string;
