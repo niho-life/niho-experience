@@ -166,7 +166,7 @@ export async function readGuestCheckout(request: Request): Promise<ParsedGuestCh
       childCount: value.childCount as number,
       expectedTotalYen: value.expectedTotalYen as number,
       bookingQuestionsFingerprint: value.bookingQuestionsFingerprint as string,
-      salesPlanRevision: value.salesPlanRevision as number | undefined,
+      ...(typeof value.salesPlanRevision === "number" ? { salesPlanRevision: value.salesPlanRevision } : {}),
       answers: answers as readonly GuestBookingAnswer[] | undefined,
       termsConsentVersion: consent.agreedVersion,
       conditionsConsentVersion: conditions === undefined ? null : (conditions.version as string),

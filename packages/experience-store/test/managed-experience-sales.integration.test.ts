@@ -93,6 +93,9 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       assert.equal(managedTerms?.salesPlanRevision, 1);
       assert.equal(managedTerms?.sellerDisplayName, "Synthetic NIHO Seller");
       assert.equal((await publications.getPublicBySlug(draft.slug))?.providerPublicName, "Synthetic Actual Provider");
+      await assert.rejects(guests.startGuestBooking({
+        ...bookingRequest(draft.slug, offerId, day(2), 1, "closed@example.test"), managedSalesEnabled: false,
+      }), StoreNotFoundError);
       const paid = await guests.startGuestBooking(bookingRequest(draft.slug, offerId, day(2), 1, "paid@example.test"));
       assert.deepEqual([paid.booking.sellerSnapshot.chargeMode, paid.booking.sellerSnapshot.salesPlan, paid.booking.sellerSnapshot.feeBasisPoints], ["PLATFORM", "MANAGED_20", 2000]);
       await guests.attachCheckoutSession(paid.publicBookingId, "cs_test_platform_paid_old");
