@@ -83,6 +83,8 @@ jobs:
         run: python3 scripts/test_stg_booking_preflight.py
       - name: Test production owner and rerun authorization without credentials
         run: python3 scripts/test_production_owner.py
+      - name: Test stg translation fixture membership guard
+        run: node scripts/test_stg_translate_fixture_policy.mjs
 
   # The old single `web` job ran everything in sequence (22-28 minutes). These jobs are independent, so they run side by
   # side; each does its own checkout and `npm ci` (the shared npm cache keeps that to about a minute). A run is about as

@@ -16,6 +16,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
 import { grantProviderOwnerIn, normalizeHostEmail } from "../../packages/experience-store/src/host-accounts.ts";
+import { inspectTranslationFixtureMemberships } from "./translate-stg-test-provider-membership.mjs";
 
 const { Client } = pg;
 const STG_PROJECT = "niho-app-stg";
@@ -138,14 +139,15 @@ async function inspectOwner(client, emailKey) {
   if (account.rowCount === 0) return { accountExists: false, providerId: null };
   assert(account.rows[0].status === "ACTIVE",
     "The matching Host Account is not active; refusing to reactivate it");
-  const ownerMemberships = await client.query(
-    "SELECT provider_id FROM provider_memberships WHERE niho_user_id=$1 AND active=true AND role='OWNER'",
+  const memberships = await client.query(
+    "SELECT provider_id, role, active FROM provider_memberships WHERE niho_user_id=$1",
     [account.rows[0].id]);
-  assert(ownerMemberships.rowCount <= 1, "Host Account already owns multiple providers; inspect stg before proceeding");
-  if (ownerMemberships.rowCount === 0) {
+  const existing = inspectTranslationFixtureMemberships(memberships.rows, FIXTURE_PROVIDER_PREFIX);
+  assert(existing.kind !== "invalid", existing.message);
+  if (existing.kind === "none") {
     return { accountExists: true, hostAccountId: account.rows[0].id, providerId: null };
   }
-  const providerId = ownerMemberships.rows[0].provider_id;
+  const providerId = existing.providerId;
   await verifyExistingFixture(client, providerId, account.rows[0].id);
   return { accountExists: true, hostAccountId: account.rows[0].id, providerId };
 }
