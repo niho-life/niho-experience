@@ -8,7 +8,7 @@ import {
   type Occurrence,
 } from "@niho-experience/experience-domain";
 import { StoreValidationError } from "./errors.ts";
-import type { BookingTermsSnapshot, GuestCancellationPolicy, PlatformFeeSnapshot, PricingBreakdown, PricingSnapshot, SellerSnapshot } from "./types.ts";
+import type { BookingTermsSnapshot, GuestCancellationPolicy, ManagedPaymentDuePolicy, PlatformFeeSnapshot, PricingBreakdown, PricingSnapshot, SellerSnapshot } from "./types.ts";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const CURRENCY = /^[A-Z]{3}$/;
@@ -132,6 +132,7 @@ export function buildSnapshots(
     readonly sellerDisclosureUrl?: string;
     readonly salesAgreementVersion?: string;
     readonly paymentDueDays?: number | null;
+    readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
   },
   guest?: GuestPricingInput,
 ): {
@@ -183,6 +184,7 @@ export function buildSnapshots(
       ...(product.sellerDisclosureUrl ? { sellerDisclosureUrl: product.sellerDisclosureUrl } : {}),
       ...(product.salesAgreementVersion ? { agreementVersion: product.salesAgreementVersion } : {}),
       ...(product.paymentDueDays !== undefined ? { paymentDueDays: product.paymentDueDays } : {}),
+      ...(product.paymentDuePolicy ? { paymentDuePolicy: product.paymentDuePolicy } : {}),
     },
   };
 }

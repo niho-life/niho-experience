@@ -41,17 +41,19 @@ test("an admin can choose instant payment when preparing a managed experience", 
   await page.getByLabel("大人1人の基本料金（税込・円）").fill("10000");
   await page.getByRole("checkbox", { name: /この体験をNIHO完全代行/ }).check();
   await page.getByRole("checkbox", { name: "開催枠ごとに1組貸切にする" }).check();
-  await page.getByLabel("提供者との合意確認方法").selectOption("WRITTEN");
-  await page.getByLabel("開催日からの支払期日（日）").fill("14");
+  await expect(page.getByText(/開催月末締め・翌月末日払い/)).toBeVisible();
+  const agreement = page.getByRole("checkbox", { name: /書面・メッセージで条件を明示/ });
   const submit = page.getByRole("button", { name: "下書きを作成" });
   await expect(submit).toBeDisabled();
   await page.getByLabel("予約の受付方法").selectOption("INSTANT");
+  await expect(submit).toBeDisabled();
+  await agreement.check();
   await expect(submit).toBeEnabled();
 
   const sent = page.waitForRequest((request) => request.url() === `${ORIGIN}/synthetic/products` && request.method() === "POST");
   await submit.click();
   expect((await sent).postDataJSON()).toMatchObject({
-    managedSales: { enabled: true, acceptanceMode: "INSTANT", privateGroup: true, sellerConfirmationMethod: "WRITTEN", paymentDueDays: 14 },
+    managedSales: { enabled: true, acceptanceMode: "INSTANT", privateGroup: true, sellerConfirmationMethod: "WRITTEN" },
   });
 });
 

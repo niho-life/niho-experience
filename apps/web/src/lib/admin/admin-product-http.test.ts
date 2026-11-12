@@ -181,7 +181,7 @@ describe("Admin product draft BFF", () => {
       new Request(`${SITE}/admin/api/product-workspaces/provider-readable/products`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ slug: "synthetic", publicTitle: "Synthetic", content: {}, currency: "JPY", unitAmount: 1000,
-          managedSales: { enabled: true, acceptanceMode, sellerConfirmationMethod: "WRITTEN", paymentDueDays: 14 } }),
+          managedSales: { enabled: true, acceptanceMode, sellerConfirmationMethod: "WRITTEN" } }),
       }),
       { params: Promise.resolve({ providerId: "provider-readable" }) },
     );
@@ -194,7 +194,7 @@ describe("Admin product draft BFF", () => {
       new Request(`${SITE}/admin/api/product-workspaces/provider-readable/products`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ slug: "synthetic", publicTitle: "Synthetic", content: {}, currency: "JPY", unitAmount: 1000,
-          managedSales: { enabled: true, acceptanceMode: "APPROVAL", sellerConfirmationMethod: "WRITTEN", paymentDueDays: 14 } }),
+          managedSales: { enabled: true, acceptanceMode: "APPROVAL", sellerConfirmationMethod: "WRITTEN" } }),
       }),
       { params: Promise.resolve({ providerId: "provider-readable" }) },
     );

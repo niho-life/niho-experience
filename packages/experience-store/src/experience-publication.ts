@@ -1472,8 +1472,7 @@ export class ExperiencePublicationRepository {
       readonly seller: ManagedPlatformSellerConfig;
       readonly agreementVersion: string;
       readonly agreementConfirmedAtUtc: string;
-      readonly agreementConfirmationMethod: AdminSellerConfirmationMethod;
-      readonly paymentDueDays: number;
+      readonly agreementConfirmationMethod: "WRITTEN";
       readonly privateGroup?: boolean;
       readonly pilotApproved: true;
     },
@@ -1491,9 +1490,9 @@ export class ExperiencePublicationRepository {
         if (!profile.rows[0]) throw new StoreNotFoundError("provider public profile");
         if (!managed.seller.legalSellerName.trim() || !managed.seller.commercialTransactionsUrl.startsWith("https://")
           || !/^acct_[A-Za-z0-9]{8,}$/.test(managed.seller.platformAccountId)
-          || managed.pilotApproved !== true || !Number.isInteger(managed.paymentDueDays)
-          || managed.paymentDueDays < 0 || managed.paymentDueDays > 180
-          || (managed.agreementConfirmationMethod !== "VERBAL" && managed.agreementConfirmationMethod !== "WRITTEN")) throw new StoreValidationError("Managed sales configuration is invalid.");
+          || managed.pilotApproved !== true || managed.agreementConfirmationMethod !== "WRITTEN") {
+          throw new StoreValidationError("Managed sales require a written agreement.");
+        }
         assertStoreIdentifier(managed.seller.sellerNihoAccountRef, "sellerNihoAccountRef");
         assertCanonicalInstant(managed.agreementConfirmedAtUtc, "agreementConfirmedAtUtc");
         assertNonEmptyText(managed.agreementVersion, "agreementVersion", 160);
@@ -1526,11 +1525,11 @@ export class ExperiencePublicationRepository {
           `INSERT INTO experience_product_sales_plan_versions
              (provider_id,product_id,revision,plan,charge_mode,provider_public_profile_version,seller_display_name,
               seller_disclosure_url,seller_niho_account_ref,stripe_account_ref,fee_basis_points,agreement_version,agreement_confirmed_by,
-              agreement_confirmed_at,agreement_confirmation_method,payment_due_days,pilot_approved,activated_by_admin_niho_user_id)
-           VALUES ($1,$2,1,'MANAGED_20','PLATFORM',$3,$4,$5,$6,$7,2000,$8,$11,$9,$10,$12,true,$11)`,
+              agreement_confirmed_at,agreement_confirmation_method,payment_due_policy,pilot_approved,activated_by_admin_niho_user_id)
+           VALUES ($1,$2,1,'MANAGED_20','PLATFORM',$3,$4,$5,$6,$7,2000,$8,$11,$9,$10,'NEXT_MONTH_END',true,$11)`,
           [providerId, id, profile.rows[0]!.version, seller.sellerDisplayName, managed.seller.commercialTransactionsUrl,
             seller.sellerNihoAccountRef, seller.stripeConnectAccountRef, managed.agreementVersion, managed.agreementConfirmedAtUtc,
-            managed.agreementConfirmationMethod, actor.nihoUserId, managed.paymentDueDays],
+            managed.agreementConfirmationMethod, actor.nihoUserId],
         );
         await client.query("INSERT INTO experience_product_sales_plan_states (provider_id,product_id,current_revision) VALUES ($1,$2,1)", [providerId, id]);
       }

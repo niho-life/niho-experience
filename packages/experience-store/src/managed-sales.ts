@@ -6,8 +6,9 @@ import { lockProviderInventory } from "./inventory.ts";
 import { addLocalDays } from "@niho-experience/experience-domain";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
-import type { ExperienceChargeMode, ExperienceSalesPlan, HostActor, PublicationAdminDraftActor } from "./types.ts";
+import type { ExperienceChargeMode, ExperienceSalesPlan, HostActor, ManagedPaymentDuePolicy, PublicationAdminDraftActor } from "./types.ts";
 import { assertCanonicalInstant, assertStoreIdentifier } from "./validation.ts";
+import { tokyoDate } from "./guest-bookings.ts";
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACCOUNT = /^acct_[A-Za-z0-9]{8,}$/;
@@ -38,6 +39,7 @@ export interface SalesPlanRevision {
   readonly agreementConfirmedAtUtc: string;
   readonly agreementConfirmationMethod: "VERBAL" | "WRITTEN" | "OWNER_WEB";
   readonly paymentDueDays: number | null;
+  readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
   readonly pilotApproved: boolean;
   readonly activatedAtUtc: string;
 }
@@ -101,6 +103,20 @@ function validateAdmin(actor: PublicationAdminDraftActor): void {
   assertStoreIdentifier(actor?.nihoUserId, "actor.nihoUserId");
 }
 
+export function managedPaymentDueDate(localDate: string, endUtc: string, seller: Record<string, unknown>): string {
+  const { paymentDueDays, paymentDuePolicy } = seller;
+  if (paymentDuePolicy === "NEXT_MONTH_END" && (paymentDueDays === null || paymentDueDays === undefined)) {
+    const completionDate = new Date(`${tokyoDate(endUtc)}T00:00:00Z`);
+    completionDate.setUTCMonth(completionDate.getUTCMonth() + 2, 0);
+    return completionDate.toISOString().slice(0, 10);
+  }
+  if (paymentDuePolicy === undefined && typeof paymentDueDays === "number"
+    && Number.isInteger(paymentDueDays) && paymentDueDays >= 0 && paymentDueDays <= 180) {
+    return addLocalDays(localDate, paymentDueDays);
+  }
+  throw new StoreAccessDeniedError();
+}
+
 export function validateManagedPlatformSellerConfig(value: ManagedPlatformSellerConfig): ManagedPlatformSellerConfig {
   const name = value?.legalSellerName?.trim();
   if (!name || name.length > 300 || /[\u0000-\u001f\u007f]/.test(name)) throw new StoreValidationError("The configured legal seller name is invalid.");
@@ -131,6 +147,7 @@ function revisionFromRow(row: DbRow, prefix = ""): SalesPlanRevision {
     agreementConfirmedAtUtc: isoValue(row, key("agreement_confirmed_at")),
     agreementConfirmationMethod: text(row[key("agreement_confirmation_method")], key("agreement_confirmation_method")) as SalesPlanRevision["agreementConfirmationMethod"],
     paymentDueDays: row[key("payment_due_days")] === null ? null : integer(row[key("payment_due_days")], key("payment_due_days")),
+    ...(row[key("payment_due_policy")] === "NEXT_MONTH_END" ? { paymentDuePolicy: "NEXT_MONTH_END" as const } : {}),
     pilotApproved: row[key("pilot_approved")] === true,
     activatedAtUtc: isoValue(row, key("activated_at")),
   };
@@ -138,7 +155,7 @@ function revisionFromRow(row: DbRow, prefix = ""): SalesPlanRevision {
 
 const REVISION_COLUMNS = `provider_id,product_id,revision,plan,charge_mode,provider_public_profile_version,
   seller_display_name,seller_disclosure_url,seller_niho_account_ref,stripe_account_ref,fee_basis_points,agreement_version,
-  agreement_confirmed_by,agreement_confirmed_at,agreement_confirmation_method,payment_due_days,pilot_approved,activated_at`;
+  agreement_confirmed_by,agreement_confirmed_at,agreement_confirmation_method,payment_due_days,payment_due_policy,pilot_approved,activated_at`;
 
 async function readState(client: Pick<PoolClient, "query">, providerId: string, productId: string, lock = false): Promise<SalesPlanState | null> {
   const state = await client.query<DbRow>(
@@ -400,7 +417,6 @@ export class ManagedExperienceSalesRepository {
       const pricing = row.pricing_snapshot as Record<string, unknown>;
       const occurrence = row.occurrence_snapshot as Record<string, unknown>;
       if (seller.chargeMode !== "PLATFORM" || seller.salesPlan !== "MANAGED_20" || seller.feeBasisPoints !== 2000
-        || !Number.isInteger(seller.paymentDueDays) || (seller.paymentDueDays as number) < 0 || (seller.paymentDueDays as number) > 180
         || typeof occurrence.localDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(occurrence.localDate)) throw new StoreAccessDeniedError();
       if (typeof occurrence.endUtc !== "string" || !Number.isFinite(Date.parse(occurrence.endUtc)) || !Number.isFinite(now.getTime()) || Date.parse(occurrence.endUtc) > now.getTime()) {
         throw new StoreConflictError("Provider compensation cannot be prepared before the experience ends.");
@@ -416,7 +432,7 @@ export class ManagedExperienceSalesRepository {
       const net = captured - refunded - disputed;
       const fee = Math.floor(net * 2000 / 10_000);
       const status = row.refund_pending === true || row.dispute_pending === true ? "REVIEW_REQUIRED" : "READY";
-      const dueOn = addLocalDays(occurrence.localDate, seller.paymentDueDays as number);
+      const dueOn = managedPaymentDueDate(occurrence.localDate, occurrence.endUtc, seller);
       const repeated = await client.query<DbRow>(
         `SELECT 1 FROM managed_provider_compensation_events
           WHERE provider_id=$1 AND booking_id=$2 AND command_id=$3::uuid AND action='CALCULATED'`,
