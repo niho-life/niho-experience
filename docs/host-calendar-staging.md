@@ -15,6 +15,7 @@ API契約は、このリポの体験業務 v1 と、固定された NIHO host/ac
 | Deployer SA | `experience-host-stg-deployer`。対象Cloud Run serviceだけ `run.admin` / `run.invoker`、runtime SAだけ `serviceAccountUser` |
 | Jobs SA | `experience-jobs`。Cloud Scheduler の OIDC token 専用。projectのroleなし、対象Cloud Run serviceだけ `run.invoker` |
 | Cloud Scheduler | `experience-jobs-drain-stg`（`asia-northeast1`）。毎分 `POST {STG_HOST_SERVICE_URL}/internal/experience-jobs/v1/drain`、audience は `STG_HOST_SERVICE_URL`。一時停止で作り、予約を開く配備のあとに再開する |
+| stg の park との関係 | `experience-jobs-drain-stg` と `experience-host-push-drain-stg` は、niho-app の `scripts/gcp/stg-runtime.sh park` で pause される（stg の Cloud SQL を止めるため。既定は park）。`wake` では再開しない。受入のときだけ、stg を wake・promote したあとに手動で `gcloud scheduler jobs resume` し、終わったら park で止める |
 | OIDC | 専用pool `experience-host-staging` / provider `github`。固定repo ID・repo名・main・手動workflowを検査。通常はレビュー必須の `host-staging`、指定ownerは `host-staging-owner` Environmentを使い、後者はGitHub actor IDも検査 |
 | Cloud SQL / VPC | 既存のprivate IPのみ・connector必須の `niho-app-db-stg` を使用するが、Experience専用DB・DBユーザーを別途作る。Cloud Runは既存 `default` VPC/subnetへのDirect VPC egress（private rangesのみ）とCloud SQL接続を併用する。NIHO業務DBへ接続しない |
 
