@@ -24,6 +24,7 @@ import { recordOtaAttendanceAsHost } from "./ota-bookings-server";
 import { notificationChangesInput } from "./notifications";
 import { PAGE_ENGLISH_UNAVAILABLE_TEXT, textHasWords } from "./page-english";
 import { SITE_CANCEL_NOTE_MAX, SITE_CANCEL_REASONS, SITE_SESSION_CANCEL_REASONS } from "./site-bookings";
+import { claimOccurrence, declineOccurrence, readAssignmentHistory, readAssignmentList, releaseOccurrence, type HostAssignmentAnswer } from "./assignments-server";
 import { cancelSiteBookingAsOwner, loadMoreSiteBookings, type HostSiteBookingPage } from "./site-bookings-server";
 import { cancelSiteSessionAsOwner, recordSiteAttendanceAsOwner } from "./site-sessions-server";
 import type { HostSessionView } from "./console-data";
@@ -290,6 +291,45 @@ export async function loadMoreSiteBookingList(input: { providerId: string; curso
   const cursor = text(input?.cursor, LIMITS.cursor);
   if (!providerId || !cursor) return invalid;
   return loadMoreSiteBookings(providerId, cursor);
+}
+
+const OCCURRENCE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
+
+function assignmentTarget(input: { providerId?: unknown; occurrenceId?: unknown; commandId?: unknown; reason?: unknown } | null | undefined) {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const occurrenceId = typeof input?.occurrenceId === "string" && OCCURRENCE_ID.test(input.occurrenceId) ? input.occurrenceId : null;
+  const commandId = typeof input?.commandId === "string" && COMMAND_ID.test(input.commandId) ? input.commandId.toLowerCase() : null;
+  const reason = text(input?.reason ?? "", 300);
+  return providerId && occurrenceId && commandId && reason !== null ? { providerId, occurrenceId, commandId, reason } : null;
+}
+
+/** 予約 › 対応する (#535): the first valid press becomes the occurrence's internal assignee. The same command again changes nothing. */
+export async function claimAssignment(input: { providerId: string; occurrenceId: string; commandId: string }): Promise<HostAssignmentAnswer> {
+  const target = assignmentTarget(input);
+  return target ? claimOccurrence(target.providerId, target.occurrenceId, target.commandId) : invalid;
+}
+
+/** 予約 › 行けません (#535): optional; it assigns and cancels nothing. */
+export async function declineAssignment(input: { providerId: string; occurrenceId: string; commandId: string; reason?: string }): Promise<HostAssignmentAnswer> {
+  const target = assignmentTarget(input);
+  return target ? declineOccurrence(target.providerId, target.occurrenceId, target.commandId, target.reason) : invalid;
+}
+
+/** 予約 › 担当を外れる (#535): back to 募集中; the guests' bookings are not touched. */
+export async function releaseAssignment(input: { providerId: string; occurrenceId: string; commandId: string; reason?: string }): Promise<HostAssignmentAnswer> {
+  const target = assignmentTarget(input);
+  return target ? releaseOccurrence(target.providerId, target.occurrenceId, target.commandId, target.reason) : invalid;
+}
+
+export async function loadAssignmentList(input: { providerId: string }) {
+  const providerId = nihoIdOrNull(input?.providerId);
+  return providerId ? readAssignmentList(providerId) : invalid;
+}
+
+export async function loadAssignmentHistory(input: { providerId: string; occurrenceId: string }) {
+  const providerId = nihoIdOrNull(input?.providerId);
+  const occurrenceId = typeof input?.occurrenceId === "string" && OCCURRENCE_ID.test(input.occurrenceId) ? input.occurrenceId : null;
+  return providerId && occurrenceId ? readAssignmentHistory(providerId, occurrenceId) : invalid;
 }
 
 const BOOKING_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

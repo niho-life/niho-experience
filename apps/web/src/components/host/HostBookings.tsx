@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import type { HostAssignmentList } from "@niho-experience/experience-store";
 import { cancelSiteBooking, loadMoreSiteBookingList } from "@/host/actions";
+import { assignmentFor } from "@/host/assignments";
 import {
   actionTime,
   approveBooking,
@@ -27,6 +29,7 @@ import { mergeSiteBookings, mergeSiteExperiences, SITE_BOOKING_LOAD_FAILED_TEXT 
 import type { HostBooking } from "@/host/types";
 import { useFocusAfterRender } from "./editor-parts";
 import type { SiteCancelChoice } from "./HostSiteCancelDialogs";
+import { HostAssignmentDetail, HostAssignments } from "./HostAssignments";
 import { HostBookingDetail, type BookingConversationLink } from "./HostBookingDetail";
 import { HostIcon } from "./HostIcon";
 import { HostOtaBookingDetail, OtaSourceBadge } from "./HostOtaBookingDetail";
@@ -98,6 +101,11 @@ export interface HostBookingsProps {
    * or the push's `?ota=`. Their sessions open この回 like this site's. Absent while they are not shown.
    */
   ota?: { bookings: readonly HostBooking[]; experiences: readonly BookingExperience[] } | null;
+  /**
+   * 担当 (#535 v0, EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED): the occurrences of NIHO-managed requests that need an internal
+   * assignee, and the ones this person is on. Absent while the flag is off or for someone who cannot serve.
+   */
+  assignments?: HostAssignmentList | null;
 }
 
 /**
@@ -110,7 +118,7 @@ export interface HostBookingsProps {
  * (mock mode: 承認・お断り・取消 change them here only; the preview note says nothing is kept).
  * メッセージ leads to the booking's thread (#106). A session's heading opens its own screen (この回, #107).
  */
-export function HostBookings({ bookings: initialBookings, experiences: initialExperiences, today, now, providerId, providerDataId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, live = null, ota = null }: HostBookingsProps) {
+export function HostBookings({ bookings: initialBookings, experiences: initialExperiences, today, now, providerId, providerDataId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, live = null, ota = null, assignments: initialAssignments = null }: HostBookingsProps) {
   const searchParams = useSearchParams();
   const [bookings, setBookings] = useState<readonly HostBooking[]>(initialBookings);
   /** Live: the experiences the loaded bookings name, and where the rest of the list starts (null once all are here). */
@@ -118,6 +126,8 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
   const [cursor, setCursor] = useState<string | null>(live?.nextCursor ?? null);
   const [more, setMore] = useState<{ busy: boolean; failed: string | null }>({ busy: false, failed: null });
   const [notice, setNotice] = useState<{ bookingId: string; text: string } | null>(null);
+  /** 担当 (#535): changed by 対応する / 行けません / 担当を外れる, which answer with the list as it is now. */
+  const [assignments, setAssignments] = useState<HostAssignmentList | null>(initialAssignments);
   /** 取り消して全額を返金する on a booking made here (#285 slice 7): the one being sent, and what failed. */
   const [siteCancel, setSiteCancel] = useState<{ bookingId: string; busy: boolean; error: string | null } | null>(null);
   const focusLater = useFocusAfterRender();
@@ -275,6 +285,7 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
               </p>
             ) : null}
             {ota ? <p className="mb-2.5 text-[0.8125rem] leading-normal text-ink-soft">{OTA_BOOKINGS_LIST_TEXT}</p> : null}
+            {assignments ? <HostAssignments providerId={providerDataId} list={assignments} onList={setAssignments} /> : null}
 
             <ul aria-label="予約の絞り込み" className="-mx-1.5 mb-1.5 flex gap-2 overflow-x-auto p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {BOOKING_FILTERS.map((item) => {
@@ -385,6 +396,10 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
                 supportHistoryEnabled={supportHistoryEnabled}
                 feeSummaryEnabled={feeSummaryEnabled}
                 translateEnabled={translateEnabled}
+                assignment={(() => {
+                  const found = assignmentFor(assignments, shown);
+                  return found ? <HostAssignmentDetail providerId={providerDataId} found={found} onList={setAssignments} /> : null;
+                })()}
                 onApprove={() => {
                   if (change(shown.id, approveBooking)) report(shown.id, "申込を承認しました。予約が確定しました");
                 }}
