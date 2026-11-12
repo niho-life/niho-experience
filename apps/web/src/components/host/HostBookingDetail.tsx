@@ -190,6 +190,8 @@ export interface HostBookingDetailProps {
   feeSummaryEnabled: boolean;
   /** 通訳を始める (#181): whether the translate BFF is open (the mock always is). */
   translateEnabled: boolean;
+  /** 担当 (#535): who is on this booking's occurrence and its history; absent when it has none (not a NIHO-managed request, or the flag is off). */
+  assignment?: ReactNode;
   onApprove: () => void;
   onDecline: () => void;
   onCancel: (cancellation: BookingCancellation) => void;
@@ -207,7 +209,7 @@ export interface HostBookingDetailProps {
  * cancelled, why and where its refund is, and its 料金・精算状況 comes from the experience DB
  * (SiteFeePanel). NIHO's support and fee panels, which know NIHO's bookings only, are left out.
  */
-export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, onApprove, onDecline, onCancel, onSiteCancel, siteCancel }: HostBookingDetailProps) {
+export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, assignment, onApprove, onDecline, onCancel, onSiteCancel, siteCancel }: HostBookingDetailProps) {
   const [asking, setAsking] = useState<"approve" | "decline" | "cancel" | "siteCancel" | null>(null);
   const actions = bookingActions(booking.status);
   const siteTerms = booking.site;
@@ -310,6 +312,7 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
       <DetailSection title="状態">
         <Rows rows={bookingStateRows(booking)} />
       </DetailSection>
+      {assignment ? <DetailSection title="担当">{assignment}</DetailSection> : null}
       {siteTerms?.supportHistory?.length ? <DetailSection title="NIHOサポートの対応履歴">
         <ol aria-label="NIHOサポートの対応履歴">
           {siteTerms.supportHistory.map((event, index) => <li key={`${event.at}-${index}`} className="flex gap-2.5 py-1 text-[0.78125rem] leading-normal">

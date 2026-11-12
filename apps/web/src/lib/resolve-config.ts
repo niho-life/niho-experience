@@ -251,6 +251,16 @@ function hostAccountsSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnab
   return true;
 }
 
+/** 開催回の担当 (#535 v0): the NIHO-managed (承認後決済) occurrences only, so it needs that sale and both consoles' data. */
+function occurrenceAssignmentSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean): boolean {
+  const name = "EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (!hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
+  if (env.EXPERIENCE_MANAGED_SALES_ENABLED !== "true") throw new Error(`${name}=true needs EXPERIENCE_MANAGED_SALES_ENABLED=true in http mode`);
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error(`${name}=true needs EXPERIENCE_DATABASE_URL in http mode`);
+  return true;
+}
+
 /** Native Experience teams require every native identity boundary; the legacy provider-operations flag is unrelated. */
 function hostTeamSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, hostAccountsEnabled: boolean): boolean {
   const name = "EXPERIENCE_HOST_TEAM_ENABLED";
@@ -795,6 +805,7 @@ export function resolveConfig(env: Env) {
     && hostAccountsEnabled
     && experienceTranslateStandaloneRequested;
   const hostTeamEnabled = hostTeamSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
+  const occurrenceAssignmentEnabled = occurrenceAssignmentSetting(apiMode, env, hostConsoleEnabled);
   // After host accounts: with them, the host publication API reads Stripe and the experience DB instead of NIHO.
   const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   // The Google calendar jobs (#238): busy re-checks and the booking calendar, each behind its own flag.
@@ -952,6 +963,7 @@ export function resolveConfig(env: Env) {
     hostAccountsEnabled,
     // Experience-native COHOST membership, independent from the legacy provider-operations consumer.
     hostTeamEnabled,
+    occurrenceAssignmentEnabled,
     googleBusySyncEnabled: googleCalendarJobs.busySyncEnabled,
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,
     googleJobsAudience: googleCalendarJobs.audience,

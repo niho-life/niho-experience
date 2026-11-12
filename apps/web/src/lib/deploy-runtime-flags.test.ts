@@ -108,6 +108,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_HOST_MAIL_ENABLED: "hostMailEnabled",
   EXPERIENCE_HOST_ACCOUNTS_ENABLED: "hostAccountsEnabled",
   EXPERIENCE_HOST_TEAM_ENABLED: "hostTeamEnabled",
+  EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED: "occurrenceAssignmentEnabled",
   EXPERIENCE_JAPANESE_SITE_ENABLED: "japaneseSiteEnabled",
   EXPERIENCE_CHANNEL_WATCHDOG_ENABLED: "channelWatchdogEnabled",
   EXPERIENCE_CHANNEL_MANAGER_ENABLED: "channelManagerEnabled",
