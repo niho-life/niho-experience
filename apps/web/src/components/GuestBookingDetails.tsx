@@ -114,6 +114,13 @@ export function GuestBookingDetails({ booking, now, conversation = null, transla
   ];
   return (
     <div className="container-page max-w-2xl py-12">
+      {booking.guestLanguage === "JA" ? (
+        <div className="mb-6" lang="ja">
+          <Notice tone="info" title="日本語でお申し込みのお客様へ">
+            この予約確認ページは現在、英語の表示のみです。内容の確認は、確認メールの日本語の案内をご覧ください。日本語でのお問い合わせ・変更・キャンセルのご希望は、確認メールへの返信で受け付けます（NIHO事務局が日本語でご案内します）。
+          </Notice>
+        </div>
+      ) : null}
       <p className="hand text-[1.75rem]">your booking</p>
       <h1 className="mt-1 text-3xl [overflow-wrap:anywhere]">{booking.experienceTitle}</h1>
       <p className="mt-3 flex flex-wrap items-center gap-2">
@@ -144,7 +151,7 @@ export function GuestBookingDetails({ booking, now, conversation = null, transla
       </dl>
       {policy ? <p className="mt-5 text-[0.9375rem] text-ink-soft">{policy}</p> : null}
       <div className="mt-6 flex flex-wrap gap-3">
-        <ButtonLink href={`/experiences/${encodeURIComponent(booking.experienceSlug)}`} variant="secondary">See the experience</ButtonLink>
+        <ButtonLink href={`${booking.guestLanguage === "JA" ? "/ja" : ""}/experiences/${encodeURIComponent(booking.experienceSlug)}`} variant="secondary">See the experience</ButtonLink>
       </div>
 
       {booking.status === "CONFIRMED" && booking.meetingGuide ? (

@@ -44,6 +44,8 @@ export interface BookingConfirmationEmail {
   readonly publicBookingId: string;
   readonly guestEmail: string;
   readonly guestName: string;
+  /** The guest's display language at checkout ("EN" or "JA"). It decides the language of every email to the guest (#59). */
+  readonly guestLanguage: "EN" | "JA";
   readonly experienceTitle: string;
   readonly experienceSlug: string;
   /** The occurrence's own date and start time (a host may have moved it), in `timeZone`. */
@@ -94,6 +96,8 @@ export interface BookingLinkEmail {
   readonly publicBookingId: string;
   readonly guestEmail: string;
   readonly guestName: string;
+  /** The guest's display language at checkout ("EN" or "JA"). It decides the language of every email to the guest (#59). */
+  readonly guestLanguage: "EN" | "JA";
   readonly experienceTitle: string;
   readonly localDate: string;
   readonly localStartTime: string;
@@ -122,6 +126,8 @@ export interface ReviewInvitationEmail {
   readonly bookingId: string;
   readonly guestEmail: string;
   readonly guestName: string;
+  /** The guest's display language at checkout ("EN" or "JA"). It decides the language of every email to the guest (#59). */
+  readonly guestLanguage: "EN" | "JA";
   readonly experienceTitle: string;
 }
 
@@ -142,6 +148,8 @@ export interface BookingMeetingGuideEmail {
   readonly publicBookingId: string;
   readonly guestEmail: string;
   readonly guestName: string;
+  /** The guest's display language at checkout ("EN" or "JA"). It decides the language of every email to the guest (#59). */
+  readonly guestLanguage: "EN" | "JA";
   readonly experienceTitle: string;
   readonly localDate: string;
   readonly localStartTime: string;
@@ -173,6 +181,8 @@ export interface BookingNoticeFacts {
   readonly publicBookingId: string;
   readonly guestEmail: string;
   readonly guestName: string;
+  /** The guest's display language at checkout ("EN" or "JA"). It decides the language of every email to the guest (#59). */
+  readonly guestLanguage: "EN" | "JA";
   readonly experienceTitle: string;
   readonly experienceSlug: string;
   readonly localDate: string;
@@ -356,6 +366,20 @@ function text(value: unknown, key: string): string {
   return value;
 }
 
+/**
+ * The experience's name as the guest reads it: a Japanese-language booking says the name of the Japanese manuscript
+ * of the current publication (#59: a Japanese-only product has no English name), else the public title.
+ */
+function experienceTitleFor(row: DbRow): string {
+  return guestLanguageOf(row) === "JA" && typeof row.public_title_ja === "string" && row.public_title_ja !== ""
+    ? row.public_title_ja : text(row.public_title, "public_title");
+}
+
+/** `booking_guests.guest_language` ("EN" | "JA", NOT NULL with a CHECK): anything else reads as English. */
+function guestLanguageOf(row: DbRow): "EN" | "JA" {
+  return row.guest_language === "JA" ? "JA" : "EN";
+}
+
 function count(value: unknown, key: string): number {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
   if (!Number.isSafeInteger(parsed) || parsed < 0) throw new StoreError(`Database returned an invalid ${key}.`);
@@ -374,7 +398,8 @@ function emailFromRow(row: DbRow): BookingConfirmationEmail | null {
     publicBookingId: text(row.public_booking_id, "public_booking_id"),
     guestEmail: text(row.guest_email, "guest_email"),
     guestName: text(row.guest_name, "guest_name"),
-    experienceTitle: text(row.public_title, "public_title"),
+    guestLanguage: guestLanguageOf(row),
+    experienceTitle: experienceTitleFor(row),
     experienceSlug: text(row.slug, "slug"),
     localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
     localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
@@ -404,7 +429,8 @@ function linkEmailFromRow(row: DbRow): BookingLinkEmail | null {
     publicBookingId: text(row.public_booking_id, "public_booking_id"),
     guestEmail: text(row.guest_email, "guest_email"),
     guestName: text(row.guest_name, "guest_name"),
-    experienceTitle: text(row.public_title, "public_title"),
+    guestLanguage: guestLanguageOf(row),
+    experienceTitle: experienceTitleFor(row),
     localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
     localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
     timeZone: text(occurrence.timeZone, "occurrence_snapshot.timeZone"),
@@ -418,7 +444,8 @@ function reviewInvitationFromRow(row: DbRow): ReviewInvitationEmail | null {
     bookingId: text(row.booking_id, "booking_id"),
     guestEmail: text(row.guest_email, "guest_email"),
     guestName: text(row.guest_name, "guest_name"),
-    experienceTitle: text(row.public_title, "public_title"),
+    guestLanguage: guestLanguageOf(row),
+    experienceTitle: experienceTitleFor(row),
   };
 }
 
@@ -431,7 +458,8 @@ function meetingGuideEmailFromRow(row: DbRow): BookingMeetingGuideEmail | null {
     publicBookingId: text(row.public_booking_id, "public_booking_id"),
     guestEmail: text(row.guest_email, "guest_email"),
     guestName: text(row.guest_name, "guest_name"),
-    experienceTitle: text(row.public_title, "public_title"),
+    guestLanguage: guestLanguageOf(row),
+    experienceTitle: experienceTitleFor(row),
     localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
     localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
     timeZone: text(occurrence.timeZone, "occurrence_snapshot.timeZone"),
@@ -454,7 +482,8 @@ function noticeFromRow(row: DbRow): BookingNoticeEmail | null {
     publicBookingId: text(row.public_booking_id, "public_booking_id"),
     guestEmail: text(row.guest_email, "guest_email"),
     guestName: text(row.guest_name, "guest_name"),
-    experienceTitle: text(row.public_title, "public_title"),
+    guestLanguage: guestLanguageOf(row),
+    experienceTitle: experienceTitleFor(row),
     experienceSlug: text(row.slug, "slug"),
     localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
     localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
@@ -495,7 +524,7 @@ function managedGuestMailFromRow(row: DbRow): ManagedGuestMailEmail | null {
     guestEmail: text(row.guest_email, "guest_email"),
     guestName: text(row.guest_name, "guest_name"),
     guestLanguage: row.guest_language === "JA" ? "JA" : "EN",
-    experienceTitle: text(row.public_title, "public_title"),
+    experienceTitle: experienceTitleFor(row),
     localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
     localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
     timeZone: text(occurrence.timeZone, "occurrence_snapshot.timeZone"),
@@ -962,6 +991,7 @@ export class GuestMailOutbox {
                 (b.occurrence_snapshot->>'startUtc')::timestamptz > clock_timestamp() AS before_start,
                 g.guest_email, g.guest_name, g.guest_language, g.approval_status, g.checkout_session_ref,
                 g.adult_count, g.child_count, p.public_title, p.slug,
+                CASE WHEN g.guest_language='JA' THEN NULLIF(btrim(pub.content->'ja'->>'title'),'') END AS public_title_ja,
                 provider.public_display_name AS provider_public_name,
                 guide_snapshot.guide AS meeting_guide,
                 (SELECT COALESCE(sum(x.amount), 0)::text FROM booking_refunds x
@@ -974,6 +1004,8 @@ export class GuestMailOutbox {
            JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
            LEFT JOIN experience_provider_public_profiles provider ON provider.provider_id=b.provider_id
              AND b.seller_snapshot->>'chargeMode'='PLATFORM'
+           LEFT JOIN experience_product_publication_states pub_state ON pub_state.provider_id=b.provider_id AND pub_state.product_id=b.product_id
+           LEFT JOIN experience_product_publications pub ON pub.id=pub_state.current_publication_id
            LEFT JOIN booking_meeting_guide_snapshots guide_snapshot ON guide_snapshot.provider_id=b.provider_id AND guide_snapshot.booking_id=b.id
            LEFT JOIN booking_refunds r ON r.provider_id = b.provider_id AND r.booking_id = b.id
                  AND r.id = (CASE WHEN c.payload->>'refundId' ~ ${UUID_TEXT} THEN (c.payload->>'refundId')::uuid END)
