@@ -227,9 +227,12 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
   const paragraphs = e.description.split(/\n\s*\n/).filter((paragraph) => paragraph.trim());
   const hostPhoto = e.hosts[0]?.avatar ?? null;
   const modes = new Set(e.offers.map((offer) => offer.acceptanceMode));
+  const managedApprovalNote = locale === "ja"
+    ? "申込時にカードは不要です。事務局の承認後、有効期限付きのStripe支払URLをご案内します。"
+    : "No card is needed now. If the office approves your request, they will send you a time-limited Stripe payment link.";
   const acceptanceNote =
     modes.size === 1 && modes.has("APPROVAL")
-      ? copy.text("booking.approvalNote")
+      ? sale.kind === "site" ? managedApprovalNote : copy.text("booking.approvalNote")
       : modes.size === 1 && modes.has("INSTANT")
         ? copy.text("booking.instantNote")
         : copy.text("detail.policyApplies");
@@ -254,8 +257,8 @@ export async function ExperiencePageContent({ params, searchParams, locale }: Ex
       icon: "people",
       text:
         approval === e.offers.length
-          ? locale === "en" ? "Your hosts confirm each request — you're only charged if they accept" : copy.text("booking.approvalNote")
-          : locale === "en" ? "Some options are confirmed by your hosts — you're only charged if they accept" : copy.text("detail.policyApplies"),
+          ? sale.kind === "site" ? managedApprovalNote : locale === "en" ? "Your hosts confirm each request — you're only charged if they accept" : copy.text("booking.approvalNote")
+          : sale.kind === "site" ? (locale === "ja" ? "一部のプランは、事務局の承認後に支払URLをご案内します。" : "For some options, the office sends a payment link after approval.") : locale === "en" ? "Some options are confirmed by your hosts — you're only charged if they accept" : copy.text("detail.policyApplies"),
     });
   }
   assurances.push({ icon: "mail", text: copy.text("detail.noAccount") }, { icon: "card", text: copy.text("detail.secureStripe") });

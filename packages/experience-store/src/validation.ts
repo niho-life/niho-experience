@@ -133,6 +133,7 @@ export function buildSnapshots(
     readonly salesAgreementVersion?: string;
     readonly paymentDueDays?: number | null;
     readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
+    readonly acceptanceMode?: "INSTANT" | "APPROVAL";
   },
   guest?: GuestPricingInput,
 ): {
@@ -185,6 +186,7 @@ export function buildSnapshots(
       ...(product.salesAgreementVersion ? { agreementVersion: product.salesAgreementVersion } : {}),
       ...(product.paymentDueDays !== undefined ? { paymentDueDays: product.paymentDueDays } : {}),
       ...(product.paymentDuePolicy ? { paymentDuePolicy: product.paymentDuePolicy } : {}),
+      ...(product.acceptanceMode ? { acceptanceMode: product.acceptanceMode } : {}),
     },
   };
 }

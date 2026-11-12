@@ -53,7 +53,7 @@ type ProductDraftBody = {
   readonly unitAmount: number;
   readonly managedSales?: {
     readonly enabled: true;
-    readonly acceptanceMode?: "INSTANT";
+    readonly acceptanceMode?: "INSTANT" | "APPROVAL";
     readonly privateGroup?: boolean;
     readonly sellerConfirmationMethod: "WRITTEN";
   };
@@ -91,7 +91,8 @@ function managedDraftSettings(input: ProductDraftBody["managedSales"]) {
   if (!server) return null;
   return { ...server, agreementConfirmedAtUtc: new Date().toISOString(),
     agreementConfirmationMethod: input.sellerConfirmationMethod,
-    privateGroup: input.privateGroup, pilotApproved: true as const };
+    privateGroup: input.privateGroup, pilotApproved: true as const,
+    acceptanceMode: input.acceptanceMode ?? "INSTANT" };
 }
 
 function adminJson(body: unknown, status = 200): ReturnType<typeof baseAdminJson> {
@@ -120,7 +121,7 @@ function validDraft(value: unknown): value is ProductDraftBody {
       && exactKeys(value.managedSales, ["enabled", "acceptanceMode", "privateGroup", "sellerConfirmationMethod"],
         ["enabled", "sellerConfirmationMethod"])
       && value.managedSales.enabled === true
-      && (value.managedSales.acceptanceMode === undefined || value.managedSales.acceptanceMode === "INSTANT")
+      && (value.managedSales.acceptanceMode === undefined || value.managedSales.acceptanceMode === "INSTANT" || value.managedSales.acceptanceMode === "APPROVAL")
       && (value.managedSales.privateGroup === undefined || typeof value.managedSales.privateGroup === "boolean")
       && value.managedSales.sellerConfirmationMethod === "WRITTEN"));
 }
@@ -221,12 +222,13 @@ async function authorize(request: Request, mutation = false): Promise<
 async function productDto(actor: PublicationAdminDraftActor, providerId: string, productId: string) {
   const repository = experiencePublicationRepository();
   if (!repository) throw new Error("store unavailable");
-  const [product, terms, media, offers, publication] = await Promise.all([
+  const [product, terms, media, offers, publication, salesPlan] = await Promise.all([
     repository.getAdminDraftProduct(actor, providerId, productId),
     repository.getAdminDraftSaleTerms(actor, providerId, productId),
     repository.listAdminDraftMedia(actor, providerId, productId),
     repository.listAdminDraftSaleOffers(actor, providerId, productId),
     repository.getAdminDraftPublicationStatus(actor, providerId, productId, config.experiencePublicationConsentVersion, config.experiencePayoutAccountConsentVersion),
+    managedExperienceSalesRepository()?.get(providerId, productId) ?? null,
   ]);
   if (product.version !== publication.draftVersion
     || terms.draftVersion !== publication.draftVersion
@@ -239,7 +241,7 @@ async function productDto(actor: PublicationAdminDraftActor, providerId: string,
     status: "DRAFT" as const,
     publicationNeedsUpdate: false,
     publicationBlockers: publication.blockers,
-    acceptanceMode: "INSTANT" as const,
+    acceptanceMode: salesPlan?.current.acceptanceMode ?? "INSTANT" as const,
     adminEnglishReview: publication.englishReview,
     draft: { slug: product.slug, publicTitle: product.publicTitle, content: product.content, currency: product.currency, unitAmount: product.unitAmount },
     sellerDisplayName: product.sellerDisplayName,

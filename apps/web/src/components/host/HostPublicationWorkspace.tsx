@@ -44,7 +44,7 @@ type Product = {
   status: Status;
   publicationNeedsUpdate: boolean;
   publicationBlockers: string[];
-  acceptanceMode?: "INSTANT";
+  acceptanceMode?: "INSTANT" | "APPROVAL";
   adminEnglishReview?: {
     reviewed: boolean;
     reviewedAtUtc: string | null;
@@ -255,10 +255,10 @@ export function HostPublicationWorkspace({
   const [unitAmount, setUnitAmount] = useState("");
   const [managedSalesAvailable, setManagedSalesAvailable] = useState(false);
   const [createManagedSales, setCreateManagedSales] = useState(false);
-  const [createManagedAcceptanceMode, setCreateManagedAcceptanceMode] = useState<"" | "INSTANT">("");
+  const [createManagedAcceptanceMode, setCreateManagedAcceptanceMode] = useState<"" | "INSTANT" | "APPROVAL">("");
   const [createManagedPrivateGroup, setCreateManagedPrivateGroup] = useState(false);
   const [createManagedAgreementConfirmed, setCreateManagedAgreementConfirmed] = useState(false);
-  const managedDraftReady = managedSalesAvailable && createManagedAcceptanceMode === "INSTANT" && createManagedAgreementConfirmed;
+  const managedDraftReady = managedSalesAvailable && (createManagedAcceptanceMode === "INSTANT" || createManagedAcceptanceMode === "APPROVAL") && createManagedAgreementConfirmed;
   const [content, setContent] = useState<Record<string, unknown>>(blankContent);
   const [terms, setTerms] = useState<PublicationTermsForm>(emptyTerms);
   const [baseline, setBaseline] = useState("");
@@ -918,9 +918,10 @@ export function HostPublicationWorkspace({
           予約の受付方法
           <select required className="rounded-xl border border-line bg-white px-3 py-2 font-normal"
             value={createManagedAcceptanceMode}
-            onChange={(event) => setCreateManagedAcceptanceMode(event.target.value === "INSTANT" ? "INSTANT" : "")}>
+            onChange={(event) => setCreateManagedAcceptanceMode(event.target.value === "INSTANT" || event.target.value === "APPROVAL" ? event.target.value : "")}>
             <option value="">選択してください</option>
             <option value="INSTANT">即時決済（有料は支払い完了で予約確定）</option>
+            <option value="APPROVAL">承認後に決済（申込時はカード不要・事務局が支払URLを案内）</option>
           </select>
         </label>
         <label className="flex items-center gap-2 text-sm font-bold sm:col-span-2">
@@ -1208,6 +1209,8 @@ export function HostPublicationWorkspace({
       <h2 id="admin-proxy-publication-title" className="font-extrabold">販売者確認と代理公開</h2>
       {product.acceptanceMode === "INSTANT" ? <dl className="flex flex-wrap gap-x-3 text-sm">
         <dt className="font-bold">予約の受付方法</dt><dd>即時決済（有料は支払い完了で予約確定）</dd>
+      </dl> : product.acceptanceMode === "APPROVAL" ? <dl className="flex flex-wrap gap-x-3 text-sm">
+        <dt className="font-bold">予約の受付方法</dt><dd>承認後に決済（申込時はカード情報を受け取らず、事務局が承認後の支払URLを手動案内）</dd>
       </dl> : null}
       <p className="text-sm text-ink-soft">現在の保存版・販売条件・掲載同意版・事務局担当者・確認方法を公開と同じtransactionで監査記録します。自由記入欄や個人情報は記録しません。</p>
       <div className="rounded-xl border border-line bg-sand/40 p-3 text-xs text-ink-soft">

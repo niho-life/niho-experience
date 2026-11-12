@@ -1292,6 +1292,15 @@ export class ExperienceStore {
       if (booking.sellerSnapshot.stripeConnectAccountRef !== input.connectedAccountId) {
         throw new StoreConflictError("Stripe event account does not match the booking seller snapshot.");
       }
+      if (booking.sellerSnapshot.acceptanceMode === "APPROVAL") {
+        const approval = await client.query<DbRow>(
+          "SELECT approval_status,checkout_session_ref FROM booking_guests WHERE provider_id=$1 AND booking_id=$2 FOR SHARE",
+          [scope.providerId, bookingRow.id],
+        );
+        if (approval.rows[0]?.approval_status !== "APPROVED" || typeof approval.rows[0]?.checkout_session_ref !== "string") {
+          throw new StoreConflictError("An unapproved booking cannot be finalized.");
+        }
+      }
 
       const existingEvent = await client.query<DbRow>(
         `SELECT event_id FROM stripe_webhook_events

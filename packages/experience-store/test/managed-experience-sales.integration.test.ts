@@ -8,6 +8,7 @@ import { ExperiencePublicationRepository } from "../src/experience-publication.t
 import { GuestBookingRepository, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import { HostAccounts } from "../src/host-accounts.ts";
 import { ManagedExperienceSalesRepository, managedPaymentDueDate } from "../src/managed-sales.ts";
+import { ManagedBookingApprovalRepository } from "../src/managed-booking-approvals.ts";
 import { ProviderPayoutAccountConsents } from "../src/payout-account-consents.ts";
 import { ProviderSellerDisclosureRepository } from "../src/provider-seller-disclosures.ts";
 import { ExperienceStore } from "../src/repository.ts";
@@ -110,6 +111,96 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       assert.equal(managedTerms?.salesPlanRevision, 1);
       assert.equal(managedTerms?.sellerDisplayName, "Synthetic NIHO Seller");
       assert.equal((await publications.getPublicBySlug(draft.slug))?.providerPublicName, "Synthetic Actual Provider");
+
+      // #515: a separate immutable MANAGED_20 revision requests first and never opens Checkout in the public transaction.
+      const approvalDraft = await publications.createDraftAsAdmin(ADMIN, profile.providerId, {
+        slug: "synthetic-managed-approval", publicTitle: "Synthetic managed approval",
+        content: {
+          ja: { title: "合成の承認制体験", lead: "合成の紹介", description: "合成の説明", language: "日本語", highlights: ["合成"], included: ["合成素材"], notIncluded: [], knowBeforeYouGo: ["合成注意"], notSuitableFor: [], timeline: [] },
+          lead: "Synthetic lead", description: "Synthetic description", facts: { language: "Japanese" }, highlights: ["Synthetic"], included: ["Synthetic material"], notIncluded: [], knowBeforeYouGo: ["Synthetic note"], notSuitableFor: [], timeline: [],
+          meetingOverview: "Synthetic meeting point", meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null,
+        }, currency: "JPY", unitAmount: 10_000,
+      }, { ...managedConfig, acceptanceMode: "APPROVAL" });
+      const approvalMediaId = randomUUID();
+      await publications.addMediaAsAdmin(ADMIN, profile.providerId, approvalDraft.id, {
+        id: approvalMediaId, objectKey: `experience-products/${approvalMediaId}.jpg`, sourceRefHash: "b".repeat(64),
+        width: 1200, height: 800, byteSize: 4096, altText: "Synthetic approval experience", altTextJa: "合成の承認制体験", publicCredit: null,
+      });
+      const approvalOfferId = randomUUID();
+      await store.saveDraftScheduleRuleAsAdmin(ADMIN, profile.providerId, approvalDraft.id, {
+        ...schedule, id: approvalOfferId,
+      }, null, approvalOfferId);
+      const approvalCurrent = await publications.getAdminDraftProduct(ADMIN, profile.providerId, approvalDraft.id);
+      await publications.saveSaleTermsAsAdmin(ADMIN, profile.providerId, approvalDraft.id, {
+        expectedDraftVersion: approvalCurrent.version, expectedSaleTermsVersion: null,
+        saleTerms: { offerPrices: null, childPricing: null, minimumParticipants: 1, minimumChargeableParticipants: 1, maxPartySize: 6, cancellationPolicy: "FREE_UNTIL_24H", cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10_000, minimumAttendance: null, bookingQuestions: [], conditionsVersion: null },
+      });
+      await publications.reviewAdminDraftEnglish(ADMIN, profile.providerId, approvalDraft.id, approvalCurrent.version);
+      const approvalPublication = await publications.publishAdminDraft(ADMIN, profile.providerId, approvalDraft.id, {
+        expectedDraftVersion: approvalCurrent.version, expectedStateVersion: null, expectedSaleTermsVersion: 1,
+        consentVersion: PUBLICATION_CONSENT, accepted: true, sellerConfirmationMethod: "WRITTEN", photoRightsConfirmed: true,
+        payoutConsentVersion: "not-used-for-managed", accountCheck: { stripeConnectAccountRef: PLATFORM, checkedAtUtc: new Date().toISOString() },
+      });
+      assert.equal((await guests.publicBookingTerms(approvalDraft.slug))?.offers[0]?.acceptanceMode, "APPROVAL");
+      const approvalRepository = new ManagedBookingApprovalRepository(pool);
+      const requested = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(2), 1, "approval@example.test"));
+      assert.equal(requested.checkoutSessionRef, null);
+      assert.equal(requested.booking.sellerSnapshot.acceptanceMode, "APPROVAL");
+      assert.ok(Date.parse(requested.holdExpiresAt) - Date.now() > 23 * 60 * 60_000);
+      assert.deepEqual((await pool.query("SELECT approval_status,checkout_session_ref FROM booking_guests WHERE booking_id=(SELECT id FROM bookings WHERE public_booking_id=$1)", [requested.publicBookingId])).rows[0], {
+        approval_status: "PENDING", checkout_session_ref: null,
+      });
+      await assert.rejects(guests.attachCheckoutSession(requested.publicBookingId, "cs_test_unapproved"), StoreConflictError);
+      await assert.rejects(store.confirmBookingPayment({ providerId: profile.providerId }, {
+        publicBookingId: requested.publicBookingId, connectedAccountId: PLATFORM, stripePaymentRef: "pi_PlatformTooEarly1",
+        stripeEventId: "evt_PlatformTooEarly1", stripeEventType: "checkout.session.completed", eventOccurredAtUtc: new Date().toISOString(), amount: 10_000, currency: "JPY",
+      }), StoreConflictError);
+      assert.equal((await approvalRepository.listPending(ADMIN)).requests.find((item) => item.publicBookingId === requested.publicBookingId)?.guestEmail, "approval@example.test");
+      const approvedRequest = await approvalRepository.approve(ADMIN, requested.publicBookingId);
+      assert.equal(approvedRequest.checkoutSessionRef, null);
+      await assert.rejects(approvalRepository.decline(ADMIN, requested.publicBookingId), StoreConflictError);
+      await guests.attachCheckoutSession(requested.publicBookingId, "cs_test_approved_reusable");
+      assert.equal((await approvalRepository.approve(ADMIN, requested.publicBookingId)).checkoutSessionRef, "cs_test_approved_reusable");
+      assert.equal((await store.confirmBookingPayment({ providerId: profile.providerId }, {
+        publicBookingId: requested.publicBookingId, connectedAccountId: PLATFORM, stripePaymentRef: "pi_PlatformApproval1",
+        stripeEventId: "evt_PlatformApproval1", stripeEventType: "checkout.session.completed", eventOccurredAtUtc: new Date().toISOString(), amount: 10_000, currency: "JPY",
+      })).booking.status, "CONFIRMED");
+
+      const declinedRequest = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(3), 1, "declined@example.test"));
+      await approvalRepository.decline(ADMIN, declinedRequest.publicBookingId);
+      assert.equal((await pool.query("SELECT status FROM bookings WHERE public_booking_id=$1", [declinedRequest.publicBookingId])).rows[0]?.status, "EXPIRED");
+
+      const expiredRequest = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(4), 1, "expired@example.test"));
+      await pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
+      await pool.query("UPDATE bookings SET created_at=clock_timestamp()-interval '2 minutes',hold_expires_at=clock_timestamp()-interval '1 minute' WHERE public_booking_id=$1", [expiredRequest.publicBookingId]);
+      await pool.query("ALTER TABLE bookings ENABLE TRIGGER bookings_protect_snapshots");
+      await assert.rejects(approvalRepository.approve(ADMIN, expiredRequest.publicBookingId), StoreConflictError);
+      await approvalRepository.decline(ADMIN, expiredRequest.publicBookingId);
+
+      const racedRequest = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(5), 1, "raced@example.test"));
+      const decisions = await Promise.allSettled([
+        approvalRepository.approve(ADMIN, racedRequest.publicBookingId),
+        approvalRepository.decline(ADMIN, racedRequest.publicBookingId),
+      ]);
+      assert.equal(decisions.filter(({ status }) => status === "fulfilled").length, 1);
+      const lostDecision = decisions.find((decision) => decision.status === "rejected");
+      assert.ok(lostDecision?.reason instanceof StoreConflictError);
+
+      const pendingAtStop = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(6), 1, "pending-at-stop@example.test"));
+      const approvedAtStop = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(7), 1, "approved-at-stop@example.test"));
+      await approvalRepository.approve(ADMIN, approvedAtStop.publicBookingId);
+      const firstApprovalPage = await approvalRepository.listPending(ADMIN, 1, 1);
+      const secondApprovalPage = await approvalRepository.listPending(ADMIN, 2, 1);
+      assert.equal(firstApprovalPage.hasNext, true);
+      assert.equal(firstApprovalPage.requests.length, 1);
+      assert.equal(secondApprovalPage.requests.length, 1);
+      assert.notEqual(firstApprovalPage.requests[0]?.publicBookingId, secondApprovalPage.requests[0]?.publicBookingId);
+
+      await publications.suspendByOperations(ADMIN, profile.providerId, approvalDraft.id, "PILOT_STOP", approvalPublication.version);
+      await assert.rejects(approvalRepository.approve(ADMIN, pendingAtStop.publicBookingId), StoreConflictError);
+      await assert.rejects(guests.attachCheckoutSession(approvedAtStop.publicBookingId, "cs_test_platform_stopped"), StoreConflictError);
+      await approvalRepository.decline(ADMIN, pendingAtStop.publicBookingId);
+
       await assert.rejects(guests.startGuestBooking({
         ...bookingRequest(draft.slug, offerId, day(2), 1, "closed@example.test"), managedSalesEnabled: false,
       }), StoreNotFoundError);

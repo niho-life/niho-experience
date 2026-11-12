@@ -1,11 +1,11 @@
 import { HandIcon, type HandIconName } from "./HandIcon";
 import { ButtonLink } from "./ui";
 
-/** The kind of booking on the return URL (`?type=instant|approval`). Anything else, or nothing, is the neutral page. */
-export type BookingReturnType = "instant" | "approval";
+/** An allowlisted return-page variant. Other values show the neutral page. */
+export type BookingReturnType = "instant" | "approval" | "managed-request";
 
 export function readReturnType(value: string | string[] | undefined): BookingReturnType | null {
-  return value === "instant" || value === "approval" ? value : null;
+  return value === "instant" || value === "approval" || value === "managed-request" ? value : null;
 }
 
 type Step = { icon: HandIconName; title: string; text: string };
@@ -20,9 +20,12 @@ type Step = { icon: HandIconName; title: string; text: string };
  */
 export function BookingReturn({ type, showReview, freeBooking = false }: { type: BookingReturnType | null; showReview: boolean; freeBooking?: boolean }) {
   const approval = type === "approval";
+  const managedRequest = type === "managed-request";
   const eyebrow = type ? "thank you" : "almost there";
-  const heading = approval ? "The host will review your request" : freeBooking ? "Check your email for your free booking" : type ? "Check your email for your booking" : "Check your email";
-  const lead = approval
+  const heading = managedRequest ? "NIHO will review your request" : approval ? "The host will review your request" : freeBooking ? "Check your email for your free booking" : type ? "Check your email for your booking" : "Check your email";
+  const lead = managedRequest
+    ? "Submitting a request does not require a card or take payment. If NIHO approves your request, we’ll email you a Stripe payment link."
+    : approval
     ? "You are charged only if they accept. We email you either way."
     : freeBooking
       ? "No payment is due. Your booking confirmation will arrive by email."
@@ -30,7 +33,7 @@ export function BookingReturn({ type, showReview, freeBooking = false }: { type:
       ? "Your confirmation comes by email once your payment goes through."
       : "We email you about your booking. If the host needs to approve your request, the email says so.";
   const steps: Step[] = [
-    { icon: "mail", title: approval ? "An email about your request" : "Your confirmation email", text: approval ? "It tells you the request is with the host. Another follows when they answer." : freeBooking ? "The experience, date and time, your group and a link to your booking. No payment is due." : "The experience, the date and time, your group, what you paid and a link to your booking." },
+    { icon: "mail", title: managedRequest ? "Wait for NIHO to reply" : approval ? "An email about your request" : "Your confirmation email", text: managedRequest ? "If approved, use the payment link before it expires. Your booking is confirmed after payment." : approval ? "It tells you the request is with the host. Another follows when they answer." : freeBooking ? "The experience, date and time, your group and a link to your booking. No payment is due." : "The experience, the date and time, your group, what you paid and a link to your booking." },
     { icon: "pin", title: "Meeting details", text: "Where to meet reaches you before the day." },
     { icon: "cal", title: "Meet your host", text: "On the day, meet your host where the meeting details say." },
     ...(showReview ? [{ icon: "chat" as const, title: "Share how it went", text: "After the experience, we ask how it was." }] : []),

@@ -231,6 +231,30 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     expect(state.repository?.attachCheckoutSession).toHaveBeenCalledWith(BOOKING_ID, "cs_test_sample1");
   });
 
+  it("returns only the local request receipt for APPROVAL and makes no Stripe call", async () => {
+    const base = started({}, 24 * 60);
+    state.repository!.startGuestBooking!.mockResolvedValueOnce({
+      ...base,
+      booking: {
+        ...base.booking,
+        sellerSnapshot: {
+          ...base.booking.sellerSnapshot,
+          chargeMode: "PLATFORM",
+          salesPlan: "MANAGED_20",
+          salesPlanRevision: 1,
+          acceptanceMode: "APPROVAL",
+        },
+      },
+    });
+    const response = await checkout(post({ ...CHECKOUT, salesPlanRevision: 1 }), slugParams());
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ checkoutUrl: `${ORIGIN}/booking/return?type=managed-request` });
+    expect(state.stripeAccountRetrieve).not.toHaveBeenCalled();
+    expect(state.stripeCreate).not.toHaveBeenCalled();
+    expect(state.stripeRetrieve).not.toHaveBeenCalled();
+    expect(state.repository?.attachCheckoutSession).not.toHaveBeenCalled();
+  });
+
   it("requires an active Experience publication and records Japanese guests on the shared checkout path", async () => {
     state.config = { ...state.config, experiencePublicationsEnabled: true };
     state.publications!.getPublicBySlug!.mockResolvedValueOnce(null);

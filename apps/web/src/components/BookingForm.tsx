@@ -252,6 +252,7 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
   }
 
   const approval = offer.acceptanceMode === "APPROVAL";
+  const managedApproval = approval && bookingSource?.kind === "site";
   const day = dayOption(selection.date, locale);
   // The chosen date's own time: a host may have moved this occurrence (#285).
   const timing = occurrenceTiming(offer, startAt && endAt ? { startAt, endAt } : null);
@@ -301,6 +302,14 @@ export function BookingForm({ api, apiUnavailable, experience, offer, selection,
       }] : []),
     ],
     total: total === null ? copy.text("booking.totalUnavailable") : formatExperiencePriceYen(total, locale),
+    ...(managedApproval ? {
+      confirmationNote: locale === "ja"
+        ? "申込時にカードは不要です。事務局の承認後、有効期限付きのStripe支払URLをご案内します。"
+        : "No card is needed now. If the office approves your request, they will send you a time-limited Stripe payment link.",
+      paymentDisclosure: locale === "ja"
+        ? "この申込ではカード情報を入力せず、請求も発生しません。"
+        : "No card details are collected and no charge is made when you send this request.",
+    } : {}),
     policyTitle: total === 0
       ? locale === "ja" ? "無料予約は体験終了までいつでもキャンセルできます" : "Free bookings can be cancelled any time before the experience ends"
       : offerCancellationTitle(offer, locale),
