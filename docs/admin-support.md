@@ -32,6 +32,8 @@ read flagをONにしたHTTP画面は、予約一覧・deep link詳細・通知�
 
 `ADMIN_PRODUCT_OPERATORS_PREVIEW_ENABLED=true` もmock専用（HTTPでは無視）で、運営者（`/admin/operators`・#542）を合成データで描く。ブラウザの `/admin/api/operators` 要求はPlaywrightがstubで答え、招待リンクの作成・取り消し・解除・結果不明からの同じ `commandId` での照合を検証する。
 
+`ADMIN_PRODUCT_WORKSPACES_PREVIEW_ENABLED=true` もmock専用（HTTPでは無視）で、提供者（`/admin/products`・#542 S2）のメニューとページを開く。ページは合成データを持たず、ブラウザの `/admin/api/product-workspaces…` 要求をPlaywrightがstubで答える。
+
 `EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED=true` もmock専用である。Admin read previewとHost予約プレビューのパネルだけを開き、Playwrightが契約形responseをbrowser requestへ返す。HTTPでは無視し、mock BFF・決済・返金・Transfer・台帳へ接続しない。
 
 予約の承認・辞退・取消／返金、連絡送信はcase flagだけをONにしても表示しない。operationsの専用flagとAPI snapshotが許可した操作だけを表示する。旧予約や不正な支援snapshotをOFF・10%へ補完せず、case読取に失敗したときも未担当・空メモを作らない。担当・内部メモはcase APIの `writeCapability` とCAS revisionだけに従う。返金の増分・返金後累計はoperations GETの`refundOptions`をそのまま使い、画面で率や金額を再計算しない。

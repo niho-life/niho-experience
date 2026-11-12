@@ -16,7 +16,7 @@ export function adminSectionFlags(): AdminSectionFlags {
     bookingSupport: preview || nihoRead,
     siteBookings: preview ? config.adminSiteBookingsPreviewEnabled : config.guestBookingEnabled,
     notifications: preview || nihoRead,
-    products: isAdminHttp() && config.experienceHostPublicationApiEnabled,
+    products: preview ? config.adminProductWorkspacesPreviewEnabled : isAdminHttp() && config.experienceHostPublicationApiEnabled,
     operators: preview ? config.adminProductOperatorsPreviewEnabled : config.hostConsoleEnabled,
     preparations: isPreparationUiEnabled(),
     channels: channelManagerEnabled() || channelWorkspacePreviewEnabled(),

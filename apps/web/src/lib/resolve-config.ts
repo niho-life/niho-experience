@@ -713,6 +713,8 @@ export function resolveConfig(env: Env) {
   // ignores it; the page renders fixtures and the browser's API calls are stubbed (its BFF stays closed in mock mode).
   const adminSiteBookingsPreviewEnabled = apiMode === "mock" && env.ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED === "true";
   // 運営者 (#542): synthetic /admin/operators for Playwright only, the same way. Mock mode only; the browser's API calls are stubbed.
+  // 提供者 (#542 S2): the same for /admin/products, whose API calls the browser stubs answer.
+  const adminProductWorkspacesPreviewEnabled = apiMode === "mock" && env.ADMIN_PRODUCT_WORKSPACES_PREVIEW_ENABLED === "true";
   const adminProductOperatorsPreviewEnabled = apiMode === "mock" && env.ADMIN_PRODUCT_OPERATORS_PREVIEW_ENABLED === "true";
   // Host history is read-only, but its selected endpoint is also agreed-not-deployed.
   const hostSupportHistoryApiEnabled = apiMode === "http" && env.HOST_SUPPORT_HISTORY_API_ENABLED === "true";
@@ -894,6 +896,7 @@ export function resolveConfig(env: Env) {
     adminOperationsPreviewEnabled,
     adminSiteBookingsPreviewEnabled,
     adminProductOperatorsPreviewEnabled,
+    adminProductWorkspacesPreviewEnabled,
     hostSupportHistoryApiEnabled,
     hostSupportSettingsApiEnabled,
     hostSupportSettingsPreviewEnabled,
