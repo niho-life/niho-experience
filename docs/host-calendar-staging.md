@@ -26,7 +26,19 @@ Owner/Editor、project全体のRun Admin、project全体のSecret Accessor、SA�
 2. 管理者が対象project・請求・既存instanceを確認して、レビュー済みSHAから `CONFIRM_HOST_STAGING_SETUP=niho-app-stg bash scripts/gcp/setup-host-staging.sh` を実行する。これは明示的なGCP変更である。scriptはAPI有効化、専用identity/repository/service/IAMを作る。DB・DBユーザー・Secret・既存サービス・共有instanceの設定は変更しない。初回はSecret/DBなしのprivate placeholderを作る。
 3. 出力された4個の `STG_HOST_*` をEnvironment Variablesへ登録する。値はresource識別子であり、秘密値ではない。追加で `STG_HOST_CORE_READY=false` をEnvironment Variablesへ登録する。既存providerの設定が異なる場合はscriptを止め、IAMを緩めずレビューする。
 4. 下記の専用bootstrap scriptを手動実行し、Experience専用DB・専用DBユーザー・バックアップ方針を用意する。NIHO業務DBを使わない。`packages/experience-store/migrations/` のSQLを名前順に適用する。RuntimeにDDL・role作成権限を渡さず、必要なtable/sequence DMLだけを付ける。共有instance内の他DBへの接続/読取を拒否できるか確認する。`setup-host-staging.sh` と配備workflowはDB変更を実行しない。
-5. 合成提供者と専用のテストNIHOアカウントを、正当な権限を持つ非公開のprovisioning経路で結ぶ。`provider_memberships` を含む実ID・SQL応答・接続URL・Google資格情報はGit、公開Issue、PR、CIログへ記録しない。実顧客・実提供者・本番DBの複製は使わない。
+5. 通訳受入用の合成ProviderとHost Account OWNERは、再利用できる内部provisioner scripts/gcp/provision-stg-translate-test-provider.mjs で作る。ownerのGoogleメールアドレスを STG_TRANSLATE_TEST_OWNER_EMAIL で渡す。NIHO LOGINの作成は不要で、Experience DBにだけstg-translate-test- 接頭辞のproviderとHost Account membershipを作る。provider IDはExperience側のIDとNIHO側の予算scope IDに同じ値を使う。seller profile・販売者同意・商品・手数料・掲載・予約・決済・メール送信は作らない。dry-runで環境と既存owner状態を確かめた後、CONFIRM_STG_TRANSLATE_TEST_PROVIDER=niho-app-stg と --apply で1件だけ作る。niho-app の scripts/dev/niho-db.sh stg --via-bastion が開くIAP tunnelから、Experience側は experience_stg_migrator を使う。productionや一般販売登録scriptへ切り替えない。
+
+    NIHO_APP_REPO="<canonical niho-app checkout>"
+    STG_TRANSLATE_TEST_OWNER_EMAIL="<owner Google email>" \
+      "$NIHO_APP_REPO/scripts/dev/niho-db.sh" stg --via-bastion -- \
+      node "$PWD/scripts/gcp/provision-stg-translate-test-provider.mjs" --dry-run
+
+    STG_TRANSLATE_TEST_OWNER_EMAIL="<owner Google email>" \
+    CONFIRM_STG_TRANSLATE_TEST_PROVIDER=niho-app-stg \
+      "$NIHO_APP_REPO/scripts/dev/niho-db.sh" stg --via-bastion -- \
+      node "$PWD/scripts/gcp/provision-stg-translate-test-provider.mjs" --apply --show-provider-id
+
+provider IDは公開せず、NIHO stgのTRANSLATE_STANDALONE_PROVIDER_IDSとTRANSLATE_STANDALONE_EXPERIENCE_PROVIDER_MAPへ対象1件だけ設定する。mapはExperience provider IDとNIHO provider scope IDの対応を記録し、このfixtureでは両者に同じIDを指定する。TRANSLATE_STANDALONE_ENABLEDとExperience側standalone flagは、API配備readbackと実機受入の準備が終わるまでOFFのままにする。Provider ID・Host Account ID・メール・SQL応答・接続URL・Google資格情報はGit、Issue、PR、CIログへ記録しない。
 
 ### 指定ownerによる手動配備
 
