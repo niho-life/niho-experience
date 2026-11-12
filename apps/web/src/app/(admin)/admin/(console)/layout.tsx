@@ -47,5 +47,5 @@ export default async function AdminConsoleLayout({ children }: { children: React
   const keeper = load.kind === "niho"
     ? { idTokenExpiresAt: load.session.idTokenExpiresAt, connectionExpiresAt: load.session.connectionExpiresAt }
     : { idTokenExpiresAt: load.session.absoluteExpiresAt, connectionExpiresAt: load.session.absoluteExpiresAt };
-  return <><AdminSessionKeeper idTokenExpiresAt={keeper.idTokenExpiresAt} connectionExpiresAt={keeper.connectionExpiresAt} /><AdminShell actorName={actorName} unreadCount={unreadCount} channelManager={channelManager} siteBookings={siteBookings} products={products}>{children}</AdminShell></>;
+  return <><AdminSessionKeeper idTokenExpiresAt={keeper.idTokenExpiresAt} connectionExpiresAt={keeper.connectionExpiresAt} /><AdminShell actorName={actorName} unreadCount={unreadCount} channelManager={channelManager} siteBookings={siteBookings} products={products} inquiries={config.groupInquiryEnabled}>{children}</AdminShell></>;
 }

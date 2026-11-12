@@ -64,7 +64,7 @@ export default defineConfig({
       url: `http://127.0.0.1:${PORT}/experiences`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
-      env: { ...serverEnv, PORT: String(PORT), GUIDE_DRAFTS_DIR },
+      env: { ...serverEnv, PORT: String(PORT), GUIDE_DRAFTS_DIR, EXPERIENCE_GROUP_INQUIRY_PREVIEW_ENABLED: "true" },
     },
     {
       command: "sh scripts/start-standalone.sh",
