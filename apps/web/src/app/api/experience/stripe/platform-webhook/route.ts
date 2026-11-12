@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { ExperiencePaymentsValidationError, isEndedCheckoutEvent, isRefundEvent, verifyPlatformCheckoutWebhook } from "@niho-experience/experience-payments";
+import { ExperiencePaymentsValidationError, isEndedCheckoutEvent, isManagedPlatformPaymentIntent, isRefundEvent, verifyPlatformCheckoutWebhook } from "@niho-experience/experience-payments";
+import { StoreNotFoundError } from "@niho-experience/experience-store";
 import { bookingCancellations, experiencePool, experienceStore, guestHoldReleases, managedExperienceSalesRepository } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
@@ -25,7 +26,14 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (!event) return reply(204);
   try {
     if ("stripeDisputeRef" in event) {
-      await managed.recordDispute({ ...event, stripeEventId: event.eventId });
+      try {
+        await managed.recordDispute({ ...event, stripeEventId: event.eventId });
+      } catch (error) {
+        // Disputes from other services on this account can arrive here. Retry our own
+        // disputes when their payment confirmation has yet to link the PaymentIntent.
+        if (!(error instanceof StoreNotFoundError)
+          || await isManagedPlatformPaymentIntent({ paymentIntentId: event.paymentIntentRef, platformStripeKey: key })) throw error;
+      }
       return reply(204);
     }
     const booking = await pool.query<{ provider_id: string; seller_snapshot: Record<string, unknown> }>(

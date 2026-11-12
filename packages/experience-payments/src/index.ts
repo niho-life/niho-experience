@@ -80,6 +80,18 @@ export async function retrievePlatformAccount(input: {
   };
 }
 
+/** Identify an early dispute when the PaymentIntent has not yet been linked to a booking. */
+export async function isManagedPlatformPaymentIntent(input: {
+  readonly paymentIntentId: string;
+  readonly platformStripeKey: string;
+}): Promise<boolean> {
+  if (!PAYMENT_INTENT_ID.test(input.paymentIntentId)) throw new ExperiencePaymentsValidationError("The platform PaymentIntent ID is malformed.");
+  const stripe = resolveSettlementStripeClient(input.platformStripeKey, undefined);
+  const paymentIntent = await stripe.paymentIntents.retrieve(input.paymentIntentId);
+  if (paymentIntent.id !== input.paymentIntentId) throw new ExperiencePaymentsValidationError("Stripe returned a different PaymentIntent.");
+  return paymentIntent.metadata?.source === "niho-experience-platform";
+}
+
 export interface RetrieveDirectCheckoutInput {
   /** The booking the Session was created for; its seller's account holds the Session. */
   readonly booking: Readonly<BookingRecord>;
@@ -1104,8 +1116,9 @@ export function verifyPlatformCheckoutWebhook(input: VerifyPlatformCheckoutWebho
   const occurred = new Date(event.created * 1000).toISOString();
   if (event.type === "refund.created" || event.type === "refund.updated" || event.type === "refund.failed") {
     const refund = asRecord(event.data.object, "refund");
-    const metadata = asRecord(refund.metadata, "refund metadata");
-    if (refund.object !== "refund" || metadata.source !== "niho-experience-platform"
+    const metadata = refund.metadata as Record<string, unknown> | null | undefined;
+    if (metadata?.source !== "niho-experience-platform") return null;
+    if (refund.object !== "refund"
       || Object.keys(metadata).length !== 3 || typeof metadata.booking_id !== "string" || typeof metadata.refund_id !== "string"
       || !UUID_V4.test(metadata.booking_id) || !UUID.test(metadata.refund_id)
       || typeof refund.id !== "string" || !REFUND_ID.test(refund.id) || typeof refund.amount !== "number") return null;
@@ -1121,6 +1134,7 @@ export function verifyPlatformCheckoutWebhook(input: VerifyPlatformCheckoutWebho
   if (event.type === "charge.dispute.created" || event.type === "charge.dispute.updated" || event.type === "charge.dispute.closed") {
     const dispute = asRecord(event.data.object, "dispute");
     if (dispute.object !== "dispute" || typeof dispute.id !== "string" || !/^dp_[A-Za-z0-9_]{1,250}$/.test(dispute.id)) throw new ExperiencePaymentsValidationError("The dispute is malformed.");
+    if (dispute.payment_intent === null) return null;
     if (typeof dispute.amount !== "number") throw new ExperiencePaymentsValidationError("The dispute amount is missing.");
     assertPositiveAmount(dispute.amount, "dispute amount");
     const currency = typeof dispute.currency === "string" ? dispute.currency.toUpperCase() : "";
@@ -1137,9 +1151,10 @@ export function verifyPlatformCheckoutWebhook(input: VerifyPlatformCheckoutWebho
   if (event.type !== "checkout.session.completed" && event.type !== "checkout.session.async_payment_succeeded"
     && event.type !== "checkout.session.expired" && event.type !== "checkout.session.async_payment_failed") return null;
   const session = asRecord(event.data.object, "checkout session");
+  const metadata = session.metadata as Record<string, unknown> | null | undefined;
+  if (metadata?.source !== "niho-experience-platform") return null;
   if (session.object !== "checkout.session" || session.mode !== "payment") throw new ExperiencePaymentsValidationError("The platform event is not a payment Checkout Session.");
-  const metadata = asRecord(session.metadata, "checkout session metadata");
-  if (Object.keys(metadata).length !== 2 || metadata.source !== "niho-experience-platform"
+  if (Object.keys(metadata).length !== 2
     || typeof metadata.booking_id !== "string" || !UUID_V4.test(metadata.booking_id)) return null;
   const base = { eventId: event.id, eventOccurredAtUtc: occurred,
     connectedAccountId: input.expectedPlatformAccountId, publicBookingId: metadata.booking_id.toLowerCase() };

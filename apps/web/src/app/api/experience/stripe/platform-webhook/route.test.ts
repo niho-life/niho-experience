@@ -1,11 +1,16 @@
 import { createHmac } from "node:crypto";
 import type { NextRequest } from "next/server";
+import { StoreNotFoundError } from "@niho-experience/experience-store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
-  query: vi.fn(), confirm: vi.fn(), release: vi.fn(), refund: vi.fn(), dispute: vi.fn(),
+  query: vi.fn(), confirm: vi.fn(), release: vi.fn(), refund: vi.fn(), dispute: vi.fn(), isManagedPayment: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
+vi.mock("@niho-experience/experience-payments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@niho-experience/experience-payments")>()),
+  isManagedPlatformPaymentIntent: state.isManagedPayment,
+}));
 vi.mock("@/lib/experience/store-server", () => ({
   experiencePool: () => ({ query: state.query }),
   experienceStore: () => ({ confirmBookingPayment: state.confirm }),
@@ -75,5 +80,33 @@ describe("managed platform Stripe webhook route", () => {
     state.query.mockResolvedValue({ rows: [{ provider_id: "provider-synthetic", seller_snapshot: { chargeMode: "CONNECT_DIRECT", stripeConnectAccountRef: "acct_ConnectedSynthetic1" } }] });
     expect((await POST(delivery(checkout("unpaid", undefined, "checkout.session.expired")))).status).toBe(204);
     expect(state.release).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges subscription Checkout from another service without touching bookings", async () => {
+    const event = checkout();
+    const other = { ...event, data: { object: { ...event.data.object, mode: "subscription", metadata: null } } };
+    expect((await POST(delivery(other))).status).toBe(204);
+    expect(state.query).not.toHaveBeenCalled();
+    expect(state.confirm).not.toHaveBeenCalled();
+  });
+
+  it("ignores unrelated disputes and retries managed disputes received before confirmation", async () => {
+    const event = {
+      ...checkout(),
+      type: "charge.dispute.created",
+      data: { object: {
+        id: "dp_SharedRouteSynthetic", object: "dispute", amount: 10_000,
+        currency: "jpy", status: "needs_response", payment_intent: "pi_SharedRouteSynthetic",
+      } },
+    };
+    state.dispute.mockRejectedValueOnce(new StoreNotFoundError("platform booking"))
+      .mockRejectedValueOnce(new StoreNotFoundError("platform booking"));
+    state.isManagedPayment.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    expect((await POST(delivery(event))).status).toBe(204);
+    expect((await POST(delivery(event))).status).toBe(503);
+    expect(state.isManagedPayment).toHaveBeenCalledWith({
+      paymentIntentId: "pi_SharedRouteSynthetic", platformStripeKey: "sk_test_platform_route_synthetic",
+    });
   });
 });
