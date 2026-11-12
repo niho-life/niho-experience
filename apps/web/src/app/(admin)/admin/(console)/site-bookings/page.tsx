@@ -8,7 +8,7 @@ import { config } from "@/lib/config";
 import { isAdminHttp, isAdminPreview, loadAdminHttpSession } from "@/lib/admin/server";
 import { bookingCancellations, experienceSupportRepository, managedBookingApprovalRepository } from "@/lib/experience/store-server";
 
-export const metadata: Metadata = { title: "サイト予約の取消・返金 | NIHO 管理" };
+export const metadata: Metadata = { title: "予約 | NIHO 管理" };
 export const dynamic = "force-dynamic";
 
 /**

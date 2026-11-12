@@ -711,7 +711,7 @@ export function AdminSiteBookings({ initial, supportBookings, notifications = []
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
-      <h1 className="font-display text-2xl font-medium">サイト予約の取消・返金</h1>
+      <h1 className="font-display text-2xl font-medium">予約</h1>
       <p className="mt-1 text-ink-soft">このサイトで受けた予約のうち、NIHO サポートの対応が要るもの。全額返金・一部返金とも、NIHO 手数料も返金額に比例して返します（一部返金の額は入力します）。</p>
       <AdminSupportNotifications initial={notifications} onSessionExpired={expireSession} />
       <SettlementSummaryList items={settlements} provider admin heading="Experience予約の決済費用精算" />

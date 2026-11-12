@@ -62,7 +62,7 @@ export function AdminProducts() {
   }
 
   return <div className="mx-auto max-w-4xl px-4 py-8 md:px-7">
-    <div className="mb-5"><p className="text-xs font-extrabold text-muted">Experience 正本</p><h1 className="font-display text-3xl font-medium">商品の代理登録</h1><p className="mt-2 text-ink-soft">実際の体験提供者の公開名と専用写真を、販売者・受取口座・ログインとは分けて登録します。販売者設定がある提供者では、従来どおり非公開の商品下書きも準備できます。</p></div>
+    <div className="mb-5"><p className="text-xs font-extrabold text-muted">Experience 正本</p><h1 className="font-display text-3xl font-medium">提供者</h1><p className="mt-2 text-ink-soft">実際の体験提供者の公開名と専用写真を、販売者・受取口座・ログインとは分けて登録します。販売者設定がある提供者では、従来どおり非公開の商品下書きも準備できます。</p></div>
     <section className={`${HOST_SURFACE} p-4 md:p-6`}>
       <h2 className="font-extrabold">提供者を初回登録</h2>
       <form className="mt-4 grid gap-4" onSubmit={createProvider}>
