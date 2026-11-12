@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { ExperienceSettlementSummary, ExperienceSupportNotification, ManagedBookingApprovalRequest, SupportEnabledBookingsPage, SupportQueue } from "@niho-experience/experience-store";
+import type { ExperienceSettlementSummary, ExperienceSupportNotification, ManagedBookingApprovalPage, SupportEnabledBookingsPage, SupportQueue } from "@niho-experience/experience-store";
 import { notFound } from "next/navigation";
 import { adminSiteBookingsPreview } from "@/admin/site-bookings-preview";
 import { AdminSiteBookings } from "@/components/admin/AdminSiteBookings";
@@ -33,7 +33,7 @@ export default async function AdminSiteBookingsPage() {
   let supportBookings: SupportEnabledBookingsPage;
   let notifications: ExperienceSupportNotification[];
   let settlements: ExperienceSettlementSummary[];
-  let approvalRequests: ManagedBookingApprovalRequest[] | null = null;
+  let approvalRequests: ManagedBookingApprovalPage | null = null;
   try {
     queue = await cancellations.supportQueue({ limit: 100 });
     [supportBookings, notifications, settlements] = await Promise.all([

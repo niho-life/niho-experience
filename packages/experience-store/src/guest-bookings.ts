@@ -51,6 +51,7 @@ import { salesWindowOf, selectPayoutAccounts, selectSales, type HostSalesWindow,
 import { evaluateStoredInventories, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import { enqueueNewBookingNotification } from "./host-notification-outbox.ts";
+import { assertManagedBookingPublicationOpen } from "./managed-booking-approvals.ts";
 import {
   BOOKING_COLUMNS,
   OVERRIDE_COLUMNS,
@@ -2131,6 +2132,7 @@ export class GuestBookingRepository {
         || (seller.acceptanceMode !== "APPROVAL" && row.approval_status !== null)) {
         throw new StoreConflictError("The booking is not authorized to take a Checkout Session.");
       }
+      if (seller.acceptanceMode === "APPROVAL") await assertManagedBookingPublicationOpen(client, providerId, String(row.product_id));
       if (Number.isSafeInteger(seller.salesPlanRevision)) {
         const plan = await client.query<DbRow>(
           `SELECT current_revision,phase FROM experience_product_sales_plan_states

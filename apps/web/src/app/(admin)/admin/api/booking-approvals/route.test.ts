@@ -61,7 +61,7 @@ beforeEach(() => {
   state.config = { guestBookingEnabled: true, managedSalesEnabled: true, managedSalesWebhooksEnabled: true, siteUrl: "https://experience.example" };
   state.http = true; state.mutation = true;
   state.load.mockResolvedValue({ status: "ok", actor: { id: "admin-current" } });
-  state.approvals.listPending.mockResolvedValue([]);
+  state.approvals.listPending.mockResolvedValue({ requests: [], page: 1, hasNext: false });
   state.approvals.approve.mockResolvedValue({ booking, guestEmail: "guest@example.test", checkoutSessionRef: null });
   state.approvals.decline.mockResolvedValue(undefined);
   state.bookings.attachCheckoutSession.mockResolvedValue(undefined);
@@ -76,9 +76,17 @@ describe("managed booking approval Admin BFF", () => {
     const response = await GET(new Request(URL));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(state.approvals.listPending).toHaveBeenCalledWith({ nihoUserId: "admin-current" });
+    expect(state.approvals.listPending).toHaveBeenCalledWith({ nihoUserId: "admin-current" }, 1);
     state.load.mockResolvedValueOnce({ status: "signed-out" });
     expect((await GET(new Request(URL))).status).toBe(401);
+  });
+
+  it("lets an Admin reach later requests without exposing guest IDs in the URL", async () => {
+    state.approvals.listPending.mockResolvedValueOnce({ requests: [], page: 2, hasNext: false });
+    const response = await GET(new Request(`${URL}?page=2`));
+    expect(await response.json()).toEqual({ requests: [], page: 2, hasNext: false });
+    expect(state.approvals.listPending).toHaveBeenCalledWith({ nihoUserId: "admin-current" }, 2);
+    expect((await GET(new Request(`${URL}?page=2&page=3`))).status).toBe(400);
   });
 
   it("approves before creating Checkout and returns the URL only to Admin", async () => {

@@ -14,7 +14,7 @@ export { ExperienceStore } from "./repository.ts";
 export { ManagedExperienceSalesRepository, validateManagedPlatformSellerConfig } from "./managed-sales.ts";
 export type { CheckoutTransitionOutcome, ManagedCompensation, ManagedPlatformSellerConfig, SalesPlanRevision, SalesPlanState, SalesPlanTransition } from "./managed-sales.ts";
 export { ManagedBookingApprovalRepository } from "./managed-booking-approvals.ts";
-export type { ApprovedManagedBookingRequest, ManagedBookingApprovalRequest } from "./managed-booking-approvals.ts";
+export type { ApprovedManagedBookingRequest, ManagedBookingApprovalPage, ManagedBookingApprovalRequest } from "./managed-booking-approvals.ts";
 export { HOST_TEAM_CONTRACT_VERSION, HOST_TEAM_RESOLVE_LIMIT, HostTeamRepository, hostAccessFingerprint } from "./host-team.ts";
 export type { HostAccessProjection, HostTeamActor, HostTeamCandidate, HostTeamCommandReceipt, HostTeamMember, HostTeamMemberRole, HostTeamMutationResult, HostTeamOperation, HostTeamSnapshot } from "./host-team.ts";
 export { ExperiencePublicationBlockedError, ExperiencePublicationRepository, publicationManuscriptReview } from "./experience-publication.ts";

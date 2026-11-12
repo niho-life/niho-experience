@@ -136,7 +136,7 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
         saleTerms: { offerPrices: null, childPricing: null, minimumParticipants: 1, minimumChargeableParticipants: 1, maxPartySize: 6, cancellationPolicy: "FREE_UNTIL_24H", cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10_000, minimumAttendance: null, bookingQuestions: [], conditionsVersion: null },
       });
       await publications.reviewAdminDraftEnglish(ADMIN, profile.providerId, approvalDraft.id, approvalCurrent.version);
-      await publications.publishAdminDraft(ADMIN, profile.providerId, approvalDraft.id, {
+      const approvalPublication = await publications.publishAdminDraft(ADMIN, profile.providerId, approvalDraft.id, {
         expectedDraftVersion: approvalCurrent.version, expectedStateVersion: null, expectedSaleTermsVersion: 1,
         consentVersion: PUBLICATION_CONSENT, accepted: true, sellerConfirmationMethod: "WRITTEN", photoRightsConfirmed: true,
         payoutConsentVersion: "not-used-for-managed", accountCheck: { stripeConnectAccountRef: PLATFORM, checkedAtUtc: new Date().toISOString() },
@@ -155,7 +155,7 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
         publicBookingId: requested.publicBookingId, connectedAccountId: PLATFORM, stripePaymentRef: "pi_PlatformTooEarly1",
         stripeEventId: "evt_PlatformTooEarly1", stripeEventType: "checkout.session.completed", eventOccurredAtUtc: new Date().toISOString(), amount: 10_000, currency: "JPY",
       }), StoreConflictError);
-      assert.equal((await approvalRepository.listPending(ADMIN)).find((item) => item.publicBookingId === requested.publicBookingId)?.guestEmail, "approval@example.test");
+      assert.equal((await approvalRepository.listPending(ADMIN)).requests.find((item) => item.publicBookingId === requested.publicBookingId)?.guestEmail, "approval@example.test");
       const approvedRequest = await approvalRepository.approve(ADMIN, requested.publicBookingId);
       assert.equal(approvedRequest.checkoutSessionRef, null);
       await assert.rejects(approvalRepository.decline(ADMIN, requested.publicBookingId), StoreConflictError);
@@ -185,6 +185,21 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       assert.equal(decisions.filter(({ status }) => status === "fulfilled").length, 1);
       const lostDecision = decisions.find((decision) => decision.status === "rejected");
       assert.ok(lostDecision?.reason instanceof StoreConflictError);
+
+      const pendingAtStop = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(6), 1, "pending-at-stop@example.test"));
+      const approvedAtStop = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(7), 1, "approved-at-stop@example.test"));
+      await approvalRepository.approve(ADMIN, approvedAtStop.publicBookingId);
+      const firstApprovalPage = await approvalRepository.listPending(ADMIN, 1, 1);
+      const secondApprovalPage = await approvalRepository.listPending(ADMIN, 2, 1);
+      assert.equal(firstApprovalPage.hasNext, true);
+      assert.equal(firstApprovalPage.requests.length, 1);
+      assert.equal(secondApprovalPage.requests.length, 1);
+      assert.notEqual(firstApprovalPage.requests[0]?.publicBookingId, secondApprovalPage.requests[0]?.publicBookingId);
+
+      await publications.suspendByOperations(ADMIN, profile.providerId, approvalDraft.id, "PILOT_STOP", approvalPublication.version);
+      await assert.rejects(approvalRepository.approve(ADMIN, pendingAtStop.publicBookingId), StoreConflictError);
+      await assert.rejects(guests.attachCheckoutSession(approvedAtStop.publicBookingId, "cs_test_platform_stopped"), StoreConflictError);
+      await approvalRepository.decline(ADMIN, pendingAtStop.publicBookingId);
 
       await assert.rejects(guests.startGuestBooking({
         ...bookingRequest(draft.slug, offerId, day(2), 1, "closed@example.test"), managedSalesEnabled: false,

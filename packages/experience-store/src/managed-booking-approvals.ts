@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
@@ -34,6 +34,24 @@ export interface ApprovedManagedBookingRequest {
   readonly checkoutSessionRef: string | null;
 }
 
+export interface ManagedBookingApprovalPage {
+  readonly requests: readonly ManagedBookingApprovalRequest[];
+  readonly page: number;
+  readonly hasNext: boolean;
+}
+
+/** Called with the provider inventory lock before authorizing or attaching a new approval Checkout. */
+export async function assertManagedBookingPublicationOpen(client: PoolClient, providerId: string, productId: string): Promise<void> {
+  const open = await client.query(
+    `SELECT 1 FROM experience_products p
+       JOIN experience_product_publication_states s ON s.provider_id=p.provider_id AND s.product_id=p.id
+      WHERE p.provider_id=$1 AND p.id=$2 AND p.status='PUBLISHED' AND s.current_publication_id IS NOT NULL
+        AND s.self_stopped_at IS NULL AND s.operations_suspended_at IS NULL AND s.owner_resume_required=false
+      FOR SHARE OF p,s`, [providerId, productId],
+  );
+  if (open.rowCount !== 1) throw new StoreConflictError("The listing is not open for new payments.");
+}
+
 function requestId(value: string): void {
   if (typeof value !== "string" || !UUID.test(value)) throw new StoreValidationError("publicBookingId must be a UUID.");
 }
@@ -55,9 +73,10 @@ export class ManagedBookingApprovalRepository {
   readonly #pool: Pool;
   constructor(pool: Pool) { this.#pool = pool; }
 
-  async listPending(actor: PublicationAdminDraftActor, limit = 100): Promise<ManagedBookingApprovalRequest[]> {
+  async listPending(actor: PublicationAdminDraftActor, page = 1, limit = 100): Promise<ManagedBookingApprovalPage> {
     assertStoreIdentifier(actor?.nihoUserId, "actor.nihoUserId");
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new StoreValidationError("limit must be from 1 to 100.");
+    if (!Number.isInteger(page) || page < 1 || page > 999_999) throw new StoreValidationError("page is out of range.");
     const rows = await this.#pool.query<DbRow>(
       `SELECT b.public_booking_id::text AS public_booking_id,b.status AS booking_status,b.hold_expires_at,g.approval_status,
               b.hold_expires_at > clock_timestamp() AS hold_active,b.occurrence_snapshot,b.pricing_snapshot,
@@ -69,10 +88,10 @@ export class ManagedBookingApprovalRepository {
           AND b.hold_expires_at > clock_timestamp()
           AND b.seller_snapshot->>'acceptanceMode'='APPROVAL'
           AND b.seller_snapshot->>'salesPlan'='MANAGED_20'
-        ORDER BY b.created_at,b.public_booking_id LIMIT $1`,
-      [limit],
+        ORDER BY b.created_at,b.public_booking_id LIMIT $1 OFFSET $2`,
+      [limit + 1, (page - 1) * limit],
     );
-    return rows.rows.map((row) => {
+    const requests = rows.rows.slice(0, limit).map((row): ManagedBookingApprovalRequest => {
       const occurrence = row.occurrence_snapshot as Record<string, unknown>;
       const pricing = row.pricing_snapshot as Record<string, unknown>;
       return {
@@ -88,6 +107,7 @@ export class ManagedBookingApprovalRepository {
         createdAtUtc: isoValue(row, "created_at"),
       };
     });
+    return { requests, page, hasNext: rows.rows.length > limit };
   }
 
   async approve(actor: PublicationAdminDraftActor, publicBookingId: string): Promise<ApprovedManagedBookingRequest> {
@@ -124,6 +144,7 @@ export class ManagedBookingApprovalRepository {
       if (plan.rows[0]?.phase !== "ACTIVE" || Number(plan.rows[0]?.current_revision) !== seller.salesPlanRevision) {
         throw new StoreConflictError("The request sales plan is no longer active.");
       }
+      if (row.checkout_session_ref === null) await assertManagedBookingPublicationOpen(client, providerId, String(row.product_id));
       if (row.approval_status === "PENDING") {
         await client.query(
           `UPDATE booking_guests SET approval_status='APPROVED',

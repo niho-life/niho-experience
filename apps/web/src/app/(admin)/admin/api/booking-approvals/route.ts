@@ -29,7 +29,7 @@ function failure(error: unknown): Response {
 }
 
 async function boundary(request: Request, mutation: boolean) {
-  if (!enabled() || new URL(request.url).search) return { ok: false as const, response: adminJson({ error: "not_found" }, 404) };
+  if (!enabled() || (mutation && new URL(request.url).search)) return { ok: false as const, response: adminJson({ error: "not_found" }, 404) };
   const loaded = await loadAdminHttpSession();
   if (loaded.status !== "ok") return { ok: false as const, response: adminJson({ error: loaded.status === "error" ? "unavailable" : "unauthenticated" }, loaded.status === "error" ? 503 : 401) };
   if (mutation && !adminMutationAllowed(request)) return { ok: false as const, response: adminJson({ error: "forbidden" }, 403) };
@@ -41,7 +41,10 @@ async function boundary(request: Request, mutation: boolean) {
 
 export async function GET(request: Request): Promise<Response> {
   const current = await boundary(request, false); if (!current.ok) return current.response;
-  try { return adminJson({ requests: await current.approvals.listPending(current.actor) }); }
+  const params = new URL(request.url).searchParams;
+  const page = params.get("page") ?? "1";
+  if (params.size !== (params.has("page") ? 1 : 0) || !/^[1-9][0-9]{0,5}$/.test(page)) return adminJson({ error: "invalid_input" }, 400);
+  try { return adminJson(await current.approvals.listPending(current.actor, Number(page))); }
   catch (error) { return failure(error); }
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ManagedBookingApprovalRequest } from "@niho-experience/experience-store";
+import type { ManagedBookingApprovalPage } from "@niho-experience/experience-store";
 
 const API = "/admin/api/booking-approvals";
 const BUTTON = "min-h-10 rounded-full border border-line-strong px-4 font-extrabold hover:bg-sand disabled:opacity-50";
@@ -9,22 +9,31 @@ const DANGER = "min-h-10 rounded-full border border-danger/40 px-4 font-extrabol
 const yen = (amount: number) => `¥${amount.toLocaleString("ja-JP")}`;
 const jst = (utc: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", dateStyle: "short", timeStyle: "short" }).format(new Date(utc));
 
-export function AdminBookingApprovals({ initial }: { initial: readonly ManagedBookingApprovalRequest[] }) {
-  const [requests, setRequests] = useState([...initial]);
+export function AdminBookingApprovals({ initial }: { initial: ManagedBookingApprovalPage }) {
+  const [{ requests, page, hasNext }, setPage] = useState(initial);
   const [busy, setBusy] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [paymentUrls, setPaymentUrls] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
 
-  async function refresh() {
-    const response = await fetch(API, { cache: "no-store", credentials: "same-origin" });
-    const body = await response.json().catch(() => null) as { requests?: ManagedBookingApprovalRequest[] } | null;
-    if (!response.ok || !Array.isArray(body?.requests)) throw new Error("refresh");
-    setRequests(body.requests);
+  async function refresh(target: number) {
+    const response = await fetch(`${API}?page=${target}`, { cache: "no-store", credentials: "same-origin" });
+    const body = await response.json().catch(() => null) as ManagedBookingApprovalPage | null;
+    if (!response.ok || !Array.isArray(body?.requests) || body.page !== target || typeof body.hasNext !== "boolean") throw new Error("refresh");
+    setPage(body);
+  }
+
+  async function navigate(target: number) {
+    if (loading || busy) return;
+    setLoading(true); setError(""); setNotice("");
+    try { await refresh(target); }
+    catch { setError("申込一覧のページを読み込めませんでした。もう一度お試しください。"); }
+    finally { setLoading(false); }
   }
 
   async function decide(publicBookingId: string, action: "APPROVE" | "DECLINE") {
-    if (busy || (action === "DECLINE" && !window.confirm("この申込を辞退し、確保中の在庫をすぐ戻しますか？"))) return;
+    if (busy || loading || (action === "DECLINE" && !window.confirm("この申込を辞退し、確保中の在庫をすぐ戻しますか？"))) return;
     setBusy(publicBookingId); setError(""); setNotice("");
     try {
       const response = await fetch(API, {
@@ -43,12 +52,12 @@ export function AdminBookingApprovals({ initial }: { initial: readonly ManagedBo
         setPaymentUrls((current) => { const next = { ...current }; delete next[publicBookingId]; return next; });
         setNotice("辞退を記録し、在庫を戻しました。予約者への連絡は手動で行ってください。");
       }
-      await refresh();
+      await refresh(page);
     } catch (reason) {
       setError(reason instanceof Error && reason.message === "conflict"
         ? "他の担当者が対応済みか、決済に必要な時間が残っていないか、販売条件が変わりました。一覧を読み直してください。"
         : "操作を完了できませんでした。状態を読み直して、同じ承認操作を再試行できます。");
-      try { await refresh(); } catch { /* Keep the last private snapshot visible. */ }
+      try { await refresh(page); } catch { /* Keep the last private snapshot visible. */ }
     } finally { setBusy(null); }
   }
 
@@ -77,12 +86,17 @@ export function AdminBookingApprovals({ initial }: { initial: readonly ManagedBo
             <span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{request.status === "PENDING" ? "判断待ち" : "承認済み・支払待ち"}</span>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className={BUTTON} disabled={!request.holdActive || busy !== null} onClick={() => void decide(request.publicBookingId, "APPROVE")}>{busy === request.publicBookingId ? "処理中…" : request.status === "APPROVED" ? "支払URLを再表示" : "承認して支払URLを作る"}</button>
-            {request.status === "PENDING" ? <button type="button" className={DANGER} disabled={busy !== null} onClick={() => void decide(request.publicBookingId, "DECLINE")}>辞退して在庫を戻す</button> : null}
+            <button type="button" className={BUTTON} disabled={!request.holdActive || busy !== null || loading} onClick={() => void decide(request.publicBookingId, "APPROVE")}>{busy === request.publicBookingId ? "処理中…" : request.status === "APPROVED" ? "支払URLを再表示" : "承認して支払URLを作る"}</button>
+            {request.status === "PENDING" ? <button type="button" className={DANGER} disabled={busy !== null || loading} onClick={() => void decide(request.publicBookingId, "DECLINE")}>辞退して在庫を戻す</button> : null}
           </div>
           {url ? <div className="mt-3 rounded-xl border border-line bg-white p-3"><label className="text-xs font-extrabold text-ink-soft">予約者へ手動送付するStripe支払URL<input readOnly value={url} onFocus={(event) => event.currentTarget.select()} className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-xs" /></label><button type="button" className={`${BUTTON} mt-2`} onClick={() => void copy(url)}>URLをコピー</button></div> : null}
         </li>;
       })}
     </ul>}
+    {page > 1 || hasNext ? <nav aria-label="予約リクエスト一覧のページ" className="mt-4 flex items-center gap-3 text-sm">
+      <button type="button" className={BUTTON} disabled={page === 1 || loading || busy !== null} onClick={() => void navigate(page - 1)}>前へ</button>
+      <span>{page}ページ</span>
+      <button type="button" className={BUTTON} disabled={!hasNext || loading || busy !== null} onClick={() => void navigate(page + 1)}>次へ</button>
+    </nav> : null}
   </section>;
 }
