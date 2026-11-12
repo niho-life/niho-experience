@@ -207,8 +207,7 @@ export interface ExperienceJobDeps {
   readonly managedBookingMail?: {
     readonly outbox: Pick<GuestMailOutbox,
       "claimManagedGuestMails" | "completeManagedGuestMail" | "retryManagedGuestMail" | "managedGuestMailStillSendable"
-      | "claimManagedOperationsMails" | "completeManagedOperationsMail" | "retryManagedOperationsMail"
-      | "managedProviderRecipientAlreadyCovered">;
+      | "claimManagedOperationsMails" | "completeManagedOperationsMail" | "retryManagedOperationsMail">;
     readonly retrieveCheckout: (input: {
       readonly booking: Readonly<Pick<BookingRecord, "publicBookingId" | "sellerSnapshot">>;
       readonly checkoutSessionId: string;
@@ -484,12 +483,9 @@ async function sendManagedBookingMails(
     if (!row.email) {
       await source.outbox.completeManagedOperationsMail(row.id); counts.skipped += 1; continue;
     }
-    let recipient = row.email.role === "OFFICE" ? source.officeRecipient : source.providerRecipient?.(row.email.productId) ?? null;
-    if (row.email.role === "PROVIDER" && recipient) {
-      if (recipient.toLowerCase() === source.officeRecipient.toLowerCase()
-        || (deps.hostMail && await source.outbox.managedProviderRecipientAlreadyCovered(row.email, recipient))) recipient = null;
-    }
-    if (!recipient) {
+    const providerMail = row.email.role === "PROVIDER";
+    const recipient = providerMail ? source.providerRecipient?.(row.email.productId) : source.officeRecipient;
+    if (!recipient || (providerMail && recipient.toLowerCase() === source.officeRecipient.toLowerCase())) {
       await source.outbox.completeManagedOperationsMail(row.id); counts.skipped += 1; continue;
     }
     const result = await deps.mailer.sendMail({ to: recipient, ...managedOperationsBookingEmail(row.email, deps.siteUrl) });

@@ -3,7 +3,7 @@ import { BOOKING_ACCESS_LIMITS, BOOKING_LINK_TOPIC } from "./booking-access.ts";
 import { REVIEW_INVITATION_TOPIC } from "./booking-attendance.ts";
 import { GUEST_NOTICE_TOPICS } from "./booking-cancellations.ts";
 import { HOST_NOTIFICATION_TOPICS } from "./host-notification-outbox.ts";
-import { enqueueHostBookingMails, HOST_ACCOUNT_USABLE, HOST_MAIL_TOPICS } from "./host-mail-shared.ts";
+import { enqueueHostBookingMails, HOST_MAIL_TOPICS } from "./host-mail-shared.ts";
 import { MANAGED_GUEST_MAIL_TOPICS, MANAGED_OPERATIONS_MAIL_TOPICS } from "./managed-booking-mail.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import { cancellationTermsOf } from "./cancellation-terms.ts";
@@ -797,23 +797,6 @@ export class GuestMailOutbox {
     );
     const row = updated.rows[0];
     return !row ? "STALE" : row.gave_up === true ? "FAILED" : "RETRY";
-  }
-
-  /** A configured provider destination may already have a host mail for this booking and event. */
-  async managedProviderRecipientAlreadyCovered(mail: ManagedOperationsMailEmail, recipient: string): Promise<boolean> {
-    const topic = mail.kind === "CONFIRMED" ? HOST_MAIL_TOPICS.newBooking : HOST_MAIL_TOPICS.cancellation;
-    const found = await this.#pool.query<DbRow>(
-      `SELECT EXISTS (
-         SELECT 1 FROM outbox_messages m
-         JOIN provider_memberships p ON p.provider_id=m.provider_id AND p.niho_user_id=m.payload->>'to'
-         JOIN host_notification_addresses a ON a.niho_user_id=p.niho_user_id
-        WHERE m.provider_id=$1 AND m.aggregate_type='booking' AND m.aggregate_id=$2 AND m.topic=$3
-          AND p.active AND p.role='OWNER' AND ${HOST_ACCOUNT_USABLE("p.niho_user_id")}
-          AND lower(COALESCE(a.override_email,a.login_email))=lower($4)
-       ) AS covered`,
-      [mail.providerId, mail.publicBookingId, topic, recipient],
-    );
-    return found.rows[0]?.covered === true;
   }
 
   /**

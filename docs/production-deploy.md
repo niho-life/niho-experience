@@ -147,7 +147,7 @@ Experience用の制限付きキーは既存のConnect権限を保ち、NIHO-plat
 
 `PROD_MANAGED_SALES_WEBHOOKS_ENABLED=true` でWebhookの設定を配備し、販売条件を確認した1件を事務局で公開する配備では `PROD_MANAGED_SALES_ENABLED=true` も設定する。完全代行の新規受付を止める場合は、販売のフラグを `false` にして候補を作り直す。受付済みの予約の決済確定・返金・精算に使うため、Webhookのフラグと口座・署名秘密の参照は維持する。
 
-完全代行の申込・確定・取消を受け取る事務局の窓口は `PROD_MAIL_REPLY_TO` に設定する。提供者の確定・取消の宛先は、許諾済みの通知先を確認し、Secret Manager に `{"商品ID":"提供者のメールアドレス"}` のJSONとして保存する。実行用サービスアカウントにこのSecretの読取権限を付け、`PROD_MANAGED_PROVIDER_MAIL_RECIPIENTS_REF` にはSecret名と数値versionの参照だけを設定する。既存予約の通知を続ける場合は新規受付停止後もメールジョブとこの参照を維持する。
+完全代行の申込・確定・取消を受け取る事務局の窓口は `PROD_MAIL_REPLY_TO` に設定する。提供者の確定・取消の宛先は、許諾済みの通知先を確認し、Secret Manager に `{"商品ID":"提供者のメールアドレス"}` のJSONとして保存する。実行用サービスアカウントにこのSecretの読取権限を付け、`PROD_MANAGED_PROVIDER_MAIL_RECIPIENTS_REF` にはSecret名と数値versionの参照だけを設定する。既存予約の通知を続ける場合は新規受付停止後もメールジョブとこの参照を維持する。同じ宛先をホストアカウントと体験別設定の両方に登録すると、それぞれの経路から通知される。
 
 **フラグを足すとき**（paneB-1・paneB-2 など）：`scripts/deploy/runtime-flags.mjs` の `FLAGS` に 1 項目（Cloud Run の名前、variable、前提、設定・Secret、workflow が入れる値）、`deploy-runtime-flags.test.ts` の `CONFIG_KEY` に 1 行、この表と [stg の表](host-calendar-staging.md#機能のフラグ84) に 1 行。workflow は変えなくてよい。
 

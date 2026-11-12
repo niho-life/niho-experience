@@ -310,7 +310,6 @@ describe("runExperienceJobs", () => {
       managedGuestMailStillSendable: vi.fn(async () => true),
       claimManagedOperationsMails: vi.fn(async () => ({ mails: operationRows.splice(0, 1), abandoned: 0 })),
       completeManagedOperationsMail: vi.fn(async () => {}), retryManagedOperationsMail: vi.fn(async () => "RETRY" as const),
-      managedProviderRecipientAlreadyCovered: vi.fn(async () => false),
     };
     const retrieveCheckout = vi.fn(async () => ({ status: "open" as const, checkoutUrl: "https://checkout.stripe.com/c/pay/managed",
       expiresAtUtc: "2026-11-01T00:40:00.000Z" }));
