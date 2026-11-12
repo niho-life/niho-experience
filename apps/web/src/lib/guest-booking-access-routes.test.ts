@@ -260,12 +260,12 @@ describe("the guest's booking pages", () => {
     expect((await bookingPage(BOOKING)).type).toBe(BookingUnavailable);
     state.config = { ...state.config, guestMailEnabled: false };
     await expect(bookingPage(BOOKING)).rejects.toThrow("NOT_FOUND");
-    expect(() => BookingOpenPage()).toThrow("NOT_FOUND");
-    expect(() => FindBookingPage()).toThrow("NOT_FOUND");
+    await expect(BookingOpenPage()).rejects.toThrow("NOT_FOUND");
+    await expect(FindBookingPage()).rejects.toThrow("NOT_FOUND");
     state.config = { ...state.config, guestMailEnabled: true, guestBookingEnabled: false };
-    expect(() => BookingOpenPage()).toThrow("NOT_FOUND");
+    await expect(BookingOpenPage()).rejects.toThrow("NOT_FOUND");
     state.config = { ...state.config, guestBookingEnabled: true };
-    expect(isValidElement(BookingOpenPage())).toBe(true);
-    expect(isValidElement(FindBookingPage())).toBe(true);
+    expect(isValidElement(await BookingOpenPage())).toBe(true);
+    expect(isValidElement(await FindBookingPage())).toBe(true);
   });
 });

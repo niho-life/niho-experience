@@ -1,6 +1,6 @@
-import type { BookingConfirmationEmail, BookingLinkEmail, BookingMeetingGuideEmail, BookingNoticeEmail, ReviewInvitationEmail } from "@niho-experience/experience-store";
+import type { BookingConfirmationEmail, BookingLinkEmail, BookingMeetingGuideEmail, BookingNoticeEmail, ClaimedBookingMessage, ClaimedSupportBookingMessage, ReviewInvitationEmail } from "@niho-experience/experience-store";
 import { REFUND_TIMING_JA, calendarDateJa, cancelledByJa, cancellationTermsWordsJa, moneyJa, partyJa, zoneNameJa } from "@/lib/booking-words-ja";
-import { absolute, body, bookingPageLink, mail, oneLine, type MailBlock, type RenderedMail } from "./templates";
+import { absolute, body, mail, oneLine, type MailBlock, type QuestionReplyMailInput, type RenderedMail } from "./templates";
 
 /**
  * 日本語で申し込んだゲストへのメール（#59）。申込み時の表示言語（`booking_guests.guest_language`）が JA の予約は、
@@ -10,8 +10,11 @@ import { absolute, body, bookingPageLink, mail, oneLine, type MailBlock, type Re
  * そこへ案内するメールは、英語の画面になることと、日本語の連絡先（このメールへの返信＝NIHO事務局）を添える。
  */
 
+/** `{SITE_URL}/bookings/open?lang=ja#g=<grant>`：grant は fragment だけ。`lang=ja` は、リンクが使えなかったときの案内を日本語にするため。 */
+const bookingPageLink = (siteUrl: string, grant: string) => `${absolute(siteUrl, "/bookings/open")}?lang=ja#g=${encodeURIComponent(grant)}`;
+const NEW_LINK_PAGE = (siteUrl: string) => `${absolute(siteUrl, "/bookings")}?lang=ja`;
+
 const SUPPORT_REPLY = "ご不明な点や変更・取消のご希望は、このメールに返信してください。NIHO事務局が日本語でご案内します。";
-const ENGLISH_PAGE_NOTE = "予約の確認ページは現在、英語の表示のみです。日本語でのお問い合わせは、このメールへの返信で受け付けます。";
 
 const greeting = (name: string): MailBlock => ({ kind: "p", text: `${oneLine(name)} 様` });
 const japanMail = (subject: string, blocks: readonly MailBlock[]): RenderedMail => mail(subject, blocks, "ja");
@@ -48,11 +51,10 @@ export function bookingConfirmationEmailJa(
       ? [
           {
             kind: "link",
-            lead: `サイトでご予約を確認できます。リンクは1回だけ使え、1つの端末でご予約を開きます。転送しないでください。新しいリンクは ${absolute(options.siteUrl, "/bookings")} からいつでも請求できます。`,
+            lead: `サイトでご予約を確認できます。リンクは1回だけ使え、1つの端末でご予約を開きます。転送しないでください。新しいリンクは ${NEW_LINK_PAGE(options.siteUrl)} からいつでも請求できます。`,
             label: "ご予約を確認する",
             href: bookingPageLink(options.siteUrl, grant),
           } as const,
-          { kind: "p", text: ENGLISH_PAGE_NOTE } as const,
         ]
       : []),
     { kind: "p", text: `${managed ? "NIHO事務局" : host}から、開催前に集合場所などのご案内をお送りします。` },
@@ -77,11 +79,10 @@ export function bookingLinkEmailJa(email: BookingLinkEmail, options: { readonly 
     },
     {
       kind: "link",
-      lead: `リンクは30日まで、1回だけ使え、1つの端末でご予約を開きます。転送しないでください。新しいリンクは ${absolute(options.siteUrl, "/bookings")} からいつでも請求できます。`,
+      lead: `リンクは30日まで、1回だけ使え、1つの端末でご予約を開きます。転送しないでください。新しいリンクは ${NEW_LINK_PAGE(options.siteUrl)} からいつでも請求できます。`,
       label: "ご予約を確認する",
       href: bookingPageLink(options.siteUrl, options.bookingPageGrant),
     },
-    { kind: "p", text: ENGLISH_PAGE_NOTE },
     { kind: "p", text: "お心当たりがない場合は、このメールを破棄してください。" },
     { kind: "p", text: "ご不明な点は、このメールに返信してください。NIHO事務局が日本語でご案内します。" },
   ]);
@@ -103,7 +104,6 @@ export function bookingNoticeEmailJa(email: BookingNoticeEmail, options: { reado
   const page: MailBlock[] = grant
     ? [
         { kind: "link", lead: "サイトでご予約を確認できます。リンクは1回だけ使えます。転送しないでください。", label: "ご予約を確認する", href: bookingPageLink(options.siteUrl, grant) },
-        { kind: "p", text: ENGLISH_PAGE_NOTE },
       ]
     : [];
   const support: MailBlock = { kind: "p", text: "ご不明な点は、このメールに返信してください。NIHO事務局が日本語でご案内します。" };
@@ -168,11 +168,72 @@ export function bookingMeetingGuideEmailJa(
     ...(email.mapUrl ? [{ kind: "link", lead: "集合場所の地図：", label: "地図を開く", href: email.mapUrl } as const] : []),
     ...(email.itemsToBring.length ? [{ kind: "facts", rows: [["持ち物", email.itemsToBring.map(oneLine).join("、")]] } as const] : []),
     ...(email.weatherPlan ? [{ kind: "p", text: `雨天時の対応：${body(email.weatherPlan)}` } as const] : []),
-    { kind: "link", lead: "遅れる場合や集合場所が分からない場合は、ご予約のページからホストへ連絡できます（このページは現在、英語の表示のみです）：", label: "ご予約を開く", href: bookingPageLink(options.siteUrl, options.bookingPageGrant) },
+    { kind: "link", lead: "遅れる場合や集合場所が分からない場合は、ご予約のページからホストへ連絡できます：", label: "ご予約を開く", href: bookingPageLink(options.siteUrl, options.bookingPageGrant) },
     { kind: "p", text: "お急ぎの場合や日本語でのお問い合わせは、このメールに返信してください。NIHO事務局が日本語でご案内します。" },
   ];
   return {
     ...japanMail(`集合場所のご案内：${experience}（${when(email.localDate, email.localStartTime)}）`, blocks),
     attachments: [{ filename: "meeting-place.jpg", content: options.photo, contentType: "image/jpeg", cid }],
   };
+}
+
+const messageFacts = (message: { publicBookingId: string; localDate: string; localStartTime: string; timeZone: string }, experience: string): MailBlock => ({
+  kind: "facts",
+  rows: [["体験", experience], ["日付", calendarDateJa(message.localDate)], ["時間", `${message.localStartTime}（${zoneNameJa(message.timeZone)}）`], ["予約番号", message.publicBookingId]],
+});
+
+/** ホストが書いた日本語（無ければ英語）を、書いたままの本文として使う。枠の文言だけが日本語。 */
+const hostWords = (message: { japanese: string | null; english: string }) => body(message.japanese ?? message.english);
+
+export function bookingMessageEmailJa(
+  message: Pick<ClaimedBookingMessage, "guestName" | "hostDisplayName" | "experienceTitle" | "english" | "japanese" | "publicBookingId" | "localDate" | "localStartTime" | "timeZone">,
+  options: { readonly siteUrl: string; readonly bookingPageGrant: string | null },
+): RenderedMail {
+  const host = oneLine(message.hostDisplayName);
+  const experience = oneLine(message.experienceTitle);
+  const grant = options.bookingPageGrant;
+  return japanMail(`${host}からご予約についてメッセージが届いています：${experience}（${when(message.localDate, message.localStartTime)}）`, [
+    greeting(message.guestName),
+    { kind: "p", text: `${host}から、ご予約についてメッセージが届いています。` },
+    { kind: "quote", text: hostWords(message) },
+    messageFacts(message, experience),
+    ...(grant
+      ? [{
+          kind: "link",
+          lead: `${host}への返信は、ご予約のページで書けます。リンクは1回だけ使え、1つの端末でご予約を開きます。転送しないでください。新しいリンクは ${NEW_LINK_PAGE(options.siteUrl)} からいつでも請求できます。`,
+          label: "ご予約を確認する",
+          href: bookingPageLink(options.siteUrl, grant),
+        } as const]
+      : []),
+    { kind: "p", text: `このメールへの返信は、${host}ではなく NIHO事務局に届きます。NIHO事務局が日本語でご案内します。` },
+  ]);
+}
+
+export function supportBookingMessageEmailJa(
+  message: Pick<ClaimedSupportBookingMessage, "guestName" | "experienceTitle" | "english" | "japanese" | "publicBookingId" | "localDate" | "localStartTime" | "timeZone">,
+  options: { readonly siteUrl: string; readonly bookingPageGrant: string | null },
+): RenderedMail {
+  const experience = oneLine(message.experienceTitle);
+  const grant = options.bookingPageGrant;
+  return japanMail(`NIHO事務局からご予約についてメッセージが届いています：${experience}（${when(message.localDate, message.localStartTime)}）`, [
+    greeting(message.guestName),
+    { kind: "p", text: "NIHO事務局から、ご予約についてメッセージが届いています。" },
+    { kind: "quote", text: hostWords(message) },
+    messageFacts(message, experience),
+    ...(grant ? [{ kind: "link", lead: "ご予約のページで、NIHO事務局とのやりとりを続けられます。リンクは1回だけ使え、1つの端末でご予約を開きます。転送しないでください。", label: "ご予約を確認する", href: bookingPageLink(options.siteUrl, grant) } as const] : []),
+    { kind: "p", text: "このメールへの返信は、提供者ではなく NIHO事務局に届きます。" },
+  ]);
+}
+
+export function questionReplyEmailJa(input: QuestionReplyMailInput & { readonly japanese?: string | null }): RenderedMail {
+  const host = oneLine(input.hostName);
+  const experience = oneLine(input.experienceTitle);
+  const link = `${absolute(input.siteUrl, "/questions/reply")}#t=${encodeURIComponent(input.replyToken)}`;
+  return japanMail(`${host}からご質問への返信が届きました：${experience}`, [
+    greeting(input.guestName),
+    { kind: "p", text: `${experience}についてのご質問に、${host}が返信しました。` },
+    { kind: "quote", text: body(input.japanese ?? input.reply) },
+    { kind: "link", lead: `${host}へ返信するには、このリンクを開いてください。このリンクで返信できるのは1回で、期限は${input.linkTtlDays}日です。`, label: `${host}に返信する`, href: link },
+    { kind: "p", text: "返信ページは現在、英語の表示のみです。このメールへの返信は、" + host + "ではなく NIHO事務局に届き、NIHO事務局が日本語でご案内します。" },
+  ]);
 }
