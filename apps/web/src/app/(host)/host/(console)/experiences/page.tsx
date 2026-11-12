@@ -36,7 +36,7 @@ export default async function HostExperiencesPage({ searchParams }: { searchPara
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="体験" />;
   if (config.experienceHostPublicationApiEnabled) {
-    return <HostPublicationWorkspace bookingGuideHref={withProvider("/host/booking-guides", linkProviderId)} />;
+    return <HostPublicationWorkspace bookingGuideHref={withProvider("/host/booking-guides", linkProviderId)} publicSiteOrigin={new URL(config.siteUrl).origin} />;
   }
   if (providerPagesEnabled()) {
     return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} ratings={await loadExperienceRatings(provider)} bookingGuideHref={config.experienceHostPublicationApiEnabled ? withProvider("/host/booking-guides", linkProviderId) : undefined} />;

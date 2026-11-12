@@ -1214,6 +1214,29 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
     });
   });
 
+  it("keeps the provider link's mark (#531) on the booking, apart from another source, and tells a booking without one", async () => {
+    await withSchema(async ({ pool, guests, addRule }) => {
+      await addRule("tea", rule("sample-am"));
+      // The marks provider-booking-link.ts hands out: utm_source=provider and where the link was placed.
+      const viaProvider = await guests.startGuestBooking(request({ guestEmail: "via-provider@example.com", utm: { utmSource: "provider", utmMedium: "qr" } }));
+      const viaOther = await guests.startGuestBooking(request({ guestEmail: "via-other@example.com", occurrenceDate: day(3), utm: { utmSource: "niho_instagram", utmMedium: "social" } }));
+      const unknown = await guests.startGuestBooking(request({ guestEmail: "unknown@example.com", occurrenceDate: day(4), utm: {} }));
+      const marks = await pool.query(
+        `SELECT g.guest_email_key AS who, g.utm FROM booking_guests g JOIN bookings b ON b.provider_id = g.provider_id AND b.id = g.booking_id
+          WHERE b.public_booking_id = ANY($1::uuid[]) ORDER BY g.guest_email_key`,
+        [[viaProvider.publicBookingId, viaOther.publicBookingId, unknown.publicBookingId]],
+      );
+      assert.deepEqual(marks.rows, [
+        { who: "unknown@example.com", utm: {} },
+        { who: "via-other@example.com", utm: { utmSource: "niho_instagram", utmMedium: "social" } },
+        { who: "via-provider@example.com", utm: { utmSource: "provider", utmMedium: "qr" } },
+      ]);
+      // The count a per-provider report reads: this product's bookings that came through a provider link.
+      const counted = await pool.query("SELECT count(*)::int AS n FROM booking_guests WHERE utm->>'utmSource' = 'provider'");
+      assert.equal(counted.rows[0]?.n, 1);
+    });
+  });
+
   it("prices children apart, snapshots the breakdown, and confirms payment against the snapshot total", async () => {
     await withSchema(async ({ pool, store, guests, addRule }) => {
       await addRule("tea", rule("sample-am"));
