@@ -793,7 +793,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
             plan.seller_display_name AS plan_seller_display_name,plan.seller_disclosure_url,
             plan.seller_niho_account_ref AS plan_seller_niho_account_ref,
             plan.stripe_account_ref AS plan_stripe_account_ref,plan.fee_basis_points AS plan_fee_basis_points,
-            plan.agreement_version AS plan_agreement_version,plan.payment_due_days,
+            plan.agreement_version AS plan_agreement_version,plan.payment_due_days,plan.payment_due_policy,
             plan_state.phase AS sales_plan_phase
        FROM experience_products p
        LEFT JOIN experience_product_publication_states s ON s.provider_id=p.provider_id AND s.product_id=p.id
@@ -836,6 +836,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
       sellerNihoAccountRef: String(row.plan_seller_niho_account_ref),
       salesAgreementVersion: String(row.plan_agreement_version),
       paymentDueDays: row.payment_due_days === null ? null : Number(row.payment_due_days),
+      ...(row.payment_due_policy === "NEXT_MONTH_END" ? { paymentDuePolicy: row.payment_due_policy } : {}),
       feeBasisPoints: Number(row.plan_fee_basis_points) as 1000 | 1500 | 2000,
     };
   }

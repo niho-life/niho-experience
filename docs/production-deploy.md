@@ -140,6 +140,8 @@ mock で出している機能を http mode で開くフラグを、repository va
 
 **NIHO完全代行の試験販売**のコードを配備する前に、`0069`（提供者の公開プロフィール）・`0070`（完全代行の販売条件）とruntime grantsを適用する。既存商品の公開・予約処理もこれらのテーブルを参照するため、試験販売をOFFのまま配備する場合も先に適用する。試験販売を開くには、NIHO-platformのアカウント用Webhookを正規サイトの `/api/experience/stripe/platform-webhook` に登録し、署名秘密はConnect用と分けてSecret Managerへ登録する。イベントと販売者・委託の確認項目は [体験ごとの販売プランと精算](experience-sales-plans.md) を参照する。
 
+翌月末払いのコードを配備する前に、`0071`（提供報酬の支払条件）を適用する。既存の販売条件と予約の記録は保持し、固定日数を記録済みの予約はその日数で精算する。
+
 Experience用の制限付きキーは既存のConnect権限を保ち、NIHO-platform自身のCheckout SessionsとCharges and Refundsの書込み、Payment Intentsの読取りを許可する。Payment Intentsの読取りは、予約台帳にまだ結び付いていない異議申立ての取引元を照合するために使う。
 
 `PROD_MANAGED_SALES_WEBHOOKS_ENABLED=true` でWebhookの設定を配備し、販売条件を確認した1件を事務局で公開する配備では `PROD_MANAGED_SALES_ENABLED=true` も設定する。完全代行の新規受付を止める場合は、販売のフラグを `false` にして候補を作り直す。受付済みの予約の決済確定・返金・精算に使うため、Webhookのフラグと口座・署名秘密の参照は維持する。

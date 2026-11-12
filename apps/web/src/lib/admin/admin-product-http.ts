@@ -55,8 +55,7 @@ type ProductDraftBody = {
     readonly enabled: true;
     readonly acceptanceMode?: "INSTANT";
     readonly privateGroup?: boolean;
-    readonly sellerConfirmationMethod: "VERBAL" | "WRITTEN";
-    readonly paymentDueDays: number;
+    readonly sellerConfirmationMethod: "WRITTEN";
   };
 };
 
@@ -91,7 +90,7 @@ function managedDraftSettings(input: ProductDraftBody["managedSales"]) {
   const server = managedServerSettings();
   if (!server) return null;
   return { ...server, agreementConfirmedAtUtc: new Date().toISOString(),
-    agreementConfirmationMethod: input.sellerConfirmationMethod, paymentDueDays: input.paymentDueDays,
+    agreementConfirmationMethod: input.sellerConfirmationMethod,
     privateGroup: input.privateGroup, pilotApproved: true as const };
 }
 
@@ -118,14 +117,12 @@ function validDraft(value: unknown): value is ProductDraftBody {
     && typeof value.unitAmount === "number" && Number.isSafeInteger(value.unitAmount)
     && (value.unitAmount === 0 || value.unitAmount >= 50)
     && (value.managedSales === undefined || (isRecord(value.managedSales)
-      && exactKeys(value.managedSales, ["enabled", "acceptanceMode", "privateGroup", "sellerConfirmationMethod", "paymentDueDays"],
-        ["enabled", "sellerConfirmationMethod", "paymentDueDays"])
+      && exactKeys(value.managedSales, ["enabled", "acceptanceMode", "privateGroup", "sellerConfirmationMethod"],
+        ["enabled", "sellerConfirmationMethod"])
       && value.managedSales.enabled === true
       && (value.managedSales.acceptanceMode === undefined || value.managedSales.acceptanceMode === "INSTANT")
       && (value.managedSales.privateGroup === undefined || typeof value.managedSales.privateGroup === "boolean")
-      && (value.managedSales.sellerConfirmationMethod === "VERBAL" || value.managedSales.sellerConfirmationMethod === "WRITTEN")
-      && Number.isInteger(value.managedSales.paymentDueDays) && (value.managedSales.paymentDueDays as number) >= 0
-      && (value.managedSales.paymentDueDays as number) <= 180));
+      && value.managedSales.sellerConfirmationMethod === "WRITTEN"));
 }
 
 function validProviderProfile(value: unknown): value is ExperienceAdminProviderPublicProfileInput & { readonly consentConfirmed: true } {

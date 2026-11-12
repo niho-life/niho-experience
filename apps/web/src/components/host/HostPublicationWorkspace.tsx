@@ -257,12 +257,8 @@ export function HostPublicationWorkspace({
   const [createManagedSales, setCreateManagedSales] = useState(false);
   const [createManagedAcceptanceMode, setCreateManagedAcceptanceMode] = useState<"" | "INSTANT">("");
   const [createManagedPrivateGroup, setCreateManagedPrivateGroup] = useState(false);
-  const [createManagedConfirmation, setCreateManagedConfirmation] = useState<"" | "VERBAL" | "WRITTEN">("");
-  const [createManagedDueDays, setCreateManagedDueDays] = useState("14");
-  const managedDueDays = Number(createManagedDueDays);
-  const managedDraftReady = managedSalesAvailable && createManagedAcceptanceMode === "INSTANT"
-    && !!createManagedConfirmation && createManagedDueDays.trim() !== ""
-    && Number.isInteger(managedDueDays) && managedDueDays >= 0 && managedDueDays <= 180;
+  const [createManagedAgreementConfirmed, setCreateManagedAgreementConfirmed] = useState(false);
+  const managedDraftReady = managedSalesAvailable && createManagedAcceptanceMode === "INSTANT" && createManagedAgreementConfirmed;
   const [content, setContent] = useState<Record<string, unknown>>(blankContent);
   const [terms, setTerms] = useState<PublicationTermsForm>(emptyTerms);
   const [baseline, setBaseline] = useState("");
@@ -496,7 +492,7 @@ export function HostPublicationWorkspace({
   async function createProduct(event: React.FormEvent) {
     event.preventDefault(); if (busy || !slug.trim() || !title.trim() || asPublicationPrice(unitAmount) === null) return;
     if (adminDraft && createManagedSales && !managedDraftReady) {
-      setError("完全代行の受付方法・合意確認方法・支払期日を確認してください。");
+      setError("完全代行の受付方法と、提供者との書面での合意を確認してください。");
       return;
     }
     const faqProblem = publicationContentFaqProblem(content);
@@ -507,7 +503,7 @@ export function HostPublicationWorkspace({
       const managedSales = adminDraft && createManagedSales
         ? {
           enabled: true, acceptanceMode: createManagedAcceptanceMode, privateGroup: createManagedPrivateGroup,
-          sellerConfirmationMethod: createManagedConfirmation, paymentDueDays: managedDueDays,
+          sellerConfirmationMethod: "WRITTEN",
         }
         : undefined;
       const response = await fetch(apiBase, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: slug.trim(), publicTitle: title.trim(), content: draftContent, currency: "JPY", unitAmount: asPublicationPrice(unitAmount), ...(managedSales ? { managedSales } : {}) }) });
@@ -932,17 +928,11 @@ export function HostPublicationWorkspace({
             onChange={(event) => setCreateManagedPrivateGroup(event.target.checked)} />
           開催枠ごとに1組貸切にする
         </label>
-        <label className="grid gap-1 text-sm font-bold">
-          提供者との合意確認方法
-          <select className="rounded-xl border border-line bg-white px-3 py-2 font-normal" value={createManagedConfirmation}
-            onChange={(event) => setCreateManagedConfirmation(event.target.value as "" | "VERBAL" | "WRITTEN")}>
-            <option value="">選択してください</option><option value="VERBAL">口頭</option><option value="WRITTEN">書面・メッセージ</option>
-          </select>
-        </label>
-        <label className="grid gap-1 text-sm font-bold">
-          開催日からの支払期日（日）
-          <input className="rounded-xl border border-line bg-white px-3 py-2 font-normal" type="number" min={0} max={180} value={createManagedDueDays}
-            onChange={(event) => setCreateManagedDueDays(event.target.value)} />
+        <p className="text-sm sm:col-span-2">提供報酬は開催月末締め・翌月末日払いです。銀行休業日は前営業日までに振り込みます。</p>
+        <label className="flex items-start gap-2 text-sm font-bold sm:col-span-2">
+          <input type="checkbox" className="mt-1" checked={createManagedAgreementConfirmed}
+            onChange={(event) => setCreateManagedAgreementConfirmed(event.target.checked)} />
+          提供者に書面・メッセージで条件を明示し、合意を確認しました。
         </label>
       </div> : null}
       {!managedSalesAvailable ? <p className="text-sm text-amber-900">完全代行の決済設定が揃うと選択できます。</p> : null}

@@ -170,6 +170,7 @@ export interface ProductInput {
   readonly salesAgreementVersion?: string;
   readonly feeBasisPoints?: 1000 | 1500 | 2000;
   readonly paymentDueDays?: number | null;
+  readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
 }
 
 export interface ProductRecord extends ProductInput {
@@ -301,10 +302,12 @@ export interface SellerSnapshot {
   readonly sellerDisclosureUrl?: string;
   readonly agreementVersion?: string;
   readonly paymentDueDays?: number | null;
+  readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
 }
 
 export type ExperienceChargeMode = "PLATFORM" | "CONNECT_DIRECT";
 export type ExperienceSalesPlan = "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10";
+export type ManagedPaymentDuePolicy = "NEXT_MONTH_END";
 
 export interface BookingRecord {
   readonly publicBookingId: string;

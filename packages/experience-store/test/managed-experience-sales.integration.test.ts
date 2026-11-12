@@ -7,7 +7,7 @@ import { StoreConflictError, StoreNotFoundError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { GuestBookingRepository, type StartGuestBookingInput } from "../src/guest-bookings.ts";
 import { HostAccounts } from "../src/host-accounts.ts";
-import { ManagedExperienceSalesRepository } from "../src/managed-sales.ts";
+import { ManagedExperienceSalesRepository, managedPaymentDueDate } from "../src/managed-sales.ts";
 import { ProviderPayoutAccountConsents } from "../src/payout-account-consents.ts";
 import { ProviderSellerDisclosureRepository } from "../src/provider-seller-disclosures.ts";
 import { ExperienceStore } from "../src/repository.ts";
@@ -34,6 +34,15 @@ function bookingRequest(slug: string, offerId: string, occurrenceDate: string, r
   };
 }
 
+it("determines the agreed due date from the original booking terms", () => {
+  const monthEnd = { paymentDuePolicy: "NEXT_MONTH_END", paymentDueDays: null };
+  assert.equal(managedPaymentDueDate("2026-11-15", "2026-11-15T03:30:00Z", monthEnd), "2026-12-31");
+  assert.equal(managedPaymentDueDate("2026-12-31", "2026-12-31T15:00:00Z", monthEnd), "2027-02-28");
+  assert.equal(managedPaymentDueDate("2028-01-31", "2028-01-31T03:30:00Z", monthEnd), "2028-02-29");
+  assert.equal(managedPaymentDueDate("2026-07-01", "2026-07-01T03:30:00Z", monthEnd), "2026-08-31");
+  assert.equal(managedPaymentDueDate("2026-11-15", "2026-11-15T03:30:00Z", { paymentDueDays: 14 }), "2026-11-29");
+});
+
 describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
   it("creates an unregistered provider, sells on platform, fences old Checkout, switches this product to Direct, refunds and records manual compensation", async () => {
     const db = await createIsolatedDatabase(databaseUrl, "managed_experience_sales", { max: 6 });
@@ -51,7 +60,7 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       assert.deepEqual(await publications.listAdminDraftProducts(ADMIN, profile.providerId), []);
       const managedConfig = {
         seller: { legalSellerName: "Synthetic NIHO Seller", commercialTransactionsUrl: "https://example.test/niho-seller", sellerNihoAccountRef: "niho-seller-synthetic", platformAccountId: PLATFORM },
-        agreementVersion: "managed-20-synthetic-v1", agreementConfirmedAtUtc: new Date().toISOString(), agreementConfirmationMethod: "WRITTEN" as const, paymentDueDays: 14, pilotApproved: true as const,
+        agreementVersion: "managed-20-synthetic-v1", agreementConfirmedAtUtc: new Date().toISOString(), agreementConfirmationMethod: "WRITTEN" as const, pilotApproved: true as const,
       };
       const draft = await publications.createDraftAsAdmin(ADMIN, profile.providerId, {
         slug: "synthetic-managed-experience", publicTitle: "Synthetic managed experience",
@@ -106,6 +115,7 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       }), StoreNotFoundError);
       const paid = await guests.startGuestBooking(bookingRequest(draft.slug, offerId, day(2), 1, "paid@example.test"));
       assert.deepEqual([paid.booking.sellerSnapshot.chargeMode, paid.booking.sellerSnapshot.salesPlan, paid.booking.sellerSnapshot.feeBasisPoints], ["PLATFORM", "MANAGED_20", 2000]);
+      assert.equal(paid.booking.sellerSnapshot.paymentDuePolicy, "NEXT_MONTH_END");
       await guests.attachCheckoutSession(paid.publicBookingId, "cs_test_platform_paid_old");
       await store.confirmBookingPayment({ providerId: profile.providerId }, {
         publicBookingId: paid.publicBookingId, connectedAccountId: PLATFORM, stripePaymentRef: "pi_PlatformPaidOld1",
@@ -208,7 +218,9 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       const afterExperience = new Date(Date.parse(paid.booking.occurrenceSnapshot.endUtc) + 1000);
       const compensation = await managed.calculateCompensation(ADMIN, paid.publicBookingId, randomUUID(), afterExperience);
       assert.deepEqual([compensation.capturedAmount, compensation.refundedAmount, compensation.nihoFeeAmount, compensation.providerAmount], [10_000, 2_000, 1_600, 6_400]);
-      assert.equal(compensation.dueOn, addLocalDays(paid.booking.occurrenceSnapshot.localDate, 14));
+      assert.equal(compensation.dueOn, managedPaymentDueDate(
+        paid.booking.occurrenceSnapshot.localDate, paid.booking.occurrenceSnapshot.endUtc, { ...paid.booking.sellerSnapshot },
+      ));
       await managed.prepareCompensation(ADMIN, paid.publicBookingId, { commandId: randomUUID(), expectedVersion: compensation.version, recipientVerified: true });
       const recalculatedPrepared = await managed.calculateCompensation(ADMIN, paid.publicBookingId, randomUUID(), afterExperience);
       assert.equal(recalculatedPrepared.status, "PREPARED");
