@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { AdminAssignmentRow, AssignmentCandidate, AssignmentHistoryItem } from "@niho-experience/experience-store";
+import { useTodoSlotCount } from "./admin-todo-slot";
 
 const API = "/admin/api/occurrence-assignments";
 const BUTTON = "min-h-10 rounded-full border border-line-strong px-4 font-extrabold hover:bg-sand disabled:opacity-50";
@@ -71,6 +72,8 @@ export function AdminOccurrenceAssignments({ initial }: { initial: readonly Admi
   }
 
   const unassigned = rows.filter((row) => row.status === "OPEN").length;
+  // 予約の「要対応」の数に、担当が決まっていない回を数える (#542 S3)。
+  useTodoSlotCount("assignments", unassigned);
   return <section className="mt-8 rounded-2xl border border-line bg-white p-4 md:p-5" aria-labelledby="occurrence-assignments-heading">
     <h2 id="occurrence-assignments-heading" className="font-display text-xl font-medium">開催回の担当</h2>
     <p className="mt-1 text-sm text-ink-soft">担当できる人が「対応する」を押すと、その人が担当になります（開催回に1人）。LINEなどで返事をもらったときは、ここで代わりに記録できます。担当が決まっても、予約者への承認・支払い・予約の確定は済みになりません。予約者には担当を知らせません。</p>

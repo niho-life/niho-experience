@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminSiteBookingsPage() {
   if (isAdminPreview() && config.adminSiteBookingsPreviewEnabled) {
     const preview = adminSiteBookingsPreview();
-    return <AdminSiteBookings initial={preview.queue} supportBookings={preview.supportBookings} />;
+    return <AdminSiteBookings initial={preview.queue} supportBookings={preview.supportBookings} notifications={preview.notifications} />;
   }
   if (!config.guestBookingEnabled || !isAdminHttp()) notFound();
   const loaded = await loadAdminHttpSession();
@@ -58,6 +58,10 @@ export default async function AdminSiteBookingsPage() {
     catch { /* The queues below remain available. */ }
   }
   const assignments = assignmentRows ? <AdminOccurrenceAssignments initial={assignmentRows} /> : assignmentsEnabled ? <p role="alert">開催回の担当を読み込めませんでした。ページを再読み込みしてください。</p> : null;
-  return <>{approvalRequests ? <AdminBookingApprovals initial={approvalRequests} /> : approvalsEnabled ? <p role="alert">承認待ちの申込を読み込めませんでした。ページを再読み込みしてください。</p> : null}{assignments}<AdminSiteBookings initial={queue} supportBookings={supportBookings} notifications={notifications} settlements={settlements}
-    managedCompensationAvailable={config.managedSalesWebhooksEnabled} /></>;
+  const approvals = approvalRequests ? <AdminBookingApprovals initial={approvalRequests} /> : approvalsEnabled ? <p role="alert">承認待ちの申込を読み込めませんでした。ページを再読み込みしてください。</p> : null;
+  // 承認待ちと開催回の担当は「要対応」の先頭に入る (#542 S3)。それぞれが自分の件数を一覧へ知らせる (admin-todo-slot.tsx)。
+  const todoSlot = approvals || assignments ? <div className="grid gap-3 [&>section]:mt-0">{approvals}{assignments}</div> : null;
+  const todoSlotCount = (approvalRequests?.requests.length ?? 0) + (assignmentRows?.filter((row) => row.status === "OPEN").length ?? 0);
+  return <AdminSiteBookings initial={queue} supportBookings={supportBookings} notifications={notifications} settlements={settlements}
+    managedCompensationAvailable={config.managedSalesWebhooksEnabled} todoSlot={todoSlot} todoSlotCount={todoSlotCount} />;
 }
