@@ -8,7 +8,7 @@ const TOKEN = "sampleTokenAbcdefghijklmnopqrstuvwxyz0123456";
 
 const reply = {
   siteUrl: SITE,
-  guestName: "Sample Guest",
+  guestName: "Sample Guest", guestLanguage: "EN" as const,
   hostName: "Sample Host",
   experienceTitle: "Synthetic tea ceremony",
   reply: "Yes, we have a vegetarian option.\nSee you soon!",
@@ -19,7 +19,7 @@ const reply = {
 const confirmation: BookingConfirmationEmail = {
   publicBookingId: "0f8fad5b-d9cb-469f-a165-70867728950e",
   guestEmail: "guest@example.com",
-  guestName: "Sample Guest",
+  guestName: "Sample Guest", guestLanguage: "EN" as const,
   experienceTitle: "Synthetic tea ceremony",
   experienceSlug: "sample-tea",
   localDate: "2026-11-14",
@@ -167,7 +167,7 @@ describe("bookingConfirmationEmail", () => {
 describe("the booking page links (#285 slice 6)", () => {
   const GRANT = "sampleGrantAbcdefghijklmnopqrstuvwxyz012345";
   const link: BookingLinkEmail = {
-    publicBookingId: confirmation.publicBookingId, guestEmail: "guest@example.com", guestName: "Sample Guest",
+    publicBookingId: confirmation.publicBookingId, guestEmail: "guest@example.com", guestName: "Sample Guest", guestLanguage: "EN" as const,
     experienceTitle: "Synthetic tea ceremony", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
   };
 

@@ -66,7 +66,7 @@ const supportMessageFor = (n: number): ClaimedSupportBookingMessage => ({
 });
 
 const facts = (n: number): BookingConfirmationEmail => ({
-  publicBookingId: `0f8fad5b-d9cb-469f-a165-70867728950${n}`, guestEmail: `booker${n}@example.com`, guestName: `Sample Booker ${n}`,
+  publicBookingId: `0f8fad5b-d9cb-469f-a165-70867728950${n}`, guestEmail: `booker${n}@example.com`, guestName: `Sample Booker ${n}`, guestLanguage: "EN" as const,
   experienceTitle: "Synthetic walk", experienceSlug: "sample-walk", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
   startUtc: "2026-11-14T01:00:00.000Z", adultCount: 1, childCount: 0, totalAmount: 3000, currency: "JPY", cancellationPolicy: "NONE",
   cancellationWindowMinutesBeforeStart: null, cancellationRefundBasisPoints: 0,
@@ -162,7 +162,7 @@ describe("runExperienceJobs", () => {
   it("sends a review invitation only for a currently eligible attendance claim", async () => {
     const rows = [
       { id: "91", deliveryRef: deliveryRefFor(91), attempts: 1, email: null },
-      { id: "92", deliveryRef: deliveryRefFor(92), attempts: 1, email: { providerId: "provider-a", bookingId: "42", guestEmail: "guest@example.com", guestName: "Sample Guest", experienceTitle: "Synthetic walk" } },
+      { id: "92", deliveryRef: deliveryRefFor(92), attempts: 1, email: { providerId: "provider-a", bookingId: "42", guestEmail: "guest@example.com", guestLanguage: "EN" as const, guestName: "Sample Guest", experienceTitle: "Synthetic walk" } },
     ];
     const outbox = {
       claimReviewInvitations: vi.fn(async () => ({ invitations: rows.splice(0, 1), abandoned: 0 })),
@@ -402,7 +402,7 @@ describe("runExperienceJobs", () => {
 describe("runExperienceJobs › the guest's booking page (#285 slice 6)", () => {
   const GRANT = "sampleGrantAbcdefghijklmnopqrstuvwxyz012345";
   const linkFacts = (n: number): BookingLinkEmail => ({
-    publicBookingId: facts(n).publicBookingId, guestEmail: `booker${n}@example.com`, guestName: `Sample Booker ${n}`,
+    publicBookingId: facts(n).publicBookingId, guestEmail: `booker${n}@example.com`, guestName: `Sample Booker ${n}`, guestLanguage: "EN" as const,
     experienceTitle: "Synthetic walk", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
   });
   const linkFor = (n: number, email: BookingLinkEmail | null = linkFacts(n), attempts = 1): ClaimedBookingLink => ({ id: String(200 + n), deliveryRef: deliveryRefFor(200 + n), attempts, email });
@@ -522,7 +522,7 @@ describe("runExperienceJobs › the guest's booking page (#285 slice 6)", () => 
 describe("runExperienceJobs › private meeting guide email (#376)", () => {
   const email: BookingMeetingGuideEmail = {
     publicBookingId: "0f8fad5b-d9cb-469f-a165-708677289501",
-    guestEmail: "guide@example.com", guestName: "Sample Guest", experienceTitle: "Synthetic walk",
+    guestEmail: "guide@example.com", guestName: "Sample Guest", guestLanguage: "EN" as const, experienceTitle: "Synthetic walk",
     localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
     collectionOverview: "Blue flag by the synthetic station", address: "1-2-3 Sample, Kamakura",
     accessInstructions: "Walk east.", entranceInstructions: "Use the garden gate.",
@@ -647,7 +647,7 @@ describe("runExperienceJobs › the guests' Japanese", () => {
 
 describe("the notices of cancellations and refunds (#285 slice 7)", () => {
   const noticeFacts = (n: number) => ({
-    publicBookingId: `0f8fad5b-d9cb-469f-a165-70867728951${n}`, guestEmail: `notice${n}@example.com`, guestName: `Sample Notice ${n}`,
+    publicBookingId: `0f8fad5b-d9cb-469f-a165-70867728951${n}`, guestEmail: `notice${n}@example.com`, guestName: `Sample Notice ${n}`, guestLanguage: "EN" as const,
     experienceTitle: "Synthetic walk", experienceSlug: "sample-walk", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
     hostDisplayName: "Sample Host",
   });

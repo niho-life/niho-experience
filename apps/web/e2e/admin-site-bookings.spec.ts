@@ -153,6 +153,8 @@ const todoList = (page: Page) => page.getByRole("list", { name: "要対応の予
 const supportList = (page: Page) => page.getByRole("list", { name: "サポートONの予約一覧" });
 /** The opened booking: of all the faces the page keeps, the one that is shown. */
 const opened = (page: Page) => page.getByRole("article");
+/** The opened booking with this number: on a PC another booking is open until the search answers, so wait for this one. */
+const openedBooking = (page: Page, publicBookingId: string) => page.getByRole("article").filter({ hasText: publicBookingId });
 const dialogOf = (page: Page) => page.getByRole("dialog");
 const searchBox = (page: Page) => page.getByRole("textbox", { name: "予約番号", exact: true });
 
@@ -255,7 +257,7 @@ test("opens a booking by its number, and says when it is malformed or not a supp
 
   await input.fill(IDS.lookupOnly);
   await input.press("Enter");
-  const found = opened(page);
+  const found = openedBooking(page, IDS.lookupOnly);
   await expect(found).toContainText("Sample Guest F");
   await expect(found.getByText("案件", { exact: true })).toBeVisible();
   expect(backend.bookingQueries).toEqual([`?publicBookingId=${IDS.off}`, `?publicBookingId=${IDS.lookupOnly}`]);
@@ -268,7 +270,7 @@ test("keeps the opened booking, and opens no other, while a contact's result is 
   const input = searchBox(page);
   await input.fill(IDS.lookupOnly);
   await input.press("Enter");
-  const found = opened(page);
+  const found = openedBooking(page, IDS.lookupOnly);
   await found.getByText("案件", { exact: true }).click();
   await found.getByRole("textbox", { name: /予約者へNIHOサポートから連絡/ }).fill("Synthetic contact text");
 
