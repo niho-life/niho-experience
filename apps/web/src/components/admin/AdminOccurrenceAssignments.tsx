@@ -114,7 +114,7 @@ export function AdminOccurrenceAssignments({ initial }: { initial: readonly Admi
                 <input value={reason} maxLength={300} onChange={(event) => setReason(event.target.value)} className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm font-normal" />
               </label>
               <div className="flex flex-wrap gap-2">
-                <button type="button" className={BUTTON} disabled={busy} onClick={() => void send(row, { action: "SET_FEE", agreedFeeYen: fee === "" ? null : Number(fee) }, "合意した額を記録しました。")}>額を記録</button>
+                <button type="button" className={BUTTON} disabled={busy} onClick={() => void send(row, { action: "SET_FEE", assignmentId: row.assignee?.assignmentId, agreedFeeYen: fee === "" ? null : Number(fee) }, "合意した額を記録しました。")}>額を記録</button>
                 <button type="button" className={BUTTON} disabled={busy} onClick={() => { if (window.confirm("この人の担当を外し、募集中に戻しますか？予約者の予約は変わりません。")) void send(row, { action: "RELEASE", reason }, "担当を外して募集中に戻しました。"); }}>担当を外して募集中に戻す</button>
               </div>
             </div>}

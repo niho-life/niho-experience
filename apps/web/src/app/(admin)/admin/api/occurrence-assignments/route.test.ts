@@ -74,9 +74,15 @@ describe("Admin occurrence assignments (#535)", () => {
 
   it("sets the agreed fee by hand and rejects malformed or forged input", async () => {
     state.repository.adminSetAgreedFee.mockResolvedValue({ outcome: "FEE_SET", repeated: false });
-    expect((await POST(post({ ...base, action: "SET_FEE", agreedFeeYen: 5000 }))).status).toBe(200);
-    expect(state.repository.adminSetAgreedFee).toHaveBeenCalledWith({ nihoUserId: "admin-synthetic" }, { ...base, agreedFeeYen: 5000 });
-    expect((await POST(post({ ...base, action: "SET_FEE", agreedFeeYen: "5000" }))).status).toBe(400);
+    const term = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    expect((await POST(post({ ...base, action: "SET_FEE", assignmentId: term, agreedFeeYen: 5000 }))).status).toBe(200);
+    expect(state.repository.adminSetAgreedFee).toHaveBeenCalledWith({ nihoUserId: "admin-synthetic" }, { ...base, assignmentId: term, agreedFeeYen: 5000 });
+    expect((await POST(post({ ...base, action: "SET_FEE", assignmentId: term, agreedFeeYen: "5000" }))).status).toBe(400);
+    // The term the office saw is required, and a hand-over in between is a conflict, not a write to the next person.
+    expect((await POST(post({ ...base, action: "SET_FEE", agreedFeeYen: 5000 }))).status).toBe(400);
+    expect((await POST(post({ ...base, action: "SET_FEE", assignmentId: "not-a-uuid", agreedFeeYen: 5000 }))).status).toBe(400);
+    state.repository.adminSetAgreedFee.mockRejectedValueOnce(new StoreConflictError("changed"));
+    expect((await POST(post({ ...base, action: "SET_FEE", assignmentId: term, agreedFeeYen: 5000 }))).status).toBe(409);
     expect((await POST(post({ ...base, action: "CLAIM" }))).status).toBe(400);
     expect((await POST(post({ ...base, action: "APPROVE" }))).status).toBe(400);
     expect((await POST(post({ ...base, action: "RELEASE", approvalStatus: "APPROVED" }))).status).toBe(400);

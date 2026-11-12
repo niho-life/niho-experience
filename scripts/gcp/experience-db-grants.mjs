@@ -146,6 +146,7 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   managed_provider_compensations: { write: IU },
   managed_provider_compensation_events: { write: I },
   // 開催回の担当 (#535, 0073): a term is opened, then released or given an agreed fee; its history is append-only.
+  occurrence_assignment_commands: { write: I },
   occurrence_assignment_events: { write: I },
   occurrence_assignments: { write: I, updateColumns: ["released_at", "agreed_fee_yen", "agreed_fee_set_at"] },
   // Read by the host notification and guest mail jobs, which also mark rows done and move their lease.

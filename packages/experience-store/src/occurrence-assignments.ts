@@ -46,6 +46,9 @@ export interface AssignmentResult {
   readonly repeated: boolean;
 }
 
+/** What a command is: a resend with the same command ID must be the same request. */
+interface CommandKey { readonly occurrenceId: string; readonly action: AssignmentAction; readonly actor: string; readonly subject: string | null }
+
 export interface AssignmentOccurrence {
   readonly providerId: string;
   readonly occurrenceId: string;
@@ -90,7 +93,8 @@ export interface AdminAssignmentRow {
   readonly participants: number;
   readonly firstRequestedAtUtc: string;
   readonly status: "OPEN" | "ASSIGNED";
-  readonly assignee: { readonly nihoUserId: string; readonly label: string; readonly claimedAtUtc: string; readonly recordedByAdmin: boolean; readonly agreedFeeYen: number | null } | null;
+  /** `assignmentId` is the term the office saw: a change of the amount names it, so that a hand-over in between is refused. */
+  readonly assignee: { readonly assignmentId: string; readonly nihoUserId: string; readonly label: string; readonly claimedAtUtc: string; readonly recordedByAdmin: boolean; readonly agreedFeeYen: number | null } | null;
   readonly declined: readonly { readonly nihoUserId: string; readonly label: string; readonly reason: string | null; readonly atUtc: string }[];
 }
 
@@ -209,19 +213,31 @@ export class OccurrenceAssignmentRepository {
     return live.rows[0] !== undefined;
   }
 
-  /** A command seen before returns what it did; the same command ID with other content is refused. */
-  async #replay(client: PoolClient, providerId: string, commandId: string, expect: { occurrenceId: string; action: AssignmentAction; actor: string; subject: string | null }): Promise<AssignmentResult | null> {
+  /**
+   * A command seen before returns its first result, also when it changed nothing (TAKEN, ALREADY_OPEN ...): a resend must
+   * not act on a state that moved on in between. The same command ID with other content is refused.
+   */
+  async #replay(client: PoolClient, providerId: string, commandId: string, expect: CommandKey): Promise<AssignmentResult | null> {
     const prior = await client.query<DbRow>(
-      "SELECT occurrence_id,action,actor_niho_user_id,subject_niho_user_id FROM occurrence_assignment_events WHERE provider_id=$1 AND command_id=$2::uuid",
+      "SELECT occurrence_id,action,actor_niho_user_id,subject_niho_user_id,outcome FROM occurrence_assignment_commands WHERE provider_id=$1 AND command_id=$2::uuid",
       [providerId, commandId],
     );
     const row = prior.rows[0];
     if (!row) return null;
-    if (row.occurrence_id !== expect.occurrenceId || row.action !== expect.action || row.actor_niho_user_id !== expect.actor || (expect.subject !== null && row.subject_niho_user_id !== expect.subject)) {
+    if (row.occurrence_id !== expect.occurrenceId || row.action !== expect.action || row.actor_niho_user_id !== expect.actor || (row.subject_niho_user_id ?? null) !== expect.subject) {
       throw new StoreConflictError("The command ID was already used for another request.");
     }
-    const outcome: Record<AssignmentAction, AssignmentOutcome> = { CLAIM: "ASSIGNED", DECLINE: "DECLINED", RELEASE: "RELEASED", SET_FEE: "FEE_SET" };
-    return { outcome: outcome[expect.action], repeated: true };
+    return { outcome: row.outcome as AssignmentOutcome, repeated: true };
+  }
+
+  /** Keeps the first result of a command, with or without a change, and returns it. */
+  async #remember(client: PoolClient, providerId: string, commandId: string, key: CommandKey, outcome: AssignmentOutcome): Promise<AssignmentResult> {
+    await client.query(
+      `INSERT INTO occurrence_assignment_commands (provider_id,command_id,occurrence_id,action,actor_niho_user_id,subject_niho_user_id,outcome)
+       VALUES ($1,$2::uuid,$3,$4,$5,$6,$7)`,
+      [providerId, commandId, key.occurrenceId, key.action, key.actor, key.subject, outcome],
+    );
+    return { outcome, repeated: false };
   }
 
   async #openTerm(client: PoolClient, providerId: string, occurrenceId: string): Promise<{ id: string; assignee: string; fee: number | null } | null> {
@@ -248,24 +264,26 @@ export class OccurrenceAssignmentRepository {
   // ---- shared state changes (the person pressed it, or the office recorded it for them) ----
 
   async #claim(client: PoolClient, args: { providerId: string; occurrenceId: string; commandId: string; subject: string; actor: string; recordedBy: AssignmentRecordedBy; reason: string | null }): Promise<AssignmentResult> {
-    const replay = await this.#replay(client, args.providerId, args.commandId, { occurrenceId: args.occurrenceId, action: "CLAIM", actor: args.actor, subject: args.subject });
+    const key: CommandKey = { occurrenceId: args.occurrenceId, action: "CLAIM", actor: args.actor, subject: args.subject };
+    const replay = await this.#replay(client, args.providerId, args.commandId, key);
     if (replay) return replay;
     if (!await this.#needsAssignee(client, args.providerId, args.occurrenceId)) throw new StoreConflictError("The occurrence is not open for an assignee.");
     const term = await this.#openTerm(client, args.providerId, args.occurrenceId);
-    if (term) return { outcome: term.assignee === args.subject ? "ALREADY_YOURS" : "TAKEN", repeated: false };
+    if (term) return this.#remember(client, args.providerId, args.commandId, key, term.assignee === args.subject ? "ALREADY_YOURS" : "TAKEN");
     const inserted = await client.query<DbRow>(
       `INSERT INTO occurrence_assignments (provider_id,occurrence_id,assignee_niho_user_id) VALUES ($1,$2,$3)
        ON CONFLICT DO NOTHING RETURNING id::text AS id`,
       [args.providerId, args.occurrenceId, args.subject],
     );
     const id = inserted.rows[0]?.id;
-    if (typeof id !== "string") return { outcome: "TAKEN", repeated: false };
+    if (typeof id !== "string") return this.#remember(client, args.providerId, args.commandId, key, "TAKEN");
     await this.#event(client, { ...args, assignmentId: id, action: "CLAIM" });
-    return { outcome: "ASSIGNED", repeated: false };
+    return this.#remember(client, args.providerId, args.commandId, key, "ASSIGNED");
   }
 
   async #decline(client: PoolClient, args: { providerId: string; occurrenceId: string; commandId: string; subject: string; actor: string; recordedBy: AssignmentRecordedBy; reason: string | null }): Promise<AssignmentResult> {
-    const replay = await this.#replay(client, args.providerId, args.commandId, { occurrenceId: args.occurrenceId, action: "DECLINE", actor: args.actor, subject: args.subject });
+    const key: CommandKey = { occurrenceId: args.occurrenceId, action: "DECLINE", actor: args.actor, subject: args.subject };
+    const replay = await this.#replay(client, args.providerId, args.commandId, key);
     if (replay) return replay;
     if (!await this.#needsAssignee(client, args.providerId, args.occurrenceId)) throw new StoreConflictError("The occurrence is not open for an assignee.");
     const term = await this.#openTerm(client, args.providerId, args.occurrenceId);
@@ -276,20 +294,21 @@ export class OccurrenceAssignmentRepository {
         ORDER BY id DESC LIMIT 1`,
       [args.providerId, args.occurrenceId, args.subject],
     );
-    if (latest.rows[0]?.action === "DECLINE") return { outcome: "ALREADY_DECLINED", repeated: false };
+    if (latest.rows[0]?.action === "DECLINE") return this.#remember(client, args.providerId, args.commandId, key, "ALREADY_DECLINED");
     await this.#event(client, { ...args, assignmentId: null, action: "DECLINE" });
-    return { outcome: "DECLINED", repeated: false };
+    return this.#remember(client, args.providerId, args.commandId, key, "DECLINED");
   }
 
   async #release(client: PoolClient, args: { providerId: string; occurrenceId: string; commandId: string; actor: string; recordedBy: AssignmentRecordedBy; reason: string | null; onlyIfAssignee: string | null }): Promise<AssignmentResult> {
-    const term = await this.#openTerm(client, args.providerId, args.occurrenceId);
-    const replay = await this.#replay(client, args.providerId, args.commandId, { occurrenceId: args.occurrenceId, action: "RELEASE", actor: args.actor, subject: args.onlyIfAssignee });
+    const key: CommandKey = { occurrenceId: args.occurrenceId, action: "RELEASE", actor: args.actor, subject: args.onlyIfAssignee };
+    const replay = await this.#replay(client, args.providerId, args.commandId, key);
     if (replay) return replay;
-    if (!term) return { outcome: "ALREADY_OPEN", repeated: false };
-    if (args.onlyIfAssignee !== null && term.assignee !== args.onlyIfAssignee) return { outcome: "TAKEN", repeated: false };
+    const term = await this.#openTerm(client, args.providerId, args.occurrenceId);
+    if (!term) return this.#remember(client, args.providerId, args.commandId, key, "ALREADY_OPEN");
+    if (args.onlyIfAssignee !== null && term.assignee !== args.onlyIfAssignee) return this.#remember(client, args.providerId, args.commandId, key, "TAKEN");
     await client.query("UPDATE occurrence_assignments SET released_at=clock_timestamp() WHERE id=$1::uuid AND released_at IS NULL", [term.id]);
     await this.#event(client, { providerId: args.providerId, occurrenceId: args.occurrenceId, commandId: args.commandId, assignmentId: term.id, action: "RELEASE", recordedBy: args.recordedBy, subject: term.assignee, actor: args.actor, reason: args.reason });
-    return { outcome: "RELEASED", repeated: false };
+    return this.#remember(client, args.providerId, args.commandId, key, "RELEASED");
   }
 
   // ---- people who can serve ----
@@ -400,7 +419,7 @@ export class OccurrenceAssignmentRepository {
       `WITH ${LIVE_CTE("true")}
        SELECT o.provider_id,o.occurrence_id,o.product_id,o.rule_id,p.public_title,${DAY} AS local_day,${CLOCK} AS local_clock,o.start_at,
               live.booking_count,live.participants,live.first_requested_at,
-              t.assignee_niho_user_id AS assignee,COALESCE(ha.email,t.assignee_niho_user_id) AS assignee_label,t.claimed_at,t.agreed_fee_yen,
+              t.id::text AS assignment_id,t.assignee_niho_user_id AS assignee,COALESCE(ha.email,t.assignee_niho_user_id) AS assignee_label,t.claimed_at,t.agreed_fee_yen,
               (SELECT e.recorded_by='ADMIN' FROM occurrence_assignment_events e WHERE e.assignment_id=t.id AND e.action='CLAIM' LIMIT 1) AS claimed_by_admin,
               COALESCE((
                 SELECT jsonb_agg(jsonb_build_object('id',d.subject_niho_user_id,'label',COALESCE(da.email,d.subject_niho_user_id),'reason',d.reason,'at',d.occurred_at) ORDER BY d.id)
@@ -426,7 +445,7 @@ export class OccurrenceAssignmentRepository {
       startsAtUtc: isoValue(row, "start_at"), bookingCount: Number(row.booking_count), participants: Number(row.participants),
       firstRequestedAtUtc: isoValue(row, "first_requested_at"), status: row.assignee === null ? "OPEN" : "ASSIGNED",
       assignee: row.assignee === null ? null : {
-        nihoUserId: String(row.assignee), label: String(row.assignee_label), claimedAtUtc: isoValue(row, "claimed_at"),
+        assignmentId: String(row.assignment_id), nihoUserId: String(row.assignee), label: String(row.assignee_label), claimedAtUtc: isoValue(row, "claimed_at"),
         recordedByAdmin: row.claimed_by_admin === true, agreedFeeYen: row.agreed_fee_yen === null ? null : Number(row.agreed_fee_yen),
       },
       declined: (Array.isArray(row.declined) ? row.declined : []).map((item: Record<string, unknown>) => ({
@@ -481,21 +500,25 @@ export class OccurrenceAssignmentRepository {
   }
 
   /** The agreed amount for the current assignee, typed by hand (null clears it). Nothing is calculated or paid. */
-  async adminSetAgreedFee(actor: AssignmentAdminActor, input: { providerId: string; occurrenceId: string; commandId: string; agreedFeeYen: number | null }): Promise<AssignmentResult> {
+  async adminSetAgreedFee(actor: AssignmentAdminActor, input: { providerId: string; occurrenceId: string; commandId: string; assignmentId: string; agreedFeeYen: number | null }): Promise<AssignmentResult> {
     ident(actor?.nihoUserId, "actor.nihoUserId");
     const { providerId, occurrenceId } = target(input?.providerId, input?.occurrenceId);
     const commandId = uuid(input.commandId, "commandId");
+    const assignmentId = uuid(input.assignmentId, "assignmentId");
     const fee = feeOf(input.agreedFeeYen);
     return withTransaction(this.#pool, async (client) => {
       await this.#lock(client, providerId, occurrenceId);
-      const term = await this.#openTerm(client, providerId, occurrenceId);
-      const replay = await this.#replay(client, providerId, commandId, { occurrenceId, action: "SET_FEE", actor: actor.nihoUserId, subject: null });
+      const key: CommandKey = { occurrenceId, action: "SET_FEE", actor: actor.nihoUserId, subject: null };
+      const replay = await this.#replay(client, providerId, commandId, key);
       if (replay) return replay;
+      const term = await this.#openTerm(client, providerId, occurrenceId);
       if (!term) throw new StoreConflictError("The occurrence has no assignee to agree a fee with.");
-      if (term.fee === fee) return { outcome: "FEE_SET", repeated: false };
+      // The amount was agreed with the person the office saw: if the term changed hands since, it must not land on the next one.
+      if (term.id !== assignmentId) throw new StoreConflictError("The assignee changed since the screen was read.");
+      if (term.fee === fee) return this.#remember(client, providerId, commandId, key, "FEE_SET");
       await client.query("UPDATE occurrence_assignments SET agreed_fee_yen=$2,agreed_fee_set_at=clock_timestamp() WHERE id=$1::uuid AND released_at IS NULL", [term.id, fee]);
       await this.#event(client, { providerId, occurrenceId, commandId, assignmentId: term.id, action: "SET_FEE", recordedBy: "ADMIN", subject: term.assignee, actor: actor.nihoUserId, reason: null, feeYen: fee });
-      return { outcome: "FEE_SET", repeated: false };
+      return this.#remember(client, providerId, commandId, key, "FEE_SET");
     });
   }
 

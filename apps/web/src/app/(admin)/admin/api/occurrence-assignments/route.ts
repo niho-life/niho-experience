@@ -61,7 +61,7 @@ export async function POST(request: Request): Promise<Response> {
     if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("shape");
     body = value as Record<string, unknown>;
   } catch { return adminJson({ error: "invalid_input" }, 400); }
-  const allowed = ["action", "providerId", "occurrenceId", "commandId", "subjectNihoUserId", "reason", "agreedFeeYen"];
+  const allowed = ["action", "providerId", "occurrenceId", "commandId", "subjectNihoUserId", "reason", "agreedFeeYen", "assignmentId"];
   if (Object.keys(body).some((key) => !allowed.includes(key))
     || typeof body.providerId !== "string" || !ID.test(body.providerId)
     || typeof body.occurrenceId !== "string" || !ID.test(body.occurrenceId)
@@ -72,7 +72,9 @@ export async function POST(request: Request): Promise<Response> {
   try {
     if (body.action === "SET_FEE") {
       if (body.agreedFeeYen !== null && typeof body.agreedFeeYen !== "number") return adminJson({ error: "invalid_input" }, 400);
-      return adminJson(await current.assignments.adminSetAgreedFee(current.actor, { ...base, agreedFeeYen: body.agreedFeeYen as number | null }));
+      // The term the office saw: if the assignee changed since, the amount is refused (409) instead of landing on the next person.
+      if (typeof body.assignmentId !== "string" || !UUID.test(body.assignmentId)) return adminJson({ error: "invalid_input" }, 400);
+      return adminJson(await current.assignments.adminSetAgreedFee(current.actor, { ...base, assignmentId: body.assignmentId, agreedFeeYen: body.agreedFeeYen as number | null }));
     }
     if (body.action !== "CLAIM" && body.action !== "DECLINE" && body.action !== "RELEASE") return adminJson({ error: "invalid_input" }, 400);
     if (body.reason !== undefined && body.reason !== null && typeof body.reason !== "string") return adminJson({ error: "invalid_input" }, 400);
