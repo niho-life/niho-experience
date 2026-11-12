@@ -3,12 +3,13 @@
  * (flag の組み立ては sections-server.ts)。
  */
 
-export type AdminSectionKey = "bookings" | "site-bookings" | "notifications" | "products" | "operators" | "preparations" | "channels";
+export type AdminSectionKey = "bookings" | "site-bookings" | "notifications" | "inquiries" | "products" | "operators" | "preparations" | "channels";
 
 export interface AdminSectionFlags {
   bookingSupport: boolean;
   siteBookings: boolean;
   notifications: boolean;
+  inquiries: boolean;
   products: boolean;
   operators: boolean;
   preparations: boolean;
@@ -25,13 +26,14 @@ const SECTIONS: readonly (AdminSection & { flag: keyof AdminSectionFlags })[] = 
   { key: "bookings", href: "/admin/bookings", label: "予約支援", flag: "bookingSupport" },
   { key: "site-bookings", href: "/admin/site-bookings", label: "予約", flag: "siteBookings" },
   { key: "notifications", href: "/admin/notifications", label: "通知", flag: "notifications" },
+  { key: "inquiries", href: "/admin/inquiries", label: "相談", flag: "inquiries" },
   { key: "products", href: "/admin/products", label: "提供者", flag: "products" },
   { key: "operators", href: "/admin/operators", label: "運営者", flag: "operators" },
   { key: "preparations", href: "/admin/preparations", label: "掲載準備", flag: "preparations" },
   { key: "channels", href: "/admin/channels", label: "掲載先", flag: "channels" },
 ];
 
-export const NO_ADMIN_SECTION_FLAGS: AdminSectionFlags = { bookingSupport: false, siteBookings: false, notifications: false, products: false, operators: false, preparations: false, channels: false };
+export const NO_ADMIN_SECTION_FLAGS: AdminSectionFlags = { bookingSupport: false, siteBookings: false, notifications: false, inquiries: false, products: false, operators: false, preparations: false, channels: false };
 
 export function adminSections(flags: AdminSectionFlags): AdminSection[] {
   return SECTIONS.filter((section) => flags[section.flag]).map(({ key, href, label }) => ({ key, href, label }));

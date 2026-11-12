@@ -240,6 +240,20 @@ export type {
   OpenedBookingSession,
 } from "./booking-access.ts";
 export { HOST_ACCOUNT_LIMITS, HostAccounts, isHostAccountId, normalizeHostEmail } from "./host-accounts.ts";
+export { GROUP_INQUIRY_MAIL_LIMITS, GROUP_INQUIRY_MAIL_RECIPIENTS, GroupInquiryRepository } from "./group-inquiries.ts";
+export type {
+  GroupInquiryList,
+  GroupInquiryMail,
+  GroupInquiryMailOutcome,
+  GroupInquiryMailRecipient,
+  GroupInquiryMailStatus,
+  GroupInquiryPatch,
+  GroupInquiryRecord,
+  SubmitGroupInquiryInput,
+  SubmittedGroupInquiry,
+} from "./group-inquiries.ts";
+export { GROUP_INQUIRY_ENTRIES, GROUP_INQUIRY_FIELDS, GROUP_INQUIRY_KINDS, GROUP_INQUIRY_LIMITS, GROUP_INQUIRY_REPLY_BUSINESS_DAYS, GROUP_INQUIRY_STATUSES, checkGroupInquiry } from "./group-inquiry-fields.ts";
+export type { GroupInquiryDetails, GroupInquiryEntry, GroupInquiryKind, GroupInquiryLocale, GroupInquiryStatus } from "./group-inquiry-fields.ts";
 export { ADMIN_SESSION_LIMITS, AdminSessions, adminActorIdForGoogleSubject, isAdminActorId } from "./admin-sessions.ts";
 export type { AdminActorId, AdminSession, AdminSessionOpened } from "./admin-sessions.ts";
 export { isHostSellerRef } from "./host-sellers.ts";
