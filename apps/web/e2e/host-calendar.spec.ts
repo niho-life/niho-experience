@@ -75,10 +75,14 @@ test("week, day agenda and add dialog work without overflow", async ({ page }, t
   await expect(dialog.getByLabel("終了日")).toHaveCount(0);
   await expect(dialog.getByLabel("日付")).toHaveValue(selectedDay);
   await dialog.getByLabel("定員（人）").fill("7");
+  const cutoff = dialog.getByLabel("予約受付の締切（開始の何時間前）");
+  await expect(cutoff).toHaveValue("2");
+  await cutoff.fill("48");
   await dialog.getByRole("button", { name: "追加する" }).click();
   await expect(dialog).toHaveCount(0);
   expect(posts).toHaveLength(1);
-  expect(posts[0]).toMatchObject({ action: "createRule", experienceId: "sample-experience", rule: { startsOn: selectedDay, endsOn: selectedDay, capacity: 7, recurrence: { kind: "WEEKLY" } } });
+  expect(posts[0]).toMatchObject({ action: "createRule", experienceId: "sample-experience",
+    rule: { startsOn: selectedDay, endsOn: selectedDay, capacity: 7, bookingCutoffMinutes: 2880, recurrence: { kind: "WEEKLY" } } });
   expect(posts[0]?.commandId).toMatch(/^[0-9a-f-]{36}$/);
   const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
   expect(axe.violations.map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`)).toEqual([]);

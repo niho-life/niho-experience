@@ -194,7 +194,8 @@ export function HostCalendarWorkspace({
     void mutate({ action: "createRule", experienceId: String(form.get("experienceId")), rule: {
       timeZone: "Asia/Tokyo", startsOn, endsOn: repeats ? String(form.get("endsOn")) : startsOn,
       localStartTime: String(form.get("localStartTime")), durationMinutes: Number(form.get("durationMinutes")), capacity: Number(form.get("capacity")),
-      bookingCutoffMinutes: 120, busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0,
+      bookingCutoffMinutes: Number(form.get("bookingCutoffHours")) * 60,
+      busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0,
       recurrence: repeats ? (recurrence === "SELECTED_WEEKDAYS" ? { kind: recurrence, weekdays } : { kind: recurrence }) : { kind: "WEEKLY" },
     } }, startsOn);
   };
@@ -248,6 +249,10 @@ export function HostCalendarWorkspace({
       <label className="grid gap-1 text-sm font-extrabold">日付<input name="startsOn" type="date" value={ruleStartsOn} onChange={(event) => setRuleStartsOn(event.currentTarget.value)} required className={FIELD} /></label>
       <label className="grid gap-1 text-sm font-extrabold">開始<input name="localStartTime" type="time" defaultValue="10:00" required className={FIELD} /></label>
       <div className="grid grid-cols-2 gap-3"><label className="grid gap-1 text-sm font-extrabold">所要時間（分）<input name="durationMinutes" type="number" min="1" max="1440" defaultValue="90" required inputMode="numeric" className={FIELD} /></label><label className="grid gap-1 text-sm font-extrabold">定員（人）<input name="capacity" type="number" min="1" max="1000" defaultValue="4" required inputMode="numeric" className={FIELD} /></label></div>
+      <label className="grid gap-1 text-sm font-extrabold">
+        予約受付の締切（開始の何時間前）
+        <input name="bookingCutoffHours" type="number" min="0" max="8760" defaultValue="2" required inputMode="numeric" className={FIELD} />
+      </label>
       <label className="flex min-h-11 items-center gap-2 font-extrabold"><input type="checkbox" checked={repeats} onChange={(event) => setRepeats(event.currentTarget.checked)} className="size-5 accent-moss" />繰り返す</label>
       {repeats ? <div className="grid gap-3 rounded-xl bg-sand p-3"><label className="grid gap-1 text-sm font-extrabold">繰り返し<select value={recurrence} onChange={(event) => setRecurrence(event.currentTarget.value)} className={FIELD}><option value="WEEKLY">毎週</option><option value="DAILY">毎日</option><option value="WEEKENDS">土日</option><option value="SELECTED_WEEKDAYS">曜日を選ぶ</option></select></label><label className="grid gap-1 text-sm font-extrabold">終了日<input name="endsOn" type="date" min={ruleStartsOn} required className={FIELD} /></label>{recurrence === "SELECTED_WEEKDAYS" ? <fieldset><legend className="text-sm font-extrabold">曜日</legend><div className="mt-1 grid grid-cols-4 gap-1">{WEEKDAYS.map((day) => <label key={day.id} className="flex min-h-11 items-center justify-center gap-1 rounded-xl border border-line-strong bg-canvas"><input type="checkbox" checked={weekdays.includes(day.id)} onChange={(event) => { const checked = event.currentTarget.checked; setWeekdays((current) => checked ? [...current, day.id] : current.filter((id) => id !== day.id)); }} />{day.label}</label>)}</div></fieldset> : null}</div> : null}
       </fieldset><div className="sticky -bottom-4 z-10 bg-canvas pt-2 pb-1"><button type="submit" disabled={saving || !dataFresh || pendingCommand !== null} className={consoleButtonClass("primary", "lg", "w-full disabled:opacity-50")}>{saving ? "保存中…" : "追加する"}</button></div>

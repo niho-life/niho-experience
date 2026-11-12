@@ -256,6 +256,7 @@ export function HostPublicationWorkspace({
   const [managedSalesAvailable, setManagedSalesAvailable] = useState(false);
   const [createManagedSales, setCreateManagedSales] = useState(false);
   const [createManagedAcceptanceMode, setCreateManagedAcceptanceMode] = useState<"" | "INSTANT">("");
+  const [createManagedPrivateGroup, setCreateManagedPrivateGroup] = useState(false);
   const [createManagedConfirmation, setCreateManagedConfirmation] = useState<"" | "VERBAL" | "WRITTEN">("");
   const [createManagedDueDays, setCreateManagedDueDays] = useState("14");
   const managedDueDays = Number(createManagedDueDays);
@@ -505,7 +506,7 @@ export function HostPublicationWorkspace({
     try {
       const managedSales = adminDraft && createManagedSales
         ? {
-          enabled: true, acceptanceMode: createManagedAcceptanceMode,
+          enabled: true, acceptanceMode: createManagedAcceptanceMode, privateGroup: createManagedPrivateGroup,
           sellerConfirmationMethod: createManagedConfirmation, paymentDueDays: managedDueDays,
         }
         : undefined;
@@ -925,6 +926,11 @@ export function HostPublicationWorkspace({
             <option value="">選択してください</option>
             <option value="INSTANT">即時決済（有料は支払い完了で予約確定）</option>
           </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm font-bold sm:col-span-2">
+          <input type="checkbox" checked={createManagedPrivateGroup}
+            onChange={(event) => setCreateManagedPrivateGroup(event.target.checked)} />
+          開催枠ごとに1組貸切にする
         </label>
         <label className="grid gap-1 text-sm font-bold">
           提供者との合意確認方法

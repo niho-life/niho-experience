@@ -1474,6 +1474,7 @@ export class ExperiencePublicationRepository {
       readonly agreementConfirmedAtUtc: string;
       readonly agreementConfirmationMethod: AdminSellerConfirmationMethod;
       readonly paymentDueDays: number;
+      readonly privateGroup?: boolean;
       readonly pilotApproved: true;
     },
   ): Promise<ProductRecord> {
@@ -1514,6 +1515,12 @@ export class ExperiencePublicationRepository {
       );
       if (!result.rows[0]) throw new StoreConflictError("A product with this slug already exists for the seller.");
       if (managed) {
+        if (managed.privateGroup) {
+          await client.query(
+            "INSERT INTO product_inventory_settings (provider_id,product_id,booking_mode) VALUES ($1,$2,'PRIVATE_GROUP')",
+            [providerId, id],
+          );
+        }
         const profile = await client.query<DbRow>("SELECT version FROM experience_provider_public_profiles WHERE provider_id=$1 FOR SHARE", [providerId]);
         await client.query(
           `INSERT INTO experience_product_sales_plan_versions
