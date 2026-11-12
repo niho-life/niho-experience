@@ -16,6 +16,8 @@ const base = (product: typeof K, title: string, seller: string) => ({ ...product
 const kitchen = base(K, "Sample Kitchen Dinner", "サンプルの台所");
 const workshop = base(W, "Sample Craft Workshop", "サンプル工房");
 const tea = base(T, "Sample Tea Hour", "サンプルの台所");
+// Archived: not among `products`, but its assignment is still active.
+const archived = base({ providerId: "provider-sample-workshop", productId: "product-sample-archived-walk" }, "Sample Archived Walk", "サンプル工房");
 
 interface Snapshot { products: unknown[]; invitations: Record<string, unknown>[]; grants: Record<string, unknown>[] }
 
@@ -43,6 +45,7 @@ async function installStubs(page: Page): Promise<Backend> {
         { ...kitchen, nihoUserId: "11111111-1111-4111-8111-111111111111", assignmentLabel: "合成 担当A", active: true, version: 3, grantedAtUtc: "2026-10-20T00:00:00.000Z" },
         { ...tea, nihoUserId: USER_TEA, assignmentLabel: "合成 担当D", active: true, expiresAtUtc: "2099-12-31T00:00:00.000Z", version: 1, grantedAtUtc: "2026-10-21T00:00:00.000Z" },
         { ...tea, nihoUserId: "33333333-3333-4333-8333-333333333333", assignmentLabel: "合成 解除済みE", active: false, version: 4, grantedAtUtc: "2026-10-01T00:00:00.000Z", revokedAtUtc: "2026-10-15T00:00:00.000Z" },
+        { ...archived, nihoUserId: "44444444-4444-4444-8444-444444444444", assignmentLabel: "合成 担当F", active: true, version: 2, grantedAtUtc: "2026-09-01T00:00:00.000Z" },
       ],
     },
     posts: [],
@@ -121,6 +124,12 @@ test("one surface per experience, people as rows, and nothing for ended ones", a
   const expired = teaSurface.getByRole("listitem").filter({ hasText: "合成 招待B" });
   await expect(expired.getByText("期限切れ")).toBeVisible();
   await expect(expired).not.toContainText("まで");
+  // An experience that is not in the list (archived, or past the list's limit) keeps its surface, so that its people
+  // can still be ended; nobody can be invited to it.
+  const archivedSurface = surface(page, "Sample Archived Walk");
+  await expect(archivedSurface.getByText("合成 担当F")).toBeVisible();
+  await expect(archivedSurface.getByRole("button", { name: "解除" })).toBeVisible();
+  await expect(archivedSurface.getByRole("button", { name: "招待" })).toHaveCount(0);
   // 受諾されていない招待と有効な担当だけ: 失効・解除済みは出ない。
   await expect(page.getByText("合成 失効済みC")).toHaveCount(0);
   await expect(page.getByText("合成 解除済みE")).toHaveCount(0);

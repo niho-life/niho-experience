@@ -165,8 +165,19 @@ export function AdminProductOperators({ initial, now: initialNow }: { initial: P
   const [linkView, setLinkView] = useState<LinkView | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
 
+  const keyOf = (item: { providerId: string; productId: string }) => `${item.providerId}:${item.productId}`;
+  const activeGrants = data.grants.filter((item) => item.active);
+  const pendingInvitations = data.invitations.filter((item) => item.state === "PENDING");
+  // The list of experiences leaves out archived ones and stops at its limit, while people are read on their own:
+  // an experience that is not listed still gets its surface (without 招待), so that its people can be ended.
+  const listed = new Set(data.products.map(keyOf));
+  const unlisted = new Map<string, Product>();
+  for (const item of [...activeGrants, ...pendingInvitations]) {
+    if (!listed.has(keyOf(item)) && !unlisted.has(keyOf(item))) unlisted.set(keyOf(item), { providerId: item.providerId, productId: item.productId, productTitle: item.productTitle, sellerDisplayName: item.sellerDisplayName });
+  }
+  const groups = [...data.products.map((product) => ({ product, invitable: true })), ...[...unlisted.values()].map((product) => ({ product, invitable: false }))];
   const titleCount = new Map<string, number>();
-  for (const product of data.products) titleCount.set(product.productTitle, (titleCount.get(product.productTitle) ?? 0) + 1);
+  for (const { product } of groups) titleCount.set(product.productTitle, (titleCount.get(product.productTitle) ?? 0) + 1);
   /** The experience's name; with the seller's only where two experiences share a title. */
   const nameOf = (item: { productTitle: string; sellerDisplayName: string }) => (titleCount.get(item.productTitle) ?? 0) > 1 ? `${item.productTitle} · ${item.sellerDisplayName}` : item.productTitle;
 
@@ -229,19 +240,21 @@ export function AdminProductOperators({ initial, now: initialNow }: { initial: P
           {pendingRequest && unknown ? <button type="button" disabled={busy} onClick={() => void post(pendingRequest)} className={`${consoleButtonClass("secondary", "sm")} disabled:opacity-50`}>結果を確認</button> : null}
         </div>
         <div className="flex flex-col gap-3.5">
-          {data.products.map((product) => {
-            const grants = data.grants.filter((item) => item.providerId === product.providerId && item.productId === product.productId && item.active);
-            const invitations = data.invitations.filter((item) => item.providerId === product.providerId && item.productId === product.productId && item.state === "PENDING");
+          {groups.map(({ product, invitable }) => {
+            const grants = activeGrants.filter((item) => keyOf(item) === keyOf(product));
+            const invitations = pendingInvitations.filter((item) => keyOf(item) === keyOf(product));
             const empty = grants.length + invitations.length === 0;
             const headId = `operators-${product.providerId}-${product.productId}`;
             return (
-              <section key={`${product.providerId}:${product.productId}`} aria-labelledby={headId} className={HOST_SURFACE}>
+              <section key={keyOf(product)} aria-labelledby={headId} className={HOST_SURFACE}>
                 <div className={`flex items-center justify-between gap-3 ${empty ? "px-4 py-3 md:px-5" : "px-4 pt-4 pb-2 md:px-5"}`}>
                   <SectionTitle id={headId}>{nameOf(product)}</SectionTitle>
-                  <button type="button" disabled={locked} onClick={() => { setNotice(null); setInviteFor(product); }} className={`${consoleButtonClass("secondary", "sm")} disabled:opacity-50`}>
-                    <HostIcon name="plus" className="size-3.5" />
-                    招待
-                  </button>
+                  {invitable ? (
+                    <button type="button" disabled={locked} onClick={() => { setNotice(null); setInviteFor(product); }} className={`${consoleButtonClass("secondary", "sm")} disabled:opacity-50`}>
+                      <HostIcon name="plus" className="size-3.5" />
+                      招待
+                    </button>
+                  ) : null}
                 </div>
                 {empty ? null : (
                   <ul className="divide-y divide-line">

@@ -17,12 +17,16 @@ export const PRODUCT_OPERATORS_PREVIEW_IDS = {
   userKitchen: "11111111-1111-4111-8111-111111111111",
   userTea: "22222222-2222-4222-8222-222222222222",
   userGone: "33333333-3333-4333-8333-333333333333",
+  /** An archived experience: not in `products`, but its assignment is still active. */
+  archived: { providerId: "provider-sample-workshop", productId: "product-sample-archived-walk" },
+  userArchived: "44444444-4444-4444-8444-444444444444",
 } as const;
 
 const ids = PRODUCT_OPERATORS_PREVIEW_IDS;
 const kitchen = { ...ids.kitchen, productTitle: "Sample Kitchen Dinner", sellerDisplayName: "サンプルの台所" };
 const workshop = { ...ids.workshop, productTitle: "Sample Craft Workshop", sellerDisplayName: "サンプル工房" };
 const tea = { ...ids.tea, productTitle: "Sample Tea Hour", sellerDisplayName: "サンプルの台所" };
+const archived = { ...ids.archived, productTitle: "Sample Archived Walk", sellerDisplayName: "サンプル工房" };
 
 export function productOperatorsPreview(): ProductOperatorAdminSnapshot {
   return {
@@ -36,6 +40,7 @@ export function productOperatorsPreview(): ProductOperatorAdminSnapshot {
       { ...kitchen, nihoUserId: ids.userKitchen, assignmentLabel: "合成 担当A", active: true, version: 3, grantedAtUtc: "2026-10-20T00:00:00.000Z" },
       { ...tea, nihoUserId: ids.userTea, assignmentLabel: "合成 担当D", active: true, expiresAtUtc: "2099-12-31T00:00:00.000Z", version: 1, grantedAtUtc: "2026-10-21T00:00:00.000Z" },
       { ...tea, nihoUserId: ids.userGone, assignmentLabel: "合成 解除済みE", active: false, version: 4, grantedAtUtc: "2026-10-01T00:00:00.000Z", revokedAtUtc: "2026-10-15T00:00:00.000Z" },
+      { ...archived, nihoUserId: ids.userArchived, assignmentLabel: "合成 担当F", active: true, version: 2, grantedAtUtc: "2026-09-01T00:00:00.000Z" },
     ],
   };
 }
