@@ -115,6 +115,10 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // DELETE: the mail job erases a question a year after its last message; its messages and reply
   // links go by ON DELETE CASCADE, which PostgreSQL runs as the table owner.
   guest_question_threads: { write: IUD },
+  // 団体・個別の相談 (#532, 0074): kept, edited by hand in the Admin console and mailed; v0 deletes by hand with a
+  // separate operator role (docs/group-inquiry.md), so no DELETE here. The mail rows are removed with the inquiry (CASCADE).
+  group_inquiries: { write: IU },
+  group_inquiry_mails: { write: IU },
   guest_review_invitations: { write: IU },
   guest_reviews: { write: IU },
   // PII-free post-accept mail feedback; DELETE with the booking guest's PII erasure.
