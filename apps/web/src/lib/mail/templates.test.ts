@@ -22,6 +22,7 @@ const confirmation: BookingConfirmationEmail = {
   guestName: "Sample Guest",
   experienceTitle: "Synthetic tea ceremony",
   experienceSlug: "sample-tea",
+  japaneseOnly: false,
   localDate: "2026-11-14",
   localStartTime: "10:00",
   timeZone: "Asia/Tokyo",
@@ -161,6 +162,13 @@ describe("bookingConfirmationEmail", () => {
     expect(mail.html).not.toContain("<i>");
     expect(mail.html).toContain("Host &amp; Co");
     expect(linesWith(mail, "https://")).toEqual([`${SITE}/experiences/..%2Fsample%20tea%3Fx`]);
+  });
+
+  it("links a Japanese-only product to its /ja page, since it has no English page (#59)", () => {
+    const mail = bookingConfirmationEmail({ ...confirmation, japaneseOnly: true }, { siteUrl: SITE, now: NOW });
+    expect(linesWith(mail, "https://")).toEqual([`${SITE}/ja/experiences/sample-tea`]);
+    expect(mail.html).toContain(`href="${SITE}/ja/experiences/sample-tea"`);
+    expect(mail.html).not.toContain(`href="${SITE}/experiences/`);
   });
 });
 

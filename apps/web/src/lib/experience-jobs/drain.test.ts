@@ -67,7 +67,7 @@ const supportMessageFor = (n: number): ClaimedSupportBookingMessage => ({
 
 const facts = (n: number): BookingConfirmationEmail => ({
   publicBookingId: `0f8fad5b-d9cb-469f-a165-70867728950${n}`, guestEmail: `booker${n}@example.com`, guestName: `Sample Booker ${n}`,
-  experienceTitle: "Synthetic walk", experienceSlug: "sample-walk", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
+  experienceTitle: "Synthetic walk", experienceSlug: "sample-walk", japaneseOnly: false, localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
   startUtc: "2026-11-14T01:00:00.000Z", adultCount: 1, childCount: 0, totalAmount: 3000, currency: "JPY", cancellationPolicy: "NONE",
   cancellationWindowMinutesBeforeStart: null, cancellationRefundBasisPoints: 0,
   hostDisplayName: "Sample Host",
