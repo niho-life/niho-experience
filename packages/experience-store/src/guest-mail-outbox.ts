@@ -48,8 +48,11 @@ export interface BookingConfirmationEmail {
   readonly guestLanguage: "EN" | "JA";
   readonly experienceTitle: string;
   readonly experienceSlug: string;
-  /** 日本語を原文にした商品（#59）。英語側の詳細ページは無く、商品ページは `/ja/experiences/{slug}` だけにある。 */
-  readonly japaneseOnly: boolean;
+  /**
+   * 日本語を原文にした商品（#59）。英語側の詳細ページは無く、商品ページは `/ja/experiences/{slug}` だけにある。
+   * 省略は false（英語原文の商品）。並行する変更が作る fixture を壊さないよう、省略できる。
+   */
+  readonly japaneseOnly?: boolean;
   /** The occurrence's own date and start time (a host may have moved it), in `timeZone`. */
   readonly localDate: string;
   readonly localStartTime: string;
