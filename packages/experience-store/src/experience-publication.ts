@@ -33,7 +33,9 @@ import { lockProviderInventory } from "./inventory.ts";
 import { CLAIMED_PUBLICATION_SLUGS_CTE, VISIBLE_PUBLICATIONS_CTE } from "./public-publication-scope.ts";
 import { withTransaction } from "./transaction.ts";
 import {
+  JAPANESE_ONLY_ENGLISH_FINGERPRINT,
   englishPublicationManuscriptOf,
+  isJapaneseOnlyContent,
   publicationFaqIssue,
   publicationManuscriptFingerprint,
   validPublicationLocaleManuscript,
@@ -505,6 +507,20 @@ export function publicationManuscriptReview(
   publicTitle: string,
 ): ExperiencePublicationManuscriptReview {
   const japanese = content.ja;
+  if (isJapaneseOnlyContent(content)) {
+    // 日本語を原文にした商品（#59）：日本語が唯一の原稿。確認する英語は無く、商品名は日本語の商品名と同じにする。
+    const ready = validPublicationLocaleManuscript(japanese)
+      && ["title", "lead", "description", "language"].every((key) => String(japanese[key]).trim().length > 0)
+      && japanese.title === publicTitle
+      && projectPublicExperiencePublicationManuscript(content as Readonly<Record<string, JsonValue>>) !== null;
+    return {
+      publicContentReady: ready,
+      ownerConfirmed: ready,
+      contentFingerprint: fingerprint(content),
+      japaneseFingerprint: validPublicationLocaleManuscript(japanese) ? publicationManuscriptFingerprint(japanese) : null,
+      englishFingerprint: JAPANESE_ONLY_ENGLISH_FINGERPRINT,
+    };
+  }
   const english = englishPublicationManuscriptOf(publicTitle, content);
   // An empty or absent FAQ is excluded from both fingerprints (byte-identical to pre-FAQ manuscripts).
   const japaneseFingerprint = validPublicationLocaleManuscript(japanese) ? publicationManuscriptFingerprint(japanese) : null;
@@ -872,8 +888,12 @@ async function blockers(
     : product.content;
   const manuscript = projectPublicExperiencePublicationManuscript(projectionContent);
   if (manuscript === null) result.push("PUBLIC_CONTENT_INVALID");
+  // 日本語のみの商品は英語の流れが空なので、日本語の流れが指す写真を確かめる。
+  const japaneseTimeline = isJapaneseOnlyContent(product.content) && isJsonRecord(product.content.ja) && Array.isArray(product.content.ja.timeline)
+    ? product.content.ja.timeline : [];
   const photoIndices = manuscript === null ? [] : [
     ...manuscript.content.timeline.flatMap((item) => item.photoIndex === null ? [] : [item.photoIndex]),
+    ...japaneseTimeline.flatMap((item) => isJsonRecord(item) && typeof item.photoIndex === "number" ? [item.photoIndex] : []),
     ...(manuscript.meetingPoint?.exteriorPhotoIndex === null || manuscript.meetingPoint?.exteriorPhotoIndex === undefined
       ? [] : [manuscript.meetingPoint.exteriorPhotoIndex]),
   ];

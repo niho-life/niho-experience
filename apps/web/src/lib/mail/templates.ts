@@ -212,7 +212,7 @@ export function bookingConfirmationEmail(
         } as const]
       : []),
     { kind: "p", text: `${managed ? "NIHO support" : host} will share the meeting details with you before the day.` },
-    { kind: "link", lead: "The experience page:", label: experience, href: absolute(options.siteUrl, `/experiences/${encodeURIComponent(email.experienceSlug)}`) },
+    { kind: "link", lead: "The experience page:", label: experience, href: absolute(options.siteUrl, `${email.japaneseOnly ? "/ja" : ""}/experiences/${encodeURIComponent(email.experienceSlug)}`) },
     { kind: "p", text: "Questions, or need to change or cancel? Reply to this email and NIHO support will help." },
   ]);
 }

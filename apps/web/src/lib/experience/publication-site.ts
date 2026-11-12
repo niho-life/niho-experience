@@ -141,7 +141,7 @@ export async function getPublicationDetail(slug: string, locale: Locale = "en"):
   const publications = experiencePublicationRepository();
   if (!publications) throw new Error("Experience publication store unavailable");
   const publication = await publications.getPublicBySlug(slug);
-  if (!publication || (locale === "ja" && !publication.japanese)) return null;
+  if (!publication || (locale === "ja" && !publication.japanese) || (locale === "en" && publication.japaneseOnly)) return null;
   const booking = guestBookingRepository();
   const [candidate, disclosure] = await Promise.all([
     booking ? booking.publicBookingTerms(slug) : null,
@@ -162,7 +162,7 @@ export async function listPublicationSummaries(region?: string, locale: Locale =
   const booking = guestBookingRepository();
   const disclosures = providerSellerDisclosureRepository();
   const summaries = await Promise.all(rows
-    .filter((publication) => locale !== "ja" || publication.japanese !== null)
+    .filter((publication) => locale === "ja" ? publication.japanese !== null : !publication.japaneseOnly)
     .map(async (publication) => {
       const [terms, disclosure] = await Promise.all([
         booking ? booking.publicBookingTerms(publication.slug) : null,

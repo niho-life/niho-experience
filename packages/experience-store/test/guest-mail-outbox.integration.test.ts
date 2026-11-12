@@ -242,6 +242,22 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
     });
   });
 
+  it("marks a Japanese-only product on the confirmation, so the email can link its /ja page (#59)", async () => {
+    await withSchema(async (context) => {
+      const { pool, outbox } = context;
+      await confirmedGuest(context, "en-product", { guestName: "Sample Guest", guestEmail: "en-product@example.com", guestLanguage: "EN" });
+      const english = await outbox.claimBookingConfirmations({ limit: 10, leaseSeconds: 120 });
+      assert.deepEqual(english.confirmations.map((row) => row.email?.japaneseOnly), [false]);
+      await pool.query("ALTER TABLE experience_product_publications DISABLE TRIGGER USER");
+      await pool.query(`UPDATE experience_product_publications SET content = jsonb_build_object('japaneseOnly', true, 'ja', jsonb_build_object('title', '合成の散歩')) WHERE slug = 'sample-walk'`);
+      await pool.query("ALTER TABLE experience_product_publications ENABLE TRIGGER USER");
+      await confirmedGuest(context, "ja-only", { guestName: "Sample Guest", guestEmail: "ja-only@example.com", guestLanguage: "EN" });
+      await makeDue(pool);
+      const claim = await outbox.claimBookingConfirmations({ limit: 10, leaseSeconds: 120 });
+      assert.deepEqual(claim.confirmations.map((row) => [row.email?.guestEmail, row.email?.japaneseOnly]).sort(), [["en-product@example.com", true], ["ja-only@example.com", true]]);
+    });
+  });
+
   it("claims the confirmations of guest bookings only, with what the email needs, and never another row", async () => {
     await withSchema(async (context) => {
       const { pool, store, guests, outbox } = context;
@@ -268,7 +284,7 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
       const snapshot = family.booking.occurrenceSnapshot;
       assert.deepEqual(confirmation!.email, {
         publicBookingId: family.publicBookingId, guestEmail: "Parent@Example.com", guestName: "Sample Parent", guestLanguage: "EN",
-        experienceTitle: "Synthetic walk", experienceSlug: "sample-walk", localDate: day(2), localStartTime: "10:00", timeZone: "Asia/Tokyo",
+        experienceTitle: "Synthetic walk", experienceSlug: "sample-walk", japaneseOnly: false, localDate: day(2), localStartTime: "10:00", timeZone: "Asia/Tokyo",
         startUtc: snapshot.startUtc, adultCount: 2, childCount: 1, totalAmount: 7500, currency: "JPY", cancellationPolicy: "FREE_UNTIL_48H",
         cancellationWindowMinutesBeforeStart: 2880, cancellationRefundBasisPoints: 10000,
         hostDisplayName: "Sample Seller A",

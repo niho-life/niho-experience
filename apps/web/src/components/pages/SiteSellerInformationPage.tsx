@@ -10,7 +10,7 @@ import { formatDuration, formatYen } from "@/lib/format";
 type Locale = "en" | "ja";
 
 const nativeSeller = cache(async (slug: string, locale: Locale) => {
-  const lookup = await getSitePublicExperience(slug);
+  const lookup = await getSitePublicExperience(slug, locale);
   if (lookup?.kind !== "published" || (locale === "ja" && !lookup.item.publication.japanese)) return null;
   const seller = lookup.item.sellerDisclosure;
   return seller?.method === "NATIVE" ? { ...lookup.item, seller } : null;
