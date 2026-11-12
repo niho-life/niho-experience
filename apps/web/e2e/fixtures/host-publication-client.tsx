@@ -6,8 +6,9 @@ import { HostPublicationWorkspace } from "../../src/components/host/HostPublicat
 Object.assign(globalThis, { React });
 const router = { back() {}, forward() {}, refresh() {}, hmrRefresh() {}, push() {}, replace() {}, prefetch() {} };
 
-window.mountHostPublication = () => createRoot(document.getElementById("root")!).render(
+window.mountHostPublication = (adminDraftCreate) => createRoot(document.getElementById("root")!).render(
   <AppRouterContext.Provider value={router}>
-    <HostPublicationWorkspace productId="synthetic-product" apiBase="/synthetic/products" />
+    <HostPublicationWorkspace apiBase="/synthetic/products"
+      {...(adminDraftCreate ? { create: true, mode: "admin-draft" } : { productId: "synthetic-product" })} />
   </AppRouterContext.Provider>,
 );

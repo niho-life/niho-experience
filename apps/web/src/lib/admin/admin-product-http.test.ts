@@ -175,17 +175,30 @@ describe("Admin product draft BFF", () => {
     expect(mocks.load).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when a managed draft is selected without every server-only Stripe setting", async () => {
+  it.each([undefined, "INSTANT"])("checks server-only Stripe settings for a managed draft with acceptance mode %s", async (acceptanceMode) => {
     vi.stubEnv("EXPERIENCE_MANAGED_SALES_ENABLED", "true");
     const response = await adminDraftProductCollection(
       new Request(`${SITE}/admin/api/product-workspaces/provider-readable/products`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ slug: "synthetic", publicTitle: "Synthetic", content: {}, currency: "JPY", unitAmount: 1000,
-          managedSales: { enabled: true, sellerConfirmationMethod: "WRITTEN", paymentDueDays: 14 } }),
+          managedSales: { enabled: true, acceptanceMode, sellerConfirmationMethod: "WRITTEN", paymentDueDays: 14 } }),
       }),
       { params: Promise.resolve({ providerId: "provider-readable" }) },
     );
     expect(response.status).toBe(503);
+    expect(mocks.repository.createDraftAsAdmin).not.toHaveBeenCalled();
+  });
+
+  it("rejects an acceptance mode the site cannot fulfill before creating a managed draft", async () => {
+    const response = await adminDraftProductCollection(
+      new Request(`${SITE}/admin/api/product-workspaces/provider-readable/products`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug: "synthetic", publicTitle: "Synthetic", content: {}, currency: "JPY", unitAmount: 1000,
+          managedSales: { enabled: true, acceptanceMode: "APPROVAL", sellerConfirmationMethod: "WRITTEN", paymentDueDays: 14 } }),
+      }),
+      { params: Promise.resolve({ providerId: "provider-readable" }) },
+    );
+    expect(response.status).toBe(400);
     expect(mocks.repository.createDraftAsAdmin).not.toHaveBeenCalled();
   });
 

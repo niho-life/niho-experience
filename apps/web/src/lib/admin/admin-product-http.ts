@@ -51,7 +51,12 @@ type ProductDraftBody = {
   readonly content: Readonly<Record<string, JsonValue>>;
   readonly currency: string;
   readonly unitAmount: number;
-  readonly managedSales?: { readonly enabled: true; readonly sellerConfirmationMethod: "VERBAL" | "WRITTEN"; readonly paymentDueDays: number };
+  readonly managedSales?: {
+    readonly enabled: true;
+    readonly acceptanceMode?: "INSTANT";
+    readonly sellerConfirmationMethod: "VERBAL" | "WRITTEN";
+    readonly paymentDueDays: number;
+  };
 };
 
 const BODY_LIMIT = 256 * 1024;
@@ -111,8 +116,10 @@ function validDraft(value: unknown): value is ProductDraftBody {
     && typeof value.unitAmount === "number" && Number.isSafeInteger(value.unitAmount)
     && (value.unitAmount === 0 || value.unitAmount >= 50)
     && (value.managedSales === undefined || (isRecord(value.managedSales)
-      && exactKeys(value.managedSales, ["enabled", "sellerConfirmationMethod", "paymentDueDays"])
+      && exactKeys(value.managedSales, ["enabled", "acceptanceMode", "sellerConfirmationMethod", "paymentDueDays"],
+        ["enabled", "sellerConfirmationMethod", "paymentDueDays"])
       && value.managedSales.enabled === true
+      && (value.managedSales.acceptanceMode === undefined || value.managedSales.acceptanceMode === "INSTANT")
       && (value.managedSales.sellerConfirmationMethod === "VERBAL" || value.managedSales.sellerConfirmationMethod === "WRITTEN")
       && Number.isInteger(value.managedSales.paymentDueDays) && (value.managedSales.paymentDueDays as number) >= 0
       && (value.managedSales.paymentDueDays as number) <= 180));
@@ -232,6 +239,7 @@ async function productDto(actor: PublicationAdminDraftActor, providerId: string,
     status: "DRAFT" as const,
     publicationNeedsUpdate: false,
     publicationBlockers: publication.blockers,
+    acceptanceMode: "INSTANT" as const,
     adminEnglishReview: publication.englishReview,
     draft: { slug: product.slug, publicTitle: product.publicTitle, content: product.content, currency: product.currency, unitAmount: product.unitAmount },
     sellerDisplayName: product.sellerDisplayName,
