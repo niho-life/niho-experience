@@ -64,6 +64,13 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       }, managedConfig);
       assert.equal((await pool.query("SELECT count(*)::int AS n FROM provider_memberships WHERE provider_id=$1", [profile.providerId])).rows[0]?.n, 0);
       assert.equal((await pool.query("SELECT count(*)::int AS n FROM experience_host_seller_profiles WHERE provider_id=$1", [profile.providerId])).rows[0]?.n, 0);
+      const privateDraft = await publications.createDraftAsAdmin(ADMIN, profile.providerId, {
+        slug: "synthetic-managed-private-group", publicTitle: "Synthetic managed private group",
+        content: {}, currency: "JPY", unitAmount: 10_000,
+      }, { ...managedConfig, privateGroup: true });
+      const inventory = await store.getInventoryAdminSnapshot(ADMIN, profile.providerId);
+      assert.equal(inventory.products.find(({ id }) => id === privateDraft.id)?.inventory?.bookingMode, "PRIVATE_GROUP");
+      assert.equal(inventory.products.find(({ id }) => id === draft.id)?.inventory, undefined);
 
       const mediaId = randomUUID();
       await publications.addMediaAsAdmin(ADMIN, profile.providerId, draft.id, {
