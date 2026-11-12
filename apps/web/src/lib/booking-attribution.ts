@@ -7,7 +7,7 @@ const UTM_FIELDS = [
   ["utm_campaign", "utmCampaign"],
   ["utm_content", "utmContent"],
 ] as const;
-const SAFE_UTM_VALUE = /^[a-z0-9_-]{1,64}$/;
+export const SAFE_UTM_VALUE = /^[a-z0-9_-]{1,64}$/;
 
 export type BookingAttribution = Partial<Pick<ExperienceCheckoutRequest, "utmSource" | "utmMedium" | "utmCampaign" | "utmContent">>;
 
