@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminSiteBookingsPage() {
   if (isAdminPreview() && config.adminSiteBookingsPreviewEnabled) {
     const preview = adminSiteBookingsPreview();
-    return <AdminSiteBookings initial={preview.queue} supportBookings={preview.supportBookings} />;
+    return <AdminSiteBookings initial={preview.queue} supportBookings={preview.supportBookings} notifications={preview.notifications} />;
   }
   if (!config.guestBookingEnabled || !isAdminHttp()) notFound();
   const loaded = await loadAdminHttpSession();
@@ -49,6 +49,7 @@ export default async function AdminSiteBookingsPage() {
     try { approvalRequests = await managedBookingApprovalRepository()?.listPending({ nihoUserId: loaded.actor.id }) ?? null; }
     catch { /* The refund and cancellation queue remains available independently. */ }
   }
-  return <>{approvalRequests ? <AdminBookingApprovals initial={approvalRequests} /> : approvalsEnabled ? <p role="alert">承認待ちの申込を読み込めませんでした。ページを再読み込みしてください。</p> : null}<AdminSiteBookings initial={queue} supportBookings={supportBookings} notifications={notifications} settlements={settlements}
-    managedCompensationAvailable={config.managedSalesWebhooksEnabled} /></>;
+  const todoSlot = approvalRequests ? <AdminBookingApprovals initial={approvalRequests} /> : approvalsEnabled ? <p role="alert">承認待ちの申込を読み込めませんでした。ページを再読み込みしてください。</p> : null;
+  return <AdminSiteBookings initial={queue} supportBookings={supportBookings} notifications={notifications} settlements={settlements}
+    managedCompensationAvailable={config.managedSalesWebhooksEnabled} todoSlot={todoSlot} todoSlotCount={approvalRequests?.requests.length ?? 0} />;
 }
