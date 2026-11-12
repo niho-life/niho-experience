@@ -107,6 +107,7 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `EXPERIENCE_RESOURCE_GOOGLE_WEBHOOK_URL` | 未設定 | watch有効時の本番公開HTTPS URL（`/api/google/calendar/watch`）。preview・localhostは指定しない |
 | `EXPERIENCE_GOOGLE_BUSY_SYNC_ENABLED` / `EXPERIENCE_GOOGLE_BOOKING_EVENTS_ENABLED` | `false` | Cloud Scheduler が呼ぶ Google の busy 照合と予約カレンダー書き込みの job（#238、[experience-runtime.md](experience-runtime.md#google-の-job)）。mock/preview では開かない |
 | `EXPERIENCE_TRANSLATE_API_ENABLED` | `false` | Experience予約詳細の「通訳を始める」（#181）のBFF。http modeでは`HOST_CONSOLE_ENABLED=true`とDBが前提。guest sales flagに依存しない。guest checkout・予約変更・取消/返金・メールは開かない。NIHO APIとstgのOWNER・store所属・予約状態・create/poll/endの受入後にだけ開く。mockはflagなしでExperience予約とstandalone pathを合成する |
+| `EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED` | `false` | Host Account用の予約なし対面通訳BFF。`HOST_CONSOLE_ENABLED`・DB・`EXPERIENCE_HOST_ACCOUNTS_ENABLED`・NIHO common-contract audienceが前提。Host Account sessionごとに現OWNERを確認し、Google service ID tokenだけをNIHOへ送る。NIHO user bearer・Host Account IDは送らない。NIHO側のprovider mapping/allowlist、stgのcreate・reload/restore・reissue・end・旧招待失効・非OWNER拒否、2台実機の双方向音声受入後にだけ開く。Stripe seller profile・販売・予約flagには依存しない |
 | `HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED` | `false` | mock専用のUI検証入口。Playwrightが選別契約形のbrowser responseをstubし、BFF・実保存は開かない |
 | `EXPERIENCE_FEE_SUMMARY_API_ENABLED` | `false` | Admin/Host共通の予約別実料金・精算GET。HTTP modeかつ各console/sessionが有効で、NIHO側API配備・受入後だけ開く |
 | `EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED` | `false` | mock専用のUI検証入口。Playwrightのbrowser stubだけを使い、実BFFや合成成功fallbackは開かない |

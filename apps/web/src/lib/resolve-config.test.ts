@@ -533,6 +533,14 @@ describe("admin support console settings", () => {
       expect(() => resolveConfig({ ...on, [name]: "true" }), name).toThrow(`EXPERIENCE_HOST_ACCOUNTS_ENABLED=true cannot be on with ${name}=true`);
       expect(resolveConfig({ ...on, [name]: "false" }).hostAccountsEnabled, name).toBe(true);
     }
+    expect(NIHO_HOST_TOKEN_FLAGS).not.toContain("EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED");
+    expect(resolveConfig({
+      ...on,
+      EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED: "true",
+      NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test",
+    })).toMatchObject({ hostAccountsEnabled: true, experienceTranslateStandaloneApiEnabled: true });
+    expect(() => resolveConfig({ ...on, EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
     // The publication API stays allowed with its payout settings (slice 3, the next test).
     const publication = {
       EXPERIENCE_PUBLICATIONS_ENABLED: "true", EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true", EXPERIENCE_PUBLICATION_CONSENT_VERSION: "v1",

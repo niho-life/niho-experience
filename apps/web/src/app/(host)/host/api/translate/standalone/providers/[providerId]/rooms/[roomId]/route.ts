@@ -8,6 +8,12 @@ export async function GET(request: Request, context: Context) {
   if (new URL(request.url).search || !isExperienceTranslateRoomPathId(providerId) || !isStandaloneTranslateRoomId(roomId)) return translateRoomsJson({ error: "not_found" }, 404);
   const loaded = await loadStandaloneTranslateRoomsClient(providerId);
   if (!loaded.ok) return loaded.response;
-  const result = await loaded.client.getStandaloneRoom(loaded.nihoProviderId, roomId);
-  return result.ok ? translateRoomsJson(result.data) : translateRoomsFailure(result);
+  if (loaded.serviceAuth) {
+    const current = await loaded.client.getCurrentStandaloneRoom(loaded.providerApiId);
+    if (!current.ok) return translateRoomsFailure(current, { serviceAuth: true });
+    if (current.data.room?.roomId !== roomId) return translateRoomsJson({ error: "not_found" }, 404);
+    return translateRoomsJson(current.data.room);
+  }
+  const result = await loaded.client.getStandaloneRoom(loaded.providerApiId, roomId);
+  return result.ok ? translateRoomsJson(result.data) : translateRoomsFailure(result, { serviceAuth: loaded.serviceAuth });
 }

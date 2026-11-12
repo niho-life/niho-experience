@@ -14,22 +14,24 @@ import type {
 } from "./types.ts";
 
 /*
- * 対面通訳の部屋 (#181): the host's own ID token makes, reads and ends a room of one of the
- * provider's bookings. The same fixed transport as the provider operations client: Bearer only,
- * no cookies, no redirects, no referrer, a timeout and no retry. Responses are accepted only in
- * the pinned shape, so a relay ticket or a budget NIHO might add later never reaches a caller
- * by accident.
+ * 対面通訳の部屋: booked NIHO-login routes use the host bearer. Reservation-free Host Account
+ * routes use only the server's fixed-audience Google ID token. Both transports omit cookies,
+ * redirects and referrers, and accept only the pinned response shape.
  */
 
 type Decoder<T> = (value: unknown) => T | null;
-type BaseOptions = { nihoWebOrigin: string; accessToken: string; fetch?: FetchLike; timeoutMs?: number };
+type BaseOptions = { nihoWebOrigin: string; fetch?: FetchLike; timeoutMs?: number } & (
+  | { auth: { kind: "niho"; accessToken: string } }
+  | { auth: { kind: "experience-service"; serviceIdToken: string } }
+);
 const TOKEN = /^[\x21-\x7e]{1,8192}$/;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const schema = <T>(name: string): Decoder<T> => (value) => isExperienceTranslateRoomsSchema<T>(name, value) ? value : null;
 
 export function createExperienceTranslateRoomsClient(options: BaseOptions) {
   const origin = normalizeOrigin(options.nihoWebOrigin);
-  if (!TOKEN.test(options.accessToken)) throw new Error("Experience translate rooms token is invalid");
+  const token = options.auth.kind === "niho" ? options.auth.accessToken : options.auth.serviceIdToken;
+  if (!TOKEN.test(token)) throw new Error("Experience translate rooms token is invalid");
   const send = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   async function request<T>(method: "GET" | "POST", path: string, status: number, decode: Decoder<T>, body?: unknown): Promise<ExperienceTranslateRoomsResult<T>> {
@@ -37,7 +39,13 @@ export function createExperienceTranslateRoomsClient(options: BaseOptions) {
     try {
       response = await send(new URL(path, origin).href, {
         method,
-        headers: { accept: "application/json", authorization: `Bearer ${options.accessToken}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        headers: {
+          accept: "application/json",
+          ...(options.auth.kind === "niho"
+            ? { authorization: `Bearer ${token}` }
+            : { "x-niho-experience-service-id-token": token }),
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         cache: "no-store",
         credentials: "omit",
@@ -57,7 +65,9 @@ export function createExperienceTranslateRoomsClient(options: BaseOptions) {
     return decoded === null ? { ok: false, kind: "unexpected_response", status } : { ok: true, data: decoded };
   }
   const siteRoomsPath = (providerId: string, bookingId: string) => `/api/experience-providers/${encodeURIComponent(providerId)}/site-bookings/${encodeURIComponent(bookingId)}/translate-rooms`;
-  const standaloneRoomsPath = (providerId: string) => `/api/experience-providers/${encodeURIComponent(providerId)}/translate-rooms`;
+  const standaloneRoomsPath = (providerId: string) => options.auth.kind === "experience-service"
+    ? `/api/experience-host/translate-providers/${encodeURIComponent(providerId)}/translate-rooms`
+    : `/api/experience-providers/${encodeURIComponent(providerId)}/translate-rooms`;
   const ids = (...values: string[]) => values.every((value) => isExperienceTranslateRoomPathId(value));
   const invalid = <T>(): Promise<ExperienceTranslateRoomsResult<T>> => Promise.resolve({ ok: false, kind: "invalid_request" });
   const safeInvites = <T extends StandaloneTranslateRoomCreated | StandaloneTranslateInviteResult>(name: string): Decoder<T> => (value) => {
@@ -92,13 +102,13 @@ export function createExperienceTranslateRoomsClient(options: BaseOptions) {
     },
     /** Experience DBの公開予約UUIDをopaqueな文脈として渡す。状態・言語・roleは送らない。 */
     createSiteRoom(providerId: string, bookingId: string) {
-      return ids(providerId) && isExperienceTranslateBookingId(bookingId) ? request("POST", siteRoomsPath(providerId, bookingId), 201, schema<ExperienceTranslateRoomCreatedResponse>("ExperienceProviderTranslateRoomCreated"), {}) : invalid<ExperienceTranslateRoomCreatedResponse>();
+      return options.auth.kind === "niho" && ids(providerId) && isExperienceTranslateBookingId(bookingId) ? request("POST", siteRoomsPath(providerId, bookingId), 201, schema<ExperienceTranslateRoomCreatedResponse>("ExperienceProviderTranslateRoomCreated"), {}) : invalid<ExperienceTranslateRoomCreatedResponse>();
     },
     getSiteRoom(providerId: string, bookingId: string, roomId: string) {
-      return ids(providerId, roomId) && isExperienceTranslateBookingId(bookingId) ? request("GET", `${siteRoomsPath(providerId, bookingId)}/${encodeURIComponent(roomId)}`, 200, schema<ExperienceTranslateRoomStatusResponse>("ExperienceProviderTranslateRoomStatus")) : invalid<ExperienceTranslateRoomStatusResponse>();
+      return options.auth.kind === "niho" && ids(providerId, roomId) && isExperienceTranslateBookingId(bookingId) ? request("GET", `${siteRoomsPath(providerId, bookingId)}/${encodeURIComponent(roomId)}`, 200, schema<ExperienceTranslateRoomStatusResponse>("ExperienceProviderTranslateRoomStatus")) : invalid<ExperienceTranslateRoomStatusResponse>();
     },
     endSiteRoom(providerId: string, bookingId: string, roomId: string) {
-      return ids(providerId, roomId) && isExperienceTranslateBookingId(bookingId) ? request("POST", `${siteRoomsPath(providerId, bookingId)}/${encodeURIComponent(roomId)}/end`, 200, schema<ExperienceTranslateRoomEndResponse>("TranslateRoomStateResult"), {}) : invalid<ExperienceTranslateRoomEndResponse>();
+      return options.auth.kind === "niho" && ids(providerId, roomId) && isExperienceTranslateBookingId(bookingId) ? request("POST", `${siteRoomsPath(providerId, bookingId)}/${encodeURIComponent(roomId)}/end`, 200, schema<ExperienceTranslateRoomEndResponse>("TranslateRoomStateResult"), {}) : invalid<ExperienceTranslateRoomEndResponse>();
     },
   };
 }

@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "NIHO Experience Translate Rooms API",
-    "version": "1.1.0",
-    "description": "予約なし・旧NIHO予約・Experience予約UUIDから使う日英2人通訳の最小契約。旅行者PII・NIHO private sourceは含めない。",
+    "version": "1.2.0",
+    "description": "予約なし・Host Account・旧NIHO予約・Experience予約UUIDから使う日英2人通訳の最小契約。旅行者PII・NIHO private sourceは含めない。",
     "x-niho-contract-status": "agreed-not-deployed",
     "x-niho-contract-source": "niho-app contracts/openapi.yaml (source commit not fixed yet)",
     "x-niho-contract-sha256-file": "experience-translate-rooms-api.openapi.json.sha256"
@@ -379,6 +379,350 @@
                 "$ref": "#/components/schemas/EmptyObject"
               }
             }
+          }
+        }
+      }
+    },
+    "/api/experience-host/translate-providers/{experienceProviderId}/translate-rooms": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceHostProviderId"
+        }
+      ],
+      "post": {
+        "operationId": "postExperienceHostStandaloneTranslateRoom",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "現在OWNERのHost Accountに予約なし通訳ルームを作る",
+        "description": "Experience runtime service ID tokenだけで認証する専用route。Experience BFFは毎回セッションと現在OWNERを確認し、\npathのExperience provider IDをNIHO runtime mapがNIHO ExperienceProvider IDへ変換する。role・owner ID・NIHO bearerは受け取らない。\n作成後はBFFの3秒current pollで15秒のhost authorization leaseを更新し、OWNER失効時は新しいticket/leaseを拒否する。\n予約なし専用flag、NIHO provider allowlist、runtime mapのすべてが必要。\n",
+        "security": [
+          {
+            "ExperienceHostTranslateServiceIdToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StandaloneTranslateRoomCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "作成済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandaloneTranslateRoomCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-host/translate-providers/{experienceProviderId}/translate-rooms/current": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceHostProviderId"
+        }
+      ],
+      "get": {
+        "operationId": "getCurrentExperienceHostStandaloneTranslateRoom",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "現在の予約なしroomを再取得しhost authorization leaseを更新する",
+        "security": [
+          {
+            "ExperienceHostTranslateServiceIdToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "現在のroomまたはnull",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandaloneTranslateRoomCurrent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-host/translate-providers/{experienceProviderId}/translate-rooms/{roomId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceHostProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "get": {
+        "operationId": "getExperienceHostStandaloneTranslateRoom",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "現在OWNER向け予約なしroomの状態を取得する",
+        "security": [
+          {
+            "ExperienceHostTranslateServiceIdToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "状態",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandaloneTranslateRoom"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-host/translate-providers/{experienceProviderId}/translate-rooms/{roomId}/invites/host": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceHostProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "post": {
+        "operationId": "postExperienceHostStandaloneHostInvite",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "host席の招待を再発行して古い資格を失効する",
+        "security": [
+          {
+            "ExperienceHostTranslateServiceIdToken": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "招待",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandaloneTranslateInviteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-host/translate-providers/{experienceProviderId}/translate-rooms/{roomId}/invites/guest": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceHostProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "post": {
+        "operationId": "postExperienceHostStandaloneGuestInvite",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "guest席の招待を再発行して古い資格を失効する",
+        "security": [
+          {
+            "ExperienceHostTranslateServiceIdToken": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "招待",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandaloneTranslateInviteResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-host/translate-providers/{experienceProviderId}/translate-rooms/{roomId}/end": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceHostProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "post": {
+        "operationId": "postExperienceHostStandaloneTranslateRoomEnd",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "現在OWNER向け予約なしroomを終了する",
+        "security": [
+          {
+            "ExperienceHostTranslateServiceIdToken": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "終了済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateRoomStateResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
           }
         }
       }
@@ -1054,6 +1398,18 @@
         },
         "description": "Experience DBが発行する外部公開予約UUID。NIHOの予約IDや旅行者PIIではない。"
       },
+      "TranslateExperienceHostProviderId": {
+        "name": "experienceProviderId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "description": "Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。"
+      },
       "TranslateExperienceProviderId": {
         "name": "providerId",
         "in": "path",
@@ -1085,6 +1441,12 @@
         "scheme": "bearer",
         "bearerFormat": "JWT",
         "description": "v1:\n- dev では `AUTH_MODE=mock` により `Authorization: Bearer mock:{firebaseUid}:{displayName?}` を受け付ける（同じ bearer scheme）。\n- prod では Firebase ID token（JWT）を想定する。\n"
+      },
+      "ExperienceHostTranslateServiceIdToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-NIHO-Experience-Service-Id-Token",
+        "description": "固定audienceと許可されたExperience runtimeだけ。Host Accountの予約なし通訳専用routeはこのID tokenだけを受け付け、host bearerは送らない。"
       }
     }
   }

@@ -1,13 +1,13 @@
 {
   "name": "experience-translate-rooms-api",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "sourceRepository": "niho-app",
   "sourceIssue": "niho-coliving/niho-app#19797",
-  "sourceCommit": "8a9c79b82341094fa44620b06f78097e76ef3114",
-  "sha256": "e080dbfef26e8188002b434fa43c939867e80eb5fd5d347f81eb9bf3e34c80bc",
+  "sourceCommit": "5e173637cb623be4400babc48bb2d5fa14cf7038",
+  "sha256": "07b43aeb03f354738820e8557dc6b83e7e17a72b2dd4ed8f4b4ec46a17ad8466",
   "status": "agreed-not-deployed",
   "deploymentStatus": "not-deployed",
-  "deploymentNote": "予約なしの通訳APIを追加した合意契約。API先行配備と有効ticketの受入までHTTP flagをOFFに維持する。",
+  "deploymentNote": "Experience Host service ID token専用の予約なしroom APIを含む合意契約。API→fencing relay→Experienceの固定SHA配備とstg受入まではHTTP flagをOFFに維持する。",
   "openapiFile": "experience-translate-rooms-api.openapi.json",
   "sha256File": "experience-translate-rooms-api.openapi.json.sha256",
   "scope": [
