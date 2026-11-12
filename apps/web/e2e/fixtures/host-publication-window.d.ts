@@ -2,6 +2,6 @@ export {};
 
 declare global {
   interface Window {
-    mountHostPublication: () => void;
+    mountHostPublication: (adminDraftCreate?: boolean) => void;
   }
 }

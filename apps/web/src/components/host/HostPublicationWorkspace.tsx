@@ -44,6 +44,7 @@ type Product = {
   status: Status;
   publicationNeedsUpdate: boolean;
   publicationBlockers: string[];
+  acceptanceMode?: "INSTANT";
   adminEnglishReview?: {
     reviewed: boolean;
     reviewedAtUtc: string | null;
@@ -254,8 +255,13 @@ export function HostPublicationWorkspace({
   const [unitAmount, setUnitAmount] = useState("");
   const [managedSalesAvailable, setManagedSalesAvailable] = useState(false);
   const [createManagedSales, setCreateManagedSales] = useState(false);
+  const [createManagedAcceptanceMode, setCreateManagedAcceptanceMode] = useState<"" | "INSTANT">("");
   const [createManagedConfirmation, setCreateManagedConfirmation] = useState<"" | "VERBAL" | "WRITTEN">("");
   const [createManagedDueDays, setCreateManagedDueDays] = useState("14");
+  const managedDueDays = Number(createManagedDueDays);
+  const managedDraftReady = managedSalesAvailable && createManagedAcceptanceMode === "INSTANT"
+    && !!createManagedConfirmation && createManagedDueDays.trim() !== ""
+    && Number.isInteger(managedDueDays) && managedDueDays >= 0 && managedDueDays <= 180;
   const [content, setContent] = useState<Record<string, unknown>>(blankContent);
   const [terms, setTerms] = useState<PublicationTermsForm>(emptyTerms);
   const [baseline, setBaseline] = useState("");
@@ -488,18 +494,21 @@ export function HostPublicationWorkspace({
 
   async function createProduct(event: React.FormEvent) {
     event.preventDefault(); if (busy || !slug.trim() || !title.trim() || asPublicationPrice(unitAmount) === null) return;
+    if (adminDraft && createManagedSales && !managedDraftReady) {
+      setError("完全代行の受付方法・合意確認方法・支払期日を確認してください。");
+      return;
+    }
     const faqProblem = publicationContentFaqProblem(content);
     if (faqProblem) { setError(faqProblem); return; }
     setBusy(true); setError(""); setNotice("");
     const draftContent = { ...blankContent, ...content };
     try {
-      const dueDays = Number(createManagedDueDays);
       const managedSales = adminDraft && createManagedSales
-        ? { enabled: true as const, sellerConfirmationMethod: createManagedConfirmation, paymentDueDays: dueDays }
+        ? {
+          enabled: true, acceptanceMode: createManagedAcceptanceMode,
+          sellerConfirmationMethod: createManagedConfirmation, paymentDueDays: managedDueDays,
+        }
         : undefined;
-      if (managedSales && (!managedSalesAvailable || !createManagedConfirmation || !Number.isInteger(dueDays) || dueDays < 0 || dueDays > 180)) {
-        throw new Error("完全代行の対象確認・合意確認方法・支払期日を確認してください。");
-      }
       const response = await fetch(apiBase, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: slug.trim(), publicTitle: title.trim(), content: draftContent, currency: "JPY", unitAmount: asPublicationPrice(unitAmount), ...(managedSales ? { managedSales } : {}) }) });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
@@ -901,9 +910,39 @@ export function HostPublicationWorkspace({
     <Field label="公開URL用の英数字slug" value={slug} onChange={setSlug} placeholder="kamakura-community-dinner" />
     <Field label="商品名（公開用）" value={title} onChange={setTitle} />
     <Field label="大人1人の基本料金（税込・円）" value={unitAmount} onChange={setUnitAmount} />
-    {adminDraft ? <fieldset className="space-y-3 rounded-xl border border-line p-4"><legend className="px-1 font-extrabold">販売方式</legend><label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={createManagedSales} disabled={!managedSalesAvailable} onChange={(event) => setCreateManagedSales(event.target.checked)} className="mt-1" /><span><strong>この体験だけを完全代行（20%）の初回試験対象として作成する</strong><br />本人アカウント・OWNER・本人の販売者プロフィール・Connect口座を作らず、NIHO名義の決済設定を使います。</span></label>{createManagedSales ? <div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 text-sm font-bold">提供者との合意確認方法<select className="rounded-xl border border-line bg-white px-3 py-2 font-normal" value={createManagedConfirmation} onChange={(event) => setCreateManagedConfirmation(event.target.value as "" | "VERBAL" | "WRITTEN")}><option value="">選択してください</option><option value="VERBAL">口頭</option><option value="WRITTEN">書面・メッセージ</option></select></label><label className="grid gap-1 text-sm font-bold">開催日からの支払期日（日）<input className="rounded-xl border border-line bg-white px-3 py-2 font-normal" type="number" min={0} max={180} value={createManagedDueDays} onChange={(event) => setCreateManagedDueDays(event.target.value)} /></label></div> : null}{!managedSalesAvailable ? <p className="text-sm text-amber-900">完全代行のサーバー設定・専用Stripe鍵・署名秘密が揃っていないため選択できません。</p> : null}</fieldset> : null}
+    {adminDraft ? <fieldset className="space-y-3 rounded-xl border border-line p-4">
+      <legend className="px-1 font-extrabold">販売方式</legend>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" checked={createManagedSales} disabled={!managedSalesAvailable} onChange={(event) => setCreateManagedSales(event.target.checked)} className="mt-1" />
+        <span><strong>この体験をNIHO完全代行（20%）で販売する</strong><br />NIHO名義で決済し、提供者の口座登録は不要です。</span>
+      </label>
+      {createManagedSales ? <div className="grid gap-3 sm:grid-cols-2">
+        <label className="grid gap-1 text-sm font-bold sm:col-span-2">
+          予約の受付方法
+          <select required className="rounded-xl border border-line bg-white px-3 py-2 font-normal"
+            value={createManagedAcceptanceMode}
+            onChange={(event) => setCreateManagedAcceptanceMode(event.target.value === "INSTANT" ? "INSTANT" : "")}>
+            <option value="">選択してください</option>
+            <option value="INSTANT">即時決済（有料は支払い完了で予約確定）</option>
+          </select>
+        </label>
+        <label className="grid gap-1 text-sm font-bold">
+          提供者との合意確認方法
+          <select className="rounded-xl border border-line bg-white px-3 py-2 font-normal" value={createManagedConfirmation}
+            onChange={(event) => setCreateManagedConfirmation(event.target.value as "" | "VERBAL" | "WRITTEN")}>
+            <option value="">選択してください</option><option value="VERBAL">口頭</option><option value="WRITTEN">書面・メッセージ</option>
+          </select>
+        </label>
+        <label className="grid gap-1 text-sm font-bold">
+          開催日からの支払期日（日）
+          <input className="rounded-xl border border-line bg-white px-3 py-2 font-normal" type="number" min={0} max={180} value={createManagedDueDays}
+            onChange={(event) => setCreateManagedDueDays(event.target.value)} />
+        </label>
+      </div> : null}
+      {!managedSalesAvailable ? <p className="text-sm text-amber-900">完全代行の決済設定が揃うと選択できます。</p> : null}
+    </fieldset> : null}
     <p className="text-sm text-muted">無料体験は0円、有料体験は50円以上で入力してください。作成後に開催日程と販売条件を設定します。</p>
-    <button disabled={busy || !slug.trim() || !title.trim() || asPublicationPrice(unitAmount) === null || (createManagedSales && (!managedSalesAvailable || !createManagedConfirmation || !Number.isInteger(Number(createManagedDueDays)) || Number(createManagedDueDays) < 0 || Number(createManagedDueDays) > 180))} className={consoleButtonClass("primary")}>{busy ? "作成中…" : "下書きを作成"}</button>
+    <button disabled={busy || !slug.trim() || !title.trim() || asPublicationPrice(unitAmount) === null || (createManagedSales && !managedDraftReady)} className={consoleButtonClass("primary")}>{busy ? "作成中…" : "下書きを作成"}</button>
   </form></HostPageBody>;
 
   if (!productId) return <HostPageBody><PageHead title={adminDraft ? "代理登録の商品" : "体験"}>{bookingGuideHref ? <Link className={consoleButtonClass("secondary")} href={bookingGuideHref}>予約後の集合案内</Link> : null}</PageHead><section className={`${HOST_SURFACE} p-4 md:p-6`}>
@@ -1171,6 +1210,9 @@ export function HostPublicationWorkspace({
     </section>
     {adminDraft ? <section className={`${HOST_SURFACE} mb-4 space-y-3 p-4 md:p-5`} aria-labelledby="admin-proxy-publication-title">
       <h2 id="admin-proxy-publication-title" className="font-extrabold">販売者確認と代理公開</h2>
+      {product.acceptanceMode === "INSTANT" ? <dl className="flex flex-wrap gap-x-3 text-sm">
+        <dt className="font-bold">予約の受付方法</dt><dd>即時決済（有料は支払い完了で予約確定）</dd>
+      </dl> : null}
       <p className="text-sm text-ink-soft">現在の保存版・販売条件・掲載同意版・事務局担当者・確認方法を公開と同じtransactionで監査記録します。自由記入欄や個人情報は記録しません。</p>
       <div className="rounded-xl border border-line bg-sand/40 p-3 text-xs text-ink-soft">
         <p className="font-bold text-ink">事務局の英語原稿レビュー</p>
