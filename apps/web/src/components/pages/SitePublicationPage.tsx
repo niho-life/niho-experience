@@ -36,7 +36,10 @@ export function sitePublicationMetadata(item: SitePublicExperience, locale: "en"
     title: !ja && publication.slug === "community-dinner-with-locals"
       ? "Kamakura Cooking & Dinner with Locals"
       : base.title,
-    alternates: { canonical, languages: publication.japanese && config.japaneseSiteEnabled ? { en: english, ja: japanese, "x-default": english } : { en: english, "x-default": english } },
+    // 日本語のみの商品には英語のページが無いので、hreflang の組を作らず canonical だけにする。
+    alternates: publication.japaneseOnly
+      ? { canonical }
+      : { canonical, languages: publication.japanese && config.japaneseSiteEnabled ? { en: english, ja: japanese, "x-default": english } : { en: english, "x-default": english } },
     openGraph: { ...base.openGraph, locale: ja ? "ja_JP" : "en_US" },
     robots: config.indexingAllowed ? undefined : { index: false, follow: false },
   };

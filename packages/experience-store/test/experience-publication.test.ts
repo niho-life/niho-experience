@@ -66,7 +66,7 @@ describe("experience publication public projection", () => {
     assert.deepEqual(Object.keys(projected ?? {}), [
       "slug", "publicTitle", "content", "meetingOverview", "meetingPointDisclosure", "meetingPoint",
       "currency", "unitAmount", "sellerDisplayName", "providerPublicName", "providerKind",
-      "photos", "providerPhoto", "businessLogo", "japanese", "publishedAtUtc",
+      "photos", "providerPhoto", "businessLogo", "japanese", "japaneseOnly", "publishedAtUtc",
     ]);
     assert.deepEqual(projected?.meetingPoint, { name: "Synthetic meeting area", exteriorPhotoIndex: 0 });
     assert.deepEqual(projected?.photos, [{

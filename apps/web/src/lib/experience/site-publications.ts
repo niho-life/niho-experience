@@ -47,14 +47,22 @@ async function readHostBio(slug: string): Promise<PublicHostBio | null> {
   }
 }
 
+/**
+ * 日本語を原文にした商品（#59）は英語側の公開面に出さない。英語の読み取りでは「予約済みの slug」として扱い、
+ * 英語の詳細・予約は 404 になる（同じ slug の NIHO の体験も出さない）。
+ */
+export type SitePublicLocale = "en" | "ja";
+const visibleInLocale = (publication: PublicExperiencePublication, locale: SitePublicLocale): boolean =>
+  locale === "ja" ? publication.japanese !== null : !publication.japaneseOnly;
+
 /** Read the Experience-owned published manuscript and, when enabled, its current sale terms. */
-export async function getSitePublicExperience(slug: string): Promise<SitePublicExperienceLookup> {
+export async function getSitePublicExperience(slug: string, locale: SitePublicLocale = "en"): Promise<SitePublicExperienceLookup> {
   if (config.apiMode !== "http") return null;
   if (!config.experiencePublicationsEnabled) return { kind: "reserved" };
   const publications = experiencePublicationRepository();
   if (!publications) throw new Error("Experience public publication store is unavailable.");
   const publication = await publications.getPublicBySlug(slug);
-  if (!publication) return { kind: "reserved" };
+  if (!publication || !visibleInLocale(publication, locale)) return { kind: "reserved" };
   const bookings = guestBookingRepository();
   const terms = bookings ? await bookings.publicBookingTerms(slug) : null;
   const disclosures = providerSellerDisclosureRepository();
@@ -69,13 +77,13 @@ export async function getSitePublicExperience(slug: string): Promise<SitePublicE
 }
 
 /** List public Experience products with a valid sale; products without sale terms stay out of the booking catalog. */
-export async function listSitePublicExperiences(): Promise<SitePublicCatalog> {
+export async function listSitePublicExperiences(locale: SitePublicLocale = "en"): Promise<SitePublicCatalog> {
   if (config.apiMode !== "http") return { experiences: [], claimedSlugs: [] };
   if (!config.experiencePublicationsEnabled) return { experiences: [], claimedSlugs: [] };
   const publications = experiencePublicationRepository();
   if (!publications) throw new Error("Experience public publication store is unavailable.");
   const claimedSlugs = await publications.listClaimedSlugs();
-  const items = await publications.listPublic();
+  const items = (await publications.listPublic()).filter((publication) => visibleInLocale(publication, locale));
   const disclosures = providerSellerDisclosureRepository();
   if (!config.guestBookingEnabled) return {
     experiences: await Promise.all(items.map(async (publication) => ({ publication, saleTerms: null, sellerDisclosure: disclosures ? await disclosures.getPublicBySlug(publication.slug) : null, hostBio: null }))),
