@@ -42,6 +42,8 @@ describe("isAllowedCheckoutRedirect on this site's own origin (#285)", () => {
     ["https://checkout.stripe.com/c/pay/cs_test_abc", true],
     ["https://experience.example/booking/return?type=instant", true],
     ["https://experience.example/booking/return?type=approval", true],
+    ["https://experience.example/booking/return?type=managed-request", true],
+    ["https://experience.example/ja/booking/return?type=managed-request&next=https://evil.example", false],
     ["https://experience.example/ja/booking/return?type=instant", true],
     ["https://experience.example/ja/booking/return?type=instant&payment=free", true],
     ["https://experience.example/ja/booking/return?type=instant&next=https://evil.example", false],

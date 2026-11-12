@@ -15,7 +15,7 @@ Experienceの公開商品は `packages/experience-store` が開催枠・予約�
 
 ### MANAGED_20の承認後決済（#515）
 
-公開offerの `acceptanceMode=APPROVAL` は、immutableな販売プラン版から読む。古い画面や不正な入力が即時決済として送っても、storeが予約snapshotへ `APPROVAL` を固定し、公開POSTは `201 { checkoutUrl: /booking/return?type=approval }` だけを返す。この段階ではStripe API、カード、与信、請求は一切無い。受付ページも「未決済」と「承認後に事務局から支払URLを手動案内する」ことを明示する。
+公開offerの `acceptanceMode=APPROVAL` は、immutableな販売プラン版から読む。古い画面や不正な入力が即時決済として送っても、storeが予約snapshotへ `APPROVAL` を固定し、公開POSTは `201 { checkoutUrl: /booking/return?type=managed-request }` だけを返す。この段階ではStripe API、カード、与信、請求は一切無い。受付ページも「未決済」と「承認後に事務局から支払URLを手動案内する」ことを明示する。
 
 `booking_guests.approval_status` は `PENDING → APPROVED | DECLINED` の一方向で、判断したAdminと時刻を保存する。Admin一覧には日時、人数、金額、連絡先、24時間の在庫期限を出す。承認は提供者在庫lockの下でactive hold、予約snapshot、現在の販売プラン版とfenceを再確認し、先に `APPROVED` を確定してから既存のplatform Checkout adapterを呼ぶ。Stripe障害後に同じ承認を再送すると、予約単位の冪等keyで同じSessionを回収する。支払URLはAdminのprivate/no-store応答だけに出し、事務局担当者が有効期限とともに予約者へ手動送付する。成功時の戻り先は通常の支払済み案内 `/booking/return?type=instant` とする。
 

@@ -91,7 +91,7 @@ export async function POST(request: Request): Promise<Response> {
       booking: approved.booking,
       returnOrigin: origin,
       returnPath: "/booking/return?type=instant",
-      cancelPath: "/booking/return?type=approval",
+      cancelPath: "/booking/return",
       locale: "auto",
       ...(approved.guestEmail === null ? {} : { customerEmail: approved.guestEmail }),
       platformStripeKey: key,

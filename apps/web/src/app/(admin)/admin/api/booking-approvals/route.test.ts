@@ -88,7 +88,7 @@ describe("managed booking approval Admin BFF", () => {
     expect(state.approvals.approve).toHaveBeenCalledWith({ nihoUserId: "admin-current" }, BOOKING);
     expect(state.create).toHaveBeenCalledWith(expect.objectContaining({
       booking, returnOrigin: "https://experience.example", returnPath: "/booking/return?type=instant",
-      cancelPath: "/booking/return?type=approval", customerEmail: "guest@example.test",
+      cancelPath: "/booking/return", customerEmail: "guest@example.test",
     }));
     expect(state.bookings.attachCheckoutSession).toHaveBeenCalledWith(BOOKING, "cs_test_approval");
   });

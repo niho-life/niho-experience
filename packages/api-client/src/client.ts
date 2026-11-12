@@ -83,9 +83,9 @@ export function normalizeOrigin(value: string): string {
   return url.origin;
 }
 
-/** 体験サイトの支払い後のページ（BookingReturn の `?type=instant|approval`）。支払い済みの再送への応答（#285 第2段）。 */
+/** 体験サイトの決済や申込後に表示する固定の案内ページ。 */
 const SITE_RETURN_PATHS = new Set(["/booking/return", "/ja/booking/return"]);
-const SITE_RETURN_QUERY = /^(?:\?type=(?:instant|approval)|\?type=instant&payment=free)$/;
+const SITE_RETURN_QUERY = /^(?:\?type=(?:instant|approval|managed-request)|\?type=instant&payment=free)$/;
 
 /**
  * checkout の応答の遷移先として受け付ける URL か。Stripe の Checkout か、NIHO の origin の予約確認ページだけ。

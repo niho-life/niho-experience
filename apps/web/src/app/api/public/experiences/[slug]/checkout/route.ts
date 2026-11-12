@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
  */
 const RETURN_PATH = "/booking/return?type=instant";
 const FREE_RETURN_PATH = "/booking/return?type=instant&payment=free";
-const APPROVAL_RETURN_PATH = "/booking/return?type=approval";
+const APPROVAL_RETURN_PATH = "/booking/return?type=managed-request";
 
 /** The class name only: Stripe's and the database's messages may repeat what was sent (an address, a session). */
 function logFailure(stage: "store" | "stripe", error: unknown): void {

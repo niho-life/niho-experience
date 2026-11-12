@@ -141,7 +141,14 @@ test.describe("/booking/return", () => {
     await expect(page.locator("main")).not.toContainText(/you're booked|booking confirmed|payment (was )?(successful|received|complete)/i);
   });
 
-  test("only the two known kinds change the wording: anything else is the neutral page", async ({ page }) => {
+  test("the managed request explains the payment link separately from legacy approval", async ({ page }) => {
+    await page.goto("/booking/return?type=managed-request");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("NIHO will review your request");
+    await expect(page.locator("main")).toContainText("does not require a card or take payment");
+    await expect(page.locator("main")).toContainText("Stripe payment link");
+  });
+
+  test("only known kinds change the wording: anything else is the neutral page", async ({ page }) => {
     for (const query of ["type=paid", "type=", "type=approval&type=instant", "type=%3Cb%3Ex%3C%2Fb%3E", "title=Free%20money"]) {
       await page.goto(`/booking/return?${query}`);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("Check your email");

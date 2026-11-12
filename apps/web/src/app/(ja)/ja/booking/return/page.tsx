@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "予約状況", robots: { index: fals
 
 export default async function JapaneseBookingReturnPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const { type } = await searchParams;
-  const approval = readReturnType(type) === "approval";
+  const approval = readReturnType(type) === "managed-request";
   let copy;
   try {
     copy = (await getJapaneseCopy()).copy;

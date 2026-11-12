@@ -248,7 +248,7 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     });
     const response = await checkout(post({ ...CHECKOUT, salesPlanRevision: 1 }), slugParams());
     expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({ checkoutUrl: `${ORIGIN}/booking/return?type=approval` });
+    expect(await response.json()).toEqual({ checkoutUrl: `${ORIGIN}/booking/return?type=managed-request` });
     expect(state.stripeAccountRetrieve).not.toHaveBeenCalled();
     expect(state.stripeCreate).not.toHaveBeenCalled();
     expect(state.stripeRetrieve).not.toHaveBeenCalled();
