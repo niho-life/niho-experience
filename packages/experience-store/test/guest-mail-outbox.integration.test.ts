@@ -207,10 +207,38 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
       assert.equal(claim.invitations.filter((row) => row.email !== null).length, 1);
       assert.deepEqual(claim.invitations.find((row) => row.email)?.email, {
         providerId: "provider-a", bookingId: bookingIds.rows[0]!.id, guestEmail: "guest@example.com",
-        guestName: "Sample Guest", experienceTitle: "Synthetic walk",
+        guestName: "Sample Guest", guestLanguage: "EN", experienceTitle: "Synthetic walk",
       });
       for (const row of claim.invitations) await outbox.completeReviewInvitation(row.id);
       assert.deepEqual((await outbox.claimReviewInvitations({ limit: 10, leaseSeconds: 120 })).invitations, []);
+    });
+  });
+
+  // #59: the language chosen at checkout travels with the booking to every email to the guest.
+  it("carries the guest's checkout language into the confirmation email", async () => {
+    await withSchema(async (context) => {
+      const { outbox } = context;
+      await confirmedGuest(context, "ja-guest", { guestName: "合成 花子", guestEmail: "ja-guest@example.com", guestLanguage: "JA" });
+      await confirmedGuest(context, "en-guest", { guestName: "Sample Guest", guestEmail: "en-guest@example.com", guestLanguage: "EN" });
+      const claim = await outbox.claimBookingConfirmations({ limit: 10, leaseSeconds: 120 });
+      const byName = Object.fromEntries(claim.confirmations.map((row) => [row.email?.guestName ?? "", row.email?.guestLanguage]));
+      assert.deepEqual(byName, { "合成 花子": "JA", "Sample Guest": "EN" });
+      // Without a Japanese name in the current publication the Japanese guest reads the public title.
+      assert.deepEqual(claim.confirmations.map((row) => row.email?.experienceTitle), ["Synthetic walk", "Synthetic walk"]);
+    });
+  });
+
+  it("names the experience by the Japanese manuscript of the current publication for a Japanese-language booking", async () => {
+    await withSchema(async (context) => {
+      const { pool, outbox } = context;
+      await pool.query("ALTER TABLE experience_product_publications DISABLE TRIGGER USER");
+      await pool.query(`UPDATE experience_product_publications SET content = jsonb_build_object('ja', jsonb_build_object('title', '合成の散歩')) WHERE slug = 'sample-walk'`);
+      await pool.query("ALTER TABLE experience_product_publications ENABLE TRIGGER USER");
+      await confirmedGuest(context, "ja-title", { guestName: "合成 花子", guestEmail: "ja-title@example.com", guestLanguage: "JA" });
+      await confirmedGuest(context, "en-title", { guestName: "Sample Guest", guestEmail: "en-title@example.com", guestLanguage: "EN" });
+      const claim = await outbox.claimBookingConfirmations({ limit: 10, leaseSeconds: 120 });
+      const titles = Object.fromEntries(claim.confirmations.map((row) => [row.email?.guestLanguage ?? "", row.email?.experienceTitle]));
+      assert.deepEqual(titles, { JA: "合成の散歩", EN: "Synthetic walk" });
     });
   });
 
@@ -239,7 +267,7 @@ describe("PostgreSQL guest mail outbox (#285 slice 5)", { skip: databaseUrl === 
       assert.equal(confirmation!.attempts, 1);
       const snapshot = family.booking.occurrenceSnapshot;
       assert.deepEqual(confirmation!.email, {
-        publicBookingId: family.publicBookingId, guestEmail: "Parent@Example.com", guestName: "Sample Parent",
+        publicBookingId: family.publicBookingId, guestEmail: "Parent@Example.com", guestName: "Sample Parent", guestLanguage: "EN",
         experienceTitle: "Synthetic walk", experienceSlug: "sample-walk", localDate: day(2), localStartTime: "10:00", timeZone: "Asia/Tokyo",
         startUtc: snapshot.startUtc, adultCount: 2, childCount: 1, totalAmount: 7500, currency: "JPY", cancellationPolicy: "FREE_UNTIL_48H",
         cancellationWindowMinutesBeforeStart: 2880, cancellationRefundBasisPoints: 10000,

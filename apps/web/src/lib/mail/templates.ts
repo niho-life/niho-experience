@@ -1,4 +1,5 @@
 import type { BookingConfirmationEmail, BookingLinkEmail, BookingMeetingGuideEmail, BookingNoticeEmail, ClaimedBookingMessage, ClaimedSupportBookingMessage, ManagedGuestMailEmail, ManagedOperationsMailEmail, ReviewInvitationEmail } from "@niho-experience/experience-store";
+import { bookingConfirmationEmailJa, bookingLinkEmailJa, bookingMeetingGuideEmailJa, bookingNoticeEmailJa, reviewInvitationEmailJa } from "./templates-ja";
 import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationTermsWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
 
 /**
@@ -28,7 +29,7 @@ export function oneLine(value: string): string {
 }
 
 /** A message body: line breaks kept as \n, other control characters dropped. */
-function body(value: string): string {
+export function body(value: string): string {
   return value.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, "").trim();
 }
 
@@ -97,6 +98,7 @@ export function absolute(siteUrl: string, path: string): string {
 
 /** The token is issued immediately before sending and stays in the URL fragment. */
 export function reviewInvitationEmail(email: ReviewInvitationEmail, options: { readonly siteUrl: string; readonly token: string }): RenderedMail {
+  if (email.guestLanguage === "JA") return reviewInvitationEmailJa(email, options);
   const experience = oneLine(email.experienceTitle);
   const link = `${absolute(options.siteUrl, "/reviews/write")}#t=${encodeURIComponent(options.token)}`;
   return mail(`Thank you for joining ${experience}`, [
@@ -112,6 +114,7 @@ export function bookingMeetingGuideEmail(
   email: BookingMeetingGuideEmail,
   options: { readonly siteUrl: string; readonly bookingPageGrant: string; readonly photo: Uint8Array },
 ): RenderedMail {
+  if (email.guestLanguage === "JA") return bookingMeetingGuideEmailJa(email, options);
   const experience = oneLine(email.experienceTitle);
   const cid = "niho-meeting-place-photo";
   const blocks: MailBlock[] = [
@@ -161,7 +164,7 @@ export function questionReplyEmail(input: QuestionReplyMailInput): RenderedMail 
 }
 
 /** `{SITE_URL}/bookings/open#g=<grant>`: the one-time grant is placed in the fragment only, never in a path or query. */
-function bookingPageLink(siteUrl: string, grant: string): string {
+export function bookingPageLink(siteUrl: string, grant: string): string {
   return `${absolute(siteUrl, "/bookings/open")}#g=${encodeURIComponent(grant)}`;
 }
 
@@ -174,6 +177,7 @@ export function bookingConfirmationEmail(
   email: BookingConfirmationEmail,
   options: { readonly siteUrl: string; readonly now: Date; readonly bookingPageGrant?: string | null },
 ): RenderedMail {
+  if (email.guestLanguage === "JA") return bookingConfirmationEmailJa(email, options);
   const experience = oneLine(email.experienceTitle);
   const host = oneLine(email.hostDisplayName);
   const managed = email.managedSeller;
@@ -273,6 +277,7 @@ export function supportBookingMessageEmail(
  * email says it can be ignored.
  */
 export function bookingLinkEmail(email: BookingLinkEmail, options: { readonly siteUrl: string; readonly bookingPageGrant: string }): RenderedMail {
+  if (email.guestLanguage === "JA") return bookingLinkEmailJa(email, options);
   const experience = oneLine(email.experienceTitle);
   return mail(`Your booking link: ${experience}, ${calendarDate(email.localDate, DATE_SHORT)} ${email.localStartTime}`, [
     { kind: "p", text: `Hi ${oneLine(email.guestName)},` },
@@ -304,6 +309,7 @@ export function bookingLinkEmail(email: BookingLinkEmail, options: { readonly si
  * refund is called done only in the email Stripe's confirmation triggers. With a grant, a link to the booking page.
  */
 export function bookingNoticeEmail(email: BookingNoticeEmail, options: { readonly siteUrl: string; readonly bookingPageGrant?: string | null }): RenderedMail {
+  if (email.guestLanguage === "JA") return bookingNoticeEmailJa(email, options);
   const experience = oneLine(email.experienceTitle);
   const when = `${calendarDate(email.localDate, DATE_SHORT)} ${email.localStartTime}`;
   const facts: Block = {
