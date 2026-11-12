@@ -9,19 +9,24 @@ import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-
 import { expectedSiteBookingTotalYen } from "@/lib/experience/site-booking-rules";
 import { answersForCheckout } from "@/lib/experience/site-booking-answers";
 import type { SitePublicExperience, SitePublicOffer } from "@/lib/experience/site-publications";
-import { siteSellerInformationHref } from "@/lib/experience/site-seller-information";
+import { siteSellerDisplayName, siteSellerInformationHref } from "@/lib/experience/site-seller-information";
 
 type QuestionAnswers = Record<string, string | string[]>;
+const FIELD_LABEL = "grid min-w-0 grid-cols-1 gap-2 text-sm font-extrabold";
+const FIELD_INPUT = "min-h-12 w-full min-w-0 rounded-xl border border-line-strong px-3 text-base font-normal";
+const FIELD_SELECT = `${FIELD_INPUT} truncate`;
+const FIELD_TEXTAREA = "min-h-24 w-full min-w-0 rounded-xl border border-line-strong p-3 text-base font-normal";
 
 export function SitePublicationBooking({ item, siteOrigin, consentVersion, bookingsEnabled, locale = "en" }: { item: SitePublicExperience; siteOrigin: string; consentVersion: string; bookingsEnabled: boolean; locale?: "en" | "ja" }) {
-  const { publication, saleTerms, sellerDisclosure } = item;
+  const { publication, saleTerms } = item;
   const ja = locale === "ja";
   const sellerInformationUrl = siteSellerInformationHref(item, locale);
-  const sellerInformationName = saleTerms?.sellerDisplayName ?? sellerDisclosure?.sellerDisplayName ?? publication.sellerDisplayName;
+  const sellerInformationName = siteSellerDisplayName(item, locale);
   const offers = saleTerms?.offers ?? [];
+  const firstOffer = offers[0];
   const [api] = useState<ExperienceApiClient>(() => getSiteBookingApi(siteOrigin, locale));
-  const [offerId, setOfferId] = useState(offers[0]?.id ?? "");
-  const [availability, setAvailability] = useState<{ offerId: string; state: "loading" | "failed" | "ready"; occurrences: Occurrence[] }>({ offerId: offers[0]?.id ?? "", state: "loading", occurrences: [] });
+  const [offerId, setOfferId] = useState(firstOffer?.id ?? "");
+  const [availability, setAvailability] = useState<{ offerId: string; state: "loading" | "failed" | "ready"; occurrences: Occurrence[] }>({ offerId: firstOffer?.id ?? "", state: "loading", occurrences: [] });
   const loading = availability.offerId !== offerId || availability.state === "loading";
   const loadError = availability.offerId === offerId && availability.state === "failed";
   const occurrences = availability.offerId === offerId ? availability.occurrences : [];
@@ -119,55 +124,60 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
     }
   }
 
-  if (!bookingsEnabled || !saleTerms || !offers.length) return <p role="status" className="rounded-2xl bg-sand p-5 text-ink-soft">{ja ? "現在、この体験はオンライン予約できません。" : "Online booking is temporarily unavailable for this experience."}</p>;
+  if (!bookingsEnabled || !saleTerms || !firstOffer) return <p role="status" className="rounded-2xl bg-sand p-5 text-ink-soft">{ja ? "現在、この体験はオンライン予約できません。" : "Online booking is temporarily unavailable for this experience."}</p>;
+
+  const pricePerAdult = (item: SitePublicOffer) => `${formatYen(item.pricing.adultPriceYen, locale)} ${ja ? "/ 大人1名" : "per adult"}`;
 
   return <form onSubmit={submit} className="rounded-[var(--radius-card)] border border-line bg-white p-5 sm:p-7">
     <div>
-      <p className="eyebrow">{publication.sellerDisplayName}</p>
+      <p className="wrap-anywhere text-sm text-ink-soft">{ja ? `販売者：${sellerInformationName}` : `Sold by ${sellerInformationName}`}</p>
       <h1 className="mt-1 text-3xl">{approval ? (ja ? `${publication.japanese!.title}の予約リクエスト` : `Request to book ${publication.publicTitle}`) : (ja ? `${publication.japanese!.title}を予約` : `Book ${publication.publicTitle}`)}</h1>
     </div>
-    <div className="mt-6 grid gap-5">
-      <label className="grid gap-2 text-sm font-extrabold">{ja ? "プラン" : "Option"}
-        <select required value={offerId} onChange={(event) => { const next = offers.find((item) => item.id === event.target.value); setOfferId(event.target.value); setDate(""); setAnswers({}); if (!next?.pricing.child) setChildren(0); }} className="min-h-12 rounded-xl border border-line-strong px-3 font-normal">
-          {offers.map((item) => <option key={item.id} value={item.id}>{item.name} · {formatYen(item.pricing.adultPriceYen, locale)} {ja ? "/ 大人1名" : "per adult"}</option>)}
+    <div className="mt-6 grid grid-cols-1 gap-5">
+      {offers.length > 1 ? <label className={FIELD_LABEL}>{ja ? "プラン" : "Option"}
+        <select required value={offerId} onChange={(event) => { const next = offers.find((item) => item.id === event.target.value); setOfferId(event.target.value); setDate(""); setAnswers({}); if (!next?.pricing.child) setChildren(0); }} className={FIELD_SELECT}>
+          {offers.map((item) => <option key={item.id} value={item.id}>{item.name} · {pricePerAdult(item)}</option>)}
         </select>
-      </label>
+      </label> : <div className="wrap-anywhere text-sm">
+        <p className="font-extrabold">{pricePerAdult(firstOffer)}</p>
+        {firstOffer.name !== publication.publicTitle ? <p className="mt-1 text-ink-soft">{firstOffer.name}</p> : null}
+      </div>}
       {offer ? <>
         <p className="-mt-3 text-sm text-ink-soft">{scheduleDescription(offer, locale)} · {formatDurationLabel(offer.durationMinutes, locale)}</p>
         <p className="-mt-4 text-sm text-ink-soft">{cancellationSummary(offer, locale)}{offer.minimumChargeableParticipants > 1 ? ja ? ` · 最低請求人数は${offer.minimumChargeableParticipants}名` : ` · Minimum charge is ${offer.minimumChargeableParticipants} guests` : ""}</p>
       </> : null}
-      <label className="grid gap-2 text-sm font-extrabold">{ja ? "日時" : "Date"}
-        <select required value={date} disabled={loading || loadError} onChange={(event) => setDate(event.target.value)} className="min-h-12 rounded-xl border border-line-strong px-3 font-normal disabled:opacity-50">
+      <label className={FIELD_LABEL}>{ja ? "日時" : "Date"}
+        <select required value={date} disabled={loading || loadError} onChange={(event) => setDate(event.target.value)} className={`${FIELD_SELECT} disabled:opacity-50`}>
           <option value="">{loading ? ja ? "日時を読み込み中…" : "Loading dates…" : loadError ? ja ? "日時を確認できません" : "Dates unavailable" : ja ? "日時を選択" : "Choose a date"}</option>
           {occurrences.map((occurrence) => <option key={`${occurrence.offerId}-${occurrence.date}`} value={occurrence.date} disabled={!occurrence.bookable}>{new Intl.DateTimeFormat(ja ? "ja-JP" : "en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric", timeZoneName: undefined }).format(new Date(`${occurrence.date}T12:00:00Z`))}{occurrence.bookable ? ` · ${new Intl.DateTimeFormat(ja ? "ja-JP" : "en-US", { timeZone: "Asia/Tokyo", hour: "numeric", minute: "2-digit" }).format(new Date(occurrence.startAt))} JST · ${occurrence.seatsLeft}${ja ? "席" : " places"}` : ja ? " · 予約不可" : " · Unavailable"}</option>)}
         </select>
       </label>
       {loadError ? <p role="alert" className="text-sm text-red-700">{ja ? "空き状況を確認できませんでした。ページを再読み込みしてください。" : "Dates couldn’t be checked. Retry the page or contact us before paying."}</p> : null}
       <div className="grid grid-cols-2 gap-4">
-        <label className="grid gap-2 text-sm font-extrabold">{ja ? "大人" : "Adults"}
-          <input type="number" min={0} max={offer?.maxPartySize ?? 1} value={adults} onChange={(event) => setAdults(Number(event.target.value))} className="min-h-12 rounded-xl border border-line-strong px-3 font-normal" />
+        <label className={FIELD_LABEL}>{ja ? "大人" : "Adults"}
+          <input type="number" min={0} max={offer?.maxPartySize ?? 1} value={adults} onChange={(event) => setAdults(Number(event.target.value))} className={FIELD_INPUT} />
         </label>
-        {offer?.pricing.child ? <label className="grid gap-2 text-sm font-extrabold">{ja ? "子ども" : "Children"} ({offer.pricing.child.minAge}–{offer.pricing.child.maxAge}{ja ? "歳" : ""})
-          <input type="number" min={0} max={offer.maxPartySize} value={children} onChange={(event) => setChildren(Number(event.target.value))} className="min-h-12 rounded-xl border border-line-strong px-3 font-normal" />
+        {offer?.pricing.child ? <label className={FIELD_LABEL}>{ja ? "子ども" : "Children"} ({offer.pricing.child.minAge}–{offer.pricing.child.maxAge}{ja ? "歳" : ""})
+          <input type="number" min={0} max={offer.maxPartySize} value={children} onChange={(event) => setChildren(Number(event.target.value))} className={FIELD_INPUT} />
         </label> : null}
       </div>
       {offer?.bookingQuestions.map((question) => <QuestionField key={question.id} question={question} value={answers[question.id]} onChange={(value) => updateAnswer(question.id, value)} locale={locale} />)}
-      <label className="grid gap-2 text-sm font-extrabold">{ja ? "氏名" : "Full name"}
-        <input required autoComplete="name" maxLength={200} value={name} onChange={(event) => setName(event.target.value)} className="min-h-12 rounded-xl border border-line-strong px-3 font-normal" />
+      <label className={FIELD_LABEL}>{ja ? "氏名" : "Full name"}
+        <input required autoComplete="name" maxLength={200} value={name} onChange={(event) => setName(event.target.value)} className={FIELD_INPUT} />
       </label>
-      <label className="grid gap-2 text-sm font-extrabold">{ja ? "メールアドレス" : "Email"}
-        <input type="email" required autoComplete="email" maxLength={320} value={email} onChange={(event) => setEmail(event.target.value)} className="min-h-12 rounded-xl border border-line-strong px-3 font-normal" />
+      <label className={FIELD_LABEL}>{ja ? "メールアドレス" : "Email"}
+        <input type="email" required autoComplete="email" maxLength={320} value={email} onChange={(event) => setEmail(event.target.value)} className={FIELD_INPUT} />
       </label>
-      <label className="grid gap-2 text-sm font-extrabold">{ja ? "備考" : "Note"} <span className="font-normal text-muted">{ja ? "任意" : "Optional"}</span>
-        <textarea maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} className="min-h-24 rounded-xl border border-line-strong p-3 font-normal" />
+      <label className={FIELD_LABEL}>{ja ? "備考" : "Note"} <span className="font-normal text-muted">{ja ? "任意" : "Optional"}</span>
+        <textarea maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} className={FIELD_TEXTAREA} />
       </label>
       <div className="rounded-xl bg-sand p-4 text-sm">
         <div className="flex justify-between gap-3"><span>{ja ? "合計" : "Total"}</span><b>{total === null ? ja ? "人数を確認してください" : "Check guest counts" : formatYen(total, locale)}</b></div>
         <p className="mt-2 text-ink-soft">{ja ? "最低請求人数がある場合は合計に含まれます。席を確保する前に最終金額を再確認します。" : "The total includes the offer’s minimum chargeable guest count where one is set. The final amount is checked again before a seat is held."}</p>
       </div>
       <label className="flex items-start gap-3 text-sm text-ink-soft">
-        <input type="checkbox" required checked={agreed} onChange={(event) => setAgreed(event.target.checked)} className="mt-1 size-4" />
-        <span>{ja ? "上記の予約・キャンセル条件と" : "I agree to the booking and cancellation conditions shown above and the "}<a className="font-extrabold underline" href="/privacy" target="_blank" rel="noreferrer">{ja ? "プライバシーポリシー" : "Privacy Policy"}</a>{sellerInformationUrl ? <>{ja ? "、および" : ", and "}<a className="underline underline-offset-2" href={sellerInformationUrl} target="_blank" rel="noreferrer">{ja ? `${sellerInformationName}の販売者情報` : `seller information for ${sellerInformationName}`}</a></> : null}{ja ? "に同意します。" : "."}</span>
+        <input type="checkbox" required checked={agreed} onChange={(event) => setAgreed(event.target.checked)} className="mt-1 size-4 shrink-0" />
+        <span className="min-w-0 wrap-anywhere">{ja ? "上記の予約・キャンセル条件と" : "I agree to the booking and cancellation conditions shown above and the "}<a className="font-extrabold underline" href="/privacy" target="_blank" rel="noreferrer">{ja ? "プライバシーポリシー" : "Privacy Policy"}</a>{sellerInformationUrl ? <>{ja ? "、および" : ", and "}<a className="underline underline-offset-2" href={sellerInformationUrl} target="_blank" rel="noreferrer">{ja ? `${sellerInformationName}の販売者情報` : `seller information for ${sellerInformationName}`}</a></> : null}{ja ? "に同意します。" : "."}</span>
       </label>
       {problem ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{problem}</p> : null}
       <button type="submit" disabled={!api || !selectedOccurrence?.bookable || total === null || !agreed || !validAnswers || submitting || loading || loadError} className="min-h-12 rounded-full bg-ink px-6 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-45">{submitLabel}</button>
@@ -186,8 +196,8 @@ function formatDurationLabel(minutes: number, locale: "en" | "ja" = "en"): strin
 
 function QuestionField({ question, value, onChange, locale = "en" }: { question: SitePublicOffer["bookingQuestions"][number]; value: string | string[] | undefined; onChange: (value: string | string[]) => void; locale?: "en" | "ja" }) {
   const label = `${question.prompt}${question.required ? " *" : locale === "ja" ? "（任意）" : " (optional)"}`;
-  if (question.inputType === "SINGLE_SELECT") return <label className="grid gap-2 text-sm font-extrabold">{label}<select required={question.required} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)} className="min-h-12 rounded-xl border border-line-strong px-3 font-normal"><option value="">{locale === "ja" ? "回答を選択" : "Choose an answer"}</option>{question.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select>{question.description ? <small className="font-normal text-muted">{question.description}</small> : null}</label>;
-  if (question.inputType === "MULTI_SELECT") return <fieldset className="grid gap-2 text-sm"><legend className="font-extrabold">{label}</legend>{question.options.map((option) => <label key={option.id} className="flex items-center gap-2"><input type="checkbox" checked={Array.isArray(value) && value.includes(option.id)} onChange={(event) => { const selected = new Set(Array.isArray(value) ? value : []); if (event.target.checked) selected.add(option.id); else selected.delete(option.id); onChange([...selected]); }} />{option.label}</label>)}{question.description ? <small className="text-muted">{question.description}</small> : null}</fieldset>;
+  if (question.inputType === "SINGLE_SELECT") return <label className={FIELD_LABEL}>{label}<select required={question.required} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value)} className={FIELD_SELECT}><option value="">{locale === "ja" ? "回答を選択" : "Choose an answer"}</option>{question.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select>{question.description ? <small className="font-normal text-muted">{question.description}</small> : null}</label>;
+  if (question.inputType === "MULTI_SELECT") return <fieldset className="grid min-w-0 grid-cols-1 gap-2 text-sm"><legend className="font-extrabold">{label}</legend>{question.options.map((option) => <label key={option.id} className="flex items-center gap-2"><input type="checkbox" checked={Array.isArray(value) && value.includes(option.id)} onChange={(event) => { const selected = new Set(Array.isArray(value) ? value : []); if (event.target.checked) selected.add(option.id); else selected.delete(option.id); onChange([...selected]); }} />{option.label}</label>)}{question.description ? <small className="text-muted">{question.description}</small> : null}</fieldset>;
   const textValue = typeof value === "string" ? value : "";
-  return <label className="grid gap-2 text-sm font-extrabold">{label}{question.inputType === "LONG_TEXT" ? <textarea required={question.required} maxLength={2000} value={textValue} onChange={(event) => onChange(event.target.value)} className="min-h-24 rounded-xl border border-line-strong p-3 font-normal" /> : <input required={question.required} maxLength={500} value={textValue} onChange={(event) => onChange(event.target.value)} className="min-h-12 rounded-xl border border-line-strong px-3 font-normal" />}{question.description ? <small className="font-normal text-muted">{question.description}</small> : null}</label>;
+  return <label className={FIELD_LABEL}>{label}{question.inputType === "LONG_TEXT" ? <textarea required={question.required} maxLength={2000} value={textValue} onChange={(event) => onChange(event.target.value)} className={FIELD_TEXTAREA} /> : <input required={question.required} maxLength={500} value={textValue} onChange={(event) => onChange(event.target.value)} className={FIELD_INPUT} />}{question.description ? <small className="font-normal text-muted">{question.description}</small> : null}</label>;
 }

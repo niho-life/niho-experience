@@ -17,6 +17,22 @@ const offer = {
 };
 
 describe("site publication booking seller terms", () => {
+  it.each([
+    ["en", "Sold by Panasonic Holdings Corporation", "seller information for Panasonic Holdings Corporation"],
+    ["ja", "販売者：パナソニックホールディングス株式会社", "パナソニックホールディングス株式会社の販売者情報"],
+  ] as const)("uses the official seller name in the %s form and its seller information link", (locale, seller, link) => {
+    const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: {
+        publication: { slug: "synthetic-experience", publicTitle: "Synthetic experience", japanese: { title: "体験サンプル" } },
+        saleTerms: { sellerDisplayName: "パナソニックホールディングス株式会社", sellerDisclosureUrl: "https://seller.example.test/legal", offers: [offer] },
+        sellerDisclosure: null,
+      } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true, locale,
+    }));
+    expect(html).toContain(seller);
+    expect(html).toContain(link);
+  });
+
   it("shows a request form without promising immediate checkout for managed approval", () => {
     const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
       item: {
