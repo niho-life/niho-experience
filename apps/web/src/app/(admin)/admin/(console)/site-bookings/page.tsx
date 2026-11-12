@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import type { ExperienceSettlementSummary, ExperienceSupportNotification, ManagedBookingApprovalPage, SupportEnabledBookingsPage, SupportQueue } from "@niho-experience/experience-store";
+import type { AdminAssignmentRow, ExperienceSettlementSummary, ExperienceSupportNotification, ManagedBookingApprovalPage, SupportEnabledBookingsPage, SupportQueue } from "@niho-experience/experience-store";
 import { notFound } from "next/navigation";
 import { adminSiteBookingsPreview } from "@/admin/site-bookings-preview";
 import { AdminSiteBookings } from "@/components/admin/AdminSiteBookings";
 import { AdminBookingApprovals } from "@/components/admin/AdminBookingApprovals";
+import { AdminOccurrenceAssignments } from "@/components/admin/AdminOccurrenceAssignments";
 import { config } from "@/lib/config";
 import { isAdminHttp, isAdminPreview, loadAdminHttpSession } from "@/lib/admin/server";
-import { bookingCancellations, experienceSupportRepository, managedBookingApprovalRepository } from "@/lib/experience/store-server";
+import { bookingCancellations, experienceSupportRepository, managedBookingApprovalRepository, occurrenceAssignmentRepository } from "@/lib/experience/store-server";
 
 export const metadata: Metadata = { title: "サイト予約の取消・返金 | NIHO 管理" };
 export const dynamic = "force-dynamic";
@@ -49,6 +50,14 @@ export default async function AdminSiteBookingsPage() {
     try { approvalRequests = await managedBookingApprovalRepository()?.listPending({ nihoUserId: loaded.actor.id }) ?? null; }
     catch { /* The refund and cancellation queue remains available independently. */ }
   }
-  return <>{approvalRequests ? <AdminBookingApprovals initial={approvalRequests} /> : approvalsEnabled ? <p role="alert">承認待ちの申込を読み込めませんでした。ページを再読み込みしてください。</p> : null}<AdminSiteBookings initial={queue} supportBookings={supportBookings} notifications={notifications} settlements={settlements}
+  // 開催回の担当 (#535 v0): independent of the approval list; a read failure leaves the rest of the page as it is.
+  let assignmentRows: readonly AdminAssignmentRow[] | null = null;
+  const assignmentsEnabled = config.occurrenceAssignmentEnabled && config.managedSalesEnabled;
+  if (assignmentsEnabled) {
+    try { assignmentRows = await occurrenceAssignmentRepository()?.adminList({ nihoUserId: loaded.actor.id }) ?? null; }
+    catch { /* The queues below remain available. */ }
+  }
+  const assignments = assignmentRows ? <AdminOccurrenceAssignments initial={assignmentRows} /> : assignmentsEnabled ? <p role="alert">開催回の担当を読み込めませんでした。ページを再読み込みしてください。</p> : null;
+  return <>{approvalRequests ? <AdminBookingApprovals initial={approvalRequests} /> : approvalsEnabled ? <p role="alert">承認待ちの申込を読み込めませんでした。ページを再読み込みしてください。</p> : null}{assignments}<AdminSiteBookings initial={queue} supportBookings={supportBookings} notifications={notifications} settlements={settlements}
     managedCompensationAvailable={config.managedSalesWebhooksEnabled} /></>;
 }

@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import type { ReactElement } from "react";
 import { notFound } from "next/navigation";
 import { HostBookings } from "@/components/host/HostBookings";
+import { ASSIGNMENT_LOAD_FAILED_TEXT } from "@/host/assignments";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
 import type { BookingExperience } from "@/host/bookings";
 import { hostPageContext } from "@/host/data";
+import { loadAssignments, type HostAssignmentsLoad } from "@/host/assignments-server";
 import { OTA_BOOKING_LOAD_FAILED_TEXT } from "@/host/ota-bookings";
 import { loadOtaBookings, otaBookingsShown, type HostOtaBookingsLoad } from "@/host/ota-bookings-server";
 import type { HostBooking } from "@/host/types";
@@ -62,6 +64,15 @@ function OtaBookingsFailed() {
   );
 }
 
+/** Above the list when the 担当 (#535) could not be read. */
+function AssignmentsFailed() {
+  return (
+    <p role="alert" className="mx-auto mb-3.5 max-w-5xl rounded-xl bg-danger-pale p-3 text-sm font-bold text-danger">
+      {ASSIGNMENT_LOAD_FAILED_TEXT}
+    </p>
+  );
+}
+
 /**
  * 予約 with only bookings made on reservation sites (#194 PR B), for a product operator or while Experience bookings are unavailable. Read only.
  */
@@ -84,7 +95,7 @@ function OtaOnlyBookings({ ota, providerDataId, linkProviderId, today }: { ota: 
   );
 }
 
-function SiteBookings({ site, provider, linkProviderId, requested, ota }: { site: Exclude<HostSiteBookingsLoad, { status: "closed" }>; provider: HostProvider; linkProviderId: string | null; requested: string | null; ota: OtaRows }) {
+function SiteBookings({ site, provider, linkProviderId, requested, ota, assignments }: { site: Exclude<HostSiteBookingsLoad, { status: "closed" }>; provider: HostProvider; linkProviderId: string | null; requested: string | null; ota: OtaRows; assignments: HostAssignmentsLoad }) {
   if (site.status === "error") return <BookingsUnavailable title="予約を読み込めませんでした" body={SITE_BOOKING_LOAD_FAILED_TEXT} />;
   if (site.requestedMissing && !ota?.bookings.some((booking) => booking.id === requested?.toLowerCase())) notFound();
   return (
@@ -103,6 +114,7 @@ function SiteBookings({ site, provider, linkProviderId, requested, ota }: { site
       translateEnabled={siteTranslateRoomsEnabled()}
       live={{ nextCursor: site.nextCursor, messages: site.messages, preview: site.preview, readOnly: site.readOnly, canCancel: site.canCancel }}
       ota={ota}
+      assignments={assignments.status === "live" ? assignments : null}
     />
   );
 }
@@ -139,13 +151,16 @@ export default async function HostBookingsPage({ searchParams }: { searchParams:
     return <OtaOnlyBookings ota={otaRows(load)!} providerDataId={calendar.choice.id} linkProviderId={linkProviderId} today={load.today} />;
   }
   if (provider.memberRole === "EDITOR") notFound();
-  const [site, otaLoad] = await Promise.all([
+  const [site, otaLoad, assignments] = await Promise.all([
     loadSiteBookings(provider, requested),
     loadOtaBookings(provider.id, provider, requested, mockScenario),
+    loadAssignments(provider),
   ]);
   const ota = otaRows(otaLoad);
   const otaFailed = otaLoad.status === "error" ? <OtaBookingsFailed /> : null;
-  if (site.status === "live") return withNotice(otaFailed, <SiteBookings site={site} provider={provider} linkProviderId={linkProviderId} requested={requested} ota={ota} />);
+  // 担当 (#535): a failed read leaves the bookings as they are, with a line above them.
+  const notice = assignments.status === "error" ? <><AssignmentsFailed />{otaFailed}</> : otaFailed;
+  if (site.status === "live") return withNotice(notice, <SiteBookings site={site} provider={provider} linkProviderId={linkProviderId} requested={requested} ota={ota} assignments={assignments} />);
   if (site.status === "closed" && ota && otaLoad.status === "live") return <OtaOnlyBookings ota={ota} providerDataId={provider.id} linkProviderId={linkProviderId} today={otaLoad.today} />;
   if (site.status === "error") return <BookingsUnavailable title="予約を読み込めませんでした" body={SITE_BOOKING_LOAD_FAILED_TEXT} />;
   return withNotice(otaFailed, <BookingsUnavailable />);
