@@ -6,6 +6,7 @@ import { BookingCancellations } from "../src/booking-cancellations.ts";
 import { StoreConflictError, StoreNotFoundError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { GuestBookingRepository, type StartGuestBookingInput } from "../src/guest-bookings.ts";
+import { GuestMailOutbox } from "../src/guest-mail-outbox.ts";
 import { HostAccounts } from "../src/host-accounts.ts";
 import { ManagedExperienceSalesRepository, managedPaymentDueDate } from "../src/managed-sales.ts";
 import { ManagedBookingApprovalRepository } from "../src/managed-booking-approvals.ts";
@@ -143,6 +144,7 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       });
       assert.equal((await guests.publicBookingTerms(approvalDraft.slug))?.offers[0]?.acceptanceMode, "APPROVAL");
       const approvalRepository = new ManagedBookingApprovalRepository(pool);
+      const outbox = new GuestMailOutbox(pool);
       const requested = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(2), 1, "approval@example.test"));
       assert.equal(requested.checkoutSessionRef, null);
       assert.equal(requested.booking.sellerSnapshot.acceptanceMode, "APPROVAL");
@@ -150,6 +152,21 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       assert.deepEqual((await pool.query("SELECT approval_status,checkout_session_ref FROM booking_guests WHERE booking_id=(SELECT id FROM bookings WHERE public_booking_id=$1)", [requested.publicBookingId])).rows[0], {
         approval_status: "PENDING", checkout_session_ref: null,
       });
+      const requestedMail = await pool.query("SELECT topic,payload::text,available_at FROM outbox_messages WHERE aggregate_id=$1 AND topic LIKE 'managed.%' ORDER BY topic", [requested.publicBookingId]);
+      assert.deepEqual(requestedMail.rows.map(({ topic }) => topic), [
+        "managed.guest.request_expired", "managed.guest.request_received", "managed.office.new_request",
+      ]);
+      assert.ok(requestedMail.rows.every(({ payload }) => payload === '{\"v\": 1}'));
+      assert.ok(requestedMail.rows.every(({ payload }) => !payload.includes("approval@example.test") && !payload.includes("cs_")));
+      const mailLease = { limit: 25, leaseSeconds: 60 };
+      const receipt = (await outbox.claimManagedGuestMails(mailLease)).mails[0]!;
+      assert.equal(receipt.email?.kind, "REQUEST_RECEIVED");
+      assert.equal(receipt.email?.guestLanguage, "JA");
+      await outbox.completeManagedGuestMail(receipt.id);
+      const office = (await outbox.claimManagedOperationsMails({ ...mailLease, includeProvider: false })).mails[0]!;
+      assert.equal(office.email?.kind, "NEW_REQUEST");
+      assert.doesNotMatch(JSON.stringify(office), /approval@example\.test|Synthetic Guest/);
+      await outbox.completeManagedOperationsMail(office.id);
       await assert.rejects(guests.attachCheckoutSession(requested.publicBookingId, "cs_test_unapproved"), StoreConflictError);
       await assert.rejects(store.confirmBookingPayment({ providerId: profile.providerId }, {
         publicBookingId: requested.publicBookingId, connectedAccountId: PLATFORM, stripePaymentRef: "pi_PlatformTooEarly1",
@@ -160,22 +177,52 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       assert.equal(approvedRequest.checkoutSessionRef, null);
       await assert.rejects(approvalRepository.decline(ADMIN, requested.publicBookingId), StoreConflictError);
       await guests.attachCheckoutSession(requested.publicBookingId, "cs_test_approved_reusable");
+      await guests.attachCheckoutSession(requested.publicBookingId, "cs_test_approved_reusable");
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox_messages WHERE aggregate_id=$1 AND topic='managed.guest.payment_ready'", [requested.publicBookingId])).rows[0]?.n, 1);
+      const paymentMail = (await outbox.claimManagedGuestMails(mailLease)).mails[0]!;
+      assert.equal(paymentMail.email?.kind, "PAYMENT_READY");
+      assert.equal(await outbox.managedGuestMailStillSendable(paymentMail.id, { kind: "PAYMENT_READY", checkoutStatus: "open" }), true);
+      await outbox.completeManagedGuestMail(paymentMail.id);
       assert.equal((await approvalRepository.approve(ADMIN, requested.publicBookingId)).checkoutSessionRef, "cs_test_approved_reusable");
       assert.equal((await store.confirmBookingPayment({ providerId: profile.providerId }, {
         publicBookingId: requested.publicBookingId, connectedAccountId: PLATFORM, stripePaymentRef: "pi_PlatformApproval1",
         stripeEventId: "evt_PlatformApproval1", stripeEventType: "checkout.session.completed", eventOccurredAtUtc: new Date().toISOString(), amount: 10_000, currency: "JPY",
       })).booking.status, "CONFIRMED");
+      assert.deepEqual((await pool.query("SELECT topic FROM outbox_messages WHERE aggregate_id=$1 AND topic LIKE 'managed.%' ORDER BY topic", [requested.publicBookingId])).rows.map(({ topic }) => topic), [
+        "managed.guest.payment_ready", "managed.guest.request_expired", "managed.guest.request_received",
+        "managed.office.confirmed", "managed.office.new_request", "managed.provider.confirmed",
+      ]);
 
       const declinedRequest = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(3), 1, "declined@example.test"));
       await approvalRepository.decline(ADMIN, declinedRequest.publicBookingId);
       assert.equal((await pool.query("SELECT status FROM bookings WHERE public_booking_id=$1", [declinedRequest.publicBookingId])).rows[0]?.status, "EXPIRED");
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox_messages WHERE aggregate_id=$1 AND topic='managed.guest.request_declined'", [declinedRequest.publicBookingId])).rows[0]?.n, 1);
 
       const expiredRequest = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(4), 1, "expired@example.test"));
       await pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
       await pool.query("UPDATE bookings SET created_at=clock_timestamp()-interval '2 minutes',hold_expires_at=clock_timestamp()-interval '1 minute' WHERE public_booking_id=$1", [expiredRequest.publicBookingId]);
       await pool.query("ALTER TABLE bookings ENABLE TRIGGER bookings_protect_snapshots");
       await assert.rejects(approvalRepository.approve(ADMIN, expiredRequest.publicBookingId), StoreConflictError);
+      await pool.query("UPDATE outbox_messages SET available_at=clock_timestamp() WHERE aggregate_id=$1 AND topic='managed.guest.request_expired'", [expiredRequest.publicBookingId]);
+      const expiry = (await outbox.claimManagedGuestMails(mailLease)).mails.find((mail) => mail.email?.publicBookingId === expiredRequest.publicBookingId)!;
+      assert.equal(expiry.email?.kind, "REQUEST_EXPIRED");
+      assert.equal(await outbox.managedGuestMailStillSendable(expiry.id, { kind: "REQUEST_EXPIRED" }), true);
       await approvalRepository.decline(ADMIN, expiredRequest.publicBookingId);
+
+      const asyncRequest = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(4), 1, "async@example.test"));
+      await approvalRepository.approve(ADMIN, asyncRequest.publicBookingId);
+      await guests.attachCheckoutSession(asyncRequest.publicBookingId, "cs_test_async_failed");
+      const asyncFailure = {
+        publicBookingId: asyncRequest.publicBookingId, connectedAccountId: PLATFORM, stripeEventId: "evt_ManagedAsyncFailed",
+        stripeEventType: "checkout.session.async_payment_failed" as const, checkoutSessionRef: "cs_test_async_failed",
+        eventOccurredAtUtc: new Date().toISOString(),
+      };
+      assert.equal((await guests.releaseGuestHold({ ...asyncFailure, stripeEventId: "evt_ManagedWrongSession", checkoutSessionRef: "cs_test_other_session" })).released, false);
+      assert.equal((await guests.releaseGuestHold(asyncFailure)).released, true);
+      assert.equal((await guests.releaseGuestHold(asyncFailure)).duplicateEvent, true);
+      const failure = (await outbox.claimManagedGuestMails(mailLease)).mails.find((mail) => mail.email?.publicBookingId === asyncRequest.publicBookingId)!;
+      assert.equal(failure.email?.kind, "PAYMENT_FAILED");
+      assert.equal(await outbox.managedGuestMailStillSendable(failure.id, { kind: "PAYMENT_FAILED" }), true);
 
       const racedRequest = await guests.startGuestBooking(bookingRequest(approvalDraft.slug, approvalOfferId, day(5), 1, "raced@example.test"));
       const decisions = await Promise.allSettled([
@@ -207,11 +254,15 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       const paid = await guests.startGuestBooking(bookingRequest(draft.slug, offerId, day(2), 1, "paid@example.test"));
       assert.deepEqual([paid.booking.sellerSnapshot.chargeMode, paid.booking.sellerSnapshot.salesPlan, paid.booking.sellerSnapshot.feeBasisPoints], ["PLATFORM", "MANAGED_20", 2000]);
       assert.equal(paid.booking.sellerSnapshot.paymentDuePolicy, "NEXT_MONTH_END");
+      assert.deepEqual((await pool.query("SELECT topic FROM outbox_messages WHERE aggregate_id=$1 AND topic LIKE 'managed.%' ORDER BY topic", [paid.publicBookingId])).rows.map(({ topic }) => topic), []);
       await guests.attachCheckoutSession(paid.publicBookingId, "cs_test_platform_paid_old");
       await store.confirmBookingPayment({ providerId: profile.providerId }, {
         publicBookingId: paid.publicBookingId, connectedAccountId: PLATFORM, stripePaymentRef: "pi_PlatformPaidOld1",
         stripeEventId: "evt_PlatformPaidOld1", stripeEventType: "checkout.session.completed", eventOccurredAtUtc: new Date().toISOString(), amount: 10_000, currency: "JPY",
       });
+      assert.deepEqual((await pool.query("SELECT topic FROM outbox_messages WHERE aggregate_id=$1 AND topic LIKE 'managed.%' ORDER BY topic", [paid.publicBookingId])).rows.map(({ topic }) => topic), [
+        "managed.office.confirmed", "managed.provider.confirmed",
+      ]);
       const openOld = await guests.startGuestBooking(bookingRequest(draft.slug, offerId, day(2), 1, "open@example.test"));
       await guests.attachCheckoutSession(openOld.publicBookingId, "cs_test_platform_open_old");
       const unattachedOld = await guests.startGuestBooking(bookingRequest(draft.slug, offerId, day(2), 1, "unattached@example.test"));
@@ -301,6 +352,10 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       const cancelled = await cancellations.cancelAsSupport(ADMIN, paid.publicBookingId, {
         commandId: randomUUID(), expectedSnapshot: preview.expectedSnapshot, reason: "GUEST_REQUEST", refund: { kind: "PARTIAL", amount: 2_000 },
       });
+      assert.deepEqual((await pool.query("SELECT topic FROM outbox_messages WHERE aggregate_id=$1 AND topic LIKE 'managed.%' ORDER BY topic", [paid.publicBookingId])).rows.map(({ topic }) => topic), [
+        "managed.office.cancelled", "managed.office.confirmed",
+        "managed.provider.cancelled", "managed.provider.confirmed",
+      ]);
       const refund = cancelled.refunds[0]!;
       assert.deepEqual([refund.chargeMode, refund.connectedAccountId, refund.refundApplicationFee], ["PLATFORM", PLATFORM, false]);
       await cancellations.recordRefundSubmission(refund.refundId, { kind: "accepted", stripeRefundRef: "re_PlatformPartial1", status: "succeeded" });

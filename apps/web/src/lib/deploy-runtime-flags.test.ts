@@ -381,9 +381,20 @@ describe("the deploy workflows' feature flags", () => {
     expect(stopped.env.EXPERIENCE_MANAGED_SALES_ENABLED).toBeUndefined();
     expect(stopped.env.EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID).toBe(open.env.EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID);
     expect(stopped.secrets.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET).toBe(open.secrets.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET);
+    expect(stopped.secrets.EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS).toBe(open.secrets.EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS);
 
     const sharedSecret = resolve("prod", { ...vars, PROD_STRIPE_PLATFORM_WEBHOOK_SECRET_REF: vars.PROD_STRIPE_WEBHOOK_SECRET_REF! });
     expect(sharedSecret.problems).toContain("PROD_STRIPE_PLATFORM_WEBHOOK_SECRET_REF must differ from PROD_STRIPE_WEBHOOK_SECRET_REF");
+  });
+
+  it("requires booking mail for managed sales and accepts an optional versioned provider destination secret", () => {
+    const vars = closure("prod", "EXPERIENCE_MANAGED_SALES_ENABLED");
+    const open = resolve("prod", vars);
+    expect(open.problems).toEqual([]);
+    expect(open.secrets.EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS).toBe(vars.PROD_MANAGED_PROVIDER_MAIL_RECIPIENTS_REF);
+    expect(resolve("prod", { ...vars, PROD_MANAGED_PROVIDER_MAIL_RECIPIENTS_REF: "" }).problems).toEqual([]);
+    expect(resolve("prod", { ...vars, PROD_MANAGED_PROVIDER_MAIL_RECIPIENTS_REF: "example:latest" }).problems.join(" ")).toContain("PROD_MANAGED_PROVIDER_MAIL_RECIPIENTS_REF");
+    expect(resolve("prod", { ...vars, PROD_GUEST_MAIL_ENABLED: "false" }).problems.join(" ")).toContain("EXPERIENCE_GUEST_MAIL_ENABLED");
   });
 
   for (const target of ["stg", "prod"] as const) {

@@ -40,17 +40,17 @@ export function AdminBookingApprovals({ initial }: { initial: ManagedBookingAppr
         method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
         body: JSON.stringify({ action, publicBookingId }),
       });
-      const body = await response.json().catch(() => null) as { paymentUrl?: string | null; checkoutCompleted?: boolean; error?: string } | null;
+      const body = await response.json().catch(() => null) as { paymentUrl?: string | null; checkoutCompleted?: boolean; paymentEmailQueued?: boolean; guestEmailQueued?: boolean; error?: string } | null;
       if (!response.ok) throw new Error(body?.error ?? String(response.status));
       if (action === "APPROVE") {
         if (typeof body?.paymentUrl === "string") {
           setPaymentUrls((current) => ({ ...current, [publicBookingId]: body.paymentUrl! }));
-          setNotice("承認しました。下の支払URLを予約者への返信にコピーしてください。自動送信はしていません。");
+          setNotice(body.paymentEmailQueued ? "承認しました。予約者への支払メールを送信待ちに登録しました。下のURLは問い合わせ時の確認・コピー用です。" : "承認しました。下の支払URLを確認してください。");
         } else if (body?.checkoutCompleted) setNotice("予約者はStripeの手続きを完了しました。支払結果はStripeからの通知で確認します。");
         else throw new Error("missing_url");
       } else {
         setPaymentUrls((current) => { const next = { ...current }; delete next[publicBookingId]; return next; });
-        setNotice("辞退を記録し、在庫を戻しました。予約者への連絡は手動で行ってください。");
+        setNotice(body?.guestEmailQueued ? "辞退を記録して在庫を戻し、予約者への辞退メールを送信待ちに登録しました。" : "辞退を記録し、在庫を戻しました。");
       }
       await refresh(page);
     } catch (reason) {
@@ -62,13 +62,13 @@ export function AdminBookingApprovals({ initial }: { initial: ManagedBookingAppr
   }
 
   async function copy(url: string) {
-    try { await navigator.clipboard.writeText(url); setNotice("支払URLをコピーしました。有効期限とともに予約者へ手動で案内してください。"); }
+    try { await navigator.clipboard.writeText(url); setNotice("問い合わせ対応用の支払URLをコピーしました。"); }
     catch { setError("自動コピーに失敗しました。URL欄を選択してコピーしてください。"); }
   }
 
   return <section className="mt-8 rounded-2xl border border-line bg-white p-4 md:p-5" aria-labelledby="booking-approvals-heading">
     <h2 id="booking-approvals-heading" className="font-display text-xl font-medium">承認後に決済する申込</h2>
-    <p className="mt-1 text-sm text-ink-soft">申込時点ではカード情報も決済もありません。承認すると、この画面だけに有効期限付きStripe支払URLを表示します。予約者への送付は事務局が手動で行います。</p>
+    <p className="mt-1 text-sm text-ink-soft">申込時点ではカード情報も決済もありません。承認すると、有効期限付きStripe支払URLを予約者へ自動メールし、この画面にも問い合わせ対応用のコピーを表示します。</p>
     {error ? <p role="alert" className="mt-3 rounded-xl bg-danger-pale p-3 text-sm text-danger">{error}</p> : null}
     {notice ? <p role="status" className="mt-3 rounded-xl bg-leaf-pale p-3 text-sm text-moss">{notice}</p> : null}
     {requests.length === 0 ? <p className="mt-4 text-sm text-muted">対応中の申込はありません。</p> : <ul className="mt-4 space-y-3">
@@ -86,10 +86,10 @@ export function AdminBookingApprovals({ initial }: { initial: ManagedBookingAppr
             <span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{request.status === "PENDING" ? "判断待ち" : "承認済み・支払待ち"}</span>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className={BUTTON} disabled={!request.holdActive || busy !== null || loading} onClick={() => void decide(request.publicBookingId, "APPROVE")}>{busy === request.publicBookingId ? "処理中…" : request.status === "APPROVED" ? "支払URLを再表示" : "承認して支払URLを作る"}</button>
+            <button type="button" className={BUTTON} disabled={!request.holdActive || busy !== null || loading} onClick={() => void decide(request.publicBookingId, "APPROVE")}>{busy === request.publicBookingId ? "処理中…" : request.status === "APPROVED" ? "支払メールを再確認" : "承認して支払メールを登録"}</button>
             {request.status === "PENDING" ? <button type="button" className={DANGER} disabled={busy !== null || loading} onClick={() => void decide(request.publicBookingId, "DECLINE")}>辞退して在庫を戻す</button> : null}
           </div>
-          {url ? <div className="mt-3 rounded-xl border border-line bg-white p-3"><label className="text-xs font-extrabold text-ink-soft">予約者へ手動送付するStripe支払URL<input readOnly value={url} onFocus={(event) => event.currentTarget.select()} className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-xs" /></label><button type="button" className={`${BUTTON} mt-2`} onClick={() => void copy(url)}>URLをコピー</button></div> : null}
+          {url ? <div className="mt-3 rounded-xl border border-line bg-white p-3"><label className="text-xs font-extrabold text-ink-soft">問い合わせ対応用のStripe支払URL（予約者へは自動メール）<input readOnly value={url} onFocus={(event) => event.currentTarget.select()} className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-xs" /></label><button type="button" className={`${BUTTON} mt-2`} onClick={() => void copy(url)}>予備URLをコピー</button></div> : null}
         </li>;
       })}
     </ul>}

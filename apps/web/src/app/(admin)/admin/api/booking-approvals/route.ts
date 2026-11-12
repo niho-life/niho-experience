@@ -67,7 +67,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     if (body.action === "DECLINE") {
       await current.approvals.decline(current.actor, body.publicBookingId);
-      return adminJson({ decision: "DECLINED" });
+      return adminJson({ decision: "DECLINED", guestEmailQueued: true });
     }
 
     // The transaction marks APPROVED before any Stripe call. A failed call is recoverable by repeating this
@@ -84,7 +84,10 @@ export async function POST(request: Request): Promise<Response> {
     }
     if (approved.checkoutSessionRef !== null) {
       const prior = await retrievePlatformCheckout({ booking: approved.booking, checkoutSessionId: approved.checkoutSessionRef, platformStripeKey: key });
-      if (prior.status === "open") return adminJson({ decision: "APPROVED", paymentUrl: prior.checkoutUrl });
+      if (prior.status === "open") {
+        await current.bookings.attachCheckoutSession(approved.booking.publicBookingId, approved.checkoutSessionRef);
+        return adminJson({ decision: "APPROVED", paymentUrl: prior.checkoutUrl, paymentEmailQueued: true });
+      }
       if (prior.status === "complete") return adminJson({ decision: "APPROVED", paymentUrl: null, checkoutCompleted: true });
       return adminJson({ error: "conflict" }, 409);
     }
@@ -108,13 +111,13 @@ export async function POST(request: Request): Promise<Response> {
       try {
         const reconciled = await current.approvals.approve(current.actor, body.publicBookingId);
         if (reconciled.checkoutSessionRef === session.checkoutSessionId) {
-          return adminJson({ decision: "APPROVED", paymentUrl: session.checkoutUrl });
+          return adminJson({ decision: "APPROVED", paymentUrl: session.checkoutUrl, paymentEmailQueued: true });
         }
       } catch { /* Preserve the original attachment failure and keep the URL private. */ }
       try { await expirePlatformCheckout({ booking: approved.booking, checkoutSessionId: session.checkoutSessionId, platformStripeKey: key }); }
       catch { /* The URL is not returned; a later Admin retry reconciles the same Session. */ }
       throw error;
     }
-    return adminJson({ decision: "APPROVED", paymentUrl: session.checkoutUrl });
+    return adminJson({ decision: "APPROVED", paymentUrl: session.checkoutUrl, paymentEmailQueued: true });
   } catch (error) { return failure(error); }
 }

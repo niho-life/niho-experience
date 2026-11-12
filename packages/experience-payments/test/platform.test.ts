@@ -7,6 +7,7 @@ import {
   expireDirectCheckout,
   expirePlatformCheckout,
   retrievePlatformAccount,
+  retrievePlatformCheckout,
   submitBookingRefund,
   verifyPlatformCheckoutWebhook,
   type PaymentsStripeClient,
@@ -89,6 +90,21 @@ describe("managed platform payment boundary", () => {
     } } } as unknown as Pick<Stripe, "accounts">;
     assert.equal((await retrievePlatformAccount({ expectedAccountId: PLATFORM_ID, stripe })).id, PLATFORM_ID);
     assert.deepEqual(calls, [[]]);
+  });
+
+  it("retrieves only the booking's trusted Stripe-hosted platform Checkout URL and real expiry", async () => {
+    const stripe = { checkout: { sessions: { retrieve: async () => ({
+      id: "cs_test_platform_synthetic", status: "open", url: "https://checkout.stripe.com/c/pay/platform",
+      expires_at: 1_793_493_600, metadata: { source: "niho-experience-platform", booking_id: BOOKING_ID },
+    }) } } } as unknown as PaymentsStripeClient;
+    assert.deepEqual(await retrievePlatformCheckout({ booking: booking(), checkoutSessionId: "cs_test_platform_synthetic", stripe }), {
+      status: "open", checkoutUrl: "https://checkout.stripe.com/c/pay/platform", expiresAtUtc: "2026-11-01T00:40:00.000Z",
+    });
+    const untrusted = { checkout: { sessions: { retrieve: async () => ({
+      id: "cs_test_platform_synthetic", status: "open", url: "https://checkout.stripe.example/pay/platform",
+      expires_at: 1_793_493_600, metadata: { source: "niho-experience-platform", booking_id: BOOKING_ID },
+    }) } } } as unknown as PaymentsStripeClient;
+    await assert.rejects(() => retrievePlatformCheckout({ booking: booking(), checkoutSessionId: "cs_test_platform_synthetic", stripe: untrusted }), /untrusted Checkout URL/);
   });
 
   it("expires an old platform Session without a connected-account header", async () => {

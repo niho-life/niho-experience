@@ -66,8 +66,8 @@ beforeEach(() => {
   state.approvals.decline.mockResolvedValue(undefined);
   state.bookings.attachCheckoutSession.mockResolvedValue(undefined);
   state.account.mockResolvedValue({ id: ACCOUNT, chargesEnabled: true, detailsSubmitted: true, country: "JP", defaultCurrency: "JPY" });
-  state.create.mockResolvedValue({ checkoutSessionId: "cs_test_approval", checkoutUrl: "https://checkout.stripe.test/pay/approval" });
-  state.retrieve.mockResolvedValue({ status: "open", checkoutUrl: "https://checkout.stripe.test/pay/approval" });
+  state.create.mockResolvedValue({ checkoutSessionId: "cs_test_approval", checkoutUrl: "https://checkout.stripe.com/c/pay/approval" });
+  state.retrieve.mockResolvedValue({ status: "open", checkoutUrl: "https://checkout.stripe.com/c/pay/approval", expiresAtUtc: "2026-11-12T23:00:00.000Z" });
   state.expire.mockResolvedValue("expired");
 });
 
@@ -92,7 +92,7 @@ describe("managed booking approval Admin BFF", () => {
   it("approves before creating Checkout and returns the URL only to Admin", async () => {
     const response = await POST(post({ action: "APPROVE", publicBookingId: BOOKING }));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ decision: "APPROVED", paymentUrl: "https://checkout.stripe.test/pay/approval" });
+    expect(await response.json()).toEqual({ decision: "APPROVED", paymentUrl: "https://checkout.stripe.com/c/pay/approval", paymentEmailQueued: true });
     expect(state.approvals.approve).toHaveBeenCalledWith({ nihoUserId: "admin-current" }, BOOKING);
     expect(state.create).toHaveBeenCalledWith(expect.objectContaining({
       booking, returnOrigin: "https://experience.example", returnPath: "/booking/return?type=instant",
@@ -104,10 +104,10 @@ describe("managed booking approval Admin BFF", () => {
   it("retrieves the same attached Session on approval retry and never creates another", async () => {
     state.approvals.approve.mockResolvedValueOnce({ booking, guestEmail: "guest@example.test", checkoutSessionRef: "cs_test_approval" });
     const response = await POST(post({ action: "APPROVE", publicBookingId: BOOKING }));
-    expect(await response.json()).toEqual({ decision: "APPROVED", paymentUrl: "https://checkout.stripe.test/pay/approval" });
+    expect(await response.json()).toEqual({ decision: "APPROVED", paymentUrl: "https://checkout.stripe.com/c/pay/approval", paymentEmailQueued: true });
     expect(state.retrieve).toHaveBeenCalledWith(expect.objectContaining({ checkoutSessionId: "cs_test_approval" }));
     expect(state.create).not.toHaveBeenCalled();
-    expect(state.bookings.attachCheckoutSession).not.toHaveBeenCalled();
+    expect(state.bookings.attachCheckoutSession).toHaveBeenCalledWith(BOOKING, "cs_test_approval");
   });
 
   it("declines without Stripe and maps a decision collision", async () => {
@@ -133,7 +133,7 @@ describe("managed booking approval Admin BFF", () => {
     state.bookings.attachCheckoutSession.mockRejectedValueOnce(new StoreConflictError("already attached"));
     const response = await POST(post({ action: "APPROVE", publicBookingId: BOOKING }));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ decision: "APPROVED", paymentUrl: "https://checkout.stripe.test/pay/approval" });
+    expect(await response.json()).toEqual({ decision: "APPROVED", paymentUrl: "https://checkout.stripe.com/c/pay/approval", paymentEmailQueued: true });
     expect(state.expire).not.toHaveBeenCalled();
   });
 });

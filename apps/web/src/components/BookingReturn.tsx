@@ -24,7 +24,7 @@ export function BookingReturn({ type, showReview, freeBooking = false }: { type:
   const eyebrow = type ? "thank you" : "almost there";
   const heading = managedRequest ? "NIHO will review your request" : approval ? "The host will review your request" : freeBooking ? "Check your email for your free booking" : type ? "Check your email for your booking" : "Check your email";
   const lead = managedRequest
-    ? "Submitting a request does not require a card or take payment. If NIHO approves your request, we’ll email you a Stripe payment link."
+    ? "We’ll email you a receipt for your request. Submitting a request does not require a card or take payment. If NIHO approves it, we’ll email you a Stripe payment link."
     : approval
     ? "You are charged only if they accept. We email you either way."
     : freeBooking

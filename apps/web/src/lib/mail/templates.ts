@@ -1,4 +1,4 @@
-import type { BookingConfirmationEmail, BookingLinkEmail, BookingMeetingGuideEmail, BookingNoticeEmail, ClaimedBookingMessage, ClaimedSupportBookingMessage, ReviewInvitationEmail } from "@niho-experience/experience-store";
+import type { BookingConfirmationEmail, BookingLinkEmail, BookingMeetingGuideEmail, BookingNoticeEmail, ClaimedBookingMessage, ClaimedSupportBookingMessage, ManagedGuestMailEmail, ManagedOperationsMailEmail, ReviewInvitationEmail } from "@niho-experience/experience-store";
 import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationTermsWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
 
 /**
@@ -351,4 +351,88 @@ export function bookingNoticeEmail(email: BookingNoticeEmail, options: { readonl
     ...page,
     { kind: "p", text: "To reply, answer this email and NIHO support will help." },
   ]);
+}
+
+const DATE_JA = new Intl.DateTimeFormat("ja-JP", { timeZone: "UTC", dateStyle: "full" });
+
+function instantInLocale(value: string, locale: "en" | "ja"): string {
+  return new Intl.DateTimeFormat(locale === "ja" ? "ja-JP" : "en-US", {
+    timeZone: "Asia/Tokyo", dateStyle: "long", timeStyle: "short",
+  }).format(new Date(value)) + (locale === "ja" ? "（日本時間）" : " (Japan time)");
+}
+
+/** MANAGED_20 request lifecycle mail. Checkout URLs exist only in this in-memory render call. */
+export function managedGuestBookingEmail(
+  email: ManagedGuestMailEmail,
+  options: { readonly checkoutUrl?: string; readonly checkoutExpiresAtUtc?: string },
+): RenderedMail {
+  const experience = oneLine(email.experienceTitle);
+  const ja = email.guestLanguage === "JA";
+  const language = ja ? "ja" : "en";
+  const facts: MailBlock = {
+    kind: "facts",
+    rows: ja
+      ? [["体験", experience], ["日付", calendarDate(email.localDate, DATE_JA)], ["時刻", `${email.localStartTime}（${email.timeZone === "Asia/Tokyo" ? "日本時間" : email.timeZone}）`], ["予約番号", email.publicBookingId]]
+      : [["Experience", experience], ["Date", calendarDate(email.localDate, DATE_LONG)], ["Time", `${email.localStartTime} ${zoneName(email.timeZone)}`], ["Booking reference", email.publicBookingId]],
+  };
+  if (email.kind === "REQUEST_RECEIVED") {
+    return mail(ja ? `予約リクエストを受け付けました：${experience}` : `We received your booking request: ${experience}`, [
+      { kind: "p", text: ja ? `${oneLine(email.guestName)} 様` : `Hi ${oneLine(email.guestName)},` },
+      { kind: "p", text: ja ? "予約リクエストを受け付けました。この時点ではお支払いは発生していません。NIHO事務局が確認後、結果をメールでお知らせします。" : "We received your booking request. No payment has been taken. NIHO will review it and email you with the result." },
+      facts,
+      { kind: "p", text: ja ? `このリクエストの期限は ${instantInLocale(email.holdExpiresAtUtc, language)} です。` : `This request is held until ${instantInLocale(email.holdExpiresAtUtc, language)}.` },
+    ], language);
+  }
+  if (email.kind === "PAYMENT_READY") {
+    if (!options.checkoutUrl || !options.checkoutExpiresAtUtc) throw new Error("A managed payment email needs a verified Checkout URL and expiry.");
+    return mail(ja ? `予約が承認されました：${experience}のお支払い` : `Your request is approved: pay for ${experience}`, [
+      { kind: "p", text: ja ? `${oneLine(email.guestName)} 様` : `Hi ${oneLine(email.guestName)},` },
+      { kind: "p", text: ja ? "予約リクエストが承認されました。下のStripe決済ページから期限までにお支払いください。お支払い完了後に予約が確定します。" : "Your booking request is approved. Please pay on Stripe before the deadline below. Your booking is confirmed after payment succeeds." },
+      facts,
+      { kind: "p", text: ja ? `支払期限：${instantInLocale(options.checkoutExpiresAtUtc, language)}` : `Payment deadline: ${instantInLocale(options.checkoutExpiresAtUtc, language)}` },
+      { kind: "link", lead: ja ? "安全なStripe決済ページ：" : "Secure Stripe payment page:", label: ja ? "支払いへ進む" : "Pay now", href: options.checkoutUrl },
+      { kind: "p", text: ja ? "このリンクを転送しないでください。ご不明点はこのメールへ返信してください。" : "Please do not forward this link. Reply to this email if you need help." },
+    ], language);
+  }
+  if (email.kind === "REQUEST_DECLINED") {
+    return mail(ja ? `予約リクエストをお受けできませんでした：${experience}` : `We couldn't accept your booking request: ${experience}`, [
+      { kind: "p", text: ja ? `${oneLine(email.guestName)} 様` : `Hi ${oneLine(email.guestName)},` },
+      { kind: "p", text: ja ? "申し訳ありませんが、今回は予約リクエストをお受けできませんでした。お支払いは発生していません。" : "We're sorry, but we couldn't accept this booking request. No payment was taken." },
+      facts,
+      { kind: "p", text: ja ? "別の日程をご検討ください。ご不明点はこのメールへ返信してください。" : "Please consider another date. Reply to this email if you need help." },
+    ], language);
+  }
+  if (email.kind === "PAYMENT_FAILED") {
+    return mail(ja ? `お支払いを完了できませんでした：${experience}` : `Your payment didn't go through: ${experience}`, [
+      { kind: "p", text: ja ? `${oneLine(email.guestName)} 様` : `Hi ${oneLine(email.guestName)},` },
+      { kind: "p", text: ja ? "お支払いを完了できず、予約は成立しませんでした。" : "Your payment didn't go through and your booking couldn't be confirmed." },
+      facts,
+      { kind: "p", text: ja ? "ご参加をご希望の場合は、体験ページから改めてお申し込みください。" : "If you would still like to join, please make a new request from the experience page." },
+    ], language);
+  }
+  return mail(ja ? `予約リクエストの期限が切れました：${experience}` : `Your booking request expired: ${experience}`, [
+    { kind: "p", text: ja ? `${oneLine(email.guestName)} 様` : `Hi ${oneLine(email.guestName)},` },
+    { kind: "p", text: ja ? "期限までに予約を確定できなかったため、確保していた在庫を戻しました。お支払いは完了していません。" : "The request could not be confirmed before its deadline, so the held place was released. Payment was not completed." },
+    facts,
+    { kind: "p", text: ja ? "参加をご希望の場合は、体験ページから改めてお申し込みください。" : "If you would still like to join, please make a new request from the experience page." },
+  ], language);
+}
+
+/** NIHO office/provider copy: deliberately contains no guest identity or guest/payment access link. */
+export function managedOperationsBookingEmail(email: ManagedOperationsMailEmail, siteUrl: string): RenderedMail {
+  const experience = oneLine(email.experienceTitle);
+  const event = email.kind === "NEW_REQUEST" ? "新しい申込" : email.kind === "CONFIRMED" ? "予約確定" : "予約取消";
+  const audience = email.role === "OFFICE" ? "NIHO事務局" : "体験提供者";
+  return mail(`[${audience}] ${event}：${experience}`, [
+    { kind: "facts", rows: [
+      ["体験", experience],
+      ["日付", calendarDate(email.localDate, DATE_JA)],
+      ["時刻", `${email.localStartTime}（${email.timeZone === "Asia/Tokyo" ? "日本時間" : email.timeZone}）`],
+      ["人数", `大人${email.adultCount}人${email.childCount ? `、子ども${email.childCount}人` : ""}`],
+      ["予約番号", email.publicBookingId],
+    ] },
+    ...(email.role === "OFFICE" ? [
+      { kind: "link", lead: "事務局で対応するには、管理画面を開いてください。", label: "予約管理を開く", href: absolute(siteUrl, "/admin/site-bookings") } as const,
+    ] : []),
+  ], "ja");
 }

@@ -33,6 +33,7 @@ import { withTransaction } from "./transaction.ts";
 import { snapshotGuestMeetingGuide } from "./guest-meeting-guides.ts";
 import { enqueueNewBookingNotification } from "./host-notification-outbox.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+import { enqueueManagedBookingConfirmed } from "./managed-booking-mail.ts";
 import { calendarMembershipRole, effectiveCalendarRole, listCalendarProductsForActor, requireProductCalendarAccess } from "./product-calendar-authorization.ts";
 import {
   evaluateStoredInventory,
@@ -1396,6 +1397,13 @@ export class ExperienceStore {
             startsAt: updatedBooking.occurrenceSnapshot.startUtc,
             seats: Number(guestRow.party),
           });
+          if (updatedBooking.sellerSnapshot.chargeMode === "PLATFORM"
+            && updatedBooking.sellerSnapshot.salesPlan === "MANAGED_20") {
+            await enqueueManagedBookingConfirmed(client, {
+              providerId: scope.providerId,
+              publicBookingId: updatedBooking.publicBookingId,
+            });
+          }
         }
       }
       await enqueueCalendarRecalculation(client, {

@@ -94,7 +94,8 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `EXPERIENCE_PUBLICATIONS_ENABLED` | `false` | #330/#369のExperience公開readとhost publication基盤。HTTP modeではhost console・DB・掲載同意version・GCS公開media bucketが必要 |
 | `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` | `false` | NIHO Host v1のidentity/Connect readとExperience OWNER boundaryを使うhost BFF。NIHO v1の配備・service identity許可・exact origin・stg受入までOFF。提供者一覧やNIHO商品APIは使わない。audienceはhost consoleの基礎設定として別途必要。詳細は[consumer contract](host-niho-v1-consumer.md) |
 | `EXPERIENCE_PUBLICATION_CONSENT_VERSION` | 未設定 | 掲載同意の承認済み版。BFFからホストへ返す版識別子で、承認された同意文と対にしてのみ設定する。未設定なら同意不足として公開不可 |
-| `EXPERIENCE_MANAGED_SALES_ENABLED` | `false` | NIHO完全代行の新規試験販売を許可する。事務局の掲載準備とゲスト予約の既存設定が前提。提供者の掲載・委託・報酬の合意を確認した体験に適用する |
+| `EXPERIENCE_MANAGED_SALES_ENABLED` | `false` | NIHO完全代行の新規試験販売を許可する。事務局の掲載準備、ゲスト予約、メール配信が前提。提供者の掲載・委託・報酬の合意を確認した体験に適用する |
+| `EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS` | 未設定 | 完全代行の確定・取消を受け取る提供者の宛先。商品IDをキーとするJSONオブジェクトで、事務局が許諾済みの宛先を登録する。本番ではSecret Managerから実行時に渡す |
 | `EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED` | `false` | 完全代行の決済通知と既存予約の精算を運用する。新規受付を止めても、事務局の報酬記録とホストの報酬表示のため維持する |
 | `EXPERIENCE_MANAGED_SELLER_NIHO_ACCOUNT_REF` / `EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID` / `EXPERIENCE_MANAGED_LEGAL_SELLER_NAME` / `EXPERIENCE_MANAGED_COMMERCIAL_TRANSACTIONS_URL` | 未設定 | NIHO運営法人の販売者参照、Stripeプラットフォーム口座ID、正式な販売者名、HTTPSの特定商取引法表示。公開時はサーバーで口座をStripeに照会する |
 | `EXPERIENCE_MANAGED_AGREEMENT_VERSION` | 未設定 | 試験導入で使う委託・報酬条件の承認済み版。事務局が体験ごとに確認方法と支払期日を記録する |

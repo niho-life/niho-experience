@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from "pg";
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+import { enqueueManagedRequestDeclined } from "./managed-booking-mail.ts";
 import { bookingFromRow, isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { BookingRecord, PublicationAdminDraftActor } from "./types.ts";
@@ -186,6 +187,7 @@ export class ManagedBookingApprovalRepository {
           WHERE provider_id=$1 AND booking_id=$2 AND approval_status='PENDING'`,
         [providerId, row.id, actor.nihoUserId],
       );
+      await enqueueManagedRequestDeclined(client, { providerId, publicBookingId });
       if (row.status === "HOLD") {
         await client.query("UPDATE bookings SET status='EXPIRED',updated_at=clock_timestamp() WHERE provider_id=$1 AND id=$2", [providerId, row.id]);
         await enqueueCalendarRecalculation(client, {

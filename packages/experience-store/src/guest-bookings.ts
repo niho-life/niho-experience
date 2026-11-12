@@ -53,6 +53,13 @@ import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import { enqueueNewBookingNotification } from "./host-notification-outbox.ts";
 import { assertManagedBookingPublicationOpen } from "./managed-booking-approvals.ts";
 import {
+  enqueueManagedBookingConfirmed,
+  enqueueManagedBookingStarted,
+  enqueueManagedPaymentReady,
+  enqueueManagedPaymentFailed,
+  expediteManagedRequestExpiry,
+} from "./managed-booking-mail.ts";
+import {
   BOOKING_COLUMNS,
   OVERRIDE_COLUMNS,
   RULE_COLUMNS,
@@ -2065,6 +2072,16 @@ export class GuestBookingRepository {
           request.clientRequestKey, request.fingerprint, JSON.stringify(request.utm), approvalRequest ? "PENDING" : null,
         ],
       );
+      const managedBooking = placed.booking.sellerSnapshot.chargeMode === "PLATFORM"
+        && placed.booking.sellerSnapshot.salesPlan === "MANAGED_20";
+      if (managedBooking) {
+        await enqueueManagedBookingStarted(client, {
+          providerId,
+          publicBookingId: placed.booking.publicBookingId,
+          approval: approvalRequest,
+          holdExpiresAtUtc: placed.booking.holdExpiresAtUtc,
+        });
+      }
       if (totalYen === 0) {
         const confirmed = await client.query<DbRow>(
           `UPDATE bookings SET status='CONFIRMED', confirmed_at=clock_timestamp(), updated_at=clock_timestamp()
@@ -2083,6 +2100,9 @@ export class GuestBookingRepository {
           providerId, bookingId: booking.publicBookingId, experienceTitle: product.publicTitle,
           startsAt: booking.occurrenceSnapshot.startUtc, seats: headCount,
         });
+        if (managedBooking) {
+          await enqueueManagedBookingConfirmed(client, { providerId, publicBookingId: booking.publicBookingId });
+        }
         await enqueueCalendarRecalculation(client, {
           providerId, aggregateType: "schedule_occurrence", aggregateId: booking.occurrenceId, cause: "booking_confirmed",
         });
@@ -2124,10 +2144,17 @@ export class GuestBookingRepository {
       );
       const row = found.rows[0];
       if (row === undefined) throw new StoreNotFoundError("guest booking");
-      if (row.checkout_session_ref === sessionRef) return;
+      const seller = row.seller_snapshot as Record<string, unknown>;
+      const managedApproval = seller.chargeMode === "PLATFORM" && seller.salesPlan === "MANAGED_20"
+        && seller.acceptanceMode === "APPROVAL";
+      if (row.checkout_session_ref === sessionRef) {
+        if (managedApproval && row.status === "HOLD" && row.hold_active === true && row.approval_status === "APPROVED") {
+          await enqueueManagedPaymentReady(client, { providerId, publicBookingId });
+        }
+        return;
+      }
       if (row.checkout_session_ref !== null) throw new StoreConflictError("Another Checkout Session is already attached to this booking.");
       if (row.status !== "HOLD" || row.hold_active !== true) throw new StoreConflictError("Only an active hold can take a Checkout Session.");
-      const seller = row.seller_snapshot as Record<string, unknown>;
       if ((seller.acceptanceMode === "APPROVAL" && row.approval_status !== "APPROVED")
         || (seller.acceptanceMode !== "APPROVAL" && row.approval_status !== null)) {
         throw new StoreConflictError("The booking is not authorized to take a Checkout Session.");
@@ -2146,6 +2173,7 @@ export class GuestBookingRepository {
         "UPDATE booking_guests SET checkout_session_ref=$3 WHERE provider_id=$1 AND booking_id=$2",
         [row.provider_id, row.booking_id, sessionRef],
       );
+      if (managedApproval) await enqueueManagedPaymentReady(client, { providerId, publicBookingId });
     });
   }
 
@@ -2229,6 +2257,16 @@ export class GuestBookingRepository {
       );
       // Under the event lock, an ID that is taken but not for this booking belongs to another one.
       if (inserted.rows[0] === undefined) throw new StoreConflictError("Stripe event ID is already used outside this booking scope.");
+      const managedApproval = booking.sellerSnapshot.chargeMode === "PLATFORM"
+        && booking.sellerSnapshot.salesPlan === "MANAGED_20" && booking.sellerSnapshot.acceptanceMode === "APPROVAL";
+      const mailRef = { providerId, publicBookingId: booking.publicBookingId };
+      // An asynchronous payment can fail after the hold already lapsed. Its signed event still
+      // belongs to this attached Session, and is the first definitive failure for the guest.
+      if (managedApproval && input.stripeEventType === "checkout.session.async_payment_failed"
+        && (release || booking.status === "EXPIRED") && !booking.stripePaymentRef
+        && guest.rows[0]?.checkout_session_ref === input.checkoutSessionRef) {
+        await enqueueManagedPaymentFailed(client, mailRef);
+      }
       if (!release) return { status: booking.status, released: false, duplicateEvent: false };
 
       await client.query(
@@ -2238,6 +2276,9 @@ export class GuestBookingRepository {
       await enqueueCalendarRecalculation(client, {
         providerId, aggregateType: "schedule_occurrence", aggregateId: booking.occurrenceId, cause: "booking_hold_released",
       });
+      if (managedApproval && input.stripeEventType === "checkout.session.expired") {
+        await expediteManagedRequestExpiry(client, mailRef);
+      }
       return { status: "EXPIRED", released: true, duplicateEvent: false };
     });
   }
