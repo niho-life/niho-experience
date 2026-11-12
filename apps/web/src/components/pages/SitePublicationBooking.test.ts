@@ -18,9 +18,9 @@ const offer = {
 
 describe("site publication booking seller terms", () => {
   it.each([
-    ["en", "Sold by Panasonic Holdings Corporation", "seller information for Panasonic Holdings Corporation"],
-    ["ja", "販売者：パナソニックホールディングス株式会社", "パナソニックホールディングス株式会社の販売者情報"],
-  ] as const)("uses the official seller name in the %s form and its seller information link", (locale, seller, link) => {
+    ["en", "Panasonic Holdings Corporation", "seller information for Panasonic Holdings Corporation"],
+    ["ja", "パナソニックホールディングス株式会社", "パナソニックホールディングス株式会社の販売者情報"],
+  ] as const)("shows the official seller name once in the %s consent before submission", (locale, seller, link) => {
     const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
       item: {
         publication: { slug: "synthetic-experience", publicTitle: "Synthetic experience", japanese: { title: "体験サンプル" } },
@@ -29,8 +29,10 @@ describe("site publication booking seller terms", () => {
       } as never,
       siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true, locale,
     }));
-    expect(html).toContain(seller);
     expect(html).toContain(link);
+    expect(html.split(seller)).toHaveLength(2);
+    expect(html.indexOf(link)).toBeGreaterThan(html.indexOf('type="checkbox"'));
+    expect(html.indexOf(link)).toBeLessThan(html.indexOf('type="submit"'));
   });
 
   it("shows a request form without promising immediate checkout for managed approval", () => {
@@ -45,6 +47,9 @@ describe("site publication booking seller terms", () => {
     expect(html).toContain("Send booking request");
     expect(html).toContain("No payment is taken when you request");
     expect(html).not.toContain("Continue to secure checkout");
+    expect(html).toContain("Sold by NIHO");
+    expect(html.indexOf("Sold by NIHO")).toBeGreaterThan(html.indexOf("Total"));
+    expect(html.indexOf("Sold by NIHO")).toBeLessThan(html.indexOf('type="submit"'));
   });
 
   it.each([

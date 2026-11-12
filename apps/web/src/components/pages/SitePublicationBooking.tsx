@@ -129,10 +129,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   const pricePerAdult = (item: SitePublicOffer) => `${formatYen(item.pricing.adultPriceYen, locale)} ${ja ? "/ 大人1名" : "per adult"}`;
 
   return <form onSubmit={submit} className="rounded-[var(--radius-card)] border border-line bg-white p-5 sm:p-7">
-    <div>
-      <p className="wrap-anywhere text-sm text-ink-soft">{ja ? `販売者：${sellerInformationName}` : `Sold by ${sellerInformationName}`}</p>
-      <h1 className="mt-1 text-3xl">{approval ? (ja ? `${publication.japanese!.title}の予約リクエスト` : `Request to book ${publication.publicTitle}`) : (ja ? `${publication.japanese!.title}を予約` : `Book ${publication.publicTitle}`)}</h1>
-    </div>
+    <h1 className="text-3xl">{approval ? (ja ? `${publication.japanese!.title}の予約リクエスト` : `Request to book ${publication.publicTitle}`) : (ja ? `${publication.japanese!.title}を予約` : `Book ${publication.publicTitle}`)}</h1>
     <div className="mt-6 grid grid-cols-1 gap-5">
       {offers.length > 1 ? <label className={FIELD_LABEL}>{ja ? "プラン" : "Option"}
         <select required value={offerId} onChange={(event) => { const next = offers.find((item) => item.id === event.target.value); setOfferId(event.target.value); setDate(""); setAnswers({}); if (!next?.pricing.child) setChildren(0); }} className={FIELD_SELECT}>
@@ -175,6 +172,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
         <div className="flex justify-between gap-3"><span>{ja ? "合計" : "Total"}</span><b>{total === null ? ja ? "人数を確認してください" : "Check guest counts" : formatYen(total, locale)}</b></div>
         <p className="mt-2 text-ink-soft">{ja ? "最低請求人数がある場合は合計に含まれます。席を確保する前に最終金額を再確認します。" : "The total includes the offer’s minimum chargeable guest count where one is set. The final amount is checked again before a seat is held."}</p>
       </div>
+      {!sellerInformationUrl ? <p className="wrap-anywhere text-sm text-ink-soft">{ja ? `販売者：${sellerInformationName}` : `Sold by ${sellerInformationName}`}</p> : null}
       <label className="flex items-start gap-3 text-sm text-ink-soft">
         <input type="checkbox" required checked={agreed} onChange={(event) => setAgreed(event.target.checked)} className="mt-1 size-4 shrink-0" />
         <span className="min-w-0 wrap-anywhere">{ja ? "上記の予約・キャンセル条件と" : "I agree to the booking and cancellation conditions shown above and the "}<a className="font-extrabold underline" href="/privacy" target="_blank" rel="noreferrer">{ja ? "プライバシーポリシー" : "Privacy Policy"}</a>{sellerInformationUrl ? <>{ja ? "、および" : ", and "}<a className="underline underline-offset-2" href={sellerInformationUrl} target="_blank" rel="noreferrer">{ja ? `${sellerInformationName}の販売者情報` : `seller information for ${sellerInformationName}`}</a></> : null}{ja ? "に同意します。" : "."}</span>
