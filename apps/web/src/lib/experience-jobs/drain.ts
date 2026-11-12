@@ -1,11 +1,12 @@
 import "server-only";
-import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostAccounts, type HostMailOutbox, type HostNotificationAddresses, type HostNotificationOutbox } from "@niho-experience/experience-store";
+import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type BookingRecord, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostAccounts, type HostMailOutbox, type HostNotificationAddresses, type HostNotificationOutbox } from "@niho-experience/experience-store";
+import type { RetrievedPlatformCheckout } from "@niho-experience/experience-payments";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { cleanupProviderMedia, type ProviderMediaCleanupCounts, type ProviderMediaCleanupDeps } from "@/lib/experience/provider-media-cleanup";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import type { HostPushKind } from "@/lib/host/push/payload";
 import { hostAddressConfirmationEmail, hostBookingEmail, hostLoginLinkEmail, hostNotificationEmail } from "@/lib/mail/host-templates";
-import { bookingConfirmationEmail, bookingLinkEmail, bookingMeetingGuideEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail, reviewInvitationEmail, supportBookingMessageEmail } from "@/lib/mail/templates";
+import { bookingConfirmationEmail, bookingLinkEmail, bookingMeetingGuideEmail, bookingMessageEmail, bookingNoticeEmail, managedGuestBookingEmail, managedOperationsBookingEmail, questionReplyEmail, reviewInvitationEmail, supportBookingMessageEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
 import { guestMessageToJapanese } from "@/lib/translation/prompts";
@@ -66,6 +67,7 @@ export const EXPERIENCE_JOB_LIMITS = {
   translationBudgetMs: 60_000,
   /** ホストへのメール (#194): booking emails and address confirmations a run sends, one claimed at a time as the guests'. */
   hostMails: 20,
+  managedMails: 30,
   hostAddressConfirmations: 10,
   hostMailLeaseSeconds: 120,
   /** People whose access ended, their addresses deleted per run. */
@@ -169,6 +171,7 @@ export interface ExperienceJobCounts {
   readonly questionReplies: QuestionReplyCounts | FailedStep;
   readonly bookingConfirmations: BookingConfirmationCounts | FailedStep;
   readonly bookingNotices: BookingNoticeCounts | FailedStep;
+  readonly managedBookingMails?: BookingConfirmationCounts | FailedStep;
   readonly reviewInvitations?: BookingConfirmationCounts | FailedStep;
   readonly meetingGuides?: BookingConfirmationCounts | StepOff | FailedStep;
   readonly meetingGuideSnapshotPurge?: PurgeCounts | StepOff | FailedStep;
@@ -200,6 +203,19 @@ export interface ExperienceJobDeps {
   readonly confirmations: Pick<GuestMailOutbox, "claimBookingConfirmations" | "completeBookingConfirmation" | "retryBookingConfirmation">;
   readonly bookingLinks: Pick<GuestMailOutbox, "claimBookingLinks" | "completeBookingLink" | "retryBookingLink">;
   readonly notices: Pick<GuestMailOutbox, "claimBookingNotices" | "completeBookingNotice" | "retryBookingNotice">;
+  /** MANAGED_20 guest/office/provider mail, including a fresh Stripe read for payment links. */
+  readonly managedBookingMail?: {
+    readonly outbox: Pick<GuestMailOutbox,
+      "claimManagedGuestMails" | "completeManagedGuestMail" | "retryManagedGuestMail" | "managedGuestMailStillSendable"
+      | "claimManagedOperationsMails" | "completeManagedOperationsMail" | "retryManagedOperationsMail"
+      | "managedProviderRecipientAlreadyCovered">;
+    readonly retrieveCheckout: (input: {
+      readonly booking: Readonly<Pick<BookingRecord, "publicBookingId" | "sellerSnapshot">>;
+      readonly checkoutSessionId: string;
+    }) => Promise<RetrievedPlatformCheckout>;
+    readonly officeRecipient: string;
+    readonly providerRecipient?: (productId: string) => string | null;
+  };
   /** Present only when reviews and attendance are enabled. */
   readonly reviewInvitations?: {
     readonly outbox: Pick<GuestMailOutbox, "claimReviewInvitations" | "completeReviewInvitation" | "retryReviewInvitation">;
@@ -394,6 +410,94 @@ async function sendBookingNotices(deps: ExperienceJobDeps): Promise<BookingNotic
       else counts.failed += 1;
     } else {
       if (await deps.notices.retryBookingNotice(notice.id, notice.attempts) === "FAILED") counts.failed += 1;
+      else counts.retried += 1;
+      break;
+    }
+  }
+  return counts;
+}
+
+async function sendManagedBookingMails(
+  deps: ExperienceJobDeps,
+  source: NonNullable<ExperienceJobDeps["managedBookingMail"]>,
+): Promise<BookingConfirmationCounts> {
+  const startedAt = deps.now().getTime();
+  const counts = { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 };
+
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.managedMails)) {
+    const claim = await source.outbox.claimManagedGuestMails({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.confirmationLeaseSeconds });
+    counts.abandoned += claim.abandoned;
+    const [row] = claim.mails;
+    if (!row) break;
+    counts.claimed += 1;
+    if (!row.email) {
+      await source.outbox.completeManagedGuestMail(row.id); counts.skipped += 1; continue;
+    }
+    let checkout: RetrievedPlatformCheckout | undefined;
+    if (row.email.kind === "PAYMENT_READY" || (row.email.kind === "REQUEST_EXPIRED" && row.email.checkoutSessionRef)) {
+      try {
+        checkout = await source.retrieveCheckout({ booking: row.email.booking, checkoutSessionId: row.email.checkoutSessionRef! });
+      } catch {
+        if (await source.outbox.retryManagedGuestMail(row.id, row.attempts) === "FAILED") counts.failed += 1;
+        else counts.retried += 1;
+        break;
+      }
+      if (row.email.kind === "REQUEST_EXPIRED" && checkout.status === "open") {
+        if (await source.outbox.retryManagedGuestMail(row.id, row.attempts) === "FAILED") counts.failed += 1;
+        else counts.retried += 1;
+        break;
+      }
+      if (row.email.kind === "PAYMENT_READY" && checkout.status === "open"
+        && (Date.parse(checkout.expiresAtUtc) <= deps.now().getTime()
+          || Date.parse(checkout.expiresAtUtc) > Date.parse(row.email.holdExpiresAtUtc))) {
+        if (await source.outbox.retryManagedGuestMail(row.id, row.attempts) === "FAILED") counts.failed += 1;
+        else counts.retried += 1;
+        break;
+      }
+    }
+    const checkoutStatus = checkout?.status;
+    if (!await source.outbox.managedGuestMailStillSendable(row.id, { kind: row.email.kind, ...(checkoutStatus ? { checkoutStatus } : {}) })) {
+      await source.outbox.completeManagedGuestMail(row.id); counts.skipped += 1; continue;
+    }
+    const rendered = managedGuestBookingEmail(row.email, checkout?.status === "open"
+      ? { checkoutUrl: checkout.checkoutUrl, checkoutExpiresAtUtc: checkout.expiresAtUtc }
+      : {});
+    const result = await deps.mailer.sendMail({ to: row.email.guestEmail, ...rendered, deliveryRef: row.deliveryRef });
+    if (result.ok || result.failure === "permanent") {
+      await source.outbox.completeManagedGuestMail(row.id);
+      if (result.ok) counts.sent += 1; else counts.failed += 1;
+    } else {
+      if (await source.outbox.retryManagedGuestMail(row.id, row.attempts) === "FAILED") counts.failed += 1;
+      else counts.retried += 1;
+      break;
+    }
+  }
+
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.managedMails)) {
+    const claim = await source.outbox.claimManagedOperationsMails({
+      limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.confirmationLeaseSeconds, includeProvider: source.providerRecipient !== undefined,
+    });
+    counts.abandoned += claim.abandoned;
+    const [row] = claim.mails;
+    if (!row) break;
+    counts.claimed += 1;
+    if (!row.email) {
+      await source.outbox.completeManagedOperationsMail(row.id); counts.skipped += 1; continue;
+    }
+    let recipient = row.email.role === "OFFICE" ? source.officeRecipient : source.providerRecipient?.(row.email.productId) ?? null;
+    if (row.email.role === "PROVIDER" && recipient) {
+      if (recipient.toLowerCase() === source.officeRecipient.toLowerCase()
+        || (deps.hostMail && await source.outbox.managedProviderRecipientAlreadyCovered(row.email, recipient))) recipient = null;
+    }
+    if (!recipient) {
+      await source.outbox.completeManagedOperationsMail(row.id); counts.skipped += 1; continue;
+    }
+    const result = await deps.mailer.sendMail({ to: recipient, ...managedOperationsBookingEmail(row.email, deps.siteUrl) });
+    if (result.ok || result.failure === "permanent") {
+      await source.outbox.completeManagedOperationsMail(row.id);
+      if (result.ok) counts.sent += 1; else counts.failed += 1;
+    } else {
+      if (await source.outbox.retryManagedOperationsMail(row.id, row.attempts) === "FAILED") counts.failed += 1;
       else counts.retried += 1;
       break;
     }
@@ -702,6 +806,9 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
     ? await step(deps, "meetingGuides", () => sendMeetingGuides(deps, deps.meetingGuides!))
     : undefined;
   const bookingNotices = await step(deps, "bookingNotices", () => sendBookingNotices(deps));
+  const managedBookingMails = deps.managedBookingMail
+    ? await step(deps, "managedBookingMails", () => sendManagedBookingMails(deps, deps.managedBookingMail!))
+    : undefined;
   const reviewInvitations = deps.reviewInvitations
     ? await step(deps, "reviewInvitations", () => sendReviewInvitations(deps, deps.reviewInvitations!))
     : undefined;
@@ -780,6 +887,7 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
     ...(meetingGuideSnapshotPurge ? { meetingGuideSnapshotPurge } : {}),
     ...(reviewInvitations ? { reviewInvitations } : {}),
     ...(meetingGuides ? { meetingGuides } : {}),
+    ...(managedBookingMails ? { managedBookingMails } : {}),
     ...(hostLoginLinks ? { hostLoginLinks } : {}),
     ...(hostAccountPurge ? { hostAccountPurge } : {}),
     ...(adminSessionPurge ? { adminSessionPurge } : {}),

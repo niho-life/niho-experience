@@ -75,8 +75,8 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `ADMIN_SUPPORT_CONSOLE_ENABLED` | `ADMIN_SUPPORT_CONSOLE_ENABLED` | ホストの画面・DB（配備capability） | — | `ADMIN_SESSION_SECRET_REF` → `ADMIN_SESSION_SECRET`（専用の32文字以上の乱数、数値version固定） | `NIHO_EXPERIENCE_ADMIN_ORIGIN`＝サイトのURL |
 | `EXPERIENCE_GUEST_BOOKING_ENABLED` | `GUEST_BOOKING_ENABLED` | ホストの画面・DB、メール | `BOOKING_CONSENT_VERSION`、`PRIVACY_POLICY_URL`（任意） | `STRIPE_PLATFORM_SECRET_KEY_REF` → `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET_REF` → `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | — |
 | `EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED` | `MANAGED_SALES_WEBHOOKS_ENABLED` | ゲスト予約 | `MANAGED_PLATFORM_ACCOUNT_ID` | `STRIPE_PLATFORM_WEBHOOK_SECRET_REF` → `EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET`（Connect用と別の数値version固定参照） | — |
-| `EXPERIENCE_MANAGED_SALES_ENABLED` | `MANAGED_SALES_ENABLED` | 完全代行Webhook、掲載API、Admin | `MANAGED_LEGAL_SELLER_NAME`、`MANAGED_COMMERCIAL_TRANSACTIONS_URL`、`MANAGED_SELLER_NIHO_ACCOUNT_REF`、`MANAGED_AGREEMENT_VERSION`、`OWNER_SALES_PLAN_AGREEMENT_VERSION`（任意） | — | — |
-| `EXPERIENCE_GUEST_MAIL_ENABLED` | `GUEST_MAIL_ENABLED` | DB | `MAIL_FROM`、`MAIL_REPLY_TO` | `SMTP_HOST_REF`・`SMTP_PORT_REF`・`SMTP_USER_REF`・`SMTP_PASSWORD_REF` → `EXPERIENCE_SMTP_*` | `EXPERIENCE_JOBS_AUDIENCE`＝サイトの URL、`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL`＝`experience-jobs@<project>` |
+| `EXPERIENCE_MANAGED_SALES_ENABLED` | `MANAGED_SALES_ENABLED` | 完全代行Webhook、掲載API、Admin、ゲストメール | `MANAGED_LEGAL_SELLER_NAME`、`MANAGED_COMMERCIAL_TRANSACTIONS_URL`、`MANAGED_SELLER_NIHO_ACCOUNT_REF`、`MANAGED_AGREEMENT_VERSION`、`OWNER_SALES_PLAN_AGREEMENT_VERSION`（任意） | — | — |
+| `EXPERIENCE_GUEST_MAIL_ENABLED` | `GUEST_MAIL_ENABLED` | DB | `MAIL_FROM`、`MAIL_REPLY_TO` | `SMTP_HOST_REF`・`SMTP_PORT_REF`・`SMTP_USER_REF`・`SMTP_PASSWORD_REF` → `EXPERIENCE_SMTP_*`、`MANAGED_PROVIDER_MAIL_RECIPIENTS_REF` → `EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS`（任意） | `EXPERIENCE_JOBS_AUDIENCE`＝サイトの URL、`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL`＝`experience-jobs@<project>` |
 | `EXPERIENCE_PUBLICATIONS_ENABLED` | `PUBLICATIONS_ENABLED` | ホストの画面・DB | `PUBLICATION_CONSENT_VERSION`、`PUBLIC_MEDIA_BUCKET` | DB capability → `EXPERIENCE_DATABASE_URL` | — |
 | `EXPERIENCE_HOST_PUBLICATION_API_ENABLED` | `HOST_PUBLICATION_API_ENABLED` | Experience publications | — | — | — |
 | `EXPERIENCE_PROVIDER_PAGES_API_ENABLED` | `PROVIDER_PAGES_API_ENABLED` | legacy NIHO provider-pages consumer（有効化禁止） | — | — | — |
@@ -146,6 +146,8 @@ mock で出している機能を http mode で開くフラグを、repository va
 Experience用の制限付きキーは既存のConnect権限を保ち、NIHO-platform自身のCheckout SessionsとCharges and Refundsの書込み、Payment Intentsの読取りを許可する。Payment Intentsの読取りは、予約台帳にまだ結び付いていない異議申立ての取引元を照合するために使う。
 
 `PROD_MANAGED_SALES_WEBHOOKS_ENABLED=true` でWebhookの設定を配備し、販売条件を確認した1件を事務局で公開する配備では `PROD_MANAGED_SALES_ENABLED=true` も設定する。完全代行の新規受付を止める場合は、販売のフラグを `false` にして候補を作り直す。受付済みの予約の決済確定・返金・精算に使うため、Webhookのフラグと口座・署名秘密の参照は維持する。
+
+完全代行の申込・確定・取消を受け取る事務局の窓口は `PROD_MAIL_REPLY_TO` に設定する。提供者の確定・取消の宛先は、許諾済みの通知先を確認し、Secret Manager に `{"商品ID":"提供者のメールアドレス"}` のJSONとして保存する。実行用サービスアカウントにこのSecretの読取権限を付け、`PROD_MANAGED_PROVIDER_MAIL_RECIPIENTS_REF` にはSecret名と数値versionの参照だけを設定する。既存予約の通知を続ける場合は新規受付停止後もメールジョブとこの参照を維持する。
 
 **フラグを足すとき**（paneB-1・paneB-2 など）：`scripts/deploy/runtime-flags.mjs` の `FLAGS` に 1 項目（Cloud Run の名前、variable、前提、設定・Secret、workflow が入れる値）、`deploy-runtime-flags.test.ts` の `CONFIG_KEY` に 1 行、この表と [stg の表](host-calendar-staging.md#機能のフラグ84) に 1 行。workflow は変えなくてよい。
 

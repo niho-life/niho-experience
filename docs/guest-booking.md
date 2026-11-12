@@ -15,11 +15,11 @@ Experienceの公開商品は `packages/experience-store` が開催枠・予約�
 
 ### MANAGED_20の承認後決済（#515）
 
-公開offerの `acceptanceMode=APPROVAL` は、immutableな販売プラン版から読む。古い画面や不正な入力が即時決済として送っても、storeが予約snapshotへ `APPROVAL` を固定し、公開POSTは `201 { checkoutUrl: /booking/return?type=managed-request }` だけを返す。この段階ではStripe API、カード、与信、請求は一切無い。受付ページも「未決済」と「承認後に事務局から支払URLを手動案内する」ことを明示する。
+公開offerの `acceptanceMode=APPROVAL` は販売プラン版から読み、受付時の予約に固定する。公開POSTは `201 { checkoutUrl: /booking/return?type=managed-request }` を返す。この段階で決済は始まらず、予約者への受付控えと事務局への新着メールを、予約の仮押さえと同じトランザクションでキューに積む。
 
-`booking_guests.approval_status` は `PENDING → APPROVED | DECLINED` の一方向で、判断したAdminと時刻を保存する。Admin一覧には日時、人数、金額、連絡先、24時間の在庫期限を出す。承認は提供者在庫lockの下でactive hold、予約snapshot、現在の販売プラン版とfenceを再確認し、先に `APPROVED` を確定してから既存のplatform Checkout adapterを呼ぶ。Stripe障害後に同じ承認を再送すると、予約単位の冪等keyで同じSessionを回収する。支払URLはAdminのprivate/no-store応答だけに出し、事務局担当者が有効期限とともに予約者へ手動送付する。成功時の戻り先は通常の支払済み案内 `/booking/return?type=instant` とする。
+`booking_guests.approval_status` は `PENDING → APPROVED | DECLINED` の一方向で、判断したAdminと時刻を保存する。Admin一覧には日時、人数、金額、連絡先、24時間の在庫期限を出す。承認後のCheckout Sessionを予約へ保存すると、支払い案内を同じトランザクションでキューに積む。配信時に保存済みSessionをStripeから読み、予約と照合して、利用可能な支払いリンクだけを予約者へ送る。事務局は必要に応じて同じリンクを管理画面から再表示できる。支払い後の戻り先は `/booking/return?type=instant` とする。
 
-辞退は `PENDING` の間だけで、同じlockの下で在庫を即時解放し、Stripeや返金を呼ばない。期限切れの申込は承認できず、既存のHOLD期限処理で在庫から自然に外れる。未承認のSession添付とwebhook確定はstoreでも拒否する。承認後の決済、platform webhook、決済台帳、取消・返金、異議申立て、提供報酬は既存MANAGED_20と同じ経路を使う。
+辞退は `PENDING` の間だけで、同じトランザクションで在庫を戻して辞退通知を積む。仮押さえ期限を過ぎた申込には、予約とStripeの状態を確認して期限切れを知らせる。処理中の支払いはStripeの結果を待ち、非同期決済の失敗が確定したときは失敗を通知する。ゲストの予約確定メールは、承認後決済・即時決済とも既存の支払い確定処理から送る。無料の即時予約では申込完了が確定となる。確定・取消は完全代行を担当する事務局と、通知先を設定した提供者へも送る。事務局用宛先は `EXPERIENCE_MAIL_REPLY_TO`、提供者用宛先は非公開の体験別設定を使う。申込状態・支払いリンクと通知の境界は #524 で検証する。
 
 ## 再送と失敗
 

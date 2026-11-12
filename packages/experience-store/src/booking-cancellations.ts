@@ -7,6 +7,7 @@ import { GUEST_MAIL_SUPPRESSION_CLASSIFICATION, publicBookingIdOf, requireBookin
 import { enqueueCancellationNotification } from "./host-notification-outbox.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
+import { enqueueManagedBookingCancelled } from "./managed-booking-mail.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { GuestCancellationPolicy, HostActor } from "./types.ts";
@@ -381,6 +382,7 @@ interface LockedBooking {
   readonly currency: string;
   readonly connectedAccountId: string;
   readonly chargeMode: "PLATFORM" | "CONNECT_DIRECT";
+  readonly managed20: boolean;
   readonly stripePaymentRef: string | null;
   readonly party: number;
   readonly title: string;
@@ -424,6 +426,7 @@ function lockedFromRow(row: DbRow): LockedBooking {
     currency: text(pricing.currency, "pricing_snapshot.currency"),
     connectedAccountId: text(seller.stripeConnectAccountRef, "seller_snapshot.stripeConnectAccountRef"),
     chargeMode: seller.chargeMode === "PLATFORM" ? "PLATFORM" : "CONNECT_DIRECT",
+    managed20: seller.chargeMode === "PLATFORM" && seller.salesPlan === "MANAGED_20",
     stripePaymentRef: typeof row.stripe_payment_ref === "string" ? row.stripe_payment_ref : null,
     party: amount(row.party, "party"),
     title: text(row.public_title, "public_title"),
@@ -757,6 +760,12 @@ async function cancelLocked(client: PoolClient, booking: LockedBooking, spec: Ca
   if (spec.notifyHost && wasConfirmed) {
     await enqueueCancellationNotification(client, {
       providerId: booking.providerId, bookingId: booking.publicBookingId, experienceTitle: booking.title, startsAt: booking.startUtc, seats: Math.max(1, booking.party),
+    });
+  }
+  if (wasConfirmed && booking.managed20) {
+    await enqueueManagedBookingCancelled(client, {
+      providerId: booking.providerId,
+      publicBookingId: booking.publicBookingId,
     });
   }
   return refund;

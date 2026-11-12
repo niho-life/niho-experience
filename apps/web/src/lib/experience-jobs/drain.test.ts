@@ -276,6 +276,61 @@ describe("runExperienceJobs", () => {
     expect(experienceJobActivity(counts)).toEqual({ failed: false, active: true });
   });
 
+  it("retrieves a MANAGED_20 payment link at send time and keeps office/provider role delivery independent", async () => {
+    const booking = {
+      publicBookingId: facts(1).publicBookingId,
+      sellerSnapshot: {
+        experienceProviderId: "provider-a", nihoAccountRef: "niho-synthetic", displayName: "NIHO Synthetic",
+        chargeMode: "PLATFORM", salesPlan: "MANAGED_20", stripeConnectAccountRef: "acct_PlatformSynthetic1",
+      },
+    } as const;
+    const common = {
+      publicBookingId: facts(1).publicBookingId, experienceTitle: "Synthetic managed walk",
+      localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
+      holdExpiresAtUtc: "2026-11-01T01:00:00.000Z",
+    } as const;
+    const guestRows = [{
+      id: "501", deliveryRef: deliveryRefFor(501), attempts: 1,
+      email: { ...common, guestEmail: "managed@example.test", guestName: "Synthetic Managed Guest", guestLanguage: "EN" as const,
+        kind: "PAYMENT_READY" as const, checkoutSessionRef: "cs_test_managed_mail", booking },
+    }];
+    const operationFacts = {
+      providerId: "provider-a", publicBookingId: common.publicBookingId, experienceTitle: common.experienceTitle,
+      localDate: common.localDate, localStartTime: common.localStartTime, timeZone: common.timeZone,
+      adultCount: 1, childCount: 0, totalAmount: 10_000, currency: "JPY",
+    } as const;
+    const operationRows = [
+      { id: "502", attempts: 1, email: { ...operationFacts, productId: "product-a", role: "OFFICE" as const, kind: "CONFIRMED" as const } },
+      { id: "503", attempts: 1, email: { ...operationFacts, productId: "product-a", role: "PROVIDER" as const, kind: "CONFIRMED" as const } },
+      { id: "504", attempts: 1, email: { ...operationFacts, productId: "product-office-duplicate", role: "PROVIDER" as const, kind: "CANCELLED" as const } },
+    ];
+    const outbox = {
+      claimManagedGuestMails: vi.fn(async () => ({ mails: guestRows.splice(0, 1), abandoned: 0 })),
+      completeManagedGuestMail: vi.fn(async () => {}), retryManagedGuestMail: vi.fn(async () => "RETRY" as const),
+      managedGuestMailStillSendable: vi.fn(async () => true),
+      claimManagedOperationsMails: vi.fn(async () => ({ mails: operationRows.splice(0, 1), abandoned: 0 })),
+      completeManagedOperationsMail: vi.fn(async () => {}), retryManagedOperationsMail: vi.fn(async () => "RETRY" as const),
+      managedProviderRecipientAlreadyCovered: vi.fn(async () => false),
+    };
+    const retrieveCheckout = vi.fn(async () => ({ status: "open" as const, checkoutUrl: "https://checkout.stripe.com/c/pay/managed",
+      expiresAtUtc: "2026-11-01T00:40:00.000Z" }));
+    const counts = await runExperienceJobs({ ...s.deps, managedBookingMail: {
+      outbox,
+      retrieveCheckout,
+      officeRecipient: "office@example.test",
+      providerRecipient: (productId) => productId === "product-a" ? "provider@example.test" : "office@example.test",
+    } });
+    expect(counts.managedBookingMails).toEqual({ claimed: 4, sent: 3, skipped: 1, retried: 0, failed: 0, abandoned: 0 });
+    expect(retrieveCheckout).toHaveBeenCalledWith({ booking, checkoutSessionId: "cs_test_managed_mail" });
+    expect(s.sent.map(({ to }) => to)).toEqual(["managed@example.test", "office@example.test", "provider@example.test"]);
+    expect(s.sent[0]?.text).toContain("https://checkout.stripe.com/c/pay/managed");
+    expect(s.sent[0]?.deliveryRef).toBe(deliveryRefFor(501));
+    for (const message of s.sent.slice(1)) {
+      expect(message.text).not.toMatch(/Synthetic Managed Guest|managed@example\.test|checkout\.stripe\.com/);
+      expect(message.deliveryRef).toBeUndefined();
+    }
+  });
+
   it("reports the erasure counts", async () => {
     s.guests.eraseGuestData.mockResolvedValueOnce(3);
     s.otaGuests.eraseGuestDetails.mockResolvedValueOnce(4);

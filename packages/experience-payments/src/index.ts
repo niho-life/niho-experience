@@ -94,17 +94,20 @@ export async function isManagedPlatformPaymentIntent(input: {
 
 export interface RetrieveDirectCheckoutInput {
   /** The booking the Session was created for; its seller's account holds the Session. */
-  readonly booking: Readonly<BookingRecord>;
+  readonly booking: Readonly<Pick<BookingRecord, "publicBookingId" | "sellerSnapshot">>;
   readonly checkoutSessionId: string;
   readonly platformStripeKey?: string;
   readonly stripe?: PaymentsStripeClient;
 }
 
-/** A Session created before: still payable (its URL), paid, or over. */
+/** Checkout's complete status also covers a payment still processing. */
 export type RetrievedDirectCheckout =
   | { readonly status: "open"; readonly checkoutUrl: string }
   | { readonly status: "complete" }
   | { readonly status: "expired" };
+
+export type RetrievedPlatformCheckout = Exclude<RetrievedDirectCheckout, { status: "open" }>
+  | { readonly status: "open"; readonly checkoutUrl: string; readonly expiresAtUtc: string };
 
 export interface VerifyDirectCheckoutWebhookInput {
   /** Exact, unparsed bytes received from Stripe. */
@@ -474,10 +477,20 @@ export async function createPlatformCheckout(input: Omit<CreateDirectCheckoutInp
     payment_intent_data: { metadata: { source: "niho-experience-platform", booking_id: bookingId } },
   }, { idempotencyKey: `experience-platform-checkout:${bookingId}` });
   if (!session.id || !session.url) throw new ExperiencePaymentsValidationError("Stripe returned a Checkout Session without a redirect URL.");
-  return { checkoutSessionId: session.id, checkoutUrl: session.url };
+  return { checkoutSessionId: session.id, checkoutUrl: platformCheckoutUrl(session.url) };
 }
 
-export async function retrievePlatformCheckout(input: RetrieveDirectCheckoutInput): Promise<RetrievedDirectCheckout> {
+function platformCheckoutUrl(value: string): string {
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new ExperiencePaymentsValidationError("Stripe returned an invalid Checkout URL."); }
+  if (url.protocol !== "https:" || url.hostname !== "checkout.stripe.com" || url.username || url.password) {
+    throw new ExperiencePaymentsValidationError("Stripe returned an untrusted Checkout URL.");
+  }
+  return url.href;
+}
+
+export async function retrievePlatformCheckout(input: RetrieveDirectCheckoutInput): Promise<RetrievedPlatformCheckout> {
   if (input.booking.sellerSnapshot.chargeMode !== "PLATFORM" || !CHECKOUT_SESSION_ID.test(input.checkoutSessionId)) {
     throw new ExperiencePaymentsValidationError("The platform Checkout input is invalid.");
   }
@@ -488,7 +501,12 @@ export async function retrievePlatformCheckout(input: RetrieveDirectCheckoutInpu
     throw new ExperiencePaymentsValidationError("The Checkout Session belongs to another booking or source.");
   }
   if (session.status === "complete") return { status: "complete" };
-  if (session.status === "open" && session.url) return { status: "open", checkoutUrl: session.url };
+  if (session.status === "open") {
+    if (!session.url || !Number.isSafeInteger(session.expires_at) || session.expires_at <= 0) {
+      throw new ExperiencePaymentsValidationError("Stripe returned an open Checkout Session without a URL or expiry.");
+    }
+    return { status: "open", checkoutUrl: platformCheckoutUrl(session.url), expiresAtUtc: new Date(session.expires_at * 1000).toISOString() };
+  }
   return { status: "expired" };
 }
 

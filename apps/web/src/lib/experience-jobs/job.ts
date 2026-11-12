@@ -1,6 +1,7 @@
 import "server-only";
 import type { Pool } from "pg";
-import { AdminSessions, BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostAccounts, HostMailOutbox, HostNotificationAddresses, HostNotificationOutbox, ProviderMediaCleanupRepository } from "@niho-experience/experience-store";
+import { retrievePlatformCheckout } from "@niho-experience/experience-payments";
+import { AdminSessions, BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostAccounts, HostMailOutbox, HostNotificationAddresses, HostNotificationOutbox, ProviderMediaCleanupRepository, isHostEmail } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
@@ -41,6 +42,28 @@ export interface ExperienceJobDependencies {
   readonly settlementReconciliation?: (pool: Pool) => SettlementReconciliationDeps | null;
   readonly mediaStorage?: () => ExperiencePublicMediaStorage | null;
   readonly run?: (deps: ExperienceJobDeps) => Promise<ExperienceJobCounts>;
+}
+
+const STORE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
+
+/** Optional private product-to-provider destinations. Invalid configuration fails closed without exposing its value. */
+function managedProviderMailRecipients(raw: string | undefined): ReadonlyMap<string, string> {
+  if (!raw?.trim()) return new Map();
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); } catch { throw new Error("Invalid managed provider mail recipient configuration."); }
+  if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new Error("Invalid managed provider mail recipient configuration.");
+  const entries = Object.entries(decoded as Record<string, unknown>);
+  if (entries.length > 500) throw new Error("Invalid managed provider mail recipient configuration.");
+  const result = new Map<string, string>();
+  for (const [productId, recipient] of entries) {
+    if (!STORE_IDENTIFIER.test(productId) || typeof recipient !== "string" || recipient !== recipient.trim()
+      || recipient !== recipient.toLowerCase() || !isHostEmail(recipient)
+      || !/^[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(recipient)) {
+      throw new Error("Invalid managed provider mail recipient configuration.");
+    }
+    result.set(productId, recipient);
+  }
+  return result;
 }
 
 /** JSON for an internal route: never cached, sniffed or indexed. */
@@ -85,10 +108,30 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
   const guidePhotos = guestBooking ? mediaStorage : null;
   const submit = guestBooking ? (dependencies.refundSubmitter ?? stripeRefundSubmitter)() : null;
   try {
+    let providerMailRecipients: ReadonlyMap<string, string> | undefined;
+    try {
+      providerMailRecipients = managedProviderMailRecipients(process.env.EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS);
+    } catch {
+      // Hold provider mail for the corrected configuration and keep unrelated mail running.
+      console.error("[experience-jobs] invalid managed provider mail recipient configuration");
+    }
+    const officeRecipient = config.guestMailReplyTo?.address;
+    if (!officeRecipient) return internalServiceJson({ error: "unavailable" }, 503);
     const counts = await (dependencies.run ?? runExperienceJobs)({
       questions: new GuestQuestionRepository(pool),
       confirmations: outbox,
       notices: outbox,
+      managedBookingMail: {
+        outbox,
+        retrieveCheckout: (input) => retrievePlatformCheckout({
+          ...input,
+          platformStripeKey: process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY?.trim() || undefined,
+        }),
+        officeRecipient,
+        providerRecipient: providerMailRecipients
+          ? (productId) => providerMailRecipients?.get(productId) ?? null
+          : undefined,
+      },
       bookingLinks: outbox,
       reviewInvitations: config.guestReviewsEnabled && config.hostAttendanceEnabled
         ? { outbox, reviews: new GuestReviewRepository(pool) }

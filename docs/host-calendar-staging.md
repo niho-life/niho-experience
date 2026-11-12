@@ -133,7 +133,7 @@ mock で出している機能を http mode で開くフラグを、`host-staging
 - **legacy NIHO provider pages** は `STG_PROVIDER_PAGES_API_ENABLED` を開かない。Experience商品をNIHO旧商品APIで登録・編集しない。
 - **Experience独自の質問**（「Ask the host」）は `STG_GUEST_QUESTIONS_ENABLED=true` で別に受け入れる。この受入では `STG_PROVIDER_OPERATIONS_API_ENABLED` を `false` または未設定にし、Experience DBの質問と `/questions/reply` を確認する。2つのメッセージ経路は同時に有効化できないため、両方を受け入れるときは別々の候補revisionで行う。
 - **予約**は上の「旅行者の予約」の手順と Variable（`BOOKINGS_ENABLED` は `STG_GUEST_BOOKING_ENABLED` に従う）。
-- **NIHO完全代行**の決済Webhookは、Stripeテストモードで `STG_MANAGED_SALES_WEBHOOKS_ENABLED=true` と `STG_STRIPE_PLATFORM_WEBHOOK_SECRET_REF=experience-stg-stripe-platform-webhook-secret:VERSION_NUMBER` を使う。試験受付には `STG_MANAGED_SALES_ENABLED=true` も設定し、販売者・提供者・契約は合成データを使う。
+- **NIHO完全代行**の決済Webhookは、Stripeテストモードで `STG_MANAGED_SALES_WEBHOOKS_ENABLED=true` と `STG_STRIPE_PLATFORM_WEBHOOK_SECRET_REF=experience-stg-stripe-platform-webhook-secret:VERSION_NUMBER` を使う。試験受付は `STG_MANAGED_SALES_ENABLED=true` と `STG_GUEST_MAIL_ENABLED=true` が必要。販売者・提供者・契約は合成データを使う。提供者へのメールを試す場合は `STG_MANAGED_PROVIDER_MAIL_RECIPIENTS_REF=experience-stg-managed-provider-mail-recipients:VERSION_NUMBER` を使い、宛先には試験用の受信先だけを登録する。
 - **ホストのアカウント**（ADR 0003、メールのログインリンク）は `STG_HOST_ACCOUNTS_ENABLED=true` で開く。`STG_GUEST_MAIL_ENABLED=true` が要り、`STG_PROVIDER_OPERATIONS_API_ENABLED`・`STG_PROVIDER_PAGES_API_ENABLED`・`STG_TRANSLATE_API_ENABLED`・`STG_HOST_ARTICLE_LINKS_ENABLED` とは併用できない（配備前に止まる）。受取口座を Stripe へ直接照会し OWNER が Experience で同意するため（3 段目）、`STG_PAYOUT_ACCOUNT_CONSENT_VERSION`（同意文の版）と `STG_STRIPE_PLATFORM_SECRET_KEY_REF=STRIPE_CONNECT_PLATFORM_SECRET_KEY:<version>`（予約と同じ Secret）も要る。この方式の `STG_HOST_PUBLICATION_API_ENABLED` は NIHO Host v1 を呼ばない。migration `0064`・`0065` を先に適用する。手順と受入は [host-accounts.md](host-accounts.md) の「staging で開く」。
 - **Admin のログイン**（ADR 0003 の 4、Google と許可リスト）は `STG_ADMIN_GOOGLE_LOGIN_ENABLED=true` で開く。`STG_ADMIN_SUPPORT_CONSOLE_ENABLED=true` と `STG_ADMIN_ALLOWED_EMAILS`（`@niho.life` の小文字のアドレスを `;` で区切る。空白なし）が要る。NIHO の Admin トークンを送る API（予約支援の読取・担当・運営操作・開設支援・手数料）とは併用できない（起動時に止まる。どれも表に無い）。migration `0066` を先に適用し、Google Cloud コンソールで stg の OAuth クライアント（`experience-stg-google-client-id`）の承認済みリダイレクト URI に `${STG_HOST_SERVICE_URL}/admin/auth/google/callback` を操作者が追加する。手順と受入は [admin-auth.md](admin-auth.md) の「運用の手順」。
 - **Secret の名前を固定**して検査する（`secret-name:数字version`）：
@@ -198,6 +198,7 @@ Secret の参照（`secret-name:VERSION`、数字 version だけ。workflow は�
 | `STG_SMTP_PORT_REF` | `RECEIPT_DELIVERY_SMTP_PORT` | `EXPERIENCE_SMTP_PORT` | NIHO app 既存 |
 | `STG_SMTP_USER_REF` | `RECEIPT_DELIVERY_SMTP_USER` | `EXPERIENCE_SMTP_USER` | NIHO app 既存 |
 | `STG_SMTP_PASSWORD_REF` | `RECEIPT_DELIVERY_SMTP_PASSWORD` | `EXPERIENCE_SMTP_PASSWORD` | NIHO app 既存 |
+| `STG_MANAGED_PROVIDER_MAIL_RECIPIENTS_REF` | `experience-stg-managed-provider-mail-recipients` | `EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS` | 任意。完全代行の提供者通知を試す場合に試験用宛先を設定 |
 | `STG_STRIPE_PLATFORM_SECRET_KEY_REF` | `STRIPE_CONNECT_PLATFORM_SECRET_KEY` | `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` | NIHO app 既存（Connect プラットフォームの鍵。staging はテストの鍵） |
 | `STG_STRIPE_WEBHOOK_SECRET_REF` | `experience-stg-stripe-webhook-secret` | `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | 新規（このサービスの webhook endpoint の署名鍵） |
 | `STG_ANTHROPIC_API_KEY_REF` | `NIHO_TRANSLATE_ANTHROPIC_API_KEY` | `EXPERIENCE_ANTHROPIC_API_KEY` | NIHO app の既存（`STG_TRANSLATION_ENABLED=true` のときだけ） |

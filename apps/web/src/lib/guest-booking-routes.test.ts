@@ -132,7 +132,7 @@ beforeEach(() => {
     id, country: "JP", default_currency: "jpy", charges_enabled: true, payouts_enabled: true, details_submitted: true,
   }));
   state.stripeCreate = vi.fn(async () => ({ id: "cs_test_sample1", url: "https://checkout.stripe.com/c/pay/cs_test_sample1" }));
-  state.stripeRetrieve = vi.fn(async () => ({ id: "cs_test_sample1", status: "open", url: "https://checkout.stripe.com/c/pay/cs_test_sample1", metadata: { booking_id: BOOKING_ID } }));
+  state.stripeRetrieve = vi.fn(async () => ({ id: "cs_test_sample1", status: "open", url: "https://checkout.stripe.com/c/pay/cs_test_sample1", expires_at: 1_798_762_200, metadata: { booking_id: BOOKING_ID } }));
 });
 
 afterEach(() => {

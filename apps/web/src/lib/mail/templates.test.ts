@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookingConfirmationEmail, BookingLinkEmail } from "@niho-experience/experience-store";
-import { bookingConfirmationEmail, bookingLinkEmail, bookingMessageEmail, questionReplyEmail, type RenderedMail } from "./templates";
+import { bookingConfirmationEmail, bookingLinkEmail, bookingMessageEmail, managedGuestBookingEmail, managedOperationsBookingEmail, questionReplyEmail, type RenderedMail } from "./templates";
 
 /** The guest emails (#285 slice 5) with synthetic data only. */
 const SITE = "https://experience.example";
@@ -230,5 +230,37 @@ describe("the booking page links (#285 slice 6)", () => {
     const plain = bookingMessageEmail(message, { siteUrl: SITE, bookingPageGrant: null });
     expect(plain.text).not.toContain("/bookings");
     expect(plain.text).toContain("Replying to this email reaches NIHO support");
+  });
+});
+
+describe("MANAGED_20 booking mail", () => {
+  const managed = {
+    publicBookingId: confirmation.publicBookingId, guestEmail: "managed@example.test", guestName: "Synthetic Guest",
+    guestLanguage: "EN" as const, experienceTitle: "Synthetic managed walk", localDate: "2026-11-14",
+    localStartTime: "10:00", timeZone: "Asia/Tokyo", holdExpiresAtUtc: "2026-11-01T01:00:00.000Z",
+  };
+
+  it("renders a verified payment URL only for payment-ready mail and uses captured Japanese", () => {
+    const booking = { publicBookingId: managed.publicBookingId, sellerSnapshot: { chargeMode: "PLATFORM", salesPlan: "MANAGED_20" } } as never;
+    const payment = managedGuestBookingEmail({ ...managed, kind: "PAYMENT_READY", checkoutSessionRef: "cs_test_synthetic", booking }, {
+      checkoutUrl: "https://checkout.stripe.com/c/pay/synthetic", checkoutExpiresAtUtc: "2026-11-01T00:40:00.000Z",
+    });
+    expect(payment.text).toContain("Payment deadline: November 1, 2026 at 9:40 AM");
+    expect(payment.text).toContain("https://checkout.stripe.com/c/pay/synthetic");
+    expect(payment.html).toMatch(/^<!doctype html>\n<html lang="en">/);
+    const japanese = managedGuestBookingEmail({ ...managed, guestLanguage: "JA", kind: "REQUEST_DECLINED" }, {});
+    expect(japanese.subject).toContain("予約リクエストをお受けできませんでした");
+    expect(japanese.text).toContain("お支払いは発生していません");
+    expect(japanese.html).toMatch(/^<!doctype html>\n<html lang="ja">/);
+  });
+
+  it("keeps provider mail free of guest identity and access/payment links", () => {
+    const mail = managedOperationsBookingEmail({
+      role: "PROVIDER", kind: "CONFIRMED", providerId: "provider-a", productId: "product-a",
+      publicBookingId: managed.publicBookingId, experienceTitle: managed.experienceTitle, localDate: managed.localDate,
+      localStartTime: managed.localStartTime, timeZone: managed.timeZone, adultCount: 1, childCount: 0,
+    }, SITE);
+    expect(mail.subject).toContain("[体験提供者] 予約確定");
+    expect(`${mail.subject}${mail.text}${mail.html}`).not.toMatch(/Synthetic Guest|managed@example\.test|https?:\/\/|支払いへ進む/);
   });
 });

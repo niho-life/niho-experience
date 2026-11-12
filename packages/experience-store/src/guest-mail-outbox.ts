@@ -3,13 +3,14 @@ import { BOOKING_ACCESS_LIMITS, BOOKING_LINK_TOPIC } from "./booking-access.ts";
 import { REVIEW_INVITATION_TOPIC } from "./booking-attendance.ts";
 import { GUEST_NOTICE_TOPICS } from "./booking-cancellations.ts";
 import { HOST_NOTIFICATION_TOPICS } from "./host-notification-outbox.ts";
-import { enqueueHostBookingMails, HOST_MAIL_TOPICS } from "./host-mail-shared.ts";
+import { enqueueHostBookingMails, HOST_ACCOUNT_USABLE, HOST_MAIL_TOPICS } from "./host-mail-shared.ts";
+import { MANAGED_GUEST_MAIL_TOPICS, MANAGED_OPERATIONS_MAIL_TOPICS } from "./managed-booking-mail.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
 import { cancellationTermsOf } from "./cancellation-terms.ts";
 import { validateGuestMeetingGuide } from "./guest-meeting-guides.ts";
-import type { DbRow } from "./rows.ts";
+import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
-import type { GuestCancellationPolicy } from "./types.ts";
+import type { BookingRecord, GuestCancellationPolicy } from "./types.ts";
 
 /**
  * The booking emails to a guest who booked on this site (#285, docs/guest-booking.md): the confirmation
@@ -32,6 +33,7 @@ export const GUEST_MAIL_LIMITS = {
   noticeAttempts: 8,
   reviewInvitationAttempts: 8,
   meetingGuideAttempts: 8,
+  managedAttempts: 8,
   claimLimitMax: 50,
   leaseSecondsMin: 30,
   leaseSecondsMax: 3600,
@@ -211,13 +213,73 @@ export interface BookingNoticeClaim {
   readonly abandoned: number;
 }
 
+interface ManagedGuestMailFacts {
+  readonly publicBookingId: string;
+  readonly guestEmail: string;
+  readonly guestName: string;
+  readonly guestLanguage: "EN" | "JA";
+  readonly experienceTitle: string;
+  readonly localDate: string;
+  readonly localStartTime: string;
+  readonly timeZone: string;
+  readonly holdExpiresAtUtc: string;
+}
+
+type ManagedCheckoutBooking = Pick<BookingRecord, "publicBookingId" | "sellerSnapshot">;
+
+export type ManagedGuestMailEmail =
+  | (ManagedGuestMailFacts & { readonly kind: "REQUEST_RECEIVED" })
+  | (ManagedGuestMailFacts & { readonly kind: "PAYMENT_READY"; readonly checkoutSessionRef: string; readonly booking: ManagedCheckoutBooking })
+  | (ManagedGuestMailFacts & { readonly kind: "REQUEST_DECLINED" | "PAYMENT_FAILED" })
+  | (ManagedGuestMailFacts & { readonly kind: "REQUEST_EXPIRED"; readonly checkoutSessionRef: string | null; readonly booking: ManagedCheckoutBooking });
+
+export interface ClaimedManagedGuestMail {
+  readonly id: string;
+  readonly deliveryRef: string;
+  readonly attempts: number;
+  readonly email: ManagedGuestMailEmail | null;
+}
+
+export interface ManagedGuestMailClaim {
+  readonly mails: readonly ClaimedManagedGuestMail[];
+  readonly abandoned: number;
+}
+
+export interface ManagedOperationsMailEmail {
+  readonly role: "OFFICE" | "PROVIDER";
+  readonly kind: "NEW_REQUEST" | "CONFIRMED" | "CANCELLED";
+  readonly providerId: string;
+  readonly productId: string;
+  readonly publicBookingId: string;
+  readonly experienceTitle: string;
+  readonly localDate: string;
+  readonly localStartTime: string;
+  readonly timeZone: string;
+  readonly adultCount: number;
+  readonly childCount: number;
+}
+
+export interface ClaimedManagedOperationsMail {
+  readonly id: string;
+  readonly attempts: number;
+  readonly email: ManagedOperationsMailEmail | null;
+}
+
+export interface ManagedOperationsMailClaim {
+  readonly mails: readonly ClaimedManagedOperationsMail[];
+  readonly abandoned: number;
+}
+
 const NOTICE_TOPICS: readonly string[] = Object.values(GUEST_NOTICE_TOPICS);
+const MANAGED_GUEST_TOPICS: readonly string[] = Object.values(MANAGED_GUEST_MAIL_TOPICS);
+const MANAGED_OPERATIONS_TOPICS: readonly string[] = Object.values(MANAGED_OPERATIONS_MAIL_TOPICS);
 const GUEST_BOOKING_MAIL_TOPICS: readonly string[] = [
   GUEST_MAIL_TOPIC,
   BOOKING_LINK_TOPIC,
   REVIEW_INVITATION_TOPIC,
   MEETING_GUIDE_DAY_BEFORE_TOPIC,
   ...NOTICE_TOPICS,
+  ...Object.values(MANAGED_GUEST_MAIL_TOPICS),
 ];
 
 /** After a transient failure: tried again later, given up (attempts used up), or no longer this claim's row. */
@@ -423,6 +485,75 @@ function noticeFromRow(row: DbRow): BookingNoticeEmail | null {
   return null;
 }
 
+function managedGuestMailFromRow(row: DbRow): ManagedGuestMailEmail | null {
+  if (row.guest_email === null || row.guest_name === null) return null;
+  const seller = record(row.seller_snapshot);
+  if (seller.chargeMode !== "PLATFORM" || seller.salesPlan !== "MANAGED_20" || seller.acceptanceMode !== "APPROVAL") return null;
+  const occurrence = record(row.occurrence_snapshot);
+  const facts: ManagedGuestMailFacts = {
+    publicBookingId: text(row.public_booking_id, "public_booking_id"),
+    guestEmail: text(row.guest_email, "guest_email"),
+    guestName: text(row.guest_name, "guest_name"),
+    guestLanguage: row.guest_language === "JA" ? "JA" : "EN",
+    experienceTitle: text(row.public_title, "public_title"),
+    localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
+    localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
+    timeZone: text(occurrence.timeZone, "occurrence_snapshot.timeZone"),
+    holdExpiresAtUtc: isoValue(row, "hold_expires_at"),
+  };
+  const booking: ManagedCheckoutBooking = { publicBookingId: facts.publicBookingId, sellerSnapshot: seller as unknown as BookingRecord["sellerSnapshot"] };
+  if (row.topic === MANAGED_GUEST_MAIL_TOPICS.requestReceived) {
+    return row.status === "HOLD" && row.hold_active === true && (row.approval_status === "PENDING" || row.approval_status === "APPROVED")
+      && row.stripe_payment_ref === null ? { ...facts, kind: "REQUEST_RECEIVED" } : null;
+  }
+  if (row.topic === MANAGED_GUEST_MAIL_TOPICS.paymentReady) {
+    return row.status === "HOLD" && row.hold_active === true && row.approval_status === "APPROVED"
+      && typeof row.checkout_session_ref === "string" && row.stripe_payment_ref === null
+      ? { ...facts, kind: "PAYMENT_READY", checkoutSessionRef: row.checkout_session_ref, booking } : null;
+  }
+  if (row.topic === MANAGED_GUEST_MAIL_TOPICS.requestDeclined) {
+    return row.status === "EXPIRED" && row.approval_status === "DECLINED"
+      ? { ...facts, kind: "REQUEST_DECLINED" } : null;
+  }
+  if (row.topic === MANAGED_GUEST_MAIL_TOPICS.paymentFailed) {
+    return row.status === "EXPIRED" && row.approval_status === "APPROVED" && row.stripe_payment_ref === null
+      ? { ...facts, kind: "PAYMENT_FAILED" } : null;
+  }
+  if (row.topic === MANAGED_GUEST_MAIL_TOPICS.requestExpired) {
+    return (row.status === "HOLD" || row.status === "EXPIRED") && (row.hold_due === true || row.status === "EXPIRED")
+      && (row.approval_status === "PENDING" || row.approval_status === "APPROVED") && row.stripe_payment_ref === null
+      ? { ...facts, kind: "REQUEST_EXPIRED", checkoutSessionRef: typeof row.checkout_session_ref === "string" ? row.checkout_session_ref : null, booking }
+      : null;
+  }
+  return null;
+}
+
+function managedOperationsMailFromRow(row: DbRow): ManagedOperationsMailEmail | null {
+  const seller = record(row.seller_snapshot);
+  if (seller.chargeMode !== "PLATFORM" || seller.salesPlan !== "MANAGED_20") return null;
+  const topic = String(row.topic);
+  const role = topic.startsWith("managed.office.") ? "OFFICE" : topic.startsWith("managed.provider.") ? "PROVIDER" : null;
+  const kind = topic.endsWith(".new_request") ? "NEW_REQUEST" : topic.endsWith(".confirmed") ? "CONFIRMED" : topic.endsWith(".cancelled") ? "CANCELLED" : null;
+  if (role === null || kind === null) return null;
+  if ((kind === "NEW_REQUEST" && (row.status !== "HOLD" || row.approval_status !== "PENDING" || row.hold_active !== true))
+    || (kind === "CONFIRMED" && row.status !== "CONFIRMED")
+    || (kind === "CANCELLED" && row.status !== "CANCELLED")) return null;
+  const occurrence = record(row.occurrence_snapshot);
+  return {
+    role,
+    kind,
+    providerId: text(row.provider_id, "provider_id"),
+    productId: text(row.product_id, "product_id"),
+    publicBookingId: text(row.public_booking_id, "public_booking_id"),
+    experienceTitle: text(row.public_title, "public_title"),
+    localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
+    localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
+    timeZone: text(occurrence.timeZone, "occurrence_snapshot.timeZone"),
+    adultCount: count(row.adult_count, "adult_count"),
+    childCount: count(row.child_count, "child_count"),
+  };
+}
+
 /** bigint ids as text, in numeric order. */
 const byId = (a: { id: string }, b: { id: string }) => a.id.length - b.id.length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
@@ -535,6 +666,154 @@ export class GuestMailOutbox {
   /** As retryBookingConfirmation, for a notice (GUEST_MAIL_LIMITS.noticeAttempts). */
   async retryBookingNotice(id: string, attempts: number): Promise<BookingConfirmationRetry> {
     return this.#retry(NOTICE_TOPICS, GUEST_MAIL_LIMITS.noticeAttempts, id, attempts);
+  }
+
+  async claimManagedGuestMails(options: { limit: number; leaseSeconds: number }): Promise<ManagedGuestMailClaim> {
+    const { rows, abandoned } = await this.#claim(MANAGED_GUEST_TOPICS, GUEST_MAIL_LIMITS.managedAttempts, options);
+    return {
+      mails: rows.map((row): ClaimedManagedGuestMail => ({
+        id: String(row.id),
+        deliveryRef: text(row.mail_delivery_ref, "mail_delivery_ref"),
+        attempts: count(row.attempts, "attempts"),
+        email: managedGuestMailFromRow(row),
+      })).sort(byId),
+      abandoned,
+    };
+  }
+
+  async completeManagedGuestMail(id: string): Promise<void> {
+    await this.#complete(MANAGED_GUEST_TOPICS, id);
+  }
+
+  async retryManagedGuestMail(id: string, attempts: number): Promise<BookingConfirmationRetry> {
+    return this.#retry(MANAGED_GUEST_TOPICS, GUEST_MAIL_LIMITS.managedAttempts, id, attempts);
+  }
+
+  /** Rechecks business state after a Stripe read and immediately before SMTP. */
+  async managedGuestMailStillSendable(
+    id: string,
+    input: { readonly kind: ManagedGuestMailEmail["kind"]; readonly checkoutStatus?: "open" | "complete" | "expired" },
+  ): Promise<boolean> {
+    assertRowId(id);
+    const found = await this.#pool.query<DbRow>(
+      `SELECT m.topic,b.status,b.hold_expires_at > clock_timestamp() AS hold_active,
+              b.hold_expires_at <= clock_timestamp() AS hold_due,b.stripe_payment_ref,b.seller_snapshot,
+              EXISTS (SELECT 1 FROM outbox_messages failed
+                        WHERE failed.provider_id=m.provider_id AND failed.aggregate_id=m.aggregate_id AND failed.topic=$3) AS payment_failed,
+              g.approval_status,g.checkout_session_ref
+         FROM outbox_messages m
+         JOIN bookings b ON ${BOOKING_OF("m")}
+         JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+        WHERE m.id=$1 AND m.topic=ANY($2::text[]) AND m.processed_at IS NULL`,
+      [id, [...MANAGED_GUEST_TOPICS], MANAGED_GUEST_MAIL_TOPICS.paymentFailed],
+    );
+    const row = found.rows[0];
+    if (!row) return false;
+    const seller = record(row.seller_snapshot);
+    if (seller.chargeMode !== "PLATFORM" || seller.salesPlan !== "MANAGED_20" || seller.acceptanceMode !== "APPROVAL") return false;
+    if (input.kind === "REQUEST_RECEIVED") {
+      return row.topic === MANAGED_GUEST_MAIL_TOPICS.requestReceived && row.status === "HOLD" && row.stripe_payment_ref === null
+        && row.hold_active === true && (row.approval_status === "PENDING" || row.approval_status === "APPROVED");
+    }
+    if (input.kind === "PAYMENT_READY") {
+      return row.topic === MANAGED_GUEST_MAIL_TOPICS.paymentReady && input.checkoutStatus === "open" && row.status === "HOLD"
+        && row.hold_active === true && row.stripe_payment_ref === null && row.approval_status === "APPROVED"
+        && typeof row.checkout_session_ref === "string";
+    }
+    if (input.kind === "REQUEST_DECLINED") {
+      return row.topic === MANAGED_GUEST_MAIL_TOPICS.requestDeclined && row.status === "EXPIRED" && row.approval_status === "DECLINED";
+    }
+    if (input.kind === "PAYMENT_FAILED") {
+      return row.topic === MANAGED_GUEST_MAIL_TOPICS.paymentFailed && row.status === "EXPIRED"
+        && row.approval_status === "APPROVED" && row.stripe_payment_ref === null;
+    }
+    const attached = typeof row.checkout_session_ref === "string";
+    return row.topic === MANAGED_GUEST_MAIL_TOPICS.requestExpired && row.payment_failed !== true
+      && (row.status === "HOLD" || row.status === "EXPIRED")
+      && (row.hold_due === true || row.status === "EXPIRED") && row.stripe_payment_ref === null
+      && (row.approval_status === "PENDING" || row.approval_status === "APPROVED")
+      && (!attached || input.checkoutStatus === "expired");
+  }
+
+  async claimManagedOperationsMails(options: { limit: number; leaseSeconds: number; includeProvider?: boolean }): Promise<ManagedOperationsMailClaim> {
+    const limit = boundedInteger(options?.limit, "limit", 1, GUEST_MAIL_LIMITS.claimLimitMax);
+    const leaseSeconds = boundedInteger(options?.leaseSeconds, "leaseSeconds", GUEST_MAIL_LIMITS.leaseSecondsMin, GUEST_MAIL_LIMITS.leaseSecondsMax);
+    const topics = options.includeProvider === false
+      ? MANAGED_OPERATIONS_TOPICS.filter((topic) => topic.startsWith("managed.office."))
+      : MANAGED_OPERATIONS_TOPICS;
+    return withTransaction(this.#pool, async (client) => {
+      const abandoned = await client.query(
+        `UPDATE outbox_messages SET processed_at=clock_timestamp()
+          WHERE topic=ANY($1::text[]) AND processed_at IS NULL AND attempts >= $2 AND available_at <= clock_timestamp()`,
+        [topics, GUEST_MAIL_LIMITS.managedAttempts],
+      );
+      const claimed = await client.query<DbRow>(
+        `WITH due AS (
+           SELECT id FROM outbox_messages
+            WHERE topic=ANY($1::text[]) AND processed_at IS NULL AND attempts < $2 AND available_at <= clock_timestamp()
+            ORDER BY available_at,id LIMIT $3 FOR UPDATE SKIP LOCKED
+         ), claimed AS (
+           UPDATE outbox_messages o SET available_at=clock_timestamp()+make_interval(secs=>$4),attempts=o.attempts+1
+             FROM due WHERE o.id=due.id
+           RETURNING o.id,o.attempts,o.provider_id,o.aggregate_id,o.topic
+         )
+         SELECT c.id::text AS id,c.attempts,c.provider_id,c.topic,b.public_booking_id::text AS public_booking_id,
+                b.product_id,b.status,b.occurrence_snapshot,b.seller_snapshot,
+                b.hold_expires_at > clock_timestamp() AS hold_active,
+                g.adult_count,g.child_count,g.approval_status,p.public_title
+           FROM claimed c
+           JOIN bookings b ON ${BOOKING_OF("c")}
+           JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+           JOIN experience_products p ON p.provider_id=b.provider_id AND p.id=b.product_id`,
+        [topics, GUEST_MAIL_LIMITS.managedAttempts, limit, leaseSeconds],
+      );
+      return {
+        mails: claimed.rows.map((row): ClaimedManagedOperationsMail => ({
+          id: String(row.id), attempts: count(row.attempts, "attempts"), email: managedOperationsMailFromRow(row),
+        })).sort(byId),
+        abandoned: abandoned.rowCount ?? 0,
+      };
+    });
+  }
+
+  async completeManagedOperationsMail(id: string): Promise<void> {
+    assertRowId(id);
+    await this.#pool.query(
+      "UPDATE outbox_messages SET processed_at=clock_timestamp() WHERE id=$1 AND topic=ANY($2::text[]) AND processed_at IS NULL",
+      [id, [...MANAGED_OPERATIONS_TOPICS]],
+    );
+  }
+
+  async retryManagedOperationsMail(id: string, attempts: number): Promise<BookingConfirmationRetry> {
+    assertRowId(id);
+    boundedInteger(attempts, "attempts", 1, GUEST_MAIL_LIMITS.managedAttempts);
+    const updated = await this.#pool.query<DbRow>(
+      `UPDATE outbox_messages
+          SET available_at=CASE WHEN attempts < $3 THEN clock_timestamp()+make_interval(mins=>LEAST(power(2,attempts),60)::int) ELSE available_at END,
+              processed_at=CASE WHEN attempts < $3 THEN NULL ELSE clock_timestamp() END
+        WHERE id=$1 AND topic=ANY($2::text[]) AND attempts=$4 AND processed_at IS NULL
+        RETURNING processed_at IS NOT NULL AS gave_up`,
+      [id, [...MANAGED_OPERATIONS_TOPICS], GUEST_MAIL_LIMITS.managedAttempts, attempts],
+    );
+    const row = updated.rows[0];
+    return !row ? "STALE" : row.gave_up === true ? "FAILED" : "RETRY";
+  }
+
+  /** A configured provider destination may already have a host mail for this booking and event. */
+  async managedProviderRecipientAlreadyCovered(mail: ManagedOperationsMailEmail, recipient: string): Promise<boolean> {
+    const topic = mail.kind === "CONFIRMED" ? HOST_MAIL_TOPICS.newBooking : HOST_MAIL_TOPICS.cancellation;
+    const found = await this.#pool.query<DbRow>(
+      `SELECT EXISTS (
+         SELECT 1 FROM outbox_messages m
+         JOIN provider_memberships p ON p.provider_id=m.provider_id AND p.niho_user_id=m.payload->>'to'
+         JOIN host_notification_addresses a ON a.niho_user_id=p.niho_user_id
+        WHERE m.provider_id=$1 AND m.aggregate_type='booking' AND m.aggregate_id=$2 AND m.topic=$3
+          AND p.active AND p.role='OWNER' AND ${HOST_ACCOUNT_USABLE("p.niho_user_id")}
+          AND lower(COALESCE(a.override_email,a.login_email))=lower($4)
+       ) AS covered`,
+      [mail.providerId, mail.publicBookingId, topic, recipient],
+    );
+    return found.rows[0]?.covered === true;
   }
 
   /**
@@ -693,10 +972,13 @@ export class GuestMailOutbox {
          )
          SELECT c.id::text AS id, c.attempts, c.topic, c.provider_id, c.mail_delivery_ref, b.id::text AS booking_id,
                 ${reviewInvitation ? "a.status" : "NULL::text"} AS attendance_status, b.public_booking_id::text AS public_booking_id, b.status,
-                b.occurrence_snapshot, b.pricing_snapshot, b.seller_snapshot, b.cancelled_by, b.cancellation_reason,
+                b.product_id,b.occurrence_snapshot, b.pricing_snapshot, b.seller_snapshot, b.cancelled_by, b.cancellation_reason,
+                b.hold_expires_at,b.hold_expires_at > clock_timestamp() AS hold_active,
+                b.hold_expires_at <= clock_timestamp() AS hold_due,b.stripe_payment_ref,
                 (b.occurrence_snapshot->>'endUtc')::timestamptz + make_interval(days => $5) > clock_timestamp() AS link_open,
                 (b.occurrence_snapshot->>'startUtc')::timestamptz > clock_timestamp() AS before_start,
-                g.guest_email, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug,
+                g.guest_email, g.guest_name, g.guest_language, g.approval_status, g.checkout_session_ref,
+                g.adult_count, g.child_count, p.public_title, p.slug,
                 provider.public_display_name AS provider_public_name,
                 guide_snapshot.guide AS meeting_guide,
                 (SELECT COALESCE(sum(x.amount), 0)::text FROM booking_refunds x

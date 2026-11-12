@@ -73,8 +73,8 @@ const siteUrl = ({ siteUrl: url }) => url;
  * `env` is also the id. `env`: the Cloud Run variable set to "true". `variable`: the GitHub variable after the prefix.
  * `defaults`: on when its variable is unset (only staging's PWA, which it always had). `needs`: CAPABILITIES or other
  * flags' `env`, "A|B" for either. `conflicts`: flags that may not be on at the same time. `secrets`: Secret Manager
- * references (`name:version`), with staging's fixed Secret
- * name. `settings`: plain values with their shape. `fixed`: values the workflow derives (job audiences and callers).
+ * references (`name:version`), with staging's fixed Secret name. `optional` permits an unset reference.
+ * `settings`: plain values with their shape. `fixed`: values the workflow derives (job audiences and callers).
  */
 export const FLAGS = Object.freeze([
   {
@@ -150,7 +150,7 @@ export const FLAGS = Object.freeze([
   {
     env: "EXPERIENCE_MANAGED_SALES_ENABLED",
     variable: "MANAGED_SALES_ENABLED",
-    needs: ["EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED", "EXPERIENCE_HOST_PUBLICATION_API_ENABLED", "ADMIN_SUPPORT_CONSOLE_ENABLED"],
+    needs: ["EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED", "EXPERIENCE_HOST_PUBLICATION_API_ENABLED", "ADMIN_SUPPORT_CONSOLE_ENABLED", "EXPERIENCE_GUEST_MAIL_ENABLED"],
     settings: [
       { env: "EXPERIENCE_MANAGED_LEGAL_SELLER_NAME", variable: "MANAGED_LEGAL_SELLER_NAME", shape: "sellerName" },
       { env: "EXPERIENCE_MANAGED_COMMERCIAL_TRANSACTIONS_URL", variable: "MANAGED_COMMERCIAL_TRANSACTIONS_URL", shape: "httpsUrl" },
@@ -168,6 +168,7 @@ export const FLAGS = Object.freeze([
       { env: "EXPERIENCE_SMTP_PORT", variable: "SMTP_PORT_REF", stg: "RECEIPT_DELIVERY_SMTP_PORT" },
       { env: "EXPERIENCE_SMTP_USER", variable: "SMTP_USER_REF", stg: "RECEIPT_DELIVERY_SMTP_USER" },
       { env: "EXPERIENCE_SMTP_PASSWORD", variable: "SMTP_PASSWORD_REF", stg: "RECEIPT_DELIVERY_SMTP_PASSWORD" },
+      { env: "EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS", variable: "MANAGED_PROVIDER_MAIL_RECIPIENTS_REF", stg: "experience-stg-managed-provider-mail-recipients", optional: true },
     ],
     settings: [
       { env: "EXPERIENCE_MAIL_FROM", variable: "MAIL_FROM", shape: "mailbox" },
@@ -408,6 +409,7 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
     env[flag.env] = flag.value ?? "true";
     for (const secret of flag.secrets ?? []) {
       const ref = value(secret.variable);
+      if (ref === "" && secret.optional) continue;
       const pattern = target === "stg" ? new RegExp(`^${escape(secret.stg)}:[1-9][0-9]*$`) : PROD_SECRET_REF;
       if (!pattern.test(ref)) problems.push(`${by} needs ${name(secret.variable)} as ${target === "stg" ? `${secret.stg}:VERSION` : "secret-name:VERSION"} (a numeric version)`);
       else secrets[secret.env] = ref;

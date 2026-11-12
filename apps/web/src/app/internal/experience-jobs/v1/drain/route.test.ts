@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     experienceJobsAudience: "https://experience.example/internal/experience-jobs",
     experienceJobsServiceAccountEmail: "experience-jobs@example.iam.gserviceaccount.com",
     siteUrl: "https://experience.example",
+    guestMailReplyTo: { name: "NIHO support", address: "office@example.test" },
   },
   verifyIdToken: vi.fn(),
   pool: vi.fn(),
@@ -86,6 +87,7 @@ beforeEach(() => {
   // No Stripe platform key unless a test sets one: refunds are not resent.
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "");
   vi.stubEnv("EXPERIENCE_PUBLIC_MEDIA_BUCKET", "");
+  vi.stubEnv("EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS", "");
   mocks.config.guestMailEnabled = true;
   mocks.verifyIdToken.mockResolvedValue(payload());
   mocks.pool.mockReturnValue(fakePool);
@@ -172,6 +174,28 @@ describe("POST /internal/experience-jobs/v1/drain", () => {
     expect(fakeMailer.close).toHaveBeenCalledOnce();
     expect(info).toHaveBeenCalledExactlyOnceWith(`[experience-jobs] drain ${JSON.stringify(counts)}`);
     info.mockRestore();
+  });
+
+  it("resolves private managed provider recipients only inside the mail job and fails closed on non-canonical input", async () => {
+    vi.stubEnv("EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS", JSON.stringify({ "product-synthetic": "provider@example.test" }));
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    expect((await post()).status).toBe(200);
+    const managed = mocks.run.mock.calls[0]![0].managedBookingMail;
+    expect(managed?.officeRecipient).toBe("office@example.test");
+    expect(managed?.providerRecipient?.("product-synthetic")).toBe("provider@example.test");
+    expect(managed?.providerRecipient?.("other-product")).toBeNull();
+    vi.mocked(console.info).mockRestore();
+
+    vi.clearAllMocks();
+    mocks.verifyIdToken.mockResolvedValue(payload()); mocks.pool.mockReturnValue(fakePool); mocks.mailer.mockReturnValue(fakeMailer);
+    vi.stubEnv("EXPERIENCE_MANAGED_PROVIDER_MAIL_RECIPIENTS", '{"product-synthetic":"Provider@example.test"}');
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await post();
+    expect(response.status).toBe(200);
+    expect(mocks.run.mock.calls[0]![0].managedBookingMail?.providerRecipient).toBeUndefined();
+    expect(error).toHaveBeenCalledOnce();
+    expect(JSON.stringify(error.mock.calls)).not.toContain("Provider@example.test");
+    error.mockRestore();
   });
 
   it("hands the run Stripe from the platform key in the environment, to send refunds again", async () => {
@@ -338,6 +362,7 @@ describe("experienceJobsDrainResponse dependencies", () => {
       questionReplies: { error: "unavailable" },
       bookingConfirmations: { error: "unavailable" },
       bookingNotices: { error: "unavailable" },
+      managedBookingMails: { error: "unavailable" },
       bookingLinks: { error: "unavailable" },
       bookingRefunds: { error: "unavailable" },
       guestTranslations: { error: "unavailable" },
@@ -352,7 +377,7 @@ describe("experienceJobsDrainResponse dependencies", () => {
       providerMediaCleanup: { off: true },
       meetingGuideSnapshotPurge: { error: "unavailable" },
     });
-    expect(pool.connect).toHaveBeenCalledTimes(5);
+    expect(pool.connect).toHaveBeenCalledTimes(6);
     // The five steps that query directly, the claim of refunds to send again, and snapshot purge.
     expect(pool.query).toHaveBeenCalledTimes(7);
     expect(mailer.sendMail).not.toHaveBeenCalled();
