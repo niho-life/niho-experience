@@ -772,6 +772,18 @@ export function resolveConfig(env: Env) {
   const hostMailEnabled = hostMailSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
   // ホストのアカウント (ADR 0003): /host signs in with Experience's own accounts instead of NIHO; see hostAccountsSetting.
   const hostAccountsEnabled = hostAccountsSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
+  const experienceTranslateStandaloneRequested = env.EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED === "true";
+  if (experienceTranslateStandaloneRequested && apiMode === "http" && !hostAccountsEnabled) {
+    throw new Error("EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
+  }
+  if (experienceTranslateStandaloneRequested && apiMode === "http" && !env.NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE?.trim()) {
+    throw new Error("EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
+  }
+  const experienceTranslateStandaloneApiEnabled = apiMode === "http"
+    && hostConsoleEnabled
+    && Boolean(env.EXPERIENCE_DATABASE_URL?.trim())
+    && hostAccountsEnabled
+    && experienceTranslateStandaloneRequested;
   const hostTeamEnabled = hostTeamSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   // After host accounts: with them, the host publication API reads Stripe and the experience DB instead of NIHO.
   const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
@@ -890,6 +902,7 @@ export function resolveConfig(env: Env) {
     experienceProviderOperationsApiEnabled,
     experienceProviderOperationsPreviewEnabled,
     experienceTranslateApiEnabled,
+    experienceTranslateStandaloneApiEnabled,
     hostNotificationSettingsEnabled,
     hostSalesLedgerEnabled,
     hostSalesPayoutsEnabled,

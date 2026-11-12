@@ -73,6 +73,16 @@ export function nihoApiFetch(session: NihoHostSession): typeof fetch {
   return isHostMock() ? createMockHostFetch(session.mockScenario ?? "default") : fetch;
 }
 
+/** Fixed-audience Google identity for the Experience BFF; never contains a host's NIHO access token. */
+export async function experienceHostServiceIdToken(): Promise<string> {
+  if (isHostMock()) return MOCK_EXPERIENCE_HOST_SERVICE_TOKEN;
+  const client = await serviceAuth.getIdTokenClient(config.nihoExperienceHostCommonContractAudience);
+  const headers = await client.getRequestHeaders();
+  const token = parseBearerToken(headers.authorization ?? headers.Authorization);
+  if (token === null) throw new Error("Experience service identity is unavailable");
+  return token;
+}
+
 export type ProvidersLoad =
   /**
    * `nihoUserId` is the identity the experience DB's `*_niho_user_id` columns hold for this person: the NIHO user ID
@@ -98,16 +108,7 @@ export function hostApiClient(session: NihoHostSession): ExperienceHostApiClient
 
 /** NIHO host common contract v1.0.0: identity and legacy Connect projection only. */
 export async function selectedHostApiClient(session: NihoHostSession, options: { legacyProviderId?: string } = {}): Promise<SelectedExperienceHostApiClient> {
-  const serviceIdToken = isHostMock()
-    ? MOCK_EXPERIENCE_HOST_SERVICE_TOKEN
-    : await (async () => {
-      const client = await serviceAuth.getIdTokenClient(config.nihoExperienceHostCommonContractAudience);
-      const headers = await client.getRequestHeaders();
-      const value = headers.authorization ?? headers.Authorization;
-      const token = parseBearerToken(value);
-      if (token === null) throw new Error("Experience service identity is unavailable");
-      return token;
-    })();
+  const serviceIdToken = await experienceHostServiceIdToken();
   const apiFetch = isHostMock()
     ? createMockExperienceHostFetch({
       accessToken: session.accessToken,

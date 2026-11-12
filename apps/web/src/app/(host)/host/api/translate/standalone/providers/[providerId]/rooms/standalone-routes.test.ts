@@ -38,7 +38,7 @@ describe("standalone translate BFF routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.allowed.mockReturnValue(true);
-    mocks.load.mockResolvedValue({ ok: true, nihoProviderId: "niho_provider_9", client: {
+    mocks.load.mockResolvedValue({ ok: true, providerApiId: "niho_provider_9", serviceAuth: false, client: {
       createStandaloneRoom: mocks.create, getCurrentStandaloneRoom: mocks.current, getStandaloneRoom: mocks.get,
       reissueStandaloneInvite: mocks.reissue, endStandaloneRoom: mocks.end,
     } });

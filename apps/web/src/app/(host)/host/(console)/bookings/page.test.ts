@@ -38,7 +38,7 @@ vi.mock("@/host/ota-bookings-server", () => ({
 vi.mock("@/lib/experience/calendar-actor", () => ({ resolveCalendarContext: async () => ({ choices: [], choice: state.calendarChoice, providerNotFound: false }) }));
 vi.mock("@/lib/host/support-history-server", () => ({ isHostSupportHistoryEnabled: () => false }));
 vi.mock("@/lib/host/fee-summary-server", () => ({ isHostFeeSummaryUiEnabled: () => false }));
-vi.mock("@/lib/host/translate-rooms-server", () => ({ translateRoomsEnabled: () => state.translateEnabled, translateRoomsEntry: () => state.translateEnabled ? { today: "2026-10-31" } : null }));
+vi.mock("@/lib/host/translate-rooms-server", () => ({ siteTranslateRoomsEnabled: () => state.translateEnabled, translateRoomsEntry: () => state.translateEnabled ? { today: "2026-10-31" } : null }));
 
 import HostBookingsPage from "./page";
 import { HostBookings } from "@/components/host/HostBookings";

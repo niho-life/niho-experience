@@ -12,7 +12,7 @@ import { mockExperienceBookings } from "@/host/mock/experience-reservations";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "@/host/site-bookings";
 import { config } from "@/lib/config";
 import { mutationFromSameOrigin } from "./relay";
-import { clearSessionCookie, isHostMock, loadHostProviders, nihoApiFetch, readHostSession, siteOrigin } from "./server";
+import { clearSessionCookie, experienceHostServiceIdToken, isHostMock, loadHostProviders, nihoApiFetch, readHostSession, siteOrigin } from "./server";
 import { accessTokenUsable } from "./session";
 
 /*
@@ -65,12 +65,17 @@ async function readBoundedTranslateBody(request: Request, limit = MAX_BODY_BYTES
 
 /** The mock always has synthetic rooms; http opens the selected NIHO translate API behind its own flag. */
 export function translateRoomsEnabled(): boolean {
+  return config.hostConsoleEnabled && (config.apiMode === "mock" || config.experienceTranslateApiEnabled || config.experienceTranslateStandaloneApiEnabled);
+}
+
+/** Booking screens keep their existing NIHO-session API gate. */
+export function siteTranslateRoomsEnabled(): boolean {
   return config.hostConsoleEnabled && (config.apiMode === "mock" || config.experienceTranslateApiEnabled);
 }
 
 /** What the booking screens get: the day in Japan 通訳を始める counts from, or null while the BFF is closed. */
 export function translateRoomsEntry(): { today: string } | null {
-  return translateRoomsEnabled() ? { today: todayInJapan(Date.now()) } : null;
+  return siteTranslateRoomsEnabled() ? { today: todayInJapan(Date.now()) } : null;
 }
 
 export function translateRoomsJson(body: unknown, status = 200): NextResponse {
@@ -106,20 +111,19 @@ export async function readStandaloneTranslateCreateBody(request: Request): Promi
   } catch { return null; }
 }
 
-/**
- * Resolves a browser-visible local Experience provider id to NIHO's provider id on every
- * standalone request. The sealed session and current OWNER membership are authoritative here;
- * NIHO then independently authorizes that same owner when the client calls its API.
- */
+/** Check the sealed session and current Experience OWNER membership for every standalone request. */
 export async function loadStandaloneTranslateRoomsClient(localProviderId: string) {
   if (!translateRoomsEnabled() || !isExperienceTranslateRoomPathId(localProviderId)) {
     return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
   }
-  // NIHO's API with the host's NIHO token: an Experience host account reads as signed out (its flag is refused with them).
   const current = await readHostSession();
-  const session = current?.kind === "experience" ? null : current;
-  if (!session) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
-  if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
+  if (!current) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
+  if (current.kind === "experience" && !config.experienceTranslateStandaloneApiEnabled) {
+    return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
+  }
+  if (current.kind === "niho" && (!config.experienceTranslateApiEnabled || !accessTokenUsable(current, Date.now()))) {
+    return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
+  }
   const identity = await loadHostProviders();
   if (identity.status === "signed-out" || identity.status === "refresh") {
     return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
@@ -131,17 +135,33 @@ export async function loadStandaloneTranslateRoomsClient(localProviderId: string
   }
   if (identity.status !== "ok") return { ok: false as const, response: translateRoomsJson({ error: "unavailable" }, 502) };
   const provider = identity.providers.find((item) => item.id === localProviderId);
-  if (provider?.memberRole !== "OWNER" || !isExperienceTranslateRoomPathId(provider.legacyProviderId)) {
+  if (provider?.memberRole !== "OWNER") {
     return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
   }
   try {
+    if (current.kind === "experience") {
+      const serviceIdToken = await experienceHostServiceIdToken();
+      return {
+        ok: true as const,
+        serviceAuth: true as const,
+        providerApiId: localProviderId,
+        client: createExperienceTranslateRoomsClient({
+          nihoWebOrigin: config.nihoWebOrigin,
+          auth: { kind: "experience-service", serviceIdToken },
+        }),
+      };
+    }
+    if (!isExperienceTranslateRoomPathId(provider.legacyProviderId)) {
+      return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
+    }
     return {
       ok: true as const,
-      nihoProviderId: provider.legacyProviderId,
+      serviceAuth: false as const,
+      providerApiId: provider.legacyProviderId,
       client: createExperienceTranslateRoomsClient({
         nihoWebOrigin: config.nihoWebOrigin,
-        accessToken: session.accessToken,
-        fetch: nihoApiFetch(session),
+        auth: { kind: "niho", accessToken: current.accessToken },
+        fetch: nihoApiFetch(current),
       }),
     };
   } catch {
@@ -161,8 +181,7 @@ export function siteTranslateBookingEligible(booking: Pick<HostGuestBooking, "st
 
 /** NIHO OWNERとExperience DBの予約所属を毎回照合してからsite-booking用NIHO clientを返す。 */
 export async function loadSiteTranslateRoomsClient(providerId: string, bookingId: string, action: SiteTranslateRoomAction) {
-  if (!translateRoomsEnabled()) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
-  // NIHO's API with the host's NIHO token: an Experience host account reads as signed out (its flag is refused with them).
+  if (!siteTranslateRoomsEnabled()) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
   const current = await readHostSession();
   const session = current?.kind === "experience" ? null : current;
   if (!session) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
@@ -203,7 +222,7 @@ export async function loadSiteTranslateRoomsClient(providerId: string, bookingId
       ok: true as const,
       client: createExperienceTranslateRoomsClient({
         nihoWebOrigin: config.nihoWebOrigin,
-        accessToken: session.accessToken,
+        auth: { kind: "niho", accessToken: session.accessToken },
         fetch: nihoApiFetch(session),
       }),
     };
@@ -213,9 +232,10 @@ export async function loadSiteTranslateRoomsClient(providerId: string, bookingId
 }
 
 /** NIHO's refusal in this site's words. A 404 stays `not_found`: the booking is not this provider's, the room is gone, or NIHO has no translate rooms yet. */
-export function translateRoomsFailure(failure: ExperienceTranslateRoomsFailure): NextResponse {
+export function translateRoomsFailure(failure: ExperienceTranslateRoomsFailure, options: { serviceAuth?: boolean } = {}): NextResponse {
   if (failure.kind === "invalid_request") return translateRoomsJson({ error: "invalid_input" }, 400);
   if (failure.kind === "rejected") {
+    if (options.serviceAuth) return translateRoomsJson({ error: "upstream_unavailable" }, 502);
     const response = translateRoomsJson({ error: failure.status === 401 ? "session_ended" : "permission_ended" }, failure.status);
     if (failure.status === 401) clearSessionCookie(response);
     return response;

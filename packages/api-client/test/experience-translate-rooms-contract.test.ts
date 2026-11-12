@@ -11,7 +11,10 @@ import { generateContractTypes } from "../scripts/gen-types.ts";
 type ContractDocument = {
   info: { version: string; "x-niho-contract-status"?: string };
   paths: Record<string, Record<string, unknown>>;
-  components: { schemas: Record<string, { enum?: string[]; properties?: Record<string, unknown>; "x-niho-experience-translate-rooms-dto"?: boolean }> };
+  components: {
+    schemas: Record<string, { enum?: string[]; properties?: Record<string, unknown>; "x-niho-experience-translate-rooms-dto"?: boolean }>;
+    securitySchemes: Record<string, { type?: string; in?: string; name?: string }>;
+  };
 };
 
 describe("experience translate rooms selected contract", () => {
@@ -49,6 +52,7 @@ describe("experience translate rooms selected contract", () => {
     const document = JSON.parse(await readFile(new URL("../contract/experience-translate-rooms-api.openapi.json", import.meta.url), "utf8")) as ContractDocument;
     const legacy = "/api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms";
     const site = "/api/experience-providers/{providerId}/site-bookings/{bookingId}/translate-rooms";
+    const hostService = "/api/experience-host/translate-providers/{experienceProviderId}/translate-rooms";
     expect(Object.keys(document.paths).sort()).toEqual([
       legacy, `${legacy}/{roomId}`, `${legacy}/{roomId}/end`, site, `${site}/{roomId}`, `${site}/{roomId}/end`,
       "/api/experience-providers/{providerId}/translate-rooms",
@@ -57,11 +61,32 @@ describe("experience translate rooms selected contract", () => {
       "/api/experience-providers/{providerId}/translate-rooms/{roomId}/invites/host",
       "/api/experience-providers/{providerId}/translate-rooms/{roomId}/invites/guest",
       "/api/experience-providers/{providerId}/translate-rooms/{roomId}/end",
+      hostService,
+      `${hostService}/current`,
+      `${hostService}/{roomId}`,
+      `${hostService}/{roomId}/invites/host`,
+      `${hostService}/{roomId}/invites/guest`,
+      `${hostService}/{roomId}/end`,
     ].sort());
     for (const root of [legacy, site]) {
       expect(Object.keys(document.paths[root] ?? {})).toEqual(["parameters", "post"]);
       expect(Object.keys(document.paths[`${root}/{roomId}`] ?? {})).toEqual(["parameters", "get"]);
       expect(Object.keys(document.paths[`${root}/{roomId}/end`] ?? {})).toEqual(["parameters", "post"]);
+    }
+    expect(Object.keys(document.paths[hostService] ?? {})).toEqual(["parameters", "post"]);
+    expect(Object.keys(document.paths[`${hostService}/current`] ?? {})).toEqual(["parameters", "get"]);
+    expect(Object.keys(document.paths[`${hostService}/{roomId}`] ?? {})).toEqual(["parameters", "get"]);
+    for (const path of [
+      `${hostService}/{roomId}/invites/host`,
+      `${hostService}/{roomId}/invites/guest`,
+      `${hostService}/{roomId}/end`,
+    ]) expect(Object.keys(document.paths[path] ?? {})).toEqual(["parameters", "post"]);
+    const serviceIdentity = document.components.securitySchemes.ExperienceHostTranslateServiceIdToken;
+    expect(serviceIdentity).toMatchObject({ type: "apiKey", in: "header" });
+    expect(serviceIdentity?.name?.toLowerCase()).toBe("x-niho-experience-service-id-token");
+    for (const path of [hostService, `${hostService}/current`, `${hostService}/{roomId}`, `${hostService}/{roomId}/invites/host`, `${hostService}/{roomId}/invites/guest`, `${hostService}/{roomId}/end`]) {
+      const operation = Object.values(document.paths[path] ?? {}).find((value) => typeof value === "object" && value !== null && "operationId" in value) as { security?: Array<Record<string, unknown>> } | undefined;
+      expect(operation?.security).toEqual([{ ExperienceHostTranslateServiceIdToken: [] }]);
     }
     const created = document.components.schemas.ExperienceProviderTranslateRoomCreated?.properties as Record<string, { enum?: string[] }>;
     const participant = document.components.schemas.ExperienceProviderTranslateRoomParticipant?.properties as Record<string, { enum?: string[] }>;

@@ -17,6 +17,6 @@ export async function POST(request: Request, context: Context) {
   if (!body) return translateRoomsJson({ error: "invalid_input" }, 400);
   const loaded = await loadStandaloneTranslateRoomsClient(providerId);
   if (!loaded.ok) return loaded.response;
-  const result = await loaded.client.createStandaloneRoom(loaded.nihoProviderId, body.hostLanguage);
-  return result.ok ? translateRoomsJson(result.data, 201) : translateRoomsFailure(result);
+  const result = await loaded.client.createStandaloneRoom(loaded.providerApiId, body.hostLanguage);
+  return result.ok ? translateRoomsJson(result.data, 201) : translateRoomsFailure(result, { serviceAuth: loaded.serviceAuth });
 }

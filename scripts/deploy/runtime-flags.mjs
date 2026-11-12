@@ -206,6 +206,12 @@ export const FLAGS = Object.freeze([
     needs: ["HOST_CONSOLE", "DATABASE"],
   },
   {
+    env: "EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED",
+    variable: "TRANSLATE_STANDALONE_API_ENABLED",
+    // Reservation-free Host Account rooms use the server-to-server OIDC route, not a NIHO host bearer.
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
+  },
+  {
     env: "EXPERIENCE_GUEST_QUESTIONS_ENABLED",
     variable: "GUEST_QUESTIONS_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE"],

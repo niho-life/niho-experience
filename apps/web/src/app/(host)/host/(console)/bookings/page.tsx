@@ -13,7 +13,7 @@ import type { HostBooking } from "@/host/types";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "@/host/site-bookings";
 import { loadSiteBookings, type HostSiteBookingsLoad } from "@/host/site-bookings-server";
 import type { HostProvider } from "@/lib/host/providers";
-import { translateRoomsEnabled } from "@/lib/host/translate-rooms-server";
+import { siteTranslateRoomsEnabled } from "@/lib/host/translate-rooms-server";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
 
 export const metadata: Metadata = { title: "予約" };
@@ -100,7 +100,7 @@ function SiteBookings({ site, provider, linkProviderId, requested, ota }: { site
       supportPreview={false}
       supportHistoryEnabled={false}
       feeSummaryEnabled={false}
-      translateEnabled={translateRoomsEnabled()}
+      translateEnabled={siteTranslateRoomsEnabled()}
       live={{ nextCursor: site.nextCursor, messages: site.messages, preview: site.preview, readOnly: site.readOnly, canCancel: site.canCancel }}
       ota={ota}
     />

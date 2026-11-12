@@ -89,6 +89,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_PROVIDER_PAGES_API_ENABLED: "experienceProviderPagesApiEnabled",
   EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED: "experienceProviderOperationsApiEnabled",
   EXPERIENCE_TRANSLATE_API_ENABLED: "experienceTranslateApiEnabled",
+  EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED: "experienceTranslateStandaloneApiEnabled",
   EXPERIENCE_GUEST_QUESTIONS_ENABLED: "guestQuestionsEnabled",
   EXPERIENCE_TRANSLATION_ENABLED: "translationEnabled",
   EXPERIENCE_GUEST_REVIEWS_ENABLED: "guestReviewsEnabled",
@@ -248,6 +249,21 @@ describe("the deploy workflows' feature flags", () => {
     expect(resolved.secrets).toEqual({});
     expect(resolveConfig(revision("stg", resolved))).toMatchObject({ guestBookingEnabled: false, experienceTranslateApiEnabled: true });
   });
+  it("opens reservation-free translation only with the Host Account session and the NIHO service audience", () => {
+    const vars = closure("stg", "EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED");
+    expect(vars.STG_TRANSLATE_STANDALONE_API_ENABLED).toBe("true");
+    expect(vars.STG_TRANSLATE_API_ENABLED).toBeUndefined();
+    const resolved = resolve("stg", vars);
+    expect(resolved.problems).toEqual([]);
+    expect(resolved.env.EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED).toBe("true");
+    expect(resolved.env.EXPERIENCE_HOST_ACCOUNTS_ENABLED).toBe("true");
+    expect(resolved.env.NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE).toBe(NIHO_API_AUDIENCE.stg);
+    expect(resolveConfig(revision("stg", resolved))).toMatchObject({
+      hostAccountsEnabled: true,
+      experienceTranslateApiEnabled: false,
+      experienceTranslateStandaloneApiEnabled: true,
+    });
+  });
   it("requires the NIHO API audience whenever the host console is deployed, independently of publication flags", () => {
     const variable = "STG_NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE";
     const input = { target: "stg" as const, hostConsole: true, siteUrl: SITE.stg };
@@ -384,7 +400,11 @@ describe("the deploy workflows' feature flags", () => {
 
     it(`${target}: every compatible flag starts the server and turns on in resolve-config`, () => {
       // Experience host accounts refuse the NIHO-token flags (its own test below), so it is left out here.
-      const compatible = FLAGS.filter((flag) => (flag.conflicts ?? []).length === 0);
+      const compatibleIds = new Set(FLAGS.filter((flag) => (flag.conflicts ?? []).length === 0).map(flagId));
+      const compatible = FLAGS.filter((flag) =>
+        (flag.conflicts ?? []).length === 0
+        && (flag.needs ?? []).every((need) => need.split("|").some((dependency) => compatibleIds.has(dependency) || CAPABILITIES.includes(dependency)))
+      );
       const vars = Object.assign({}, ...compatible.map((flag) => varsOf(target, flag))) as Vars;
       const resolved = resolve(target, vars);
       expect(resolved.problems).toEqual([]);

@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StoreNotFoundError } from "@niho-experience/experience-store";
 
 const mocks = vi.hoisted(() => ({
-  config: { hostConsoleEnabled: true, apiMode: "http" as "http" | "mock", experienceTranslateApiEnabled: false, guestBookingEnabled: true, nihoWebOrigin: "https://niho.example" },
+  config: { hostConsoleEnabled: true, apiMode: "http" as "http" | "mock", experienceTranslateApiEnabled: false, experienceTranslateStandaloneApiEnabled: false, hostAccountsEnabled: false, guestBookingEnabled: true, nihoWebOrigin: "https://niho.example" },
   readHost: vi.fn(),
   usable: vi.fn(),
   create: vi.fn(),
   clear: vi.fn(),
+  serviceIdToken: vi.fn(),
   upstreamFetch: vi.fn(),
   owner: vi.fn(),
   hostMock: false,
@@ -21,6 +22,7 @@ vi.mock("./server", () => ({
   nihoApiFetch: () => mocks.upstreamFetch,
   siteOrigin: () => "https://experience.example",
   clearSessionCookie: mocks.clear,
+  experienceHostServiceIdToken: mocks.serviceIdToken,
   isHostMock: () => mocks.hostMock,
   loadHostProviders: mocks.providers,
 }));
@@ -49,9 +51,10 @@ function oversizedChunkedRequest(contentType = "application/json") {
 describe("translate rooms server boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.assign(mocks.config, { hostConsoleEnabled: true, apiMode: "http", experienceTranslateApiEnabled: false, guestBookingEnabled: true });
+    Object.assign(mocks.config, { hostConsoleEnabled: true, apiMode: "http", experienceTranslateApiEnabled: false, experienceTranslateStandaloneApiEnabled: false, hostAccountsEnabled: false, guestBookingEnabled: true });
     mocks.usable.mockReturnValue(true);
     mocks.create.mockReturnValue({ marker: "translate-client" });
+    mocks.serviceIdToken.mockResolvedValue("service-identity-token");
     mocks.hostMock = false;
     mocks.providers.mockResolvedValue({ status: "ok", providers: [{ id: "provider_1", legacyProviderId: "niho_provider_1", memberRole: "OWNER" }] });
   });
@@ -63,6 +66,9 @@ describe("translate rooms server boundary", () => {
     expect(translateRoomsEnabled()).toBe(true);
     mocks.config.hostConsoleEnabled = false;
     expect(translateRoomsEnabled()).toBe(false);
+    Object.assign(mocks.config, { hostConsoleEnabled: true, apiMode: "http", experienceTranslateStandaloneApiEnabled: true, experienceTranslateApiEnabled: false });
+    expect(translateRoomsEnabled()).toBe(true);
+    expect(translateRoomsEntry()).toBeNull();
     Object.assign(mocks.config, { hostConsoleEnabled: true, apiMode: "mock", experienceTranslateApiEnabled: false });
     expect(translateRoomsEnabled()).toBe(true);
     expect(translateRoomsEntry()).toEqual({ today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
@@ -75,6 +81,10 @@ describe("translate rooms server boundary", () => {
     expect(ended.status).toBe(401);
     expect(await ended.json()).toEqual({ error: "session_ended" });
     expect(mocks.clear).toHaveBeenCalledWith(ended);
+    const serviceRejected = translateRoomsFailure({ ok: false, kind: "rejected", status: 401 }, { serviceAuth: true });
+    expect(serviceRejected.status).toBe(502);
+    expect(await serviceRejected.json()).toEqual({ error: "upstream_unavailable" });
+    expect(mocks.clear).toHaveBeenCalledTimes(1);
     expect(await translateRoomsFailure({ ok: false, kind: "rejected", status: 403 }).json()).toEqual({ error: "permission_ended" });
     const missing = translateRoomsFailure({ ok: false, kind: "not_found" });
     expect(missing.status).toBe(404);
@@ -125,16 +135,28 @@ describe("translate rooms server boundary", () => {
 
   it("standaloneは現在OWNERのlocal idをNIHO idへ解決し、予約・売上条件を読まない", async () => {
     mocks.config.experienceTranslateApiEnabled = true;
-    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
+    mocks.readHost.mockResolvedValue({ kind: "niho", accessToken: "sealed-host-token" });
     const loaded = await loadStandaloneTranslateRoomsClient("provider_1");
-    expect(loaded).toEqual({ ok: true, nihoProviderId: "niho_provider_1", client: { marker: "translate-client" } });
-    expect(mocks.create).toHaveBeenCalledWith({ nihoWebOrigin: "https://niho.example", accessToken: "sealed-host-token", fetch: mocks.upstreamFetch });
+    expect(loaded).toEqual({ ok: true, serviceAuth: false, providerApiId: "niho_provider_1", client: { marker: "translate-client" } });
+    expect(mocks.create).toHaveBeenCalledWith({ nihoWebOrigin: "https://niho.example", auth: { kind: "niho", accessToken: "sealed-host-token" }, fetch: mocks.upstreamFetch });
     expect(mocks.owner).not.toHaveBeenCalled();
+  });
+
+  it("Host Account OWNERはNIHO bearerではなくservice identityだけでlocal providerを送る", async () => {
+    mocks.config.experienceTranslateStandaloneApiEnabled = true;
+    mocks.config.hostAccountsEnabled = true;
+    mocks.readHost.mockResolvedValue({ kind: "experience", hostAccountId: "hst_not-forwarded", sessionToken: "not-forwarded" });
+    mocks.providers.mockResolvedValue({ status: "ok", providers: [{ id: "experience_provider_1", legacyProviderId: null, memberRole: "OWNER" }] });
+    const loaded = await loadStandaloneTranslateRoomsClient("experience_provider_1");
+    expect(loaded).toEqual({ ok: true, serviceAuth: true, providerApiId: "experience_provider_1", client: { marker: "translate-client" } });
+    expect(mocks.create).toHaveBeenCalledWith({ nihoWebOrigin: "https://niho.example", auth: { kind: "experience-service", serviceIdToken: "service-identity-token" } });
+    expect(mocks.owner).not.toHaveBeenCalled();
+    expect(mocks.upstreamFetch).not.toHaveBeenCalled();
   });
 
   it("standaloneは他role・他provider・欠けたmapping・失効identityを閉じる", async () => {
     mocks.config.experienceTranslateApiEnabled = true;
-    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
+    mocks.readHost.mockResolvedValue({ kind: "niho", accessToken: "sealed-host-token" });
     for (const providers of [
       [{ id: "provider_1", legacyProviderId: "niho_provider_1", memberRole: "COHOST" }],
       [{ id: "provider_2", legacyProviderId: "niho_provider_2", memberRole: "OWNER" }],
@@ -163,7 +185,7 @@ describe("translate rooms server boundary", () => {
 
   it("site BFFはNIHO OWNERとExperience storeの所属を毎回照合し、createだけ状態を制限する", async () => {
     mocks.config.experienceTranslateApiEnabled = true;
-    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
+    mocks.readHost.mockResolvedValue({ kind: "niho", accessToken: "sealed-host-token" });
     const booking = { status: "CONFIRMED", cancelledAtUtc: null, language: "EN", localDate: "2099-01-01" };
     const getGuestBookingForHost = vi.fn().mockResolvedValue(booking);
     mocks.owner.mockResolvedValue({ ok: true, bookings: { getGuestBookingForHost }, actor: { providerId: "provider_1", nihoUserId: "owner_1", calendarRoleCeiling: "OWNER" } });
@@ -192,7 +214,7 @@ describe("translate rooms server boundary", () => {
   it("sales OFFでも通訳flagとOWNER・Experience membershipが有効なら既存予約を照合する", async () => {
     mocks.config.experienceTranslateApiEnabled = true;
     mocks.config.guestBookingEnabled = false;
-    mocks.readHost.mockResolvedValue({ accessToken: "sealed-host-token" });
+    mocks.readHost.mockResolvedValue({ kind: "niho", accessToken: "sealed-host-token" });
     const booking = { status: "CONFIRMED", cancelledAtUtc: null, language: "EN", localDate: "2099-01-01" };
     const getGuestBookingForHost = vi.fn().mockResolvedValue(booking);
     mocks.owner.mockResolvedValue({ ok: true, bookings: { getGuestBookingForHost }, actor: { providerId: "provider_1", nihoUserId: "owner_1", calendarRoleCeiling: "OWNER" } });
