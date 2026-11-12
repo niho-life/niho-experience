@@ -1,0 +1,759 @@
+<!doctype html>
+<!--
+  mock: NIHO Experience 管理画面（/admin/*）を /host と同じ見た目にする案 v1（2026-11-13）。Issue #542 の基準モック。
+  論点:
+    - 枠を /host と同じにする（PC は左サイドバー、スマホは下端タブ、アカウントは下端のメニュー、地は白）。
+    - メニューは今のログインで使える 3 つだけにする（予約・提供者・運営者）。予約支援・掲載準備・通知は出さない。
+    - 運営者: 体験ごとに 1 面。招待はその体験の「招待」から始め、入力は担当者名だけ。ピルは招待中だけ。失効・解除済みは一覧に出さない。
+    - 予約: 承認待ち・取消の依頼・返金の要対応を「次にすること」の 1 つの一覧にまとめる。予約番号の入力欄は検索 1 つにする。
+    - 提供者: 一覧 → 1 件のページ。登録はダイアログ。
+    - 画面に説明文を置かない。
+  作っていない: API・認証・保存・メール送信・Stripe。招待リンクは合成で、どこにも届かない。
+    予約の詳細（返金額の入力・完全代行の報酬振込・決済費用の精算）、確認待ちの支払い、Admin 通知、掲載先。
+    提供者の保存・写真の登録・体験の下書き編集（体験の行は開かない）。期限切れの招待、読込失敗・競合・結果不明の表示。
+    検索は何を入れても同じサンプルの予約を開く。アカウントメニューの「体験サイトを見る」「ログアウト」は動かない。
+  人名・メール・予約・金額・日付・体験名・提供者名・販売者名はすべて合成。
+  開き方: URL の末尾に #operators / #bookings / #providers / #provider=sample-kitchen、端末は続けて &pc / &phone。
+  参照: niho-experience の apps/web/src/components/host/（HostShell・HostNav・ui.tsx・host-ui.ts・HostConfirmDialog）、
+    components/admin/（AdminShell・AdminProductOperators・AdminBookingApprovals・AdminSiteBookings・AdminProducts）、
+    docs/design-system.md「ホストの画面」、docs/product-operators.md。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>NIHO Experience 管理 — 改善案 v1</title>
+<style>
+:root{
+  --canvas:#fff;--sand:#f5f5f2;--ink:#1c1c1a;--ink-soft:#4b4b47;--muted:#6c6c67;--line:#e8e8e4;--line-strong:#d4d4cf;
+  --moss:#355e1f;--leaf:#b2d67c;--leaf-hover:#a3c86b;--leaf-pale:#eef5e3;
+  --danger:#a8321e;--danger-pale:#fcece8;--warn:#7a4b00;--warn-pale:#fff3dc;
+  --font-sans:"Nunito","Hiragino Sans","Noto Sans JP",ui-sans-serif,system-ui,sans-serif;
+  --font-display:"Fraunces",Georgia,"Hiragino Mincho ProN","Yu Mincho",serif;
+  --font-chrome:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;
+  --shadow-card:0 1px 2px rgb(28 28 26 / .04),0 10px 30px rgb(28 28 26 / .08);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:#ecece8;color:var(--ink);font:14px/1.6 var(--font-sans);-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0}
+button,a,summary,input{-webkit-tap-highlight-color:transparent}
+a{color:inherit;text-decoration:none}
+h1,h2,p,ul{margin:0}
+ul{list-style:none;padding:0}
+[hidden]{display:none!important}
+:focus-visible{outline:3px solid var(--moss);outline-offset:2px}
+.i{width:20px;height:20px;flex:none;fill:currentColor}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+/* ---- outside the product: mock frame ---- */
+.review{display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:1304px;margin:0 auto;padding:12px 12px 10px;font-family:var(--font-chrome)}
+.review-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700;color:#3d3d39}
+.seg{display:inline-flex;flex:none;gap:2px;padding:3px;border-radius:999px;background:#dcdcd6}
+.seg button{height:28px;padding:0 14px;border-radius:999px;font-size:12px;font-weight:700;color:#55554f}
+.seg button[aria-pressed=true]{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .1)}
+.stage{display:flex;justify-content:center;padding:0 0 16px}
+.device{display:flex;width:min(1280px,calc(100% - 24px));height:min(860px,calc(100vh - 70px));flex-direction:column;overflow:hidden;border:1px solid #d6d6d0;border-radius:14px;background:var(--canvas);box-shadow:0 1px 2px rgb(28 28 26 / .04),0 12px 40px rgb(28 28 26 / .07)}
+.device.bleed{border-radius:0;border-inline:0}
+.device[data-device=phone] .main{scrollbar-width:none}
+.device[data-device=phone] .main::-webkit-scrollbar{display:none}
+.urlbar{display:flex;flex:none;align-items:center;gap:10px;height:36px;min-width:0;padding:0 14px;border-bottom:1px solid var(--line);background:#fafaf8;font:12px/1 var(--font-chrome);color:var(--muted)}
+.lights{display:flex;flex:none;gap:5px}
+.lights i{width:8px;height:8px;border-radius:50%;background:#dcdcd5}
+.urltext{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.urltext strong{font-weight:600;color:var(--ink)}
+
+/* ---- shell (HostShell) ---- */
+.app{position:relative;display:flex;flex:1;min-height:0;background:var(--canvas);container:app / inline-size}
+.sidebar{display:none}
+.col{display:flex;flex:1;min-width:0;flex-direction:column}
+.brand{font-family:var(--font-display);font-weight:500;letter-spacing:-.01em;white-space:nowrap}
+.scope{display:inline-flex;flex:none;align-items:center;height:20px;padding:0 7px;border-radius:999px;background:var(--sand);font-size:12px;line-height:1;font-weight:800;color:var(--ink-soft)}
+.mhead{position:relative;z-index:30;display:flex;flex:none;align-items:center;gap:10px;height:52px;padding:0 8px 0 16px;border-bottom:1px solid var(--line);background:var(--canvas)}
+.mhead .brandwrap{display:flex;flex:1;min-width:0;align-items:center;gap:8px}
+.mhead .brand{font-size:17px;line-height:1}
+.mhead .back{display:none;height:44px;flex:none;margin-right:auto;align-items:center;margin-left:-6px;padding-right:6px;font-size:15px;font-weight:800}
+.mhead .back .i{width:22px;height:22px}
+.app[data-sub] .mhead .brandwrap,.app[data-sub] .mhead .account{display:none}
+.app[data-sub] .mhead .back{display:inline-flex}
+.app[data-sub] .tabbar{display:none}
+.main{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.tabbar{flex:none;padding:6px 4px 14px;border-top:1px solid var(--line);background:var(--canvas)}
+.tabbar ul{display:grid;grid-template-columns:repeat(3,1fr)}
+.tabbar a{display:flex;height:46px;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;font-size:12px;line-height:1.25;font-weight:700;color:var(--muted)}
+.tabbar a[aria-current=page]{color:var(--ink)}
+.tabbar .i{width:22px;height:22px}
+.nav ul{display:flex;flex-direction:column;gap:2px}
+.nav a{display:flex;height:40px;align-items:center;gap:10px;padding:0 10px;border-radius:10px;font-weight:700;color:var(--ink-soft)}
+.nav a:hover{background:rgb(245 245 242 / .6);color:var(--ink)}
+.nav a[aria-current=page]{background:var(--sand);color:var(--ink)}
+.nav .i{width:18px;height:18px}
+
+/* account menu (AccountMenu) */
+.account{position:relative}
+.account summary{cursor:pointer;list-style:none}
+.account summary::-webkit-details-marker{display:none}
+.account .avatar{width:30px;height:30px}
+.mhead .account summary{display:grid;width:44px;height:44px;place-items:center;border-radius:50%}
+.sidebar .account summary{display:flex;min-height:48px;align-items:center;gap:10px;padding:12px 10px 0;border-top:1px solid var(--line)}
+.account .who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;line-height:1.3;font-weight:800}
+.account summary .chev{width:16px;height:16px;color:var(--muted)}
+.account[open] summary .chev{transform:rotate(180deg)}
+.popup{position:absolute;z-index:40;border:1px solid var(--line);border-radius:16px;background:var(--canvas);padding:6px;box-shadow:var(--shadow-card)}
+.mhead .popup{top:100%;right:0;width:256px;max-width:calc(100cqw - 16px);margin-top:4px}
+.sidebar .popup{bottom:calc(100% + 8px);left:0;width:204px}
+.popup .me{padding:6px 10px 10px}
+.popup .me b{display:block;font-weight:800;overflow-wrap:anywhere}
+.popup .me span{display:block;font-size:12px;color:var(--muted)}
+.popup .group{display:flex;flex-direction:column;gap:2px;padding:4px 0;border-top:1px solid var(--line)}
+.popup .group:last-child{padding-bottom:0}
+.menulink{display:flex;width:100%;min-height:44px;align-items:center;gap:8px;padding:0 10px;border-radius:10px;font-size:13px;font-weight:700;color:var(--ink-soft);text-align:left}
+.menulink:hover{background:var(--sand);color:var(--ink)}
+.menulink .i{width:14px;height:14px}
+
+/* ---- page parts (ui.tsx / host-ui.ts) ---- */
+.page{width:100%;max-width:1040px;margin:0 auto;padding:14px 16px 24px}
+.narrow{max-width:720px}
+.pagehead{display:flex;min-height:38px;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}
+.pagehead h1,.subhead h1{font-family:var(--font-display);font-size:22px;line-height:1.2;font-weight:500;letter-spacing:-.01em}
+.pagehead h1{flex:none}
+.subhead{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.subhead h1{min-width:0;line-height:1.25;overflow-wrap:anywhere}
+.backbtn{display:none;width:40px;height:40px;flex:none;place-items:center;border-radius:50%;background:var(--sand)}
+.backbtn:hover{background:var(--line)}
+.backbtn .i{width:18px;height:18px}
+.stack{display:grid;gap:14px}
+.surface{overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--canvas)}
+.panelhead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 16px 8px}
+.panelhead.solo{padding-block:12px}
+.section-title{min-width:0;font:700 12.5px/1.5 var(--font-sans);letter-spacing:0;color:var(--ink-soft);overflow-wrap:anywhere}
+.rows>li{border-top:1px solid var(--line)}
+.rows>li:first-child{border-top:0}
+.row{display:flex;width:100%;min-height:52px;align-items:center;gap:12px;padding:12px 14px;text-align:left}
+a.row:hover,button.row:hover{background:rgb(245 245 242 / .6)}
+.grow{flex:1 1 0;min-width:0}
+.row-title{display:block;font-size:14px;line-height:1.4;font-weight:800;overflow-wrap:anywhere}
+.row-detail{display:block;font-size:12.5px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.row-aside{display:block;font-size:12px;line-height:1.5;font-weight:800;color:var(--warn)}
+.row .chev{width:16px;height:16px;color:var(--line-strong)}
+.row .end{flex:none;text-align:right;font-size:14px;line-height:1.4;font-weight:800;white-space:nowrap;font-variant-numeric:tabular-nums}
+.row.flush{padding-left:16px}
+.person{flex-wrap:wrap}
+.person .grow{flex:1 1 90px}
+.person .btn{margin-left:auto}
+.todo{flex-wrap:wrap;align-items:flex-start}
+.todo .grow{flex:1 1 140px}
+.todo .actions{flex:1 0 100%;justify-content:flex-end}
+.state{display:flex;width:96px;flex:none}
+.actions{display:flex;flex:none;flex-wrap:wrap;gap:8px;margin-left:auto}
+.day{width:44px;flex:none;text-align:center;line-height:1.1}
+.day small{display:block;font-size:12px;font-weight:800;color:var(--muted)}
+.day b{display:block;margin-top:2px;font-family:var(--font-display);font-size:21px;font-weight:500}
+.empty{padding:0 16px 16px;color:var(--muted)}
+.notice{display:flex;align-items:flex-start;gap:6px;margin:0 16px 8px;padding:8px 12px;border-radius:12px;background:var(--leaf-pale);font-size:13px;line-height:1.5;font-weight:700;color:var(--moss)}
+.notice .i{width:16px;height:16px;margin-top:2px}
+
+.avatar{display:grid;width:28px;height:28px;flex:none;place-items:center;border-radius:50%;background:var(--leaf-pale);font-size:13px;line-height:1;font-weight:800;color:var(--moss)}
+.pill{display:inline-flex;height:24px;flex:none;align-items:center;gap:6px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:800;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.75}
+.pill.ok{background:var(--leaf-pale);color:var(--moss)}
+.pill.wait{background:var(--warn-pale);color:var(--warn)}
+.pill.draft{background:var(--sand);color:var(--ink-soft)}
+.pill.stop{background:var(--danger-pale);color:var(--danger)}
+
+.btn{display:inline-flex;flex:none;align-items:center;justify-content:center;gap:6px;border:1px solid transparent;border-radius:999px;font-weight:800;line-height:1;white-space:nowrap;transition:background-color .15s,color .15s}
+.btn:disabled{cursor:default;opacity:.5}
+.btn.md{height:38px;padding:0 16px;font-size:13.5px}
+.btn.sm{height:30px;padding:0 12px;font-size:12.5px}
+.btn.primary{background:var(--leaf);color:var(--ink)}
+.btn.primary:not(:disabled):hover{background:var(--leaf-hover)}
+.btn.secondary{border-color:var(--line-strong);background:var(--canvas);color:var(--ink)}
+.btn.secondary:hover{background:var(--sand)}
+.btn.ghost{color:var(--ink-soft)}
+.btn.ghost:hover{background:var(--sand);color:var(--ink)}
+.btn.danger{border-color:var(--line-strong);background:var(--canvas);color:var(--danger)}
+.btn.danger:hover{background:var(--danger-pale)}
+.btn .i{width:14px;height:14px}
+.btn.md .i{width:16px;height:16px}
+
+.input{display:block;width:100%;min-height:40px;padding:8px 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--canvas);font-size:16px;line-height:1.5;color:var(--ink)}
+.input::placeholder,.search input::placeholder{color:#96968f}
+.input[readonly]{overflow:hidden;text-overflow:ellipsis}
+.search{position:relative;display:flex;flex:0 1 240px;min-width:0;align-items:center}
+.search .i{position:absolute;left:12px;width:16px;height:16px;color:var(--muted);pointer-events:none}
+.search input{width:100%;height:38px;padding:0 14px 0 34px;border:1px solid var(--line-strong);border-radius:999px;background:var(--canvas);font-size:16px}
+
+.fields{padding:4px 16px}
+.fieldrow{display:grid;gap:4px;padding:12px 0;border-top:1px solid var(--line)}
+.fieldrow:first-child{border-top:0}
+.fieldrow .label{font-size:12.5px;font-weight:800;color:var(--ink-soft)}
+.segment{display:inline-flex;padding:2px;border-radius:999px;background:var(--sand)}
+.segment label{position:relative;display:block;height:32px;padding:0 12px;border-radius:999px;font-size:13px;line-height:32px;font-weight:800;color:var(--ink-soft);cursor:pointer}
+.segment label:has(:checked){background:var(--canvas);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .08)}
+.segment label:has(:focus-visible){outline:3px solid var(--moss);outline-offset:2px}
+.segment input{position:absolute;inset:0;margin:0;opacity:0;cursor:pointer}
+.tiles{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.tile{display:grid;width:72px;height:54px;place-items:center;border-radius:10px;background:var(--sand);color:var(--muted)}
+.tile.add{border:1px dashed var(--line-strong);background:none}
+.tile .i{width:18px;height:18px}
+.check{display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:13px;line-height:1.5;cursor:pointer}
+.check input{width:17px;height:17px;flex:none;margin:1px 0 0;accent-color:#5f8a3a}
+
+/* dialog (HostConfirmDialog) */
+.overlay{position:absolute;inset:0;z-index:60;display:grid;place-items:center;padding:16px;background:rgb(28 28 26 / .4)}
+.dialog{display:flex;width:100%;max-width:460px;max-height:100%;flex-direction:column;overflow:hidden;border-radius:16px;background:var(--canvas);box-shadow:0 20px 60px rgb(0 0 0 / .2)}
+.dialog form{display:contents}
+.dialog-body{flex:1;min-height:0;overflow-y:auto;padding:16px}
+.dialog-title{font:800 15px/1.5 var(--font-sans);letter-spacing:0}
+.dialog-desc{margin-top:4px;color:var(--ink-soft);overflow-wrap:anywhere}
+.dialog-desc + .dialog-desc{margin-top:0}
+.dialog-body .input,.dialog-body .segment{margin-top:12px}
+.dialog-body .hint{margin-top:8px;font-size:12.5px;color:var(--muted)}
+.dialog-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+
+@container app (min-width:768px){
+  .sidebar{position:relative;display:flex;width:232px;flex:none;flex-direction:column;overflow-y:auto;padding:18px 12px 14px;border-right:1px solid var(--line)}
+  .sidebar .brandline{display:flex;align-items:center;gap:6px;padding:4px 0 16px 10px}
+  .sidebar .brand{font-size:19px;line-height:1.1}
+  .sidebar .account{margin-top:auto;padding-top:12px}
+  .mhead,.tabbar{display:none}
+  .page{padding:28px 36px 40px}
+  .pagehead{align-items:flex-end;margin-bottom:18px}
+  .pagehead h1,.subhead h1{font-size:26px}
+  .subhead{margin-bottom:18px}
+  .backbtn{display:grid}
+  .panelhead{padding-inline:20px}
+  .row{padding-inline:16px}
+  .row.flush{padding-left:20px}
+  .todo{align-items:center}
+  .todo .actions{flex:none}
+  .empty{padding-inline:20px}
+  .notice{margin-inline:20px}
+  .input{font-size:14px}
+  .search input{font-size:13.5px}
+  .fields{padding:6px 20px}
+  .fieldrow{grid-template-columns:168px minmax(0,1fr);gap:8px 16px}
+  .fieldrow .label{padding-top:9px}
+  .fieldrow .input{max-width:360px}
+  .row .chev{display:block}
+  .dialog-body{padding:20px 20px 16px}
+  .dialog-foot{padding-inline:20px}
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-bookings" viewBox="0 0 20 20"><path d="M6 2a1 1 0 0 1 1 1v1h6V3a1 1 0 1 1 2 0v1h.5A2.5 2.5 0 0 1 18 6.5V8H2V6.5A2.5 2.5 0 0 1 4.5 4H5V3a1 1 0 0 1 1-1zM2 9.5h16v6a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 2 15.5z"/></symbol>
+  <symbol id="i-providers" viewBox="0 0 20 20"><path d="M3 2.6h14a1 1 0 0 1 1 1v2.5a2.667 2.667 0 0 1-5.333 0 2.667 2.667 0 0 1-5.334 0A2.667 2.667 0 0 1 2 6.1V3.600a1 1 0 0 1 1-1z"/><path fill-rule="evenodd" d="M3.4 10.300h13.200v5.900a1.500 1.500 0 0 1-1.500 1.500H4.900a1.500 1.500 0 0 1-1.500-1.500zm5.100 2.500v4.900h3v-4.900z"/></symbol>
+  <symbol id="i-operators" viewBox="0 0 20 20"><circle cx="7.2" cy="6.1" r="3.3"/><path d="M1.4 16.6c0-3.1 2.6-5.3 5.8-5.3s5.800 2.200 5.800 5.300c0 .800-.600 1.400-1.400 1.400H2.800c-.800 0-1.400-.600-1.400-1.400z"/><circle cx="14.500" cy="6.900" r="2.600"/><path d="M14.600 11.200c2.300 0 4 1.600 4 3.900 0 .700-.500 1.200-1.200 1.200h-2.700c0-1.900-.700-3.600-1.900-4.800.500-.200 1.100-.300 1.800-.300z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 3a1 1 0 0 1 1 1v5h5a1 1 0 1 1 0 2h-5v5a1 1 0 1 1-2 0v-5H4a1 1 0 1 1 0-2h5V4a1 1 0 0 1 1-1z"/></symbol>
+  <symbol id="i-chevronRight" viewBox="0 0 20 20"><path d="M7.3 4.3a1 1 0 0 1 1.400 0l5 5a1 1 0 0 1 0 1.400l-5 5a1 1 0 1 1-1.400-1.400L11.600 10 7.300 5.700a1 1 0 0 1 0-1.400z"/></symbol>
+  <symbol id="i-chevronLeft" viewBox="0 0 20 20"><path d="M12.700 4.300a1 1 0 0 1 0 1.400L8.400 10l4.300 4.300a1 1 0 1 1-1.400 1.400l-5-5a1 1 0 0 1 0-1.400l5-5a1 1 0 0 1 1.400 0z"/></symbol>
+  <symbol id="i-chevronDown" viewBox="0 0 20 20"><path d="M4.300 7.300a1 1 0 0 1 1.400 0L10 11.600l4.300-4.300a1 1 0 1 1 1.400 1.400l-5 5a1 1 0 0 1-1.400 0l-5-5a1 1 0 0 1 0-1.400z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 20 20"><path d="M16.700 5.300a1 1 0 0 1 0 1.400l-8 8a1 1 0 0 1-1.400 0l-4-4a1 1 0 1 1 1.400-1.400l3.300 3.300 7.300-7.300a1 1 0 0 1 1.400 0z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 20 20"><path d="M7 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 2v8h8V4zM3 7a1 1 0 0 1 1 1v8h8a1 1 0 1 1 0 2H4a2 2 0 0 1-2-2V8a1 1 0 0 1 1-1z"/></symbol>
+  <symbol id="i-external" viewBox="0 0 20 20"><path d="M11 3a1 1 0 1 1 0-2h6a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0V4.400l-7.300 7.300a1 1 0 0 1-1.400-1.400L14.600 3zM3 5a2 2 0 0 1 2-2h3a1 1 0 0 1 0 2H5v10h10v-3a1 1 0 1 1 2 0v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 20 20"><circle cx="8.500" cy="8.500" r="5.200" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12.500 12.500l4.300 4.300" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 3h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 2v7.600l3.300-3.300a1 1 0 0 1 1.400 0l2.800 2.800 1.300-1.300a1 1 0 0 1 1.400 0l1.800 1.800V5zm9.500 1.200a1.400 1.400 0 1 1 0 2.800 1.400 1.400 0 0 1 0-2.800z"/></symbol>
+</svg>
+
+<div class="review">
+  <span class="review-title">NIHO Experience 管理 — 改善案 v1</span>
+  <div class="seg" role="group" aria-label="端末">
+    <button type="button" data-device="pc" aria-pressed="true">PC</button>
+    <button type="button" data-device="phone" aria-pressed="false">スマホ</button>
+  </div>
+</div>
+
+<div class="stage">
+<div class="device" data-device="pc">
+  <div class="urlbar"><span class="lights"><i></i><i></i><i></i></span><span class="urltext">experience.niho.life<strong id="path">/admin/operators</strong></span></div>
+
+  <div class="app" id="app">
+    <aside class="sidebar">
+      <p class="brandline"><a href="#" class="brand" data-go="bookings">NIHO Experience</a><span class="scope">管理</span></p>
+      <nav class="nav" aria-label="管理メニュー">
+        <ul>
+          <li><a href="#" data-go="bookings"><svg class="i"><use href="#i-bookings"/></svg><span>予約</span></a></li>
+          <li><a href="#" data-go="providers"><svg class="i"><use href="#i-providers"/></svg><span>提供者</span></a></li>
+          <li><a href="#" data-go="operators"><svg class="i"><use href="#i-operators"/></svg><span>運営者</span></a></li>
+        </ul>
+      </nav>
+      <details class="account">
+        <summary><span class="avatar" aria-hidden="true">A</span><span class="who">admin@example.com</span><svg class="i chev"><use href="#i-chevronDown"/></svg></summary>
+        <div class="popup">
+          <div class="me"><b>admin@example.com</b><span>Google アカウント</span></div>
+          <div class="group"><a href="#" class="menulink" data-noop><svg class="i"><use href="#i-external"/></svg>体験サイトを見る</a></div>
+          <div class="group"><button type="button" class="menulink" data-noop>ログアウト</button></div>
+        </div>
+      </details>
+    </aside>
+
+    <div class="col">
+      <header class="mhead">
+        <p class="brandwrap"><a href="#" class="brand" data-go="bookings">NIHO Experience</a><span class="scope">管理</span></p>
+        <a href="#" class="back" data-go="providers"><svg class="i"><use href="#i-chevronLeft"/></svg>提供者</a>
+        <details class="account">
+          <summary><span class="avatar" aria-hidden="true">A</span><span class="sr">admin@example.com のアカウント</span></summary>
+          <div class="popup">
+            <div class="me"><b>admin@example.com</b><span>Google アカウント</span></div>
+            <div class="group"><a href="#" class="menulink" data-noop><svg class="i"><use href="#i-external"/></svg>体験サイトを見る</a></div>
+            <div class="group"><button type="button" class="menulink" data-noop>ログアウト</button></div>
+          </div>
+        </details>
+      </header>
+
+      <main class="main" id="main">
+        <!-- 予約 -->
+        <section data-screen="bookings" hidden>
+          <div class="page">
+            <div class="pagehead">
+              <h1>予約</h1>
+              <form class="search" role="search" data-form="search"><svg class="i"><use href="#i-search"/></svg><input name="q" placeholder="予約番号" aria-label="予約番号" autocomplete="off"></form>
+            </div>
+            <section class="surface" aria-labelledby="todo-title">
+              <div class="panelhead"><h2 class="section-title" id="todo-title" tabindex="-1">次にすること</h2></div>
+              <p class="notice" id="todo-notice" role="status" hidden></p>
+              <div id="todos"></div>
+            </section>
+            <section class="surface" aria-labelledby="support-title" style="margin-top:14px">
+              <div class="panelhead"><h2 class="section-title" id="support-title">サポート ON の予約</h2></div>
+              <ul class="rows" id="support"></ul>
+            </section>
+          </div>
+        </section>
+
+        <!-- 提供者 -->
+        <section data-screen="providers" hidden>
+          <div class="page"><div class="narrow">
+            <div class="pagehead">
+              <h1>提供者</h1>
+              <button type="button" class="btn primary md" data-act="register"><svg class="i"><use href="#i-plus"/></svg>登録</button>
+            </div>
+            <section class="surface"><ul class="rows" id="providers"></ul></section>
+          </div></div>
+        </section>
+
+        <!-- 提供者 1 件 -->
+        <section data-screen="provider" hidden>
+          <div class="page"><div class="narrow" id="provider"></div></div>
+        </section>
+
+        <!-- 運営者 -->
+        <section data-screen="operators">
+          <div class="page"><div class="narrow">
+            <div class="pagehead"><h1>運営者</h1></div>
+            <div class="stack" id="operators"></div>
+          </div></div>
+        </section>
+      </main>
+
+      <nav class="tabbar" aria-label="管理メニュー">
+        <ul>
+          <li><a href="#" data-go="bookings"><svg class="i"><use href="#i-bookings"/></svg><span>予約</span></a></li>
+          <li><a href="#" data-go="providers"><svg class="i"><use href="#i-providers"/></svg><span>提供者</span></a></li>
+          <li><a href="#" data-go="operators"><svg class="i"><use href="#i-operators"/></svg><span>運営者</span></a></li>
+        </ul>
+      </nav>
+    </div>
+
+    <div class="overlay" id="overlay" hidden><div class="dialog" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title"></div></div>
+  </div>
+</div>
+</div>
+
+<script>
+(() => {
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const esc = (value) => String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const icon = (name, cls = "") => `<svg class="i ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+  const initial = (name) => Array.from(name.trim())[0]?.toUpperCase() ?? "?";
+  const after = (days) => { const d = new Date(); d.setDate(d.getDate() + days); return d; };
+  const monthDay = (d) => `${d.getMonth() + 1}月${d.getDate()}日`;
+  const weekday = (d) => "日月火水木金土"[d.getDay()];
+  const yen = (amount) => `¥${amount.toLocaleString("ja-JP")}`;
+  const random = (length, chars) => Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+
+  /* ---- synthetic data ---- */
+  const products = [
+    { id: "dinner", title: "Sample Kitchen Dinner" },
+    { id: "zen", title: "Sample Craft Workshop" },
+  ];
+  const productTitle = (id) => products.find((item) => item.id === id).title;
+  let operators = [
+    { id: 1, product: "dinner", name: "田中 健", pending: false },
+    { id: 2, product: "dinner", name: "佐藤 美咲", pending: true, until: monthDay(after(5)) },
+  ];
+  let nextOperatorId = 3;
+
+  const session = (days, time) => ({ date: after(days), time });
+  const bookings = {
+    b1: { product: "zen", ...session(8, "10:00"), guests: "大人 2", amount: 124000, guest: "Emma Wilson", email: "emma.wilson@example.com", number: "dc34-3786" },
+    b2: { product: "dinner", ...session(5, "18:00"), guests: "大人 2", amount: 13600, guest: "Liam Chen", email: "liam.chen@example.com", number: "7a10-52c9" },
+    b3: { product: "dinner", ...session(-9, "18:00"), guests: "大人 1", amount: 6800, guest: "Sofia Rossi", email: "sofia.rossi@example.com", number: "19be-0f44" },
+    b4: { product: "dinner", ...session(12, "18:00"), guests: "大人 3・子ども 1", amount: 23800, guest: "Noah Müller", email: "noah.mueller@example.com", number: "c2d8-91ab" },
+    b5: { product: "zen", ...session(15, "10:00"), guests: "大人 1", amount: 62000, guest: "Ava Martin", email: "ava.martin@example.com", number: "50f3-7e21" },
+  };
+  const when = (b) => `${monthDay(b.date)}(${weekday(b.date)}) ${b.time}`;
+  let todos = [
+    { id: "t1", kind: "approval", booking: "b1", tone: "wait", label: "承認待ち", aside: "あと 23 時間" },
+    { id: "t2", kind: "cancel", booking: "b2", tone: "wait", label: "取消の依頼" },
+    { id: "t3", kind: "refund", booking: "b3", tone: "stop", label: "返金 失敗" },
+  ];
+  let support = ["b4", "b5"];
+
+  let providers = [
+    { id: "sample-kitchen", name: "サンプルの台所", publicName: "", kind: "", seller: "合同会社サンプル", experiences: [{ title: "Sample Kitchen Dinner", tone: "ok", label: "掲載中" }] },
+    { id: "sample-studio", name: "サンプル工房", publicName: "サンプル工房", kind: "BUSINESS", seller: "", experiences: [] },
+  ];
+
+  /* ---- 運営者 ---- */
+  function renderOperators() {
+    $("#operators").innerHTML = products.map((product) => {
+      const people = operators.filter((item) => item.product === product.id);
+      return `<section class="surface" aria-labelledby="op-${product.id}">
+        <div class="panelhead${people.length ? "" : " solo"}">
+          <h2 class="section-title" id="op-${product.id}">${esc(product.title)}</h2>
+          <button type="button" class="btn secondary sm" data-act="invite" data-product="${product.id}">${icon("plus")}招待</button>
+        </div>
+        ${people.length ? `<ul class="rows">${people.map((item) => `<li class="row person">
+          <span class="avatar" aria-hidden="true">${esc(initial(item.name))}</span>
+          <span class="grow"><span class="row-title">${esc(item.name)}</span>${item.pending ? `<span class="row-detail">${esc(item.until)}まで</span>` : ""}</span>
+          ${item.pending ? `<span class="pill wait">招待中</span>` : ""}
+          <button type="button" class="btn ghost sm" data-act="remove" data-id="${item.id}">${item.pending ? "取り消す" : "解除"}</button>
+        </li>`).join("")}</ul>` : ""}
+      </section>`;
+    }).join("");
+  }
+
+  function openInvite(productId) {
+    openDialog(`<form data-form="invite" data-product="${productId}">
+      <div class="dialog-body">
+        <h2 class="dialog-title" id="dlg-title">運営者を招待</h2>
+        <p class="dialog-desc">${esc(productTitle(productId))}</p>
+        <input class="input" name="name" maxlength="100" placeholder="担当者名" aria-label="担当者名" autocomplete="off" data-focus>
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="btn secondary md" data-act="close">やめる</button>
+        <button type="submit" class="btn primary md" disabled>招待リンクを作成</button>
+      </div>
+    </form>`);
+  }
+
+  function createInvitation(productId, name) {
+    operators = [...operators, { id: nextOperatorId++, product: productId, name, pending: true, until: monthDay(after(7)) }];
+    renderOperators();
+    const hex = "0123456789abcdef";
+    const link = `https://experience.niho.life/host/invitations/${random(8, hex)}-${random(4, hex)}-4${random(3, hex)}-a${random(3, hex)}-${random(12, hex)}#${random(43, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")}`;
+    openDialog(`<div class="dialog-body">
+        <h2 class="dialog-title" id="dlg-title">招待リンク</h2>
+        <p class="dialog-desc">${esc(name)} · ${esc(productTitle(productId))}</p>
+        <input class="input" id="invite-link" readonly value="${esc(link)}" aria-label="招待リンク">
+        <p class="hint">7日間有効 · 閉じると再表示できません</p>
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="btn secondary md" data-act="close">閉じる</button>
+        <button type="button" class="btn primary md" data-act="copy" data-focus>${icon("copy")}<span>リンクをコピー</span></button>
+      </div>`, { keepOpener: true });
+  }
+
+  function openRemove(id) {
+    const item = operators.find((entry) => entry.id === id);
+    openDialog(`<div class="dialog-body">
+        <h2 class="dialog-title" id="dlg-title">${item.pending ? "招待を取り消しますか？" : "担当を解除しますか？"}</h2>
+        <p class="dialog-desc">${esc(item.name)} · ${esc(productTitle(item.product))}</p>
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="btn secondary md" data-act="close" data-focus>やめる</button>
+        <button type="button" class="btn danger md" data-act="remove-confirm" data-id="${item.id}">${item.pending ? "取り消す" : "解除する"}</button>
+      </div>`);
+  }
+
+  /* ---- 予約 ---- */
+  function renderBookings() {
+    $("#todos").innerHTML = todos.length ? `<ul class="rows">${todos.map((todo) => {
+      const b = bookings[todo.booking];
+      const detail = todo.kind === "refund" ? `${yen(b.amount)} · ${b.guest}` : `${when(b)} · ${b.guests} · ${yen(b.amount)} · ${b.guest}`;
+      return `<li class="row todo">
+        <span class="state"><span class="pill ${todo.tone}">${esc(todo.label)}</span></span>
+        <span class="grow">${todo.aside ? `<span class="row-aside">${esc(todo.aside)}</span>` : ""}<span class="row-title">${esc(productTitle(b.product))}</span><span class="row-detail">${esc(detail)}</span></span>
+        <span class="actions">${todo.kind === "approval"
+          ? `<button type="button" class="btn secondary sm" data-act="decline" data-todo="${todo.id}">辞退</button><button type="button" class="btn primary sm" data-act="approve" data-todo="${todo.id}">承認</button>`
+          : `<button type="button" class="btn secondary sm" data-act="open-todo" data-todo="${todo.id}">開く</button>`}</span>
+      </li>`;
+    }).join("")}</ul>` : `<p class="empty">いま対応が必要なことはありません。</p>`;
+    $("#support").innerHTML = support.map((id) => {
+      const b = bookings[id];
+      return `<li><button type="button" class="row" data-act="open-booking" data-booking="${id}">
+        <span class="day" aria-hidden="true"><small>${weekday(b.date)}</small><b>${b.date.getDate()}</b></span>
+        <span class="grow"><span class="row-title">${esc(productTitle(b.product))}</span><span class="row-detail">${esc(`${b.time} · ${b.guests} · ${b.guest}`)}</span></span>
+        <span class="end">${yen(b.amount)}</span>
+        ${icon("chevronRight", "chev")}
+      </button></li>`;
+    }).join("");
+  }
+
+  function say(text) {
+    const notice = $("#todo-notice");
+    notice.innerHTML = `${icon("check")}${esc(text)}`;
+    notice.hidden = false;
+  }
+  function settle(todoId, text) {
+    todos = todos.filter((todo) => todo.id !== todoId);
+    renderBookings();
+    say(text);
+  }
+
+  function bookingSummary(b) {
+    return `<p class="dialog-desc">${esc(`${when(b)} · ${b.guests} · ${yen(b.amount)}`)}</p>
+        <p class="dialog-desc">${esc(`${b.guest} · ${b.email}`)}</p>
+        <p class="hint">予約番号 ${esc(b.number)}</p>`;
+  }
+  function openDecline(todoId) {
+    const b = bookings[todos.find((todo) => todo.id === todoId).booking];
+    openDialog(`<div class="dialog-body">
+        <h2 class="dialog-title" id="dlg-title">申込を辞退しますか？</h2>
+        <p class="dialog-desc">${esc(productTitle(b.product))}</p>
+        ${bookingSummary(b)}
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="btn secondary md" data-act="close" data-focus>やめる</button>
+        <button type="button" class="btn danger md" data-act="settle" data-todo="${todoId}" data-say="${esc(`${b.guest} さんの申込を辞退しました`)}">辞退する</button>
+      </div>`);
+  }
+  function openTodo(todoId) {
+    const todo = todos.find((entry) => entry.id === todoId);
+    const b = bookings[todo.booking];
+    const actions = todo.kind === "cancel"
+      ? `<button type="button" class="btn secondary md" data-act="settle" data-todo="${todoId}" data-say="${esc(`${b.guest} さんの取消の依頼をお断りしました`)}">お断りする</button>
+         <button type="button" class="btn danger md" data-act="settle" data-todo="${todoId}" data-say="${esc(`${b.guest} さんの予約を取り消して返金しました`)}">取り消して返金</button>`
+      : `<button type="button" class="btn secondary md" data-act="settle" data-todo="${todoId}" data-say="${esc(`${b.guest} さんの返金を手作業で済ませました`)}">手作業で済ませた</button>`;
+    openDialog(`<div class="dialog-body">
+        <h2 class="dialog-title" id="dlg-title">${esc(productTitle(b.product))}</h2>
+        ${bookingSummary(b)}
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="btn ghost md" data-act="close" data-focus>閉じる</button>
+        ${actions}
+      </div>`);
+  }
+  function openBooking(id) {
+    const b = bookings[id];
+    openDialog(`<div class="dialog-body">
+        <h2 class="dialog-title" id="dlg-title">${esc(productTitle(b.product))}</h2>
+        ${bookingSummary(b)}
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="btn ghost md" data-act="close" data-focus>閉じる</button>
+        <button type="button" class="btn danger md" data-act="cancel-booking" data-booking="${id}">取り消して返金</button>
+      </div>`);
+  }
+
+  /* ---- 提供者 ---- */
+  const providerPill = (provider) => !provider.publicName ? `<span class="pill wait">公開名なし</span>` : !provider.seller ? `<span class="pill draft">販売者なし</span>` : "";
+  function renderProviders() {
+    $("#providers").innerHTML = providers.map((provider) => `<li><a href="#" class="row" data-provider="${provider.id}">
+      <span class="avatar" aria-hidden="true">${esc(initial(provider.name))}</span>
+      <span class="grow"><span class="row-title">${esc(provider.name)}</span>${provider.seller ? `<span class="row-detail">${esc(provider.seller)}</span>` : ""}</span>
+      ${providerPill(provider)}
+      ${icon("chevronRight", "chev")}
+    </a></li>`).join("");
+  }
+  const kindSegment = (name, value) => `<span class="segment" role="radiogroup" aria-label="種別">${[["", "未指定"], ["PERSON", "個人"], ["BUSINESS", "事業者・団体"]]
+    .map(([key, label]) => `<label><input type="radio" name="${name}" value="${key}"${key === value ? " checked" : ""}>${label}</label>`).join("")}</span>`;
+  function renderProvider(id) {
+    const provider = providers.find((item) => item.id === id);
+    $("#provider").innerHTML = `<div class="subhead">
+        <a href="#" class="backbtn" data-go="providers" aria-label="提供者へ戻る">${icon("chevronLeft")}</a>
+        <h1>${esc(provider.name)}</h1>
+      </div>
+      <div class="stack">
+        <section class="surface" aria-labelledby="pv-public">
+          <div class="panelhead"><h2 class="section-title" id="pv-public">公開情報</h2></div>
+          <div class="fields">
+            <div class="fieldrow"><label class="label" for="pv-name">公開名</label><div><input class="input" id="pv-name" value="${esc(provider.publicName)}" maxlength="300" autocomplete="off"></div></div>
+            <div class="fieldrow"><span class="label">種別</span><div>${kindSegment("pv-kind", provider.kind)}</div></div>
+            <div class="fieldrow"><span class="label">写真</span><div class="tiles">${provider.publicName ? `<span class="tile">${icon("photo")}</span>` : ""}<button type="button" class="tile add" aria-label="写真を追加" data-noop>${icon("plus")}</button></div></div>
+          </div>
+        </section>
+        <section class="surface" aria-labelledby="pv-experiences">
+          <div class="panelhead${provider.experiences.length ? "" : " solo"}">
+            <h2 class="section-title" id="pv-experiences">体験</h2>
+            ${provider.seller ? `<button type="button" class="btn secondary sm" data-noop>${icon("plus")}下書き</button>` : `<span class="pill draft">販売者なし</span>`}
+          </div>
+          ${provider.experiences.length ? `<ul class="rows">${provider.experiences.map((item) => `<li><a href="#" class="row flush" data-noop>
+            <span class="grow"><span class="row-title">${esc(item.title)}</span></span>
+            <span class="pill ${item.tone}">${esc(item.label)}</span>
+            ${icon("chevronRight", "chev")}
+          </a></li>`).join("")}</ul>` : ""}
+        </section>
+      </div>`;
+  }
+  function openRegister() {
+    openDialog(`<form data-form="register">
+      <div class="dialog-body">
+        <h2 class="dialog-title" id="dlg-title">提供者を登録</h2>
+        <input class="input" name="name" maxlength="300" placeholder="公開名" aria-label="公開名" autocomplete="off" data-focus>
+        <div>${kindSegment("kind", "")}</div>
+        <label class="check"><input type="checkbox" name="consent"><span>この公開名での掲載について、提供者の承諾を確認しました</span></label>
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="btn secondary md" data-act="close">やめる</button>
+        <button type="submit" class="btn primary md" disabled>登録</button>
+      </div>
+    </form>`);
+  }
+
+  /* ---- navigation ---- */
+  const app = $("#app");
+  const PATHS = { bookings: "/admin/site-bookings", providers: "/admin/products", operators: "/admin/operators" };
+  function go(screen, providerId) {
+    const shown = providerId ? "provider" : screen;
+    if (providerId) renderProvider(providerId);
+    $$("[data-screen]").forEach((section) => { section.hidden = section.dataset.screen !== shown; });
+    $$("[data-go]").forEach((link) => {
+      if (link.closest(".nav, .tabbar")) link.toggleAttribute("aria-current", false);
+      if (link.closest(".nav, .tabbar") && link.dataset.go === screen) link.setAttribute("aria-current", "page");
+    });
+    if (providerId) app.dataset.sub = "1"; else delete app.dataset.sub;
+    $("#path").textContent = providerId ? `${PATHS.providers}/${providerId}` : PATHS[screen];
+    try { history.replaceState(null, "", `#${providerId ? `provider=${providerId}` : screen}`); } catch { /* a sandboxed preview has no history */ }
+    $("#main").scrollTop = 0;
+    $$("details[open]").forEach((details) => details.removeAttribute("open"));
+  }
+
+  /* ---- dialog ---- */
+  const overlay = $("#overlay");
+  const dialog = $("#dialog");
+  let opener = null;
+  function openDialog(html, { keepOpener = false } = {}) {
+    if (!keepOpener) opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialog.innerHTML = html;
+    overlay.hidden = false;
+    $("[data-focus]", dialog)?.focus();
+  }
+  function closeDialog() {
+    overlay.hidden = true;
+    dialog.innerHTML = "";
+    if (opener?.isConnected) opener.focus();
+    opener = null;
+  }
+  const formReady = (form) => {
+    const data = new FormData(form);
+    const named = String(data.get("name") ?? "").trim().length > 0;
+    return form.dataset.form === "register" ? named && data.has("consent") : named;
+  };
+
+  /* ---- events ---- */
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    if (target === overlay) { closeDialog(); return; }
+    const link = target.closest("a[href='#']");
+    if (link) event.preventDefault();
+    const device = target.closest("[data-device]");
+    if (device && device.tagName === "BUTTON") { setDevice(device.dataset.device); return; }
+    const nav = target.closest("[data-go]");
+    if (nav) { go(nav.dataset.go); return; }
+    const provider = target.closest("[data-provider]");
+    if (provider) { go("providers", provider.dataset.provider); return; }
+    const button = target.closest("[data-act]");
+    if (!button) {
+      $$("details[open]").forEach((details) => { if (!details.contains(target)) details.removeAttribute("open"); });
+      return;
+    }
+    const { act, id, product, todo, booking } = button.dataset;
+    if (act === "close") closeDialog();
+    else if (act === "invite") openInvite(product);
+    else if (act === "remove") openRemove(Number(id));
+    else if (act === "remove-confirm") { operators = operators.filter((item) => item.id !== Number(id)); renderOperators(); closeDialog(); }
+    else if (act === "copy") {
+      const input = $("#invite-link");
+      const done = () => { button.innerHTML = `${icon("check")}<span>コピーしました</span>`; };
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(input.value).then(done, () => { input.select(); });
+      else { input.select(); }
+    }
+    else if (act === "approve") { const b = bookings[todos.find((item) => item.id === todo).booking]; settle(todo, `${b.guest} さんの申込を承認しました`); }
+    else if (act === "decline") openDecline(todo);
+    else if (act === "open-todo") openTodo(todo);
+    else if (act === "settle") { settle(todo, button.dataset.say); closeDialog(); }
+    else if (act === "open-booking") openBooking(booking);
+    else if (act === "cancel-booking") { const b = bookings[booking]; support = support.filter((item) => item !== booking); renderBookings(); say(`${b.guest} さんの予約を取り消して返金しました`); closeDialog(); }
+    else if (act === "register") openRegister();
+  });
+  document.addEventListener("input", (event) => {
+    const form = event.target instanceof Element ? event.target.closest("form[data-form]") : null;
+    const submit = form ? $("button[type=submit]", form) : null;
+    if (submit) submit.disabled = !formReady(form);
+  });
+  document.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.target;
+    const data = new FormData(form);
+    if (form.dataset.form === "search") { if (String(data.get("q")).trim()) openBooking("b4"); return; }
+    if (!formReady(form)) return;
+    const name = String(data.get("name")).trim();
+    if (form.dataset.form === "invite") createInvitation(form.dataset.product, name);
+    if (form.dataset.form === "register") {
+      const id = `provider-${providers.length + 1}`;
+      providers = [...providers, { id, name, publicName: name, kind: String(data.get("kind") ?? ""), seller: "", experiences: [] }];
+      renderProviders();
+      closeDialog();
+      go("providers", id);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!overlay.hidden) closeDialog();
+    else $$("details[open]").forEach((details) => details.removeAttribute("open"));
+  });
+
+  /* ---- mock frame: PC / スマホ, scaled to the window ---- */
+  const frame = $(".device");
+  function fit() {
+    const phone = frame.dataset.device === "phone";
+    const vw = document.documentElement.clientWidth;
+    const vh = window.innerHeight;
+    const bleed = phone && vw <= 480;
+    const width = phone ? (bleed ? vw : 390) : Math.max(1100, Math.min(1280, vw - 24));
+    const scale = bleed ? 1 : Math.min(1, (vw - 24) / width);
+    const room = (vh - $(".review").offsetHeight - (bleed ? 0 : 16)) / scale;
+    const height = Math.max(phone ? 560 : 600, Math.min(phone ? 800 : 860, room));
+    frame.classList.toggle("bleed", bleed);
+    frame.style.width = `${width}px`;
+    frame.style.height = `${height}px`;
+    frame.style.zoom = String(scale);
+  }
+  function setDevice(device) {
+    frame.dataset.device = device;
+    $$(".seg button").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.device === device)));
+    fit();
+  }
+  window.addEventListener("resize", fit);
+
+  renderOperators();
+  renderBookings();
+  renderProviders();
+  /* #operators / #bookings / #providers / #provider=<id>, then &phone or &pc */
+  function openFromHash(first) {
+    const [screen = "", ...flags] = decodeURIComponent(location.hash.slice(1)).split("&");
+    const providerId = screen.startsWith("provider=") ? screen.slice(9) : "";
+    if (providers.some((item) => item.id === providerId)) go("providers", providerId);
+    else if (PATHS[screen] || first) go(PATHS[screen] ? screen : "operators");
+    const device = flags.includes("phone") ? "phone" : flags.includes("pc") ? "pc" : first ? (document.documentElement.clientWidth < 700 ? "phone" : "pc") : null;
+    if (device) setDevice(device);
+  }
+  window.addEventListener("hashchange", () => openFromHash(false));
+  openFromHash(true);
+})();
+</script>
+<style>
+@font-face{font-family:"Fraunces";font-style:normal;font-weight:100 900;font-display:swap;src:url(home-list-neighborhoods-v1/assets/fonts/fraunces-latin-wght-normal.woff2) format("woff2")}
+@font-face{font-family:"Nunito";font-style:normal;font-weight:200 1000;font-display:swap;src:url(home-list-neighborhoods-v1/assets/fonts/nunito-latin-wght-normal.woff2) format("woff2")}
+</style>
+</body>
+</html>

@@ -123,7 +123,7 @@ async function openPage(page: Page): Promise<Backend> {
   await page.goto("/admin");
   await page.getByRole("button", { name: "合成Adminとして開く" }).click();
   await page.waitForURL(/\/admin\/bookings/);
-  await page.getByRole("link", { name: "サイト予約" }).click();
+  await page.getByRole("link", { name: "予約", exact: true }).click();
   await page.waitForURL(/\/admin\/site-bookings/);
   await expect(page.getByRole("heading", { name: /サポートONの予約/ })).toBeVisible();
   return backend;
