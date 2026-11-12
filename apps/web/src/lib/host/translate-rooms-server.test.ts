@@ -154,6 +154,17 @@ describe("translate rooms server boundary", () => {
     expect(mocks.upstreamFetch).not.toHaveBeenCalled();
   });
 
+  it("mockのNIHOホストはHTTP専用flagなしで合成standalone clientへ進む", async () => {
+    Object.assign(mocks.config, { apiMode: "mock", experienceTranslateApiEnabled: false, experienceTranslateStandaloneApiEnabled: false });
+    mocks.readHost.mockResolvedValue({ kind: "niho", accessToken: "mock-host-token" });
+
+    const loaded = await loadStandaloneTranslateRoomsClient("provider_1");
+
+    expect(loaded).toEqual({ ok: true, serviceAuth: false, providerApiId: "niho_provider_1", client: { marker: "translate-client" } });
+    expect(mocks.usable).not.toHaveBeenCalled();
+    expect(mocks.create).toHaveBeenCalledWith({ nihoWebOrigin: "https://niho.example", auth: { kind: "niho", accessToken: "mock-host-token" }, fetch: mocks.upstreamFetch });
+  });
+
   it("standaloneは他role・他provider・欠けたmapping・失効identityを閉じる", async () => {
     mocks.config.experienceTranslateApiEnabled = true;
     mocks.readHost.mockResolvedValue({ kind: "niho", accessToken: "sealed-host-token" });

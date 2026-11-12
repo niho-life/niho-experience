@@ -77,6 +77,23 @@ describe("standalone translate BFF routes", () => {
     expect(mocks.end).toHaveBeenCalledWith("niho_provider_9", "room_1");
   });
 
+  it("Host Account status renews the owner lease through current and hides a different current room", async () => {
+    mocks.load.mockResolvedValue({ ok: true, providerApiId: "local_provider_1", serviceAuth: true, client: {
+      getCurrentStandaloneRoom: mocks.current, getStandaloneRoom: mocks.get,
+    } });
+    mocks.current.mockResolvedValueOnce({ ok: true, data: { room } });
+    const status = await getRoom(new Request(`${base}/room_1`), roomContext());
+    expect(status.status).toBe(200);
+    expect(await status.json()).toEqual(room);
+    expect(mocks.current).toHaveBeenCalledWith("local_provider_1");
+    expect(mocks.get).not.toHaveBeenCalled();
+
+    mocks.current.mockResolvedValueOnce({ ok: true, data: { room: null } });
+    expect((await getRoom(new Request(`${base}/room_1`), roomContext())).status).toBe(404);
+    mocks.current.mockResolvedValueOnce({ ok: true, data: { room: { ...room, roomId: "room_2" } } });
+    expect((await getRoom(new Request(`${base}/room_1`), roomContext())).status).toBe(404);
+  });
+
   it("rejects query, odd ids, cross-origin mutation and non-strict bodies before identity lookup", async () => {
     expect((await getCurrent(new Request(`${base}/current?debug=1`), providerContext())).status).toBe(404);
     expect((await getRoom(new Request(`${base}/room_1`), roomContext(".."))).status).toBe(404);

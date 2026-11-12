@@ -118,11 +118,13 @@ export async function loadStandaloneTranslateRoomsClient(localProviderId: string
   }
   const current = await readHostSession();
   if (!current) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
-  if (current.kind === "experience" && !config.experienceTranslateStandaloneApiEnabled) {
-    return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
-  }
-  if (current.kind === "niho" && (!config.experienceTranslateApiEnabled || !accessTokenUsable(current, Date.now()))) {
-    return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
+  if (config.apiMode === "http") {
+    if (current.kind === "experience" && !config.experienceTranslateStandaloneApiEnabled) {
+      return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
+    }
+    if (current.kind === "niho" && (!config.experienceTranslateApiEnabled || !accessTokenUsable(current, Date.now()))) {
+      return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
+    }
   }
   const identity = await loadHostProviders();
   if (identity.status === "signed-out" || identity.status === "refresh") {
