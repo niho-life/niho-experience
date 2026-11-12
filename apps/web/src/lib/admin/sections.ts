@@ -44,6 +44,14 @@ export function adminHomePath(flags: AdminSectionFlags): string | null {
   return adminSections(flags)[0]?.href ?? null;
 }
 
+/**
+ * On phones the page for one provider (/admin/products/<id>, this level only) brings its own "‹ 提供者" band and no bottom
+ * tabs, like the host console's pages under a section. null everywhere else.
+ */
+export function adminBackLink(pathname: string): { href: string; label: string } | null {
+  return /^\/admin\/products\/[^/]+\/?$/.test(pathname) ? { href: "/admin/products", label: "提供者" } : null;
+}
+
 /** The menu item that is current: the path is the section's own or one under it. */
 export function isAdminSectionActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
