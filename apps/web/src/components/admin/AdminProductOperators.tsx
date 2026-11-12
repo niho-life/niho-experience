@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import type { ProductOperatorAdminSnapshot } from "@niho-experience/experience-store";
 import type { StatusLabel } from "@/host/status";
-import { HostConfirmDialog, HOST_DIALOG } from "@/components/host/HostConfirmDialog";
+import { DIALOG_BODY, DIALOG_FOOT, DIALOG_TITLE, ModalDialog } from "./AdminModalDialog";
+import { HostConfirmDialog } from "@/components/host/HostConfirmDialog";
 import { DANGER_BUTTON } from "@/components/host/HostBookingDialogs";
 import { HostNoticeLine } from "@/components/host/HostNoticeLine";
 import { HostIcon } from "@/components/host/HostIcon";
@@ -39,35 +40,6 @@ interface LinkView {
   assignmentLabel: string;
   productName: string;
 }
-
-/** A modal <dialog> on the page, the same way HostConfirmDialog opens one, for the invitation's two faces. */
-function ModalDialog({ titleId, focusRef, locked = false, onClose, children }: { titleId: string; focusRef: RefObject<HTMLElement | null>; locked?: boolean; onClose: () => void; children: ReactNode }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const element = dialog.current;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled && element?.isConnected && !element.open) {
-        element.showModal();
-        focusRef.current?.focus();
-      }
-    });
-    return () => {
-      cancelled = true;
-      if (previousFocus?.isConnected && (document.activeElement === document.body || element?.contains(document.activeElement))) previousFocus.focus();
-    };
-  }, [focusRef]);
-  return (
-    <dialog ref={dialog} aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); if (!locked) onClose(); }} className={HOST_DIALOG}>
-      {children}
-    </dialog>
-  );
-}
-
-const DIALOG_BODY = "min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-4 md:px-5 md:pt-5";
-const DIALOG_FOOT = "flex flex-wrap items-center justify-end gap-2 border-t border-line px-4 py-3 md:px-5";
-const DIALOG_TITLE = "font-sans text-[0.9375rem] leading-normal font-extrabold tracking-normal";
 
 function InviteFormDialog({ productName, busy, onSubmit, onClose }: { productName: string; busy: boolean; onSubmit: (assignmentLabel: string) => void; onClose: () => void }) {
   const titleId = useId();
