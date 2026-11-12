@@ -47,6 +47,12 @@ export interface HostPushEvent {
   guestName?: string;
   /** Only this product's people (its OWNER and operators) get it, instead of every member of the provider. */
   productId?: string;
+  /**
+   * 担当を募る (#535): a NIHO-managed request that needs an internal assignee. Only the people who can take the occurrence
+   * (the provider's OWNER and COHOST and the product's operators; the assignee alone once there is one) get it. It sets the
+   * title; `kind` stays NEW_BOOKING, which cannot be turned off. Needs `productId`.
+   */
+  assignment?: { occurrenceId: string };
   /** Only the provider's OWNER gets it (an operations suspension: only the OWNER can resume the listing). */
   ownerOnly?: true;
   /**
@@ -111,6 +117,9 @@ export const HOST_PUSH_TITLES: Record<HostPushKind, string> = {
   GOOGLE_CALENDAR_ATTENTION: "Googleカレンダーを確認してください",
 };
 
+/** A request that needs someone to take it: said apart from a booking, because the host is asked to press 対応する. */
+export const HOST_PUSH_ASSIGNMENT_TITLE = "担当を募集中の申込";
+
 export const HOST_PUSH_QUESTION_TITLE = "予約前の質問が届きました";
 
 /** A clearing of an operations stop: the listing stays off until the OWNER resumes it (owner_resume_required). */
@@ -171,6 +180,7 @@ function whenLine(event: HostPushEvent): string | null {
 export function hostPushLines(event: HostPushEvent): { title: string; experience: string | null; when: string | null; guest: string | null; seats: string | null } {
   return {
     title: event.ota ? hostPushOtaTitle(event.ota)
+      : event.assignment ? HOST_PUSH_ASSIGNMENT_TITLE
       : event.listing?.change === "CLEARED" ? HOST_PUSH_LISTING_CLEARED_TITLE
       : event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
     experience: titleLine(event.experienceTitle),

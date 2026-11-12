@@ -31,11 +31,19 @@ NIHO販売（完全代行・承認後決済 #515）の開催回に、社内の�
 | 事務局のAPI・画面 | `apps/web/src/app/(admin)/admin/api/occurrence-assignments/route.ts`・`apps/web/src/components/admin/AdminOccurrenceAssignments.tsx` |
 | runtime roleの権限 | `scripts/gcp/experience-db-grants.mjs`（events は INSERT のみ、assignments は INSERT と released_at・agreed_fee_yen・agreed_fee_set_at の UPDATE のみ） |
 
+## 通知（②）
+
+申込みが届いた時点で、担当できる人に既存のホスト向けpush・メールで知らせる。flag は①と同じ `EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED`（OFFの間は行を積まない）。pushは `HOST_PUSH_ENABLED`、メールは `EXPERIENCE_HOST_MAIL_ENABLED` の既存の段が送る（それぞれOFFなら行は残り、24時間で閉じる）。新しい migration・runtime権限は要らない。
+
+- **いつ**：承認後決済の申込を受けた同じ transaction（`startGuestBooking`）で `host.notify.assignment_request`（push）と `host.mail.assignment_request`（担当できる人ごとに1行）を積む。担当を外れて募集中に戻ったときも、担当を外れた期間ごとに1回、その回の最も早い生きた申込を使って積み直す。
+- **だれに**：OWNER・COHOST・その商品の運営者（有効・期限内）。EDITOR・VIEWER・解除済みには送らない。メールは宛先を持つ人だけ。**送る時に読み直す**ので、担当が決まっていればその人だけに送り、他の人の分は送らず閉じる（同じ回に後から入った申込も、決まっている担当だけに知らせて、もう一度募集しない）。メールは `HOST_MAIL_TOPICS.assignmentRequest`、pushは `HostPushSubscriptions.assignmentRecipients`。
+- **中身**：`{ v, bookingId, occurrenceId, productId, experienceTitle, startsAt, seats }` だけ。予約者の名前・連絡先・金額・内部の担当は載せない。題は「担当を募集中の申込」（設定 › 通知の「新しい予約・申込」の一種で、止められない）。本文は体験・日時・人数と `/host/bookings?booking=…` のリンク。メールには「担当になっても、承認・支払いの案内・予約の確定は NIHO が行う。予約者には担当者は知らされない」と書く。
+- **重複**：申込の予約ID（再募集は予約ID＋終えた担当期間のID）ごとに1行。再送・同時の申込でも増えない。pushの tag は回ごとなので、同じ回の次の申込は前の通知を置き換える。
+
 ## まだ無いもの（後続）
 
-- **申込み時点の通知**（担当できる人への push・メール）。いまのホスト向け通知は予約の確定時に出る。v0の①では、事務局が申込みの新着メール（既存）を見てLINEなどで声をかけ、返事を代わりに記録する。②で既存のホスト向けpush・メールの仕組み（`host.notify.*`・`host.mail.*`）に載せる。
-- 募集のまま開催が近づいた回の事務局への強調、締切の個別設定、複数人の編成、自動の割当、別日・別条件の提案、報酬の計算、商品限定運営者の画面、権限表（#528）。
+- 募集のまま開催が近づいた回の事務局での強調、締切の個別設定、複数人の編成、自動の割当、別日・別条件の提案、報酬の計算、商品限定運営者のホスト画面、権限表（#528）。
 
 ## 検証
 
-`packages/experience-store/test/occurrence-assignments.integration.test.ts`（同時の「対応する」で1人だけ確定、再送・二重クリックの冪等、権限の無い人の拒否、追記だけの履歴、予約を変えないこと）、`apps/web/src/host/assignments-server.test.ts`、`apps/web/src/app/(admin)/admin/api/occurrence-assignments/route.test.ts`。いずれも合成データ。本番・stgの有効化と実データでの受入は別。
+`packages/experience-store/test/occurrence-assignments.integration.test.ts`（同時の「対応する」で1人だけ確定、再送・二重クリックの冪等、権限の無い人の拒否、追記だけの履歴、予約を変えないこと）、`apps/web/src/host/assignments-server.test.ts`、`apps/web/src/app/(admin)/admin/api/occurrence-assignments/route.test.ts`。通知は同じ統合テストの「②」（宛先、担当済み後の絞り込み、再募集の1回、flag OFFで積まない）と、`outbox.test.ts`・`push.test.ts`・`host-templates.test.ts`。いずれも合成データ。本番・stgの有効化と実データでの受入は別。

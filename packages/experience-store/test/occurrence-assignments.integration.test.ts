@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "../src/errors.ts";
+import { HostMailOutbox } from "../src/host-mail-outbox.ts";
+import { enqueueAssignmentRequestNotification } from "../src/host-notification-outbox.ts";
 import { OccurrenceAssignmentRepository } from "../src/occurrence-assignments.ts";
+import { HostPushSubscriptions as PushSubscriptionsForTest } from "../src/push-subscriptions.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -56,7 +59,8 @@ async function seedBooking(pool: Pool, providerId: string, productId: string, oc
   const inserted = await pool.query<{ id: string }>(
     `INSERT INTO bookings (public_booking_id,provider_id,product_id,occurrence_id,status,seats,idempotency_key,hold_expires_at,
        occurrence_snapshot,pricing_snapshot,seller_snapshot,confirmed_at,created_at)
-     VALUES ($1,$2,$3,$4,$5,1,$6,clock_timestamp()+interval '23 hours','{}','{}',$7::jsonb,
+     VALUES ($1,$2,$3,$4,$5,1,$6,clock_timestamp()+interval '23 hours',
+       (SELECT jsonb_build_object('startUtc', to_char(start_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) FROM schedule_occurrences WHERE provider_id=$2 AND occurrence_id=$4),'{}',$7::jsonb,
        CASE WHEN $5='CONFIRMED' THEN clock_timestamp() END,clock_timestamp()-interval '1 minute') RETURNING id::text AS id`,
     [publicId, providerId, productId, occurrenceId, status, `key-${publicId}`, JSON.stringify(seller)],
   );
@@ -253,4 +257,84 @@ async function seedOperatorGrant(pool: Pool, invitationId: string, providerId: s
     `INSERT INTO product_operator_grants (provider_id,product_id,niho_user_id,invitation_id,assignment_label) VALUES ($1,$2,$3,$4,'運営担当')`,
     [providerId, productId, userId, invitationId],
   );
+}
+
+describe("occurrence assignee notifications (#535 v0 ②)", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
+  it("tells the people who can take the occurrence, narrows to the assignee once there is one, and tells them again when it is open again", async () => {
+    const db = await createIsolatedDatabase(databaseUrl, "occurrence_assignment_notifications", { max: 4 });
+    try {
+      const pool = db.pool;
+      await seedProvider(pool, PROVIDER, "product-a");
+      await pool.query(
+        `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,$2,'OWNER',true),($1,$3,'COHOST',true),($1,$4,'EDITOR',true)`,
+        [PROVIDER, OWNER, COHOST, EDITOR],
+      );
+      await seedOperatorGrant(pool, randomUUID(), PROVIDER, "product-a", OPERATOR);
+      for (const [index, person] of [OWNER, COHOST, EDITOR, OPERATOR, STRANGER].entries()) {
+        await pool.query("INSERT INTO host_notification_addresses (niho_user_id,login_email,login_email_at) VALUES ($1,$2,clock_timestamp())", [person, `person${index}@example.test`]);
+        await pool.query(
+          `INSERT INTO host_push_subscriptions (niho_user_id,connection_id,endpoint,p256dh,auth,device_label) VALUES ($1,'conn',$2,$3,$4,'iphone')`,
+          [person, `https://push.example.test/${index}`, "A".repeat(87), "B".repeat(22)],
+        );
+      }
+      await seedOccurrence(pool, PROVIDER, "product-a", "occ-notify", 6);
+      const first = await seedBooking(pool, PROVIDER, "product-a", "occ-notify", "request");
+      const repository = new OccurrenceAssignmentRepository(pool, { notifications: true });
+      const mails = new HostMailOutbox(pool);
+      const pushes = new PushSubscriptionsForTest(pool);
+
+      // The request is told once (push and one email per person who can take it, with an address): OWNER, COHOST and the
+      // operator, not an editor or a stranger. A repeat adds nothing.
+      assert.equal(await inTransaction(pool, (client) => enqueueAssignmentRequestNotification(client, { providerId: PROVIDER, publicBookingId: first })), 1);
+      assert.equal(await inTransaction(pool, (client) => enqueueAssignmentRequestNotification(client, { providerId: PROVIDER, publicBookingId: first })), 0);
+      const rows = await pool.query("SELECT topic,payload FROM outbox_messages WHERE aggregate_id=$1 AND topic LIKE 'host.%' ORDER BY topic,payload->>'to'", [first]);
+      assert.deepEqual(rows.rows.map((row) => [row.topic, row.payload.to ?? null]), [
+        ["host.mail.assignment_request", COHOST], ["host.mail.assignment_request", OPERATOR], ["host.mail.assignment_request", OWNER], ["host.notify.assignment_request", null],
+      ]);
+      const payload = rows.rows.find((row) => row.topic === "host.notify.assignment_request")!.payload;
+      assert.deepEqual(Object.keys(payload).sort(), ["bookingId", "experienceTitle", "occurrenceId", "productId", "seats", "startsAt", "v"]);
+      assert.ok(!JSON.stringify(rows.rows).includes("Synthetic Guest") && !JSON.stringify(rows.rows).includes("guest@example.test"));
+      const claimed = async () => (await mails.claimBookingMails({ limit: 20, leaseSeconds: 60 })).mails;
+      const sendable = (await claimed()).filter((mail) => mail.to !== null);
+      assert.equal(sendable.length, 3);
+      assert.ok(sendable.every((mail) => mail.notificationTopic === "host.notify.assignment_request"));
+      for (const mail of sendable) await mails.completeBookingMail(mail.id);
+      assert.deepEqual((await pushes.assignmentRecipients(PROVIDER, "product-a", "occ-notify", new Date(Date.now() - 60_000))).length, 3);
+
+      // Once someone is the assignee, only that person is told: the other people's emails are not sent and their devices
+      // get nothing, for the first request that is still waiting and for a request that comes later.
+      await pool.query("UPDATE outbox_messages SET available_at=clock_timestamp(),processed_at=NULL WHERE aggregate_id=$1 AND topic='host.mail.assignment_request'", [first]);
+      assert.equal((await repository.claim(actor(COHOST), { occurrenceId: "occ-notify", commandId: cmd() })).outcome, "ASSIGNED");
+      const afterClaim = await claimed();
+      assert.deepEqual(afterClaim.filter((mail) => mail.to !== null).map((mail) => mail.to), ["person1@example.test"]);
+      assert.equal((await pushes.assignmentRecipients(PROVIDER, "product-a", "occ-notify", new Date(Date.now() - 60_000))).length, 1);
+      const second = await seedBooking(pool, PROVIDER, "product-a", "occ-notify", "request");
+      await inTransaction(pool, (client) => enqueueAssignmentRequestNotification(client, { providerId: PROVIDER, publicBookingId: second }));
+      assert.deepEqual((await claimed()).filter((mail) => mail.to !== null).map((mail) => mail.to), ["person1@example.test"]);
+
+      // Stepping down makes it open again and tells the people who can take it once more, exactly once per ended term.
+      const before = Number((await pool.query("SELECT count(*)::int AS n FROM outbox_messages WHERE topic='host.notify.assignment_request'")).rows[0]?.n);
+      const release = cmd();
+      assert.equal((await repository.release(actor(COHOST), { occurrenceId: "occ-notify", commandId: release })).outcome, "RELEASED");
+      assert.equal((await repository.release(actor(COHOST), { occurrenceId: "occ-notify", commandId: release })).repeated, true);
+      assert.equal(Number((await pool.query("SELECT count(*)::int AS n FROM outbox_messages WHERE topic='host.notify.assignment_request'")).rows[0]?.n), before + 1);
+      assert.equal((await pushes.assignmentRecipients(PROVIDER, "product-a", "occ-notify", new Date(Date.now() - 60_000))).length, 3);
+      // Without the flag a release tells nobody.
+      await repository.claim(actor(OWNER), { occurrenceId: "occ-notify", commandId: cmd() });
+      const quiet = new OccurrenceAssignmentRepository(pool);
+      const count = async () => Number((await pool.query("SELECT count(*)::int AS n FROM outbox_messages WHERE topic LIKE 'host.%assignment_request'")).rows[0]?.n);
+      const beforeQuiet = await count();
+      await quiet.release(actor(OWNER), { occurrenceId: "occ-notify", commandId: cmd() });
+      assert.equal(await count(), beforeQuiet);
+    } finally {
+      await db.dispose();
+    }
+  });
+});
+
+async function inTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try { await client.query("BEGIN"); const result = await work(client); await client.query("COMMIT"); return result; }
+  catch (error) { await client.query("ROLLBACK"); throw error; }
+  finally { client.release(); }
 }

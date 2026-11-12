@@ -8,7 +8,7 @@ export const HOST_PUSH_SEEN_WITHIN_MS = 30 * 24 * 60 * 60 * 1000;
 const CONCURRENCY = 4;
 
 export interface HostPushDeps {
-  subscriptions: Pick<HostPushSubscriptions, "recipients" | "ownerRecipients" | "productRecipients" | "recordSent" | "recordFailure" | "removeById">;
+  subscriptions: Pick<HostPushSubscriptions, "recipients" | "ownerRecipients" | "productRecipients" | "assignmentRecipients" | "recordSent" | "recordFailure" | "removeById">;
   vapid: VapidKeys;
   fetch: typeof fetch;
   now: number;
@@ -60,6 +60,8 @@ export async function notifyHostDevices(event: HostPushEvent, deps: HostPushDeps
   const seenAfter = new Date(deps.now - HOST_PUSH_SEEN_WITHIN_MS);
   const recipients = event.ownerOnly === true
     ? await deps.subscriptions.ownerRecipients(event.providerId, seenAfter)
+    : event.assignment !== undefined && event.productId !== undefined
+      ? await deps.subscriptions.assignmentRecipients(event.providerId, event.productId, event.assignment.occurrenceId, seenAfter)
     : event.productId === undefined
       ? await deps.subscriptions.recipients(event.providerId, seenAfter)
       : await deps.subscriptions.productRecipients(event.providerId, event.productId, seenAfter);

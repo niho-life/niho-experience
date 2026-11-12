@@ -52,7 +52,7 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       const pool = db.pool;
       const publications = new ExperiencePublicationRepository(pool);
       const store = new ExperienceStore(pool);
-      const guests = new GuestBookingRepository(pool);
+      const guests = new GuestBookingRepository(pool, { assignmentNotifications: true });
       const managed = new ManagedExperienceSalesRepository(pool);
       const cancellations = new BookingCancellations(pool);
 
@@ -157,6 +157,10 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
         "managed.guest.request_expired", "managed.guest.request_received", "managed.office.new_request",
       ]);
       assert.ok(requestedMail.rows.every(({ payload }) => payload === '{\"v\": 1}'));
+      // #535: the request also tells whoever can take its occurrence (one push; nobody has an address here), and no guest data.
+      const assignmentRows = await pool.query("SELECT topic,payload::text FROM outbox_messages WHERE aggregate_id=$1 AND topic LIKE 'host.%assignment_request'", [requested.publicBookingId]);
+      assert.deepEqual(assignmentRows.rows.map(({ topic }) => topic), ["host.notify.assignment_request"]);
+      assert.ok(!assignmentRows.rows[0]!.payload.includes("Synthetic Guest") && !assignmentRows.rows[0]!.payload.includes("approval@example.test"));
       assert.ok(requestedMail.rows.every(({ payload }) => !payload.includes("approval@example.test") && !payload.includes("cs_")));
       const mailLease = { limit: 25, leaseSeconds: 60 };
       const receipt = (await outbox.claimManagedGuestMails(mailLease)).mails[0]!;

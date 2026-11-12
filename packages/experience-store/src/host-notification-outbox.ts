@@ -16,6 +16,7 @@ export const HOST_NOTIFICATION_TOPICS = {
   guestMessage: "host.notify.guest_message",
   guestQuestion: "host.notify.guest_question",
   newBooking: "host.notify.new_booking",
+  assignmentRequest: "host.notify.assignment_request",
   cancellation: "host.notify.cancellation",
   bookingMessage: "host.notify.booking_message",
   googleCalendarAttention: "host.notify.google_calendar_attention",
@@ -69,6 +70,20 @@ export interface BookingMessagePayload {
 export interface NewBookingPayload {
   readonly v: 1;
   readonly bookingId: string;
+  readonly experienceTitle: string;
+  readonly startsAt: string;
+  readonly seats: number;
+}
+
+/**
+ * A NIHO-managed request that needs an internal assignee (#535): who can take the occurrence is told to press 対応する. Facts
+ * only, as a new booking, plus the occurrence and product the people are found by. No guest name, contact or amount.
+ */
+export interface AssignmentRequestPayload {
+  readonly v: 1;
+  readonly bookingId: string;
+  readonly occurrenceId: string;
+  readonly productId: string;
   readonly experienceTitle: string;
   readonly startsAt: string;
   readonly seats: number;
@@ -177,6 +192,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const MESSAGE_KEYS = ["bookingId", "experienceTitle", "messageId", "seats", "startsAt", "v"];
 const QUESTION_KEYS = ["experienceTitle", "messageId", "threadId", "v"];
 const NEW_BOOKING_KEYS = ["bookingId", "experienceTitle", "seats", "startsAt", "v"];
+const ASSIGNMENT_REQUEST_KEYS = ["bookingId", "experienceTitle", "occurrenceId", "productId", "seats", "startsAt", "v"];
 const BOOKING_MESSAGE_KEYS = ["experienceTitle", "messageId", "seats", "startsAt", "threadId", "v"];
 const GOOGLE_ATTENTION_KEYS = ["input", "reason", "v"];
 const NEW_REVIEW_KEYS = ["experienceTitle", "reviewId", "v"];
@@ -247,6 +263,13 @@ export function parseNewBookingPayload(value: unknown): NewBookingPayload | null
 }
 
 /** The cancellation's payload (the same keys as a new booking's), or null for anything else. */
+export function parseAssignmentRequestPayload(value: unknown): AssignmentRequestPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, ASSIGNMENT_REQUEST_KEYS) || value.v !== 1) return null;
+  if (!publicId(value.bookingId) || !title(value.experienceTitle) || !seats(value.seats) || !storedInstant(value.startsAt)) return null;
+  if (typeof value.occurrenceId !== "string" || !PRODUCT_ID.test(value.occurrenceId) || typeof value.productId !== "string" || !PRODUCT_ID.test(value.productId)) return null;
+  return { v: 1, bookingId: value.bookingId, occurrenceId: value.occurrenceId, productId: value.productId, experienceTitle: value.experienceTitle, startsAt: value.startsAt, seats: value.seats };
+}
+
 export function parseCancellationPayload(value: unknown): CancellationPayload | null {
   return parseNewBookingPayload(value);
 }
@@ -480,6 +503,48 @@ export async function enqueueNewBookingNotification(client: PoolClient, input: B
   await enqueueHostBookingMails(client, {
     providerId: facts.providerId, topic: HOST_MAIL_TOPICS.newBooking, aggregateType: AGGREGATE_TYPE, aggregateId: facts.bookingId,
     deduplicationKey: `new-booking:${facts.bookingId}`, payload,
+  });
+  return added;
+}
+
+/**
+ * 担当を募る (#535): a NIHO-managed approval request was made, or its occurrence went back to 募集中 (`reopenedTermId`: the
+ * assignment that ended). One push (NEW_BOOKING, which cannot be turned off) and one email per person who can take the
+ * occurrence, in the transaction of the event. Who is told is read again when it is sent: once someone is the assignee, only
+ * that person is (a later request in the same occurrence is told to the assignee only). The booking is read here, so a caller
+ * passes only which one. 1 when the push was added, 0 for a repeat or a booking that is not found.
+ */
+export async function enqueueAssignmentRequestNotification(
+  client: PoolClient,
+  input: { readonly providerId: string; readonly publicBookingId: string; readonly reopenedTermId?: string },
+): Promise<number> {
+  assertStoreIdentifier(input.providerId, "providerId");
+  if (!publicId(input.publicBookingId) || input.publicBookingId.length !== 36) throw new StoreValidationError("publicBookingId is invalid.");
+  const found = await client.query(
+    `SELECT b.occurrence_id,b.product_id,p.public_title,g.adult_count+g.child_count AS seats,b.occurrence_snapshot->>'startUtc' AS starts_at
+       FROM bookings b
+       JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+       JOIN experience_products p ON p.provider_id=b.provider_id AND p.id=b.product_id
+      WHERE b.provider_id=$1 AND b.public_booking_id=$2::uuid`,
+    [input.providerId, input.publicBookingId],
+  );
+  const row = found.rows[0];
+  if (!row) return 0;
+  const startsAt = canonicalInstant(row.starts_at);
+  if (startsAt === null) return 0;
+  const payload: AssignmentRequestPayload = {
+    v: 1, bookingId: input.publicBookingId, occurrenceId: String(row.occurrence_id), productId: String(row.product_id),
+    experienceTitle: clippedTitle(String(row.public_title)), startsAt, seats: Number(row.seats),
+  };
+  if (parseAssignmentRequestPayload(payload) === null) throw new StoreValidationError("The assignment request notification is invalid.");
+  const key = input.reopenedTermId === undefined ? input.publicBookingId : `${input.publicBookingId}:reopened:${input.reopenedTermId}`;
+  const added = await insertRow(client, {
+    providerId: input.providerId, bookingId: input.publicBookingId, topic: HOST_NOTIFICATION_TOPICS.assignmentRequest,
+    deduplicationKey: `host-push:assignment-request:${key}`, payload, availableAt: null,
+  });
+  await enqueueHostBookingMails(client, {
+    providerId: input.providerId, topic: HOST_MAIL_TOPICS.assignmentRequest, aggregateType: AGGREGATE_TYPE, aggregateId: input.publicBookingId,
+    deduplicationKey: `assignment-request:${key}`, payload, productId: payload.productId, serves: true,
   });
   return added;
 }

@@ -17,6 +17,7 @@ export const HOST_MAIL_TOPICS = {
   newBooking: "host.mail.new_booking",
   cancellation: "host.mail.cancellation",
   otaBooking: "host.mail.ota_booking",
+  assignmentRequest: "host.mail.assignment_request",
   guestMessage: "host.mail.guest_message",
   guestQuestion: "host.mail.guest_question",
   bookingMessage: "host.mail.booking_message",
@@ -82,16 +83,22 @@ export async function enqueueHostBookingMails(
     /** The push's payload without the guest's name (the job reads that when it sends). */
     readonly payload: object;
     readonly productId?: string;
+    /**
+     * 担当を募る申込 (#535): the provider's OWNERs and COHOSTs, and the product's operators (`productId` is required), who
+     * can take the occurrence. The job narrows it again when it sends (host-mail-outbox.ts).
+     */
+    readonly serves?: boolean;
   },
 ): Promise<number> {
   assertStoreIdentifier(input.providerId, "providerId");
   if (input.productId !== undefined) assertStoreIdentifier(input.productId, "productId");
+  if (input.serves === true && input.productId === undefined) throw new StoreValidationError("An assignment email needs its product.");
   if ("guestName" in input.payload || "to" in input.payload) throw new StoreValidationError("A host email row carries no guest name.");
   const result = await client.query(
     `INSERT INTO outbox_messages (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload)
      SELECT $1, $2, $3, $4, $5 || ':' || md5(r.niho_user_id), $6::jsonb || jsonb_build_object('to', r.niho_user_id)
        FROM (SELECT m.niho_user_id FROM provider_memberships m
-              WHERE m.provider_id = $1 AND m.active AND m.role = 'OWNER'
+              WHERE m.provider_id = $1 AND m.active AND m.role = ANY($8::text[])
              UNION
              SELECT g.niho_user_id FROM product_operator_grants g
               WHERE $7::text IS NOT NULL AND g.provider_id = $1 AND g.product_id = $7 AND g.active
@@ -101,7 +108,7 @@ export async function enqueueHostBookingMails(
       -- One order whatever the collation, so the rows (and their emails) come in the same order every time.
       ORDER BY r.niho_user_id COLLATE "C"
      ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,
-    [input.providerId, input.aggregateType, input.aggregateId, input.topic, `host-mail:${input.deduplicationKey}`, JSON.stringify(input.payload), input.productId ?? null],
+    [input.providerId, input.aggregateType, input.aggregateId, input.topic, `host-mail:${input.deduplicationKey}`, JSON.stringify(input.payload), input.productId ?? null, input.serves === true ? ["OWNER", "COHOST"] : ["OWNER"]],
   );
   return result.rowCount ?? 0;
 }

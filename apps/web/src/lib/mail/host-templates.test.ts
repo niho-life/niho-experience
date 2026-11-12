@@ -39,6 +39,21 @@ describe("host emails", () => {
     expect(mail.html).toContain(`href="${SITE}/host/bookings?ota=4f1c2b3a-5d6e-4f70-8a91-b2c3d4e5f607&amp;providerId=provider-a"`);
   });
 
+  it("words a request that needs an assignee: where 対応する is, and that it is not an approval or a payment (#535)", () => {
+    const mail = hostBookingEmail({
+      providerId: "provider-a", kind: "NEW_BOOKING", assignment: { occurrenceId: "occ-1" }, productId: "tea", experienceTitle: "Synthetic <walk>",
+      startsAt: "2026-11-14T01:00:00.000Z", seats: 2, url: "/host/bookings?booking=b1&providerId=provider-a", tag: "assign-x",
+    }, { siteUrl: SITE });
+    expect(mail.subject).toBe("担当を募集中の申込：Synthetic <walk> 11/14（土）10:00");
+    expect(mail.text).toContain("「対応する」を押してください");
+    expect(mail.text).toContain("先に押した1人が担当になります");
+    expect(mail.text).toContain("承認・支払いの案内・予約の確定は NIHO が行います");
+    expect(mail.text).toContain("人数: 2名");
+    expect(mail.text).not.toContain("予約者:");
+    expect(mail.html).toContain("Synthetic &lt;walk&gt;");
+    expect(mail.html).toContain(`href="${SITE}/host/bookings?booking=b1&amp;providerId=provider-a"`);
+  });
+
   it("words this site's cancellation without a site or a guest", () => {
     const mail = hostBookingEmail({ providerId: "provider-a", kind: "CANCELLATION", experienceTitle: "Synthetic walk", startsAt: "2026-11-14T01:00:00.000Z", seats: 1, url: "/host/bookings?booking=b1&providerId=provider-a", tag: "cancellation-b1" }, { siteUrl: SITE });
     expect(mail.subject).toBe("予約が取り消されました：Synthetic walk 11/14（土）10:00");

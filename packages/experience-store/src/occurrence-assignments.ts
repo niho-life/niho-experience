@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import { enqueueAssignmentRequestNotification } from "./host-notification-outbox.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreError, StoreValidationError } from "./errors.ts";
 import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import { isoValue, type DbRow } from "./rows.ts";
@@ -170,7 +171,12 @@ function occurrenceFromRow(row: DbRow, me: string): AssignmentOccurrence {
 
 export class OccurrenceAssignmentRepository {
   readonly #pool: Pool;
-  constructor(pool: Pool) { this.#pool = pool; }
+  /** 担当を募る (#535): an occurrence that goes back to 募集中 tells the people who can take it again. Off unless the flag is on. */
+  readonly #notify: boolean;
+  constructor(pool: Pool, options: { readonly notifications?: boolean } = {}) {
+    this.#pool = pool;
+    this.#notify = options.notifications === true;
+  }
 
   /** Provider members who may serve any product (OWNER, COHOST) or a product operator for this one. */
   async #canServe(client: PoolClient, actor: HostActor, productId: string | null): Promise<boolean> {
@@ -289,6 +295,16 @@ export class OccurrenceAssignmentRepository {
     if (args.onlyIfAssignee !== null && term.assignee !== args.onlyIfAssignee) return { outcome: "TAKEN", repeated: false };
     await client.query("UPDATE occurrence_assignments SET released_at=clock_timestamp() WHERE id=$1::uuid AND released_at IS NULL", [term.id]);
     await this.#event(client, { providerId: args.providerId, occurrenceId: args.occurrenceId, commandId: args.commandId, assignmentId: term.id, action: "RELEASE", recordedBy: args.recordedBy, subject: term.assignee, actor: args.actor, reason: args.reason });
+    if (this.#notify) {
+      // 募集中 again: the people who can take it are told once more, through the occurrence's earliest live request.
+      const first = await client.query<DbRow>(
+        `SELECT b.public_booking_id::text AS id FROM bookings b JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
+          WHERE b.provider_id=$1 AND b.occurrence_id=$2 AND ${LIVE} ORDER BY b.created_at,b.id LIMIT 1`,
+        [args.providerId, args.occurrenceId],
+      );
+      const bookingId = first.rows[0]?.id;
+      if (typeof bookingId === "string") await enqueueAssignmentRequestNotification(client, { providerId: args.providerId, publicBookingId: bookingId, reopenedTermId: term.id });
+    }
     return { outcome: "RELEASED", repeated: false };
   }
 

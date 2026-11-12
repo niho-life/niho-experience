@@ -21,6 +21,7 @@ const REPLY: MailBlock = { kind: "p", text: "このメールに返信すると N
  * send), and the link the push opens. An OTA booking adds where its cancellations, refunds and messages are handled.
  */
 export function hostBookingEmail(event: HostPushEvent, options: { readonly siteUrl: string }): RenderedMail {
+  if (event.assignment) return hostAssignmentEmail(event, options);
   const lines = hostPushLines(event);
   const site = event.ota ? otaSiteLabel(event.ota.site) : null;
   const rows: (readonly [string, string])[] = [
@@ -44,6 +45,28 @@ export function hostBookingEmail(event: HostPushEvent, options: { readonly siteU
       href: absolute(options.siteUrl, event.url),
     },
     ...(site ? [{ kind: "p", text: `取消・返金・予約者とのやりとりは ${site} で行ってください。` } as const] : []),
+    { kind: "link", lead: SETTINGS_LEAD, label: "設定 › 通知", href: absolute(options.siteUrl, NOTIFICATION_SETTINGS) },
+    REPLY,
+  ], "ja");
+}
+
+/**
+ * 担当を募る (#535): a NIHO-managed request needs someone to take its occurrence. It says what the push says and where 対応する
+ * is. Never the guest, an amount or who else was asked; it does not say the request is approved or paid.
+ */
+function hostAssignmentEmail(event: HostPushEvent, options: { readonly siteUrl: string }): RenderedMail {
+  const lines = hostPushLines(event);
+  const rows: (readonly [string, string])[] = [
+    ["受け方", "NIHO で受けた申込"],
+    ...(lines.experience ? [["体験", lines.experience] as const] : []),
+    ...(lines.when ? [["日時", lines.when] as const] : []),
+    ...(lines.seats ? [["人数", lines.seats] as const] : []),
+  ];
+  const subject = [lines.title, [lines.experience, lines.when].filter(Boolean).join(" ")].filter(Boolean).join("：");
+  return mail(subject, [
+    { kind: "p", text: "担当できる方を募っています。行ける方は、ホストの画面で「対応する」を押してください。先に押した1人が担当になります。" },
+    { kind: "facts", rows },
+    { kind: "link", lead: "担当になっても、予約者への承認・支払いの案内・予約の確定は NIHO が行います。予約者には担当者は知らされません。", label: "予約を開く", href: absolute(options.siteUrl, event.url) },
     { kind: "link", lead: SETTINGS_LEAD, label: "設定 › 通知", href: absolute(options.siteUrl, NOTIFICATION_SETTINGS) },
     REPLY,
   ], "ja");

@@ -112,6 +112,7 @@ export {
   enqueueGuestQuestionNotification,
   enqueueCancellationNotification,
   enqueueGoogleCalendarAttentionNotification,
+  enqueueAssignmentRequestNotification,
   enqueueNewBookingNotification,
   enqueueNewReviewNotification,
   parseDayBeforeSummaryPayload,
@@ -121,6 +122,7 @@ export {
   LISTING_SUSPENSION_CHANGES,
   HostNotificationOutbox,
   OTA_BOOKING_CHANGES,
+  parseAssignmentRequestPayload,
   parseBookingMessagePayload,
   parseCancellationPayload,
   parseGoogleCalendarAttentionPayload,
@@ -133,6 +135,7 @@ export {
   parseListingSuspensionPayload,
 } from "./host-notification-outbox.ts";
 export type {
+  AssignmentRequestPayload,
   BookingMessagePayload,
   CancellationPayload,
   ClaimedHostNotification,
