@@ -23,7 +23,7 @@ export function AdminSignedInNotice({ load, nihoTitle }: { load: Extract<AdminHt
         <p className="mt-5 text-ink-soft">
           {niho
             ? "管理者認証だけが接続されています。予約・通知の読取flagはOFFです。NIHO側の配備と受入後に有効化します。"
-            : "このログインでは NIHO の予約支援・通知・運営の API を使いません。サイト予約・掲載先・体験の停止は、メニューから開いてください。"}
+            : "このログインでは NIHO の予約支援・通知・運営の API を使いません。予約・掲載先・体験の停止は、メニューから開いてください。"}
         </p>
       </section>
     </div>
