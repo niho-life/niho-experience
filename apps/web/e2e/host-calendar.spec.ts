@@ -118,6 +118,26 @@ test("selected weekdays can be checked, unchecked and saved", async ({ page }) =
   expect(posts[0]).toMatchObject({ rule: { recurrence: { kind: "SELECTED_WEEKDAYS", weekdays: ["SATURDAY"] } } });
 });
 
+test("weekend slots can be created without an end date", async ({ page }) => {
+  await signIn(page);
+  await stubCalendar(page, async (route) => {
+    if (route.request().method() === "POST") await route.fulfill({ status: 201, json: { id: "new", version: 1 } });
+    else await route.fulfill({ status: 200, json: calendarData() });
+  });
+  await page.goto("/host/calendar");
+  await page.getByRole("button", { name: "枠を追加" }).click();
+  const dialog = page.getByRole("dialog", { name: "枠を追加" });
+  await dialog.getByRole("checkbox", { name: "繰り返す" }).check();
+  await dialog.getByRole("combobox", { name: "繰り返し", exact: true }).selectOption("WEEKENDS");
+  await expect(dialog.getByLabel("終了日（任意）")).toHaveValue("");
+  const request = page.waitForRequest((candidate) => candidate.url().includes("/host/calendar/data") && candidate.method() === "POST");
+  await dialog.getByRole("button", { name: "追加する" }).click();
+  const { rule } = (await request).postDataJSON();
+  expect(rule.recurrence).toEqual({ kind: "WEEKENDS" });
+  expect(rule).not.toHaveProperty("endsOn");
+  await expect(dialog).toHaveCount(0);
+});
+
 test("409 keeps input; successful save followed by GET failure is not resubmitted", async ({ page }) => {
   await signIn(page);
   const posts: Record<string, unknown>[] = [];

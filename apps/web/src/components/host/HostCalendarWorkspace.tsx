@@ -191,8 +191,9 @@ export function HostCalendarWorkspace({
     const form = new FormData(event.currentTarget);
     if (repeats && recurrence === "SELECTED_WEEKDAYS" && weekdays.length === 0) { setMutationError({ message: "曜日を選んでください。" }); return; }
     const startsOn = String(form.get("startsOn"));
+    const endsOn = repeats ? String(form.get("endsOn") ?? "") : startsOn;
     void mutate({ action: "createRule", experienceId: String(form.get("experienceId")), rule: {
-      timeZone: "Asia/Tokyo", startsOn, endsOn: repeats ? String(form.get("endsOn")) : startsOn,
+      timeZone: "Asia/Tokyo", startsOn, ...(endsOn ? { endsOn } : {}),
       localStartTime: String(form.get("localStartTime")), durationMinutes: Number(form.get("durationMinutes")), capacity: Number(form.get("capacity")),
       bookingCutoffMinutes: Number(form.get("bookingCutoffHours")) * 60,
       busyBufferBeforeMinutes: 0, busyBufferAfterMinutes: 0,
@@ -254,7 +255,7 @@ export function HostCalendarWorkspace({
         <input name="bookingCutoffHours" type="number" min="0" max="8760" defaultValue="2" required inputMode="numeric" className={FIELD} />
       </label>
       <label className="flex min-h-11 items-center gap-2 font-extrabold"><input type="checkbox" checked={repeats} onChange={(event) => setRepeats(event.currentTarget.checked)} className="size-5 accent-moss" />繰り返す</label>
-      {repeats ? <div className="grid gap-3 rounded-xl bg-sand p-3"><label className="grid gap-1 text-sm font-extrabold">繰り返し<select value={recurrence} onChange={(event) => setRecurrence(event.currentTarget.value)} className={FIELD}><option value="WEEKLY">毎週</option><option value="DAILY">毎日</option><option value="WEEKENDS">土日</option><option value="SELECTED_WEEKDAYS">曜日を選ぶ</option></select></label><label className="grid gap-1 text-sm font-extrabold">終了日<input name="endsOn" type="date" min={ruleStartsOn} required className={FIELD} /></label>{recurrence === "SELECTED_WEEKDAYS" ? <fieldset><legend className="text-sm font-extrabold">曜日</legend><div className="mt-1 grid grid-cols-4 gap-1">{WEEKDAYS.map((day) => <label key={day.id} className="flex min-h-11 items-center justify-center gap-1 rounded-xl border border-line-strong bg-canvas"><input type="checkbox" checked={weekdays.includes(day.id)} onChange={(event) => { const checked = event.currentTarget.checked; setWeekdays((current) => checked ? [...current, day.id] : current.filter((id) => id !== day.id)); }} />{day.label}</label>)}</div></fieldset> : null}</div> : null}
+      {repeats ? <div className="grid gap-3 rounded-xl bg-sand p-3"><label className="grid gap-1 text-sm font-extrabold">繰り返し<select value={recurrence} onChange={(event) => setRecurrence(event.currentTarget.value)} className={FIELD}><option value="WEEKLY">毎週</option><option value="DAILY">毎日</option><option value="WEEKENDS">土日</option><option value="SELECTED_WEEKDAYS">曜日を選ぶ</option></select></label><label className="grid gap-1 text-sm font-extrabold">終了日（任意）<input name="endsOn" type="date" min={ruleStartsOn} className={FIELD} /></label>{recurrence === "SELECTED_WEEKDAYS" ? <fieldset><legend className="text-sm font-extrabold">曜日</legend><div className="mt-1 grid grid-cols-4 gap-1">{WEEKDAYS.map((day) => <label key={day.id} className="flex min-h-11 items-center justify-center gap-1 rounded-xl border border-line-strong bg-canvas"><input type="checkbox" checked={weekdays.includes(day.id)} onChange={(event) => { const checked = event.currentTarget.checked; setWeekdays((current) => checked ? [...current, day.id] : current.filter((id) => id !== day.id)); }} />{day.label}</label>)}</div></fieldset> : null}</div> : null}
       </fieldset><div className="sticky -bottom-4 z-10 bg-canvas pt-2 pb-1"><button type="submit" disabled={saving || !dataFresh || pendingCommand !== null} className={consoleButtonClass("primary", "lg", "w-full disabled:opacity-50")}>{saving ? "保存中…" : "追加する"}</button></div>
     </form></WorkspaceDialog> : null}
 
