@@ -29,7 +29,7 @@ export interface GuestBookingMessage {
   readonly id: string;
   readonly from: "guest" | "host" | "support";
   readonly atUtc: string;
-  /** The guest's own words, or the host's English. */
+  /** The guest's own words, or the host's English (the host's own Japanese for a booking made in Japanese). */
   readonly body: string;
 }
 
@@ -111,7 +111,7 @@ export class GuestBookingMessages {
       const booking = await sessionBooking(client, sessionId, publicBookingId);
       if (!booking) return null;
       const messages = await client.query<DbRow>(
-        `SELECT m.id, m.author, m.body, m.created_at
+        `SELECT m.id, m.author, m.body, m.body_ja, m.created_at
            FROM guest_question_threads t
            JOIN guest_question_messages m ON m.provider_id = t.provider_id AND m.thread_id = t.id
           WHERE t.provider_id = $1 AND t.booking_id = $2::bigint
@@ -120,8 +120,12 @@ export class GuestBookingMessages {
       );
       return {
         open: booking.open,
-        // The host's English only: the Japanese they wrote is for the host console.
-        messages: messages.rows.map((row) => ({ id: String(row.id), from: row.author === "HOST" ? "host" : row.author === "SUPPORT" ? "support" : "guest", atUtc: isoValue(row, "created_at"), body: String(row.body) })),
+        // The host's English only: the Japanese they wrote is for the host console. A booking made in Japanese (#59) reads
+        // the host's own Japanese instead (the English when they wrote none), as the host and NIHO support wrote it.
+        messages: messages.rows.map((row) => ({
+          id: String(row.id), from: row.author === "HOST" ? "host" : row.author === "SUPPORT" ? "support" : "guest", atUtc: isoValue(row, "created_at"),
+          body: booking.language === "JA" && row.author !== "GUEST" && typeof row.body_ja === "string" && row.body_ja !== "" ? row.body_ja : String(row.body),
+        })),
       };
     });
   }

@@ -1,5 +1,5 @@
 import type { BookingConfirmationEmail, BookingLinkEmail, BookingMeetingGuideEmail, BookingNoticeEmail, ClaimedBookingMessage, ClaimedSupportBookingMessage, ManagedGuestMailEmail, ManagedOperationsMailEmail, ReviewInvitationEmail } from "@niho-experience/experience-store";
-import { bookingConfirmationEmailJa, bookingLinkEmailJa, bookingMeetingGuideEmailJa, bookingNoticeEmailJa, reviewInvitationEmailJa } from "./templates-ja";
+import { bookingConfirmationEmailJa, bookingLinkEmailJa, bookingMeetingGuideEmailJa, bookingMessageEmailJa, bookingNoticeEmailJa, questionReplyEmailJa, reviewInvitationEmailJa, supportBookingMessageEmailJa } from "./templates-ja";
 import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationTermsWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
 
 /**
@@ -144,6 +144,9 @@ export interface QuestionReplyMailInput {
   readonly experienceTitle: string;
   /** The host's English. */
   readonly reply: string;
+  /** The guest's language (#59): "JA" sends the Japanese frame, and the host's own Japanese when they wrote it. */
+  readonly guestLanguage?: "EN" | "JA";
+  readonly japanese?: string | null;
   /** For `/questions/reply#t=<token>`: placed in the fragment only, never in a path or query. */
   readonly replyToken: string;
   readonly linkTtlDays: number;
@@ -151,6 +154,7 @@ export interface QuestionReplyMailInput {
 
 /** "{Host} replied to your question about {experience}", with the reply and the one-time link to answer. */
 export function questionReplyEmail(input: QuestionReplyMailInput): RenderedMail {
+  if (input.guestLanguage === "JA") return questionReplyEmailJa(input);
   const host = oneLine(input.hostName);
   const experience = oneLine(input.experienceTitle);
   const link = `${absolute(input.siteUrl, "/questions/reply")}#t=${encodeURIComponent(input.replyToken)}`;
@@ -223,9 +227,10 @@ export function bookingConfirmationEmail(
  * (the page is off, or can no longer be opened) the email says replying to it reaches NIHO support.
  */
 export function bookingMessageEmail(
-  message: Pick<ClaimedBookingMessage, "guestName" | "hostDisplayName" | "experienceTitle" | "english" | "publicBookingId" | "localDate" | "localStartTime" | "timeZone">,
+  message: Pick<ClaimedBookingMessage, "guestName" | "guestLanguage" | "hostDisplayName" | "experienceTitle" | "english" | "japanese" | "publicBookingId" | "localDate" | "localStartTime" | "timeZone">,
   options: { readonly siteUrl: string; readonly bookingPageGrant: string | null },
 ): RenderedMail {
+  if (message.guestLanguage === "JA") return bookingMessageEmailJa(message, options);
   const host = oneLine(message.hostDisplayName);
   const experience = oneLine(message.experienceTitle);
   const grant = options.bookingPageGrant;
@@ -256,9 +261,10 @@ export function bookingMessageEmail(
 
 /** A guest-facing Admin message clearly marked as NIHO support, sent through the booking message outbox. */
 export function supportBookingMessageEmail(
-  message: Pick<ClaimedSupportBookingMessage, "guestName" | "experienceTitle" | "english" | "publicBookingId" | "localDate" | "localStartTime" | "timeZone">,
+  message: Pick<ClaimedSupportBookingMessage, "guestName" | "guestLanguage" | "experienceTitle" | "english" | "japanese" | "publicBookingId" | "localDate" | "localStartTime" | "timeZone">,
   options: { readonly siteUrl: string; readonly bookingPageGrant: string | null },
 ): RenderedMail {
+  if (message.guestLanguage === "JA") return supportBookingMessageEmailJa(message, options);
   const experience = oneLine(message.experienceTitle);
   const grant = options.bookingPageGrant;
   return mail(`NIHO support sent you a message about your booking: ${experience}, ${calendarDate(message.localDate, DATE_SHORT)} ${message.localStartTime}`, [
