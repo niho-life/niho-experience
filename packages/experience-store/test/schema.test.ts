@@ -575,4 +575,18 @@ describe("database invariants", () => {
     assert.match(sql, /rights_consent_version/);
     assert.doesNotMatch(sql.replace(/--.*$/gm, ""), /INSERT INTO provider_memberships|INSERT INTO experience_host_seller_profiles/);
   });
+
+  it("keeps request-to-book policy immutable and approval decisions one-way (#515)", async () => {
+    const sql = await readFile(new URL("../migrations/0072_managed_booking_approval.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /acceptance_mode text NOT NULL DEFAULT 'INSTANT'/);
+    assert.match(sql, /acceptance_mode IN \('INSTANT','APPROVAL'\)/);
+    assert.match(sql, /approval_status text CHECK \(approval_status IN \('PENDING','APPROVED','DECLINED'\)\)/);
+    assert.match(sql, /approval_status='PENDING'[\s\S]*checkout_session_ref IS NULL/);
+    assert.match(sql, /approval_status='DECLINED'[\s\S]*checkout_session_ref IS NULL/);
+    assert.match(sql, /booking_guests_approval_protect/);
+    const code = sql.replace(/--.*$/gm, "");
+    assert.doesNotMatch(code, /UPDATE bookings|UPDATE booking_guests|INSERT INTO bookings|DELETE FROM bookings/i);
+  });
 });

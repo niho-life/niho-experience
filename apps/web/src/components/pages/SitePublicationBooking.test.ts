@@ -17,6 +17,20 @@ const offer = {
 };
 
 describe("site publication booking seller terms", () => {
+  it("shows a request form without promising immediate checkout for managed approval", () => {
+    const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: {
+        publication: { slug: "synthetic-experience", publicTitle: "Synthetic experience", sellerDisplayName: "NIHO" },
+        saleTerms: { sellerDisplayName: "NIHO", offers: [{ ...offer, acceptanceMode: "APPROVAL" }] },
+        sellerDisclosure: null,
+      } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true,
+    }));
+    expect(html).toContain("Send booking request");
+    expect(html).toContain("No payment is taken when you request");
+    expect(html).not.toContain("Continue to secure checkout");
+  });
+
   it.each([
     ["en", "seller information for Synthetic Legal Seller", "/experiences/synthetic-experience/seller"],
     ["ja", "Synthetic Legal Sellerの販売者情報", "/ja/experiences/synthetic-experience/seller"],

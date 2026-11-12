@@ -55,6 +55,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   const headline = reviewHeadline(reviewDisplay(reviews), locale);
   const structured = sitePublicationJsonLd(item, config.siteUrl, config.bookingsEnabled && config.guestBookingEnabled, reviewsForJsonLd(reviews), locale);
   const offers = saleTerms?.offers ?? [];
+  const approval = offers.some((offer) => offer.acceptanceMode === "APPROVAL");
   const durationValues = [...new Set(offers.map((offer) => offer.durationMinutes))].sort((a, b) => a - b);
   const durations = durationValues.length === 1
     ? formatDuration(durationValues[0]!, locale)
@@ -201,6 +202,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
               <p className="mt-2 text-sm text-ink-soft">{offers.map((offer) => scheduleDescription(offer, locale)).filter((line, index, all) => all.indexOf(line) === index).join(" · ")}</p>
               {config.bookingsEnabled && config.guestBookingEnabled ? <Link href={`${ja ? "/ja" : ""}/experiences/${publication.slug}/book`} className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-ink px-6 font-extrabold text-white hover:bg-ink/90">{ja ? "日時を選ぶ" : "Choose a date"}</Link> : <p className="mt-5 rounded-xl bg-sand p-3 text-sm text-ink-soft">{ja ? "現在、オンライン予約はご利用いただけません。" : "Online booking is temporarily unavailable."}</p>}
               <p className="mt-3 text-xs text-muted">{ja ? `${saleTerms?.sellerDisplayName ?? publication.sellerDisplayName}が販売者です。お支払いはStripe Checkoutで受け付けます。` : `${saleTerms?.sellerDisplayName ?? publication.sellerDisplayName} is the seller and receives the booking payment through Stripe Checkout.`}</p>
+              {approval ? <p className="mt-2 text-sm font-semibold text-ink-soft">{ja ? "予約はリクエスト制です。承認後にお支払いをご案内します。" : "Request to book. Payment is due only after NIHO approves your request."}</p> : null}
               <ul className="mt-5 space-y-3 border-t border-line pt-4 text-sm text-ink-soft">
                 {offers.map((offer) => <li key={offer.id}><b className="text-ink">{offer.name}:</b> {cancellationSummary(offer, locale)}{offer.minimumChargeableParticipants > 1 ? ja ? ` · 最低請求人数: ${offer.minimumChargeableParticipants}名` : ` · Minimum charge: ${offer.minimumChargeableParticipants} guests` : ""}</li>)}
               </ul>

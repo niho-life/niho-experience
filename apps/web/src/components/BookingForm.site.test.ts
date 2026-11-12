@@ -80,3 +80,28 @@ it("renders Japanese minimum-charge and explicit custom cancellation terms with 
   });
   expect(state.model?.summary).toMatchObject({ image: { alt: localizedAlt } });
 });
+
+it("describes MANAGED_20 approval as a cardless request without changing the legacy approval copy", () => {
+  const base = buildFixtureExperiences()[0]!;
+  const experience = {
+    ...base,
+    offers: base.offers.map((item, index) => index === 0 ? { ...item, acceptanceMode: "APPROVAL" as const } : item),
+  };
+  const offer = experience.offers[0]!;
+  const props = {
+    api: null, apiUnavailable: true, experience, offer,
+    selection: { offerId: offer.id, date: "2026-11-02", adultCount: 1, childCount: 0 },
+    preview: false, attributionEnabled: false, publicApiVersion: "1.2" as const, onExperienceRefresh: vi.fn(() => true),
+    draft: { guestName: "", guestEmail: "", note: "", answerSets: {} }, onDraftChange: vi.fn(), attemptRef: { current: null }, onBack: vi.fn(),
+  };
+  renderToStaticMarkup(createElement(BookingForm, { ...props, bookingSource: { kind: "site", origin: "https://experience.example" } as const }));
+  expect(state.model).toMatchObject({
+    approval: true,
+    confirmationNote: "No card is needed now. If the office approves your request, they will send you a time-limited Stripe payment link.",
+    paymentDisclosure: "No card details are collected and no charge is made when you send this request.",
+  });
+
+  renderToStaticMarkup(createElement(BookingForm, props));
+  expect(state.model).not.toHaveProperty("confirmationNote");
+  expect(state.model).not.toHaveProperty("paymentDisclosure");
+});

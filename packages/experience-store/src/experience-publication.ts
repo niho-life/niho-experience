@@ -1475,6 +1475,7 @@ export class ExperiencePublicationRepository {
       readonly agreementConfirmationMethod: "WRITTEN";
       readonly privateGroup?: boolean;
       readonly pilotApproved: true;
+      readonly acceptanceMode?: "INSTANT" | "APPROVAL";
     },
   ): Promise<ProductRecord> {
     validateAdminDraftActor(actor);
@@ -1490,7 +1491,8 @@ export class ExperiencePublicationRepository {
         if (!profile.rows[0]) throw new StoreNotFoundError("provider public profile");
         if (!managed.seller.legalSellerName.trim() || !managed.seller.commercialTransactionsUrl.startsWith("https://")
           || !/^acct_[A-Za-z0-9]{8,}$/.test(managed.seller.platformAccountId)
-          || managed.pilotApproved !== true || managed.agreementConfirmationMethod !== "WRITTEN") {
+          || managed.pilotApproved !== true || managed.agreementConfirmationMethod !== "WRITTEN"
+          || ![undefined, "INSTANT", "APPROVAL"].includes(managed.acceptanceMode)) {
           throw new StoreValidationError("Managed sales require a written agreement.");
         }
         assertStoreIdentifier(managed.seller.sellerNihoAccountRef, "sellerNihoAccountRef");
@@ -1525,11 +1527,12 @@ export class ExperiencePublicationRepository {
           `INSERT INTO experience_product_sales_plan_versions
              (provider_id,product_id,revision,plan,charge_mode,provider_public_profile_version,seller_display_name,
               seller_disclosure_url,seller_niho_account_ref,stripe_account_ref,fee_basis_points,agreement_version,agreement_confirmed_by,
-              agreement_confirmed_at,agreement_confirmation_method,payment_due_policy,pilot_approved,activated_by_admin_niho_user_id)
-           VALUES ($1,$2,1,'MANAGED_20','PLATFORM',$3,$4,$5,$6,$7,2000,$8,$11,$9,$10,'NEXT_MONTH_END',true,$11)`,
+              agreement_confirmed_at,agreement_confirmation_method,payment_due_policy,pilot_approved,activated_by_admin_niho_user_id,
+              acceptance_mode)
+           VALUES ($1,$2,1,'MANAGED_20','PLATFORM',$3,$4,$5,$6,$7,2000,$8,$11,$9,$10,'NEXT_MONTH_END',true,$11,$12)`,
           [providerId, id, profile.rows[0]!.version, seller.sellerDisplayName, managed.seller.commercialTransactionsUrl,
             seller.sellerNihoAccountRef, seller.stripeConnectAccountRef, managed.agreementVersion, managed.agreementConfirmedAtUtc,
-            managed.agreementConfirmationMethod, actor.nihoUserId],
+            managed.agreementConfirmationMethod, actor.nihoUserId, managed.acceptanceMode ?? "INSTANT"],
         );
         await client.query("INSERT INTO experience_product_sales_plan_states (provider_id,product_id,current_revision) VALUES ($1,$2,1)", [providerId, id]);
       }

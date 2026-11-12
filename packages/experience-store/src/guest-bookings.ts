@@ -79,6 +79,8 @@ export const GUEST_BOOKING_LIMITS = {
    * before the hold, so the rest (4 minutes) is the time between the hold and the Session's creation.
    */
   defaultHoldSeconds: 2_100,
+  /** MANAGED_20 request-to-book gives the office one day; this value is never accepted from the browser. */
+  approvalHoldSeconds: 24 * 60 * 60,
   /** Availability and checkout cover the Tokyo date of today through 89 days later. */
   windowDays: 90,
   maxPartySize: 500,
@@ -223,7 +225,7 @@ export interface PublicBookingOffer {
     readonly cancellationWindowMinutesBeforeStart: number | null;
     readonly refundBasisPoints: number;
   };
-  readonly acceptanceMode: "INSTANT";
+  readonly acceptanceMode: "INSTANT" | "APPROVAL";
   readonly bookingQuestions: readonly BookingQuestion[];
   readonly bookingQuestionsFingerprint: string;
 }
@@ -794,6 +796,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
             plan.seller_niho_account_ref AS plan_seller_niho_account_ref,
             plan.stripe_account_ref AS plan_stripe_account_ref,plan.fee_basis_points AS plan_fee_basis_points,
             plan.agreement_version AS plan_agreement_version,plan.payment_due_days,plan.payment_due_policy,
+            plan.acceptance_mode,
             plan_state.phase AS sales_plan_phase
        FROM experience_products p
        LEFT JOIN experience_product_publication_states s ON s.provider_id=p.provider_id AND s.product_id=p.id
@@ -837,6 +840,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
       salesAgreementVersion: String(row.plan_agreement_version),
       paymentDueDays: row.payment_due_days === null ? null : Number(row.payment_due_days),
       ...(row.payment_due_policy === "NEXT_MONTH_END" ? { paymentDuePolicy: row.payment_due_policy } : {}),
+      acceptanceMode: row.acceptance_mode === "APPROVAL" ? "APPROVAL" : "INSTANT",
       feeBasisPoints: Number(row.plan_fee_basis_points) as 1000 | 1500 | 2000,
     };
   }
@@ -998,7 +1002,7 @@ function offerFor(sellable: Sellable, stored: StoredScheduleRule): PublicBooking
       cancellationWindowMinutesBeforeStart: terms.cancellationWindowMinutesBeforeStart,
       refundBasisPoints: terms.cancellationRefundBasisPoints,
     },
-    acceptanceMode: "INSTANT",
+    acceptanceMode: product.acceptanceMode === "APPROVAL" ? "APPROVAL" : "INSTANT",
     bookingQuestions: terms.bookingQuestions,
     bookingQuestionsFingerprint: terms.bookingQuestionsFingerprint,
   };
@@ -1897,6 +1901,7 @@ export class GuestBookingRepository {
         throw new StoreNotFoundError("experience for sale");
       }
       const { product, terms, settings } = sellable;
+      const approvalRequest = product.acceptanceMode === "APPROVAL";
 
       const previous = await client.query<DbRow>(
         `SELECT id, ${BOOKING_COLUMNS} FROM bookings WHERE provider_id=$1 AND idempotency_key=$2`,
@@ -1957,6 +1962,11 @@ export class GuestBookingRepository {
         adultPriceYen, terms.childPricing, request.adultCount, request.childCount, terms.minimumChargeableParticipants,
       );
       if (request.expectedTotalYen !== totalYen) throw new GuestCheckoutError("PRICE_CHANGED", { currentTotalYen: totalYen });
+      // Approval is a paid MANAGED_20 pilot only. A malformed or stale plan is not allowed to fall through
+      // to either the free-confirmation path or public Stripe creation.
+      if (approvalRequest && (totalYen === 0 || product.salesPlan !== "MANAGED_20" || product.chargeMode !== "PLATFORM")) {
+        throw new StoreNotFoundError("experience for sale");
+      }
       // A free product skips Stripe; paid bookings still need an application fee Stripe accepts.
       if (totalYen !== 0 && !chargeablePlatformFee(totalYen, settings.platformFeeBasisPoints)) throw new StoreNotFoundError("experience for sale");
       if (request.bookingQuestionsFingerprint !== terms.bookingQuestionsFingerprint) throw new GuestCheckoutError("QUESTIONS_CHANGED");
@@ -2013,7 +2023,7 @@ export class GuestBookingRepository {
         placed = await placeBookingHold(client, { ...product, unitAmount: adultPriceYen }, occurrenceForBooking, {
           seats: headCount,
           idempotencyKey,
-          holdSeconds: request.holdSeconds,
+          holdSeconds: approvalRequest ? GUEST_BOOKING_LIMITS.approvalHoldSeconds : request.holdSeconds,
           guest: {
             breakdown: { adultCount: request.adultCount, childCount: request.childCount, childUnitAmount: terms.childPricing?.priceYen ?? null },
             cancellationPolicy: terms.cancellationPolicy,
@@ -2046,12 +2056,12 @@ export class GuestBookingRepository {
         `INSERT INTO booking_guests (
            provider_id, booking_id, guest_name, guest_email, guest_email_key, guest_phone, guest_language, note,
            answers, adult_count, child_count, terms_consent_version, conditions_consent_version,
-           client_request_key, request_fingerprint, utm
-         ) VALUES ($1,$2,$3,$4,lower($4),$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15::jsonb)`,
+           client_request_key, request_fingerprint, utm, approval_status
+         ) VALUES ($1,$2,$3,$4,lower($4),$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15::jsonb,$16)`,
         [
           providerId, placed.bookingRowId, request.guestName, request.guestEmail, request.guestPhone, request.guestLanguage, request.note,
           JSON.stringify(answers), request.adultCount, request.childCount, request.termsConsentVersion, request.conditionsConsentVersion,
-          request.clientRequestKey, request.fingerprint, JSON.stringify(request.utm),
+          request.clientRequestKey, request.fingerprint, JSON.stringify(request.utm), approvalRequest ? "PENDING" : null,
         ],
       );
       if (totalYen === 0) {
@@ -2103,7 +2113,7 @@ export class GuestBookingRepository {
     await withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
       const found = await client.query<DbRow>(
-        `SELECT g.provider_id, g.booking_id, g.checkout_session_ref, b.status,b.product_id,b.seller_snapshot,
+        `SELECT g.provider_id, g.booking_id, g.checkout_session_ref,g.approval_status,b.status,b.product_id,b.seller_snapshot,
                 b.hold_expires_at > clock_timestamp() AS hold_active
            FROM booking_guests g
            JOIN bookings b ON b.provider_id=g.provider_id AND b.id=g.booking_id
@@ -2117,6 +2127,10 @@ export class GuestBookingRepository {
       if (row.checkout_session_ref !== null) throw new StoreConflictError("Another Checkout Session is already attached to this booking.");
       if (row.status !== "HOLD" || row.hold_active !== true) throw new StoreConflictError("Only an active hold can take a Checkout Session.");
       const seller = row.seller_snapshot as Record<string, unknown>;
+      if ((seller.acceptanceMode === "APPROVAL" && row.approval_status !== "APPROVED")
+        || (seller.acceptanceMode !== "APPROVAL" && row.approval_status !== null)) {
+        throw new StoreConflictError("The booking is not authorized to take a Checkout Session.");
+      }
       if (Number.isSafeInteger(seller.salesPlanRevision)) {
         const plan = await client.query<DbRow>(
           `SELECT current_revision,phase FROM experience_product_sales_plan_states

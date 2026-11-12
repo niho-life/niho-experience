@@ -8,10 +8,18 @@ Experienceの公開商品は `packages/experience-store` が開催枠・予約�
 
 1. **同意する規約**：旅行者が同意する規約の版は `EXPERIENCE_BOOKING_CONSENT_VERSION`。checkout の `consent.agreedVersion` がこれと違えば 422 `CONSENT_OUTDATED`。画面はこの版を詳細の `booking.consentVersion` として受け取り、規約の文書（リンク）は NIHO の詳細の `legalDocuments` を出す。参加の条件（#110）の版は商品の販売条件（`conditions_version`）にあり、`conditionsConsent.version` と照らす。
 2. **残席**：ブラウザが `GET /api/public/experiences/{slug}/availability`（任意で `?offerId=`）を読む。応答は NIHO の `PublicExperienceAvailabilityResponse` と同じ形で、日本時間の今日から 89 日後まで、要求ごとに数え、`no-store`。offer は商品の有効な繰り返し枠。ここで売っていない slug は本文なしの 404、形の誤った `offerId` は 400。
-3. **申込**：ブラウザが `POST /api/public/experiences/{slug}/checkout` へ NIHO の `PublicExperienceCheckoutRequest` と、journey の `guestPhone`・`conditionsConsent` を送る（このサイトのページからだけ。`guestLanguage` は当面 `EN`）。`GuestBookingRepository.startGuestBooking` が NIHO と同じ順で確かめ、1 トランザクションで席を仮押さえし、予約者を `booking_guests` に記録し、価格・取消条件・NIHO の手数料を予約の snapshot に固定する。snapshot は `paymentRequired` を保存し、無料は `false`（過去snapshotで値が無ければ合計額から判定）。有料予約は35分の仮押さえを使う。完全無料商品（大人・子ども・全offerがすべて0円）は同じトランザクション内で即時確定し、Stripe決済と決済台帳を作らない。1〜49円や有料・無料価格の混在は販売不可。
+3. **申込**：ブラウザが `POST /api/public/experiences/{slug}/checkout` へ NIHO の `PublicExperienceCheckoutRequest` と、journey の `guestPhone`・`conditionsConsent` を送る（このサイトのページからだけ。`guestLanguage` は当面 `EN`）。`GuestBookingRepository.startGuestBooking` が NIHO と同じ順で確かめ、1 トランザクションで席を仮押さえし、予約者を `booking_guests` に記録し、価格・取消条件・NIHO の手数料・販売プラン版・受付方法を予約の snapshot に固定する。snapshot は `paymentRequired` を保存し、無料は `false`（過去snapshotで値が無ければ合計額から判定）。即時の有料予約は35分、MANAGED_20の承認後決済はサーバーで固定した24時間の仮押さえを使う。完全無料商品（大人・子ども・全offerがすべて0円）は同じトランザクション内で即時確定し、Stripe決済と決済台帳を作らない。承認後決済で0円は販売不可。1〜49円や有料・無料価格の混在も販売不可。
 4. **決済または無料確定**：有料予約だけ、`createDirectCheckout` が販売者の Connect 口座に Direct charge の Checkout Session を作る。請求額・口座・手数料（`application_fee_amount`）は予約の snapshot から取る。戻り先は支払い後が `/booking/return?type=instant`、取りやめが `/experiences/{slug}?checkout=cancelled`（どちらもこのサイト）。旅行者のメールアドレスは Stripe の入力欄の初期値（`customer_email`）にだけ渡す。Session を予約に記録し（`attachCheckoutSession`、1 回だけ）、`201 { checkoutUrl }` を返す。無料予約はStripeを使わず、即時確定後に `/booking/return?type=instant&payment=free` を表示して、確認メールを案内する。
 5. **確定**：有料予約の決済確定は Stripe の webhook（`/api/experience/stripe/webhook`）だけで行う。署名を確かめ、販売者の口座と金額・通貨を snapshot と照らして `confirmBookingPayment` が確定し、台帳に記入する。無料予約は申込トランザクションで確定し、確認メール・ホスト通知・開催回再計算を同じトランザクションから積む。戻り先のページは予約の完了状態を照会しない（何が届くかだけを言う）。
 6. **放棄**：Session が支払われずに終わると、同じ webhook が仮押さえを解放する（`releaseGuestHold`、下の「放棄された Checkout と遅れた支払い」）。
+
+### MANAGED_20の承認後決済（#515）
+
+公開offerの `acceptanceMode=APPROVAL` は、immutableな販売プラン版から読む。古い画面や不正な入力が即時決済として送っても、storeが予約snapshotへ `APPROVAL` を固定し、公開POSTは `201 { checkoutUrl: /booking/return?type=approval }` だけを返す。この段階ではStripe API、カード、与信、請求は一切無い。受付ページも「未決済」と「承認後に事務局から支払URLを手動案内する」ことを明示する。
+
+`booking_guests.approval_status` は `PENDING → APPROVED | DECLINED` の一方向で、判断したAdminと時刻を保存する。Admin一覧には日時、人数、金額、連絡先、24時間の在庫期限を出す。承認は提供者在庫lockの下でactive hold、予約snapshot、現在の販売プラン版とfenceを再確認し、先に `APPROVED` を確定してから既存のplatform Checkout adapterを呼ぶ。Stripe障害後に同じ承認を再送すると、予約単位の冪等keyで同じSessionを回収する。支払URLはAdminのprivate/no-store応答だけに出し、事務局担当者が有効期限とともに予約者へ手動送付する。成功時の戻り先は通常の支払済み案内 `/booking/return?type=instant` とする。
+
+辞退は `PENDING` の間だけで、同じlockの下で在庫を即時解放し、Stripeや返金を呼ばない。期限切れの申込は承認できず、既存のHOLD期限処理で在庫から自然に外れる。未承認のSession添付とwebhook確定はstoreでも拒否する。承認後の決済、platform webhook、決済台帳、取消・返金、異議申立て、提供報酬は既存MANAGED_20と同じ経路を使う。
 
 ## 再送と失敗
 

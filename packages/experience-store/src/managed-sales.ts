@@ -6,7 +6,7 @@ import { lockProviderInventory } from "./inventory.ts";
 import { addLocalDays } from "@niho-experience/experience-domain";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
-import type { ExperienceChargeMode, ExperienceSalesPlan, HostActor, ManagedPaymentDuePolicy, PublicationAdminDraftActor } from "./types.ts";
+import type { BookingAcceptanceMode, ExperienceChargeMode, ExperienceSalesPlan, HostActor, ManagedPaymentDuePolicy, PublicationAdminDraftActor } from "./types.ts";
 import { assertCanonicalInstant, assertStoreIdentifier } from "./validation.ts";
 import { tokyoDate } from "./guest-bookings.ts";
 
@@ -42,6 +42,7 @@ export interface SalesPlanRevision {
   readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
   readonly pilotApproved: boolean;
   readonly activatedAtUtc: string;
+  readonly acceptanceMode: BookingAcceptanceMode;
 }
 
 export interface SalesPlanState {
@@ -150,12 +151,14 @@ function revisionFromRow(row: DbRow, prefix = ""): SalesPlanRevision {
     ...(row[key("payment_due_policy")] === "NEXT_MONTH_END" ? { paymentDuePolicy: "NEXT_MONTH_END" as const } : {}),
     pilotApproved: row[key("pilot_approved")] === true,
     activatedAtUtc: isoValue(row, key("activated_at")),
+    acceptanceMode: text(row[key("acceptance_mode")], key("acceptance_mode")) as BookingAcceptanceMode,
   };
 }
 
 const REVISION_COLUMNS = `provider_id,product_id,revision,plan,charge_mode,provider_public_profile_version,
   seller_display_name,seller_disclosure_url,seller_niho_account_ref,stripe_account_ref,fee_basis_points,agreement_version,
-  agreement_confirmed_by,agreement_confirmed_at,agreement_confirmation_method,payment_due_days,payment_due_policy,pilot_approved,activated_at`;
+  agreement_confirmed_by,agreement_confirmed_at,agreement_confirmation_method,payment_due_days,payment_due_policy,pilot_approved,activated_at,
+  acceptance_mode`;
 
 async function readState(client: Pick<PoolClient, "query">, providerId: string, productId: string, lock = false): Promise<SalesPlanState | null> {
   const state = await client.query<DbRow>(

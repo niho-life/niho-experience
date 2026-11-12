@@ -171,6 +171,8 @@ export interface ProductInput {
   readonly feeBasisPoints?: 1000 | 1500 | 2000;
   readonly paymentDueDays?: number | null;
   readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
+  /** Immutable sales-plan policy. Absent historical and owner/direct rows are instant. */
+  readonly acceptanceMode?: BookingAcceptanceMode;
 }
 
 export interface ProductRecord extends ProductInput {
@@ -303,11 +305,14 @@ export interface SellerSnapshot {
   readonly agreementVersion?: string;
   readonly paymentDueDays?: number | null;
   readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
+  /** Present on new sales-plan bookings; APPROVAL must be authorized before Checkout is attached or paid. */
+  readonly acceptanceMode?: BookingAcceptanceMode;
 }
 
 export type ExperienceChargeMode = "PLATFORM" | "CONNECT_DIRECT";
 export type ExperienceSalesPlan = "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10";
 export type ManagedPaymentDuePolicy = "NEXT_MONTH_END";
+export type BookingAcceptanceMode = "INSTANT" | "APPROVAL";
 
 export interface BookingRecord {
   readonly publicBookingId: string;

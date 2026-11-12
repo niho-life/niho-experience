@@ -37,6 +37,13 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   const [submitting, setSubmitting] = useState(false);
   const attempt = useRef<{ signature: string; key: string } | null>(null);
   const offer = offers.find((candidate) => candidate.id === offerId);
+  const approval = offer?.acceptanceMode === "APPROVAL";
+  const submitLabel = approval
+    ? (submitting ? (ja ? "リクエストを送信中…" : "Sending your request…") : (ja ? "予約をリクエストする" : "Send booking request"))
+    : (submitting ? (ja ? "決済を開いています…" : "Opening secure checkout…") : (ja ? "安全な決済へ進む" : "Continue to secure checkout"));
+  const connectionError = approval
+    ? (ja ? "リクエストを送信できませんでした。再度お試しください。" : "We couldn’t send your request. Please try again.")
+    : (ja ? "決済に接続できませんでした。再度お試しください。" : "We couldn't reach checkout. You can retry this request safely.");
   const total = offer ? expectedSiteBookingTotalYen(offer, adults, children) : null;
   const selectedOccurrence = occurrences.find((occurrence) => occurrence.offerId === offerId && occurrence.date === date);
   const validAnswers = offer?.bookingQuestions.every((question) => {
@@ -101,12 +108,12 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
           return;
         }
         if (code === "RATE_LIMITED") setProblem(ja ? "操作が多すぎます。少し待ってから再度お試しください。" : "Too many attempts. Please wait a moment and try again.");
-        else setProblem(ja ? "決済を開始できませんでした。入力内容を確認して再度お試しください。" : "We couldn't start checkout. Check the details and try again.");
+        else setProblem(approval ? connectionError : ja ? "決済を開始できませんでした。入力内容を確認して再度お試しください。" : "We couldn't start checkout. Check the details and try again.");
       } else {
-        setProblem(ja ? "決済に接続できませんでした。再度お試しください。" : "We couldn't reach checkout. You can retry this request safely.");
+        setProblem(connectionError);
       }
     } catch {
-      setProblem(ja ? "決済に接続できませんでした。再度お試しください。" : "We couldn't reach checkout. You can retry this request safely.");
+      setProblem(connectionError);
     } finally {
       setSubmitting(false);
     }
@@ -117,7 +124,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   return <form onSubmit={submit} className="rounded-[var(--radius-card)] border border-line bg-white p-5 sm:p-7">
     <div>
       <p className="eyebrow">{publication.sellerDisplayName}</p>
-      <h1 className="mt-1 text-3xl">{ja ? `${publication.japanese!.title}を予約` : `Book ${publication.publicTitle}`}</h1>
+      <h1 className="mt-1 text-3xl">{approval ? (ja ? `${publication.japanese!.title}の予約リクエスト` : `Request to book ${publication.publicTitle}`) : (ja ? `${publication.japanese!.title}を予約` : `Book ${publication.publicTitle}`)}</h1>
     </div>
     <div className="mt-6 grid gap-5">
       <label className="grid gap-2 text-sm font-extrabold">{ja ? "プラン" : "Option"}
@@ -163,8 +170,10 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
         <span>{ja ? "上記の予約・キャンセル条件と" : "I agree to the booking and cancellation conditions shown above and the "}<a className="font-extrabold underline" href="/privacy" target="_blank" rel="noreferrer">{ja ? "プライバシーポリシー" : "Privacy Policy"}</a>{sellerInformationUrl ? <>{ja ? "、および" : ", and "}<a className="underline underline-offset-2" href={sellerInformationUrl} target="_blank" rel="noreferrer">{ja ? `${sellerInformationName}の販売者情報` : `seller information for ${sellerInformationName}`}</a></> : null}{ja ? "に同意します。" : "."}</span>
       </label>
       {problem ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{problem}</p> : null}
-      <button type="submit" disabled={!api || !selectedOccurrence?.bookable || total === null || !agreed || !validAnswers || submitting || loading || loadError} className="min-h-12 rounded-full bg-ink px-6 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-45">{submitting ? ja ? "決済を開いています…" : "Opening secure checkout…" : ja ? "安全な決済へ進む" : "Continue to secure checkout"}</button>
-      <p className="text-center text-xs text-muted">{ja ? "お支払い情報はStripe Checkoutで入力します。氏名、メールアドレス、回答は予約の作成にのみ使用します。" : "Payment details are entered on Stripe Checkout. Your name, email and answers are sent only to create this booking."}</p>
+      <button type="submit" disabled={!api || !selectedOccurrence?.bookable || total === null || !agreed || !validAnswers || submitting || loading || loadError} className="min-h-12 rounded-full bg-ink px-6 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-45">{submitLabel}</button>
+      <p className="text-center text-xs text-muted">{approval
+        ? (ja ? "リクエスト時のお支払いはありません。承認後、事務局からお支払いリンクをメールでお送りします。" : "No payment is taken when you request. If NIHO approves your request, we’ll email you a payment link.")
+        : (ja ? "お支払い情報はStripe Checkoutで入力します。氏名、メールアドレス、回答は予約の作成にのみ使用します。" : "Payment details are entered on Stripe Checkout. Your name, email and answers are sent only to create this booking.")}</p>
     </div>
   </form>;
 }

@@ -12,11 +12,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Where Stripe returns a guest who paid: the page BookingReturn renders (`readReturnType`). Every offer
- * sold here is INSTANT (the store's PublicBookingOffer), so the type is fixed.
+ * Where Stripe returns a guest who paid, and where a request-to-book guest receives the request receipt.
+ * The approval path is local and allowlisted: public request submission never receives a Stripe URL.
  */
 const RETURN_PATH = "/booking/return?type=instant";
 const FREE_RETURN_PATH = "/booking/return?type=instant&payment=free";
+const APPROVAL_RETURN_PATH = "/booking/return?type=approval";
 
 /** The class name only: Stripe's and the database's messages may repeat what was sent (an address, a session). */
 function logFailure(stage: "store" | "stripe", error: unknown): void {
@@ -53,6 +54,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const guestLanguage = request.headers.get("accept-language")?.split(",", 1)[0]?.trim().toLowerCase().split("-", 1)[0] === "ja" ? "JA" : "EN";
   const returnPath = `${guestLanguage === "JA" ? "/ja" : ""}${RETURN_PATH}`;
   const freeReturnPath = `${guestLanguage === "JA" ? "/ja" : ""}${FREE_RETURN_PATH}`;
+  const approvalReturnPath = `${guestLanguage === "JA" ? "/ja" : ""}${APPROVAL_RETURN_PATH}`;
   // Trust only Cloudflare's overwritten source-IP header after the Cloud Run origin is restricted to its
   // authenticated edge path. Do not fall back to attacker-controlled X-Forwarded-For or a browser ID.
   const clientIpDigest = checkoutIpDigest(request, process.env.EXPERIENCE_CHECKOUT_IP_HMAC_KEY ?? "");
@@ -89,6 +91,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   }
   // Expired or cancelled: these seats are gone. The page reads availability again and starts a new request.
   if (started.status !== "HOLD" || Date.parse(started.holdExpiresAt) <= Date.now()) return checkoutError("UNAVAILABLE");
+  if (started.booking.sellerSnapshot.acceptanceMode === "APPROVAL") {
+    return publicJson(201, { checkoutUrl: `${siteOrigin}${approvalReturnPath}` } satisfies ExperienceCheckoutResponse);
+  }
   if (!stripeKey) return checkoutError("CHECKOUT_UNAVAILABLE");
 
   // A publication is durable, but a connected account can lose charge or payout capability at any time.
