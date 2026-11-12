@@ -4,7 +4,7 @@ import type { HostProvider } from "@/lib/host/providers";
 
 /** 開催回の担当 (#535) on the host side, against a stubbed store and provider list. */
 const state = vi.hoisted(() => ({
-  store: null as null | Record<string, ReturnType<typeof vi.fn>>,
+  store: null as null | { list: ReturnType<typeof vi.fn>; claim: ReturnType<typeof vi.fn>; decline: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn>; history: ReturnType<typeof vi.fn> },
   session: null as null | { nihoUserId: string; accessTokenExpiresAt: number },
   providers: { status: "ok", providers: [] } as { status: string; providers?: Pick<HostProvider, "id" | "nihoUserId" | "memberRole">[] },
   mock: false,
