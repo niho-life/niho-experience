@@ -30,3 +30,12 @@ export function providerBookingLink(input: { readonly origin: string; readonly s
   url.searchParams.set("utm_medium", input.placement);
   return url.href;
 }
+
+/**
+ * The link points at the live public page, so it is offered only for a published product whose saved draft is the live
+ * version. While a change (for example a new slug) waits for the publication conditions the live page keeps its old
+ * address and the draft's slug would not reach it (the same rule as the host's own "公開ページを見る").
+ */
+export function providerBookingLinkAvailable(product: { readonly status: string; readonly publicationNeedsUpdate: boolean }): boolean {
+  return product.status === "PUBLISHED" && !product.publicationNeedsUpdate;
+}

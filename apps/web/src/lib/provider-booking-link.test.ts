@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBookingAttributionStore } from "./booking-attribution";
-import { PROVIDER_LINK_PLACEMENTS, providerBookingLink } from "./provider-booking-link";
+import { PROVIDER_LINK_PLACEMENTS, providerBookingLink, providerBookingLinkAvailable } from "./provider-booking-link";
 
 /** 提供者経由の予約リンク (#531 v0): the mark is an existing booking UTM, so it reaches the booking as it is. Synthetic data only. */
 const ORIGIN = "https://experience.example";
@@ -41,6 +41,17 @@ describe("providerBookingLink", () => {
       const unknown = createBookingAttributionStore();
       unknown.capture(url.search, "1");
       expect(unknown.read("1")).toEqual({});
+    }
+  });
+});
+
+describe("providerBookingLinkAvailable", () => {
+  it("is offered only while the saved draft is the live page, so a pending slug change never hands out a dead link", () => {
+    expect(providerBookingLinkAvailable({ status: "PUBLISHED", publicationNeedsUpdate: false })).toBe(true);
+    // Published, but a changed draft waits for the publication conditions: the live page keeps its old address.
+    expect(providerBookingLinkAvailable({ status: "PUBLISHED", publicationNeedsUpdate: true })).toBe(false);
+    for (const status of ["DRAFT", "STOPPED", "RESTART_REQUIRED", "SUSPENDED"]) {
+      expect(providerBookingLinkAvailable({ status, publicationNeedsUpdate: false })).toBe(false);
     }
   });
 });
