@@ -315,10 +315,11 @@ export class OccurrenceAssignmentRepository {
     await client.query("UPDATE occurrence_assignments SET released_at=clock_timestamp() WHERE id=$1::uuid AND released_at IS NULL", [term.id]);
     await this.#event(client, { providerId: args.providerId, occurrenceId: args.occurrenceId, commandId: args.commandId, assignmentId: term.id, action: "RELEASE", recordedBy: args.recordedBy, subject: term.assignee, actor: args.actor, reason: args.reason });
     if (this.#notify) {
-      // 募集中 again: the people who can take it are told once more, through the occurrence's earliest live request.
+      // 募集中 again: the people who can take it are told once more, through the occurrence's earliest live request. Only before the start: the list and #needsAssignee leave a started occurrence out, so a notice would point at nothing.
       const first = await client.query<DbRow>(
         `SELECT b.public_booking_id::text AS id FROM bookings b JOIN booking_guests g ON g.provider_id=b.provider_id AND g.booking_id=b.id
-          WHERE b.provider_id=$1 AND b.occurrence_id=$2 AND ${LIVE} ORDER BY b.created_at,b.id LIMIT 1`,
+           JOIN schedule_occurrences o ON o.provider_id=b.provider_id AND o.occurrence_id=b.occurrence_id
+          WHERE b.provider_id=$1 AND b.occurrence_id=$2 AND o.start_at > clock_timestamp() AND ${LIVE} ORDER BY b.created_at,b.id LIMIT 1`,
         [args.providerId, args.occurrenceId],
       );
       const bookingId = first.rows[0]?.id;

@@ -354,6 +354,12 @@ describe("occurrence assignee notifications (#535 v0 ②)", { skip: databaseUrl 
       const beforeQuiet = await count();
       await quiet.release(actor(OWNER), { occurrenceId: "occ-notify", commandId: cmd() });
       assert.equal(await count(), beforeQuiet);
+      // After the start the list no longer shows the occurrence, so stepping down then tells nobody (the assignment record stays).
+      await repository.claim(actor(OWNER), { occurrenceId: "occ-notify", commandId: cmd() });
+      await pool.query("UPDATE schedule_occurrences SET start_at=clock_timestamp()-interval '2 hours',end_at=clock_timestamp()-interval '30 minutes' WHERE provider_id=$1 AND occurrence_id='occ-notify'", [PROVIDER]);
+      const beforeStarted = await count();
+      assert.equal((await repository.release(actor(OWNER), { occurrenceId: "occ-notify", commandId: cmd() })).outcome, "RELEASED");
+      assert.equal(await count(), beforeStarted);
     } finally {
       await db.dispose();
     }
