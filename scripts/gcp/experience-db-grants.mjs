@@ -119,6 +119,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // separate operator role (docs/group-inquiry.md), so no DELETE here. The mail rows are removed with the inquiry (CASCADE).
   group_inquiries: { write: IU },
   group_inquiry_mails: { write: IU },
+  // 街の人 (#564, 0077): the Admin lists, edits and withdraws (DELETE) people on the Japanese site's 街の人.
+  experience_people_listings: { write: IUD },
   guest_review_invitations: { write: IU },
   guest_reviews: { write: IU },
   // PII-free post-accept mail feedback; DELETE with the booking guest's PII erasure.

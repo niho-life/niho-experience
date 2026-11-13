@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { languageSwitchTarget } from "./locale-links";
+import { languageButtonTarget, languageSwitchTarget } from "./locale-links";
 import { experienceCounterparts, mapJapaneseExperiences, mapPublicationJapaneseExperiences, pairLanguages, staticPair } from "./localized-mapping";
 import { sitemapEntries } from "./sitemap-entries";
 
@@ -98,10 +98,10 @@ describe("Japanese-only experiences (#59)", () => {
     expect(mapping.get("translated")?.japaneseOnly).toBe(false);
   });
 
-  it("gives it no language-switch row, while a translated experience keeps its pair", () => {
+  it("marks it as having no counterpart (no button at all), while a translated experience keeps its pair", () => {
     const rows = experienceCounterparts(mapping);
-    expect(rows["/experiences/ja-first"]).toBeUndefined();
-    expect(rows["/experiences/ja-first/book"]).toBeUndefined();
+    expect(rows["/experiences/ja-first"]).toBe("");
+    expect(rows["/experiences/ja-first/book"]).toBe("");
     expect(rows["/experiences/translated"]).toBe("/ja/experiences/translated");
     expect(languageSwitchTarget("/ja/experiences/ja-first", "", rows)).toBeNull();
   });
@@ -120,5 +120,29 @@ describe("Japanese-only experiences (#59)", () => {
     expect(own?.alternates).toBeUndefined();
     const translated = entries.find((entry) => entry.url === "https://experience.example/experiences/translated");
     expect(translated?.alternates?.languages?.ja).toBe("https://experience.example/ja/experiences/translated");
+  });
+});
+
+// 言語のボタン（#562）：同じページの相手の言語へ、無ければ相手の言語のトップへ。日本語だけの商品では出さない。
+describe("language button target", () => {
+  const rows = { "/": "/ja", "/experiences": "/ja/experiences", "/experiences/tea": "/ja/experiences/tea", "/experiences/ja-first": "", "/experiences/ja-first/book": "" };
+
+  it("moves to the same page in the other language, keeping browse-safe query fields", () => {
+    expect(languageButtonTarget("/experiences/tea", "date=2026-11-20&token=x", rows)).toBe("/ja/experiences/tea?date=2026-11-20");
+    expect(languageButtonTarget("/ja/experiences/tea", "", rows)).toBe("/experiences/tea");
+    expect(languageButtonTarget("/ja", "", rows)).toBe("/");
+    expect(languageButtonTarget("/", "", rows)).toBe("/ja");
+  });
+
+  it("goes to the other language's top page where the page has no pair", () => {
+    expect(languageButtonTarget("/ja/business", "", rows)).toBe("/");
+    expect(languageButtonTarget("/ja/experiences/unlisted", "", rows)).toBe("/");
+    expect(languageButtonTarget("/privacy", "", rows)).toBe("/ja");
+    expect(languageButtonTarget("/guides/some", "", rows)).toBe("/ja");
+  });
+
+  it("is not shown on a Japanese-only experience's pages", () => {
+    expect(languageButtonTarget("/ja/experiences/ja-first", "", rows)).toBeNull();
+    expect(languageButtonTarget("/ja/experiences/ja-first/book", "", rows)).toBeNull();
   });
 });
