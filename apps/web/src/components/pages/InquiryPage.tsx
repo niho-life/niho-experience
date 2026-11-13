@@ -20,7 +20,7 @@ const WORDS = {
 /** The inquiry form's page (#532), in either language: the same form, the context the entry page passed. 404 while the flag is off. */
 export function InquiryPage({ locale, search }: { locale: GroupInquiryLocale; search: Record<string, string | string[] | undefined> }) {
   if (!config.groupInquiryEnabled && !config.groupInquiryPreviewEnabled) notFound();
-  const entry = inquiryContextFromSearch(search);
+  const entry = inquiryContextFromSearch(search, locale);
   const words = WORDS[locale];
   // 相談のページ (#565): opened with no entry context (not from a school, company, person or experience), the Japanese page
   // first says what can be asked, how it goes and what it costs; the form is the same one below.

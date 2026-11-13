@@ -6,6 +6,7 @@ const LINK = {
   experienceTitle: "Synthetic tea",
   hostDisplayName: "Sample Seller",
   guestName: "Sample Guest",
+  language: "EN",
   messages: [
     { from: "guest", atUtc: "2026-10-31T01:00:00.000Z", body: "Is there a vegetarian option?" },
     { from: "host", atUtc: "2026-10-31T02:00:00.000Z", body: "Yes, we can." },
@@ -28,6 +29,14 @@ describe("the reply page's link", () => {
     expect(parseReplyLink({ link: { ...LINK, messages: [{ from: "admin", atUtc: LINK.expiresAtUtc, body: "x" }] } })).toBeNull();
     expect(parseReplyLink({ link: { ...LINK, guestName: "" } })).toBeNull();
     expect(parseReplyLink(null)).toBeNull();
+  });
+
+  it("reads a message to a person (#589): about no experience, written in Japanese; and refuses a language it does not know", () => {
+    const person = { ...LINK, experienceTitle: null, language: "JA" };
+    expect(parseReplyLink({ link: person })).toEqual(person);
+    expect(parseReplyLink({ link: { ...LINK, language: "FR" } })).toBeNull();
+    expect(parseReplyLink({ link: { ...LINK, experienceTitle: "" } })).toBeNull();
+    expect(parseReplyLink({ link: Object.fromEntries(Object.entries(LINK).filter(([key]) => key !== "language")) })).toBeNull();
   });
 });
 

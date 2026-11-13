@@ -145,25 +145,34 @@ export function sortThreads<T extends HostThread>(threads: readonly T[]): T[] {
     .map((item) => item.thread);
 }
 
-/** The thread's title: a question before booking, or the messages with someone who booked. */
-export function threadHeading(thread: Pick<HostThread, "guest" | "booking">): string {
-  return thread.booking ? `${thread.guest} さんとの連絡` : `${thread.guest} さんの質問`;
+/**
+ * The "experience" a message sent from a person's page (#589) is filed under (docs/guest-questions.md): it is about none, so
+ * メッセージ lists it under 人物ページから, and it reads as a message, not as a question before booking.
+ */
+export const PERSON_EXPERIENCE_ID = "person-page";
+
+/** A message sent from a person's page, to the host directly. */
+const fromPersonPage = (thread: Pick<HostThread, "booking" | "experienceId">): boolean => thread.booking === null && thread.experienceId === PERSON_EXPERIENCE_ID;
+
+/** The thread's title: a question before booking, a message from a person's page, or the messages with someone who booked. */
+export function threadHeading(thread: Pick<HostThread, "guest" | "booking" | "experienceId">): string {
+  return thread.booking ? `${thread.guest} さんとの連絡` : fromPersonPage(thread) ? `${thread.guest} さんからのメッセージ` : `${thread.guest} さんの質問`;
 }
 
 /** ホーム's label for a waiting thread. */
-export function threadKind(thread: Pick<HostThread, "booking">): string {
-  return thread.booking ? "予約者からの連絡" : "予約前の質問";
+export function threadKind(thread: Pick<HostThread, "booking" | "experienceId">): string {
+  return thread.booking ? "予約者からの連絡" : fromPersonPage(thread) ? "人物ページからのメッセージ" : "予約前の質問";
 }
 
-/** A list row's "予約前", or the booked day: "10/27（火）予約". */
-export function threadWhen(thread: Pick<HostThread, "booking">): string {
-  return thread.booking ? `${shortDateWithWeekdayJa(thread.booking.date)}予約` : "予約前";
+/** A list row's "予約前", or the booked day: "10/27（火）予約". A message from a person's page has neither. */
+export function threadWhen(thread: Pick<HostThread, "booking" | "experienceId">): string {
+  return thread.booking ? `${shortDateWithWeekdayJa(thread.booking.date)}予約` : fromPersonPage(thread) ? "" : "予約前";
 }
 
 /** Under the thread's title, after the experience: "予約前 · 子ども", or the booking's "10/27（火）18:00 · 3名". */
-export function threadContext(thread: Pick<HostThread, "booking" | "topic">): string {
+export function threadContext(thread: Pick<HostThread, "booking" | "topic" | "experienceId">): string {
   const booking = thread.booking;
-  const head = booking ? [`${shortDateWithWeekdayJa(booking.date)}${booking.start}`, `${booking.guests}名`] : ["予約前"];
+  const head = booking ? [`${shortDateWithWeekdayJa(booking.date)}${booking.start}`, `${booking.guests}名`] : fromPersonPage(thread) ? [] : ["予約前"];
   return [...head, ...(thread.topic ? [thread.topic] : [])].join(" · ");
 }
 

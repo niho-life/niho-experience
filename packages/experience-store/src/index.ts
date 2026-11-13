@@ -166,7 +166,7 @@ export { HostCalendarSettings } from "./host-calendar-settings.ts";
 export { GuestReviewRatings } from "./guest-review-ratings.ts";
 export type { HostProductRating } from "./guest-review-ratings.ts";
 export type { HostCalendarFeed, HostCalendarFeedBooking, HostCalendarFeedIssue, HostCalendarFeedRecord, HostGoogleConnectionState } from "./host-calendar-settings.ts";
-export { GUEST_QUESTION_LIMITS, GUEST_QUESTION_TOPICS, GuestQuestionRepository } from "./guest-questions.ts";
+export { GUEST_QUESTION_LIMITS, GUEST_QUESTION_TOPICS, GuestQuestionRepository, PERSON_THREAD_LABEL } from "./guest-questions.ts";
 export type {
   ClaimedBookingMessage,
   ClaimedSupportBookingMessage,
@@ -186,6 +186,7 @@ export type {
   GuestQuestionTopic,
   GuestThreadKind,
   SubmitGuestQuestionInput,
+  SubmitPersonMessageInput,
 } from "./guest-questions.ts";
 export { GuestBookingMessages } from "./booking-messages.ts";
 export type { GuestBookingConversation, GuestBookingMessage, SendGuestBookingMessageInput } from "./booking-messages.ts";

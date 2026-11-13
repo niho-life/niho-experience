@@ -75,9 +75,17 @@ describe("相談のページ (/ja/inquiry)", () => {
   });
 
   it("goes straight to the form when it was opened from a school, company, person or experience, and in English", () => {
-    for (const search of [{ type: "school", from: "school" }, { from: "provider", host: "合成 花子" }, { from: "experience", experience: "synthetic-tea" }] as Record<string, string>[]) {
+    for (const search of [{ type: "school", from: "school" }, { from: "experience", experience: "synthetic-tea" }] as Record<string, string>[]) {
       expect(text(page(search)), JSON.stringify(search)).not.toContain("たとえば、こんな相談");
     }
     expect(text(page({}, "en"))).not.toContain("たとえば、こんな相談");
+  });
+
+  it("opens an old link for a person with no context, and says nothing of a person (#589)", () => {
+    for (const search of [{ from: "provider", host: "合成 花子" }, { host: "合成 花子" }] as Record<string, string>[]) {
+      const words = text(page(search));
+      expect(words, JSON.stringify(search)).toContain("たとえば、こんな相談");
+      expect(words, JSON.stringify(search)).not.toContain("合成 花子");
+    }
   });
 });

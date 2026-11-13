@@ -21,6 +21,7 @@ describe("街の人 listings (#564)", { skip: databaseUrl === undefined ? "TEST_
       const people = new PeopleListingRepository(db.pool);
       const withPhoto = async (name: string) => {
         const provider = await publications.createAdminProvider(ADMIN, { publicDisplayName: name, providerKind: "PERSON", consentVersion: CONSENT });
+        await db.pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,'owner','OWNER',true)", [provider.providerId]);
         const assetId = randomUUID();
         await publications.addProviderMediaAsAdmin(ADMIN, provider.providerId, 1, CONSENT, {
           id: assetId, objectKey: `experience-provider-media/${assetId}.jpg`, sourceRefHash: "b".repeat(64), width: 800, height: 800, byteSize: 4096,
@@ -186,6 +187,46 @@ describe("街の人 listings (#564)", { skip: databaseUrl === undefined ? "TEST_
       const version = (await people.adminList()).find((item) => item.providerId === takuyaProvider)?.listing?.version as number;
       await people.adminWithdraw(ADMIN.nihoUserId, takuyaProvider, version);
       assert.equal((await pool.query("SELECT count(*)::int AS n FROM experience_people_listing_experiences")).rows[0]?.n, 0);
+    } finally {
+      await db.dispose();
+    }
+  });
+
+  it("shows a person only with a current OWNER account, and says so to the Admin (#589)", async () => {
+    const db = await createIsolatedDatabase(databaseUrl, "people_listing_owner");
+    try {
+      const pool = db.pool;
+      const publications = new ExperiencePublicationRepository(pool);
+      const people = new PeopleListingRepository(pool);
+      const provider = await publications.createAdminProvider(ADMIN, { publicDisplayName: "Synthetic Owner Check", providerKind: "PERSON", consentVersion: CONSENT });
+      const assetId = randomUUID();
+      await publications.addProviderMediaAsAdmin(ADMIN, provider.providerId, 1, CONSENT, {
+        id: assetId, objectKey: `experience-provider-media/${assetId}.jpg`, sourceRefHash: "b".repeat(64), width: 800, height: 800, byteSize: 4096,
+        placement: "PROVIDER_PHOTO", altText: "photo", altTextJa: "写真", publicCredit: null,
+      });
+      await people.adminSave(ADMIN.nihoUserId, provider.providerId, null, input("owner-check"));
+      const row = async () => (await people.adminList()).find((item) => item.providerId === provider.providerId)!;
+      const shown = async () => ({ list: (await people.listPublic()).length, page: (await people.getPublicBySlug("owner-check")) !== null });
+
+      // Listed, with a public profile and a photo, but nobody can be written to: not shown, and the Admin sees why.
+      assert.deepEqual(await shown(), { list: 0, page: false });
+      assert.equal((await row()).photoReady, true);
+      assert.equal((await row()).hasOwner, false);
+      assert.equal((await row()).visible, false);
+
+      // An EDITOR (or a former OWNER) is not enough.
+      await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,'editor','EDITOR',true),($1,'former','OWNER',false)", [provider.providerId]);
+      assert.equal((await row()).hasOwner, false);
+      assert.deepEqual(await shown(), { list: 0, page: false });
+
+      await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,'owner','OWNER',true)", [provider.providerId]);
+      assert.equal((await row()).hasOwner, true);
+      assert.equal((await row()).visible, true);
+      assert.deepEqual(await shown(), { list: 1, page: true });
+
+      // The OWNER account ending takes the person off again.
+      await pool.query("UPDATE provider_memberships SET active=false WHERE provider_id=$1 AND niho_user_id='owner'", [provider.providerId]);
+      assert.deepEqual(await shown(), { list: 0, page: false });
     } finally {
       await db.dispose();
     }

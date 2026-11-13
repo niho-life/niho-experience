@@ -14,6 +14,6 @@ export const metadata: Metadata = { title: "Reply to your host", robots: { index
  * The server never sees the token (it is in the fragment); the page reads it in the browser (GuestReply).
  */
 export default function GuestReplyPage() {
-  if (!config.guestQuestionsEnabled) notFound();
+  if (!config.guestQuestionsEnabled && !config.personMessagesEnabled) notFound();
   return <GuestReply translationNotice={translationNoticeShown(config)} />;
 }

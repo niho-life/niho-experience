@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { PublicPerson } from "@niho-experience/experience-store";
+import { PersonMessageForm } from "@/components/PersonMessageForm";
 import { Photo } from "@/components/Photo";
 import { buttonClass } from "@/components/ui";
 import { config } from "@/lib/config";
@@ -43,7 +44,7 @@ export function PeopleListPage({ people }: { people: readonly PublicPerson[] }) 
   );
 }
 
-/** One person: who they are, a way to talk to them through the office, and the experiences they offer. */
+/** One person: who they are, a way to write to them directly (#589), and the experiences they offer. */
 export function PersonPage({ person, experiences }: { person: PublicPerson; experiences: readonly SitePublicExperience[] }) {
   return (
     <div className="mx-auto w-full max-w-[64rem] px-4 pb-16">
@@ -61,9 +62,7 @@ export function PersonPage({ person, experiences }: { person: PublicPerson; expe
           {person.quoteJa ? <p className="mt-5 text-[1.25rem] leading-snug">「{person.quoteJa}」</p> : null}
           {person.introJa ? <p className="mt-4 max-w-[40rem] whitespace-pre-line text-ink-soft">{person.introJa}</p> : null}
           {person.photo.credit ? <p className="mt-3 text-xs text-muted">写真：{person.photo.credit}</p> : null}
-          {config.groupInquiryEnabled ? (
-            <a href={inquiryHref("ja", { from: "PROVIDER", hostName: person.name })} className={buttonClass("secondary", "mt-6 w-full sm:w-auto")}>{person.name}さんに相談する</a>
-          ) : null}
+          {config.personMessagesEnabled ? <PersonMessageForm slug={person.slug} name={person.name} /> : null}
         </div>
       </header>
       {experiences.length > 0 ? (

@@ -130,8 +130,8 @@ function ReplyComposer({ thread, providerId, onSend }: { thread: HostThread; pro
   const japaneseField = useRef<HTMLTextAreaElement>(null);
   const draft = useReplyDraft((japanese) => draftReplyEnglish({ providerId, threadId: thread.id, japanese }), { onChange: () => setSent(false) });
   const { canSend } = replyDraftState(draft);
-  /** A guest who booked in Japanese reads the Japanese written here; the English is kept as the record (#59). */
-  const japaneseGuest = thread.booking !== null && thread.guestLanguage === "ja";
+  /** A guest who booked in Japanese, or wrote from a person's page (#589), reads the Japanese written here; the English is kept as the record (#59). */
+  const japaneseGuest = thread.guestLanguage === "ja";
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

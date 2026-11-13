@@ -220,6 +220,14 @@ export const FLAGS = Object.freeze([
     needs: ["HOST_CONSOLE", "DATABASE"],
   },
   {
+    env: "EXPERIENCE_PERSON_MESSAGES_ENABLED",
+    variable: "PERSON_MESSAGES_ENABLED",
+    // 街の人 (Japanese site) → a message to the person, kept like a question and answered by the OWNER in メッセージ; the
+    // answer is an email (guest mail). Like the questions, the OWNER must be able to read it in the Experience's own メッセージ.
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_GUEST_MAIL_ENABLED", "EXPERIENCE_JAPANESE_SITE_ENABLED"],
+    conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED"],
+  },
+  {
     env: "EXPERIENCE_GROUP_INQUIRY_ENABLED",
     variable: "GROUP_INQUIRY_ENABLED",
     // The two emails of an inquiry go with the mail job (guest mail); the Admin inbox needs the Admin sign-in as ever.

@@ -146,7 +146,7 @@ node scripts/experience/ops.mjs classification apply --file changes.json --yes  
 
 ### 街の人に載せる・変える・外す
 
-載せる・変える・外すは、日本語サイトの `/ja/people` にすぐ出る・消えるので `publish` の段階（**本番は依頼した人の了承を取ってから `--yes`**）。載せられるのは、公開プロフィールがある提供者だけ（`people list` の `publicDisplayName`・`photoReady`・`hasHostBio`・`visible` を見る。提供者の写真が許可つきで選ばれていないと、載せても表示されない）。
+載せる・変える・外すは、日本語サイトの `/ja/people` にすぐ出る・消えるので `publish` の段階（**本番は依頼した人の了承を取ってから `--yes`**）。載せられるのは、公開プロフィールがある提供者だけ（`people list` の `publicDisplayName`・`photoReady`・`hasHostBio`・`visible` を見る。提供者の写真が許可つきで選ばれていないと、載せても表示されない。本人のアカウント（現役の OWNER）が無い人も表示されない（#589）。載せたのに表示されない人には、`hiddenBecause` に理由が付く）。
 
 ```json
 { "items": [

@@ -149,6 +149,23 @@ describe("people withdraw and list", () => {
     expect(await count("--unlisted")).toBe(1);
     expect(await count("--provider", "p2")).toBe(1);
   });
+
+  it("says why a listed person is not shown: no OWNER account of their own, or no photo (#589)", async () => {
+    const fake = fakeApi([
+      person("p1", { listing: listing({ slug: "a" }), visible: true, hasOwner: true }),
+      person("p2", { listing: listing({ slug: "b" }), visible: false, hasOwner: false }),
+      person("p3", { listing: listing({ slug: "c" }), visible: false, hasOwner: false, photoReady: false }),
+      person("p4"),
+    ]);
+    const people = ((await execute(fake.api, ["list"])).output as { result: { people: Array<{ providerId: string; hiddenBecause?: string[] }> } }).result.people;
+    const reasons = Object.fromEntries(people.map((row) => [row.providerId, row.hiddenBecause]));
+    expect(reasons).toEqual({
+      p1: undefined,
+      p2: ["本人のアカウントが無いため非公開"],
+      p3: ["本人のアカウントが無いため非公開", "公開してよい提供者写真が無いため非公開"],
+      p4: undefined,
+    });
+  });
 });
 
 describe("people apply: experiences (#585)", () => {

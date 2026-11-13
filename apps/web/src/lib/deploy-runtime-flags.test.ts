@@ -92,6 +92,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_TRANSLATE_API_ENABLED: "experienceTranslateApiEnabled",
   EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED: "experienceTranslateStandaloneApiEnabled",
   EXPERIENCE_GUEST_QUESTIONS_ENABLED: "guestQuestionsEnabled",
+  EXPERIENCE_PERSON_MESSAGES_ENABLED: "personMessagesEnabled",
   EXPERIENCE_GROUP_INQUIRY_ENABLED: "groupInquiryEnabled",
   EXPERIENCE_TRANSLATION_ENABLED: "translationEnabled",
   EXPERIENCE_GUEST_REVIEWS_ENABLED: "guestReviewsEnabled",

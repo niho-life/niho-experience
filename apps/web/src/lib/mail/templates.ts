@@ -141,7 +141,8 @@ export interface QuestionReplyMailInput {
   readonly siteUrl: string;
   readonly guestName: string;
   readonly hostName: string;
-  readonly experienceTitle: string;
+  /** The experience asked about; null for a message sent from a person's page (#589), which is about none. */
+  readonly experienceTitle: string | null;
   /** The host's English. */
   readonly reply: string;
   /** The guest's language (#59): "JA" sends the Japanese frame, and the host's own Japanese when they wrote it. */
@@ -156,11 +157,11 @@ export interface QuestionReplyMailInput {
 export function questionReplyEmail(input: QuestionReplyMailInput): RenderedMail {
   if (input.guestLanguage === "JA") return questionReplyEmailJa(input);
   const host = oneLine(input.hostName);
-  const experience = oneLine(input.experienceTitle);
+  const about = input.experienceTitle === null ? "your message" : `your question about ${oneLine(input.experienceTitle)}`;
   const link = `${absolute(input.siteUrl, "/questions/reply")}#t=${encodeURIComponent(input.replyToken)}`;
-  return mail(`${host} replied to your question about ${experience}`, [
+  return mail(`${host} replied to ${about}`, [
     { kind: "p", text: `Hi ${oneLine(input.guestName)},` },
-    { kind: "p", text: `${host} replied to your question about ${experience}:` },
+    { kind: "p", text: `${host} replied to ${about}:` },
     { kind: "quote", text: body(input.reply) },
     { kind: "link", lead: `To answer ${host}, open this link. You can answer once with it, within ${input.linkTtlDays} days.`, label: `Answer ${host}`, href: link },
     { kind: "p", text: `Replying to this email reaches NIHO support, not ${host}.` },
