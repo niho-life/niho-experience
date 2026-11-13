@@ -51,7 +51,15 @@ export interface IdTokenResult {
  * here and nowhere else.
  */
 export const NIHO_CONNECT_AUDIENCE_PARAM = "audience";
-export type NihoConnectAudience = "host";
+export type NihoConnectAudience = "host" | "guest";
+
+/**
+ * A traveler's way in (niho-coliving/niho-app#20307): with `audience=guest` and one of these, NIHO goes straight to that
+ * provider's own screen, without its login page and without its name in front. Apple has no web sign-in at NIHO yet (the
+ * traveler is shown NIHO's usual screen), so the entrance does not offer it (traveler/methods.ts).
+ */
+export const NIHO_CONNECT_METHODS = ["google", "apple", "line"] as const;
+export type NihoConnectMethod = (typeof NIHO_CONNECT_METHODS)[number];
 
 /**
  * How recent a sign-in a step-up asks NIHO for (`max_age`, in seconds; NIHO accepts 60 to 86400): a re-login for a sensitive
@@ -66,10 +74,11 @@ export const NIHO_REAUTHENTICATION_MAX_AGE_SECONDS = 300;
  * NIHO's confirmation page for this site. `maxAgeSeconds` asks NIHO to sign the person in again when their last sign-in
  * is older (`max_age`, 60 to 86400 seconds; niho-coliving/niho-app#20305): a sensitive change's re-authentication (#595).
  */
-export function nihoConnectUrl(nihoOrigin: string, params: { challenge: string; state: string; origin: string; audience?: NihoConnectAudience; maxAgeSeconds?: number }): string {
+export function nihoConnectUrl(nihoOrigin: string, params: { challenge: string; state: string; origin: string; audience?: NihoConnectAudience; method?: NihoConnectMethod; maxAgeSeconds?: number }): string {
   const url = new URL("/connect/niho-experience", nihoOrigin);
   const search = new URLSearchParams({ v: "1", challenge: params.challenge, state: params.state, origin: params.origin });
   if (params.audience) search.set(NIHO_CONNECT_AUDIENCE_PARAM, params.audience);
+  if (params.method) search.set("method", params.method);
   if (params.maxAgeSeconds !== undefined) search.set("max_age", String(params.maxAgeSeconds));
   url.search = search.toString();
   return url.href;

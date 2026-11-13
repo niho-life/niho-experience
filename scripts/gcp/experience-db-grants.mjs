@@ -213,6 +213,9 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   schedule_occurrences: { write: IU },
   schedule_rules: { write: IU },
   stripe_webhook_events: { write: I },
+  // 旅行者のアカウント (#597, 0085): made at the first sign-in, then its last sign-in and suspension are marked; its sessions end and are cleaned up.
+  traveler_accounts: { write: IU },
+  traveler_sessions: { write: IUD },
 });
 
 /** Owned by the migration role; the runtime gets no privilege on it. */

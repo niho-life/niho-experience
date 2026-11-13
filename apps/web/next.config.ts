@@ -76,6 +76,9 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
+      // 旅行者のアカウント (Epic #591, #597): the log in page, the signed-in page and their routes.
+      { source: "/account", headers: privatePageHeaders },
+      { source: "/account/:path*", headers: privatePageHeaders },
       { source: "/experiences/:slug/book", headers: privatePageHeaders },
       { source: "/ja/experiences/:slug/book", headers: privatePageHeaders },
       { source: "/booking/:path*", headers: privatePageHeaders },

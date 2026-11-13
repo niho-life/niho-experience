@@ -2,15 +2,18 @@ import "server-only";
 import { type NextRequest, type NextResponse } from "next/server";
 import type { NihoSessionResult } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
-import { hostAccountIdentities, hostAccounts, hostInvitations } from "@/lib/experience/store-server";
+import { hostAccountIdentities, hostAccounts, hostInvitations, travelerAccounts } from "@/lib/experience/store-server";
 import { clearInviteBindingCookie, isOpaqueSecret, linkBindingHash, nowUtc, readExperienceHostSession, setAccountSessionCookie } from "./accounts";
-import { NIHO_REAUTHENTICATION_MAX_AGE_SECONDS, deleteConnection, exchangeCode, nihoConnectUrl } from "./niho-auth";
+import { NIHO_REAUTHENTICATION_MAX_AGE_SECONDS, deleteConnection, exchangeCode, nihoConnectUrl, type NihoConnectAudience, type NihoConnectMethod } from "./niho-auth";
 import type { NihoIdentityOutcome } from "./niho-identity";
 import { loginStatesMatch, createLoginState, createPkceVerifier, pkceChallenge } from "./pkce";
 import { nihoIdOrNull } from "./providers";
 import { forgetHostPushConnection } from "./push/server";
 import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostAccountSettingsPath, hostInvitationPath, hostReturnPathOrNull, invitationIdOrNull, withProvider, withQuery, type LoginErrorReason } from "./routes";
-import { clearLoginCookie, loginSealer, lookupNihoIdentity, nihoAuthDeps, seeOther, setLoginCookie, siteOrigin } from "./server";
+import { clearLoginCookie, hostNotFound, loginSealer, lookupNihoIdentity, nihoAuthDeps, seeOther, setLoginCookie, siteOrigin } from "./server";
+import { TRAVELER_HOME_PATH, TRAVELER_SIGN_IN_PATH, type TravelerLoginError } from "@/lib/traveler/paths";
+import { TRAVELER_LOGIN_HINT_COOKIE, TRAVELER_SESSION_COOKIE } from "@/lib/traveler/session";
+import { clearTravelerLoginHint, isTravelerSessionToken, setTravelerLoginHint, setTravelerSessionCookie } from "@/lib/traveler/server";
 import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_COOKIE, LOGIN_MAX_AGE_SECONDS, type HostLoginState } from "./session";
 
 /*
@@ -35,6 +38,10 @@ import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_
  * - invitation (`purpose: "invite"`, #596): the host opened an invitation link from ops. The return binds the NIHO account to
  *   the invited host account in the same transaction that uses the invitation up (the invitation belongs to the browser that
  *   opened it, whose binding cookie must come back), then opens that host account's session as a sign-in does.
+ * - traveler (`purpose: "traveler"`, #597): a traveler logs in or signs up with Google, Apple or LINE (`audience=guest`, a
+ *   `method`): NIHO goes straight to that provider and makes the NIHO account on the way. The return opens the traveler's
+ *   own account and session (another table and cookie than a host's), never a host account's, and failures go to the
+ *   traveler's English entrance, not the host console's pages.
  */
 
 const MAX_CODE_LENGTH = 2048;
@@ -79,14 +86,25 @@ export function startNihoInvite(request: NextRequest): NextResponse {
   return nihoRoundTrip({ providerId: null, purpose: "invite" }, false);
 }
 
-function nihoRoundTrip(intent: Pick<HostLoginState, "providerId" | "invitationId" | "returnPath" | "purpose" | "hostAccountId">, reauth: boolean): NextResponse {
+/**
+ * A traveler's way in (#597): to NIHO with `audience=guest` and, for a method they pressed, straight to that provider. No method
+ * is the existing NIHO account's way in (NIHO's own login screen). The traveler's pages are English and never name NIHO.
+ */
+export function startTravelerLogin(method: NihoConnectMethod | null): NextResponse {
+  const response = nihoRoundTrip({ providerId: null, purpose: "traveler" }, false, { audience: "guest", ...(method ? { method } : {}) });
+  setTravelerLoginHint(response);
+  return response;
+}
+
+function nihoRoundTrip(intent: Pick<HostLoginState, "providerId" | "invitationId" | "returnPath" | "purpose" | "hostAccountId">, reauth: boolean, target: { audience: NihoConnectAudience; method?: NihoConnectMethod } = { audience: "host" }): NextResponse {
   const verifier = createPkceVerifier();
   const state = createLoginState();
   const response = seeOther(nihoConnectUrl(config.nihoWebOrigin, {
     challenge: pkceChallenge(verifier),
     state,
     origin: siteOrigin(),
-    audience: "host",
+    audience: target.audience,
+    ...(target.method ? { method: target.method } : {}),
     // A sign-in the host does not have to repeat is not asked again; a step-up always is (the window is NIHO_REAUTHENTICATION_MAX_AGE_SECONDS).
     ...(reauth ? { maxAgeSeconds: NIHO_REAUTHENTICATION_MAX_AGE_SECONDS } : {}),
   }));
@@ -130,11 +148,24 @@ async function withNihoIdentity<T>(code: string, verifier: string, run: (nihoUse
   }
 }
 
-/** NIHO's return to `/host/auth/callback` (see the sequence above). Failures carry a fixed reason only. */
-export async function completeNihoLogin(request: NextRequest): Promise<NextResponse> {
+/** Back to the traveler's entrance with what went wrong, in words that name no NIHO account. */
+function travelerFailed(reason: TravelerLoginError): NextResponse {
+  const response = seeOther(withQuery(TRAVELER_SIGN_IN_PATH, { error: reason }));
+  clearLoginCookie(response);
+  clearTravelerLoginHint(response);
+  return response;
+}
+
+/**
+ * NIHO's return to `/host/auth/callback` (see the sequence above). Failures carry a fixed reason only. `host`: the host
+ * console's NIHO login is on; a return for a host purpose is a 404 without it (a traveler's return still goes through).
+ */
+export async function completeNihoLogin(request: NextRequest, options: { host: boolean } = { host: true }): Promise<NextResponse> {
   const params = request.nextUrl.searchParams;
   const login = decodeLoginState(loginSealer(), request.cookies.get(LOGIN_COOKIE)?.value, Date.now());
-  if (!login) return failed("expired");
+  if (!login) return config.travelerAccountsEnabled && request.cookies.has(TRAVELER_LOGIN_HINT_COOKIE) ? travelerFailed("expired") : failed("expired");
+  if (login.purpose === "traveler") return config.travelerAccountsEnabled ? completeTravelerSignIn(request, login) : hostNotFound();
+  if (!options.host) return hostNotFound();
   const link = login.purpose === "link";
   if (!loginStatesMatch(login.state, params.get("state"))) return link ? linkBack(login, "unavailable") : failed("state", login);
   if (params.has("error")) return link ? linkBack(login, "denied") : failed("denied", login);
@@ -230,6 +261,47 @@ async function completeInvite(request: NextRequest, login: HostLoginState, code:
   if (opened?.kind !== "ok") return failed("invite-unavailable");
   const response = await signedIn(request, login, accounts, opened, now);
   clearInviteBindingCookie(response);
+  return response;
+}
+
+/**
+ * The return of a traveler's log in (#597): the account of the NIHO user ID that came back (made now when it is the first
+ * time) and a session of it, in the traveler's own cookie. NIHO's sign-in time is the session's `authenticated_at` and a return
+ * without one opens nothing (the same rule as a host's). The connection ends whatever happened.
+ */
+async function completeTravelerSignIn(request: NextRequest, login: HostLoginState): Promise<NextResponse> {
+  const params = request.nextUrl.searchParams;
+  if (!loginStatesMatch(login.state, params.get("state"))) return travelerFailed("unavailable");
+  if (params.has("error")) return travelerFailed("denied");
+  const code = params.get("code");
+  if (!code || code.length > MAX_CODE_LENGTH) return travelerFailed("unavailable");
+  const travelers = travelerAccounts();
+  if (!travelers) return travelerFailed("unavailable");
+
+  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeMs) => {
+    const now = Date.now();
+    try {
+      return { now, result: await travelers.signInWithNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) }) };
+    } catch (error) {
+      console.error(`[traveler-auth] sign-in not opened: ${error instanceof Error ? error.name : "unknown error"}`);
+      return null;
+    }
+  });
+  if (!verified.ok) return travelerFailed(verified.reason === "rejected" ? "expired" : "unavailable");
+  if (verified.value === null) return travelerFailed("unavailable");
+  const { now, result } = verified.value;
+  if (result.kind === "account-suspended") return travelerFailed("suspended");
+
+  // The session this browser held before ends (another traveler on a shared device, or the same one logging in again).
+  const previous = request.cookies.get(TRAVELER_SESSION_COOKIE)?.value;
+  if (isTravelerSessionToken(previous) && previous !== result.sessionToken) {
+    try { await travelers.revokeSession({ sessionToken: previous, nowUtc: nowUtc(now) }); }
+    catch { /* It ends on its own (14 idle days at most). */ }
+  }
+  const response = seeOther(TRAVELER_HOME_PATH);
+  clearLoginCookie(response);
+  clearTravelerLoginHint(response);
+  setTravelerSessionCookie(response, result.sessionToken, result.absoluteExpiresAtUtc, now);
   return response;
 }
 

@@ -21,8 +21,12 @@ function failed(reason: LoginErrorReason, preparationCaseId: string | null = nul
  */
 export async function GET(request: NextRequest) {
   if (!config.hostConsoleEnabled) return hostNotFound();
-  // With Experience host accounts NIHO only proves who the host is (Epic #591); without that flag there is no NIHO login (ADR 0003).
-  if (config.hostAccountsEnabled) return config.hostNihoLoginEnabled ? completeNihoLogin(request) : hostNotFound();
+  // With Experience host accounts NIHO only proves who the host (or, #597, the traveler) is (Epic #591); without that flag
+  // there is no NIHO login (ADR 0003). A traveler's return is told apart by its sealed state, never by a flag of its own here.
+  if (config.hostAccountsEnabled) {
+    const host = config.hostNihoLoginEnabled;
+    return host || config.travelerAccountsEnabled ? completeNihoLogin(request, { host }) : hostNotFound();
+  }
   const params = request.nextUrl.searchParams;
   const login = decodeLoginState(loginSealer(), request.cookies.get(LOGIN_COOKIE)?.value, Date.now());
   if (!login) return failed("expired");
