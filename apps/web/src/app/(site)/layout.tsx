@@ -7,6 +7,7 @@ import { AttributionCapture } from "@/components/AttributionCapture";
 import { analyticsModeForRuntime } from "@/lib/analytics";
 import { CodeSiteChrome } from "@/components/SiteChrome";
 import { config, isPreview } from "@/lib/config";
+import { attributionEnabled } from "@/lib/attribution-enabled";
 import { SITE_DESCRIPTION } from "@/lib/public-metadata";
 import { SiteLocaleProvider } from "@/components/SiteLocale";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
@@ -59,7 +60,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <SiteLocaleProvider locale="en">
           <AnalyticsSetup mode={analyticsMode} websiteId={config.umamiWebsiteId} />
           <ExperienceGa4Analytics measurementId={publicAnalytics?.ga4MeasurementId ?? null} />
-          <AttributionCapture enabled={config.publicApiVersion === "1.2"} />
+          <AttributionCapture enabled={attributionEnabled()} />
           <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageSwitch counterparts={counterparts} /> : undefined} footerLinks={footerLinks}>
             {children}
           </CodeSiteChrome>

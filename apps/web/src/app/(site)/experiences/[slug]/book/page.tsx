@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BookingPageContent } from "@/components/pages/BookingPageContent";
 import { SitePublicationBooking } from "@/components/pages/SitePublicationBooking";
+import { attributionEnabled } from "@/lib/attribution-enabled";
 import { config } from "@/lib/config";
 import { getSitePublicExperience } from "@/lib/experience/site-publications";
 import type { SearchParams } from "@/lib/filters";
@@ -14,7 +15,7 @@ type Props = { params: Promise<{ slug: string }>; searchParams: Promise<SearchPa
 
 export default async function BookPage(props: Props) {
   const local = await getSitePublicExperience((await props.params).slug);
-  if (local?.kind === "published") return <div className="container-page py-8 lg:py-12"><SitePublicationBooking item={local.item} siteOrigin={new URL(config.siteUrl).origin} consentVersion={config.guestBookingConsentVersion} bookingsEnabled={config.bookingsEnabled && config.guestBookingEnabled} /></div>;
+  if (local?.kind === "published") return <div className="container-page py-8 lg:py-12"><SitePublicationBooking item={local.item} siteOrigin={new URL(config.siteUrl).origin} consentVersion={config.guestBookingConsentVersion} bookingsEnabled={config.bookingsEnabled && config.guestBookingEnabled} attributionEnabled={attributionEnabled()} /></div>;
   if (local?.kind === "reserved") notFound();
   return BookingPageContent({ ...props, locale: "en" });
 }

@@ -70,4 +70,29 @@ describe("site publication booking seller terms", () => {
     expect(html).toContain(`href="${href}"`);
     expect(html).toContain(label);
   });
+
+  // 無料（0円）の予約は決済に進まない：支払い前提の文言を出さない（#59）。
+  it.each([
+    ["en", "Book for free", "No payment is needed.", "Continue to secure checkout", "Stripe Checkout"],
+    ["ja", "無料で予約する", "お支払いは不要です。", "安全な決済へ進む", "Stripe Checkout"],
+  ] as const)("says a free booking is booked, not paid, in %s", (locale, button, note, checkout, stripe) => {
+    const free = { ...offer, pricing: { ...offer.pricing, adultPriceYen: 0 } };
+    const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: { publication: { slug: "free-one", publicTitle: "Free one", japanese: { title: "無料の体験" }, sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers: [free] }, sellerDisclosure: null } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true, locale,
+    }));
+    expect(html).toContain(button);
+    expect(html).toContain(note);
+    expect(html).not.toContain(checkout);
+    expect(html).not.toContain(stripe);
+  });
+
+  it("keeps the checkout wording for a paid booking", () => {
+    const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: { publication: { slug: "paid-one", publicTitle: "Paid one", sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers: [offer] }, sellerDisclosure: null } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true,
+    }));
+    expect(html).toContain("Continue to secure checkout");
+    expect(html).toContain("Stripe Checkout");
+  });
 });

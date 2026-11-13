@@ -21,7 +21,7 @@
 - 静的4ページのrouteは `sourcePath` と日本語pathを照合する。全体のroute・copyが整うまで言語切替を公開せず、未翻訳の本文を日本語の完成版として表示しない。
 - 体験詳細・予約の日英の対応は、下の「動的ページの日英対応」の規則だけで決める。言語切替・sitemap・hreflangで別の判定を持たない。
 - 日本語予約は `localization.bookingReady` と `unavailableCopyKey` で入口を判定する。価格・残席・terms fingerprint・consentはNIHOが再確認し、`LOCALIZATION_OUTDATED` は再読込を案内する。
-- 日本語予約・戻りは `private, no-store`、`noindex, nofollow`。日本語rootへanalytics/attribution captureを置かず、guest入力をURL・計測へ渡さない。
+- 日本語予約・戻りは `private, no-store`、`noindex, nofollow`。日本語rootにはanalytics（Umami・GA4）を置かず、guest入力をURL・計測へ渡さない。流入の印（`utm_*`の許可された値）の取り込み（`AttributionCapture`、メモリのみ・最初の流入だけ・Do Not Track なら取らない）は英語と同じく日本語rootにも置く（#59。提供者の「予約リンクをコピー」の印が日本語のみの商品の予約に結び付くため。有効かどうかは `attributionEnabled()`）。
 - 上流応答はbounded JSONで読み、公開業務DTOのschemaを検証する。装飾文書を無視することを理由に、業務データや翻訳の検証を緩めない。
 
 ## 動的ページの日英対応（オーナー決定 2026-10-31）
