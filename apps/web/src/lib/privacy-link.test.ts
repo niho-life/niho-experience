@@ -18,7 +18,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/ja", useSearchParams: (
 // supplies `headers()`; the server-only settings boundary is covered separately.
 vi.mock("@/lib/public-site-analytics", () => ({ getPublicSiteAnalyticsSettings: async () => null }));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; }, isPreview: false }));
-vi.mock("@/lib/guide-registry", () => ({ guideCatalogForSite: async () => state.guideCatalog, hasGuidesPage: () => state.hasGuides }));
+vi.mock("@/lib/guide-registry", () => ({ guideCatalogForSite: async () => state.guideCatalog, hasGuidesPage: () => state.hasGuides, japaneseGuides: async () => [] }));
 vi.mock("@/lib/localized-content", () => ({
   getJapaneseStaticCounterparts: async () => ({}),
   getPreparedJapaneseStaticRelease: async () => ({ copy: { copy: createStaticCopyV1(defaultStaticCopyValuesV1()), releaseId: "release-1", values: defaultStaticCopyValuesV1() }, counterparts: {} }),
