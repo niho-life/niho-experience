@@ -28,7 +28,6 @@ Epic [#591](https://github.com/niho-life/niho-experience/issues/591)、[#597](ht
 
 - 予約・メッセージ・レビュー・通訳とアカウントの結び付け（予約の一覧・履歴）。いまの `/account` は何も持たない。
 - 日本語サイトの入口と並び順、サイト名「NIHO Experience」の扱い、Apple の web 対応。
-- 日本語サイトの入口と並び順、サイト名「NIHO Experience」の扱い、Apple の web 対応（上と同じ）。
 - 確認画面を省くか（NIHO の `skip-confirm`。NIHO 側のオーナー判断待ち）と、Google・LINE・Apple の同意画面に出る名前（niho-coliving/niho-app#20307 の調査）。
 
 ## NIHO の回数上限（サービス単位）
