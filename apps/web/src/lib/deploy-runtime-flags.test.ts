@@ -109,6 +109,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_OTA_BOOKING_NOTIFICATIONS_ENABLED: "otaBookingNotificationsEnabled",
   EXPERIENCE_HOST_MAIL_ENABLED: "hostMailEnabled",
   EXPERIENCE_HOST_ACCOUNTS_ENABLED: "hostAccountsEnabled",
+  EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "hostNihoLoginEnabled",
   EXPERIENCE_HOST_TEAM_ENABLED: "hostTeamEnabled",
   EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED: "occurrenceAssignmentEnabled",
   EXPERIENCE_JAPANESE_SITE_ENABLED: "japaneseSiteEnabled",

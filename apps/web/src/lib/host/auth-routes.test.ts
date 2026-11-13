@@ -69,7 +69,7 @@ function openSession(value: string | undefined) {
 }
 
 async function startLogin(query = "") {
-  const response = login(new NextRequest(`${SITE}/host/auth/login${query}`));
+  const response = await login(new NextRequest(`${SITE}/host/auth/login${query}`));
   const location = new URL(response.headers.get("location")!);
   const cookie = setCookies(response).get(LOGIN_COOKIE)!;
   return { response, location, cookie: `${LOGIN_COOKIE}=${cookie.value}`, attributes: cookie.attributes };
@@ -162,7 +162,7 @@ describe("login and callback (http mode)", () => {
       : json(200, { accessToken: "web-access-1", expiresAt: new Date(Date.now() + 60 * MIN).toISOString() });
     const response = await callback(new NextRequest(`${SITE}/host/auth/callback?code=code-1&state=${location.searchParams.get("state")}`, { headers: { cookie } }));
     expect(response.headers.get("location")).toBe(`/host/invitations/${invitationId}`);
-    const conflict = login(new NextRequest(`${SITE}/host/auth/login?invitationId=${invitationId}&preparationCaseId=case_1`));
+    const conflict = await login(new NextRequest(`${SITE}/host/auth/login?invitationId=${invitationId}&preparationCaseId=case_1`));
     expect(conflict.status).toBe(400);
   });
 
@@ -340,7 +340,7 @@ describe("mock mode sign-in from the installed app (#177)", () => {
   });
 
   it("forwards the app's mark to the synthetic sign-in, which makes an app session", async () => {
-    const started = login(new NextRequest(`${SITE}/host/auth/login?surface=app&providerId=p_1`));
+    const started = await login(new NextRequest(`${SITE}/host/auth/login?surface=app&providerId=p_1`));
     expect(started.headers.get("location")).toBe("/host/auth/mock-login?providerId=p_1&surface=app");
     const { GET } = await import("@/app/(host)/host/auth/mock-login/route");
     const app = await GET(new NextRequest(`${SITE}/host/auth/mock-login?surface=app`));
@@ -351,7 +351,7 @@ describe("mock mode sign-in from the installed app (#177)", () => {
 
   it("returns mock invitation login to the fixed page and rejects mixed intents", async () => {
     const invitationId = "00000000-0000-4000-8000-000000000196";
-    const started = login(new NextRequest(`${SITE}/host/auth/login?invitationId=${invitationId}&returnTo=https://evil.example.test`));
+    const started = await login(new NextRequest(`${SITE}/host/auth/login?invitationId=${invitationId}&returnTo=https://evil.example.test`));
     expect(started.headers.get("location")).toBe(`/host/auth/mock-login?invitationId=${invitationId}`);
     const { GET } = await import("@/app/(host)/host/auth/mock-login/route");
     const accepted = await GET(new NextRequest(`${SITE}/host/auth/mock-login?invitationId=${invitationId}`));

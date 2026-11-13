@@ -59,8 +59,12 @@ export const readHostSession = cache(async (): Promise<HostSession | null> => {
   return decodeSession(sessionSealer(), jar.get(SESSION_COOKIE)?.value, Date.now());
 });
 
-/** 「メールでログイン」 with Experience host accounts, 「NIHO でログイン」 otherwise: the console's sign-in buttons. */
+/**
+ * The console's sign-in buttons: 「NIHO アカウントでログイン」 when NIHO proves the host (Epic #591), 「メールでログイン」 with
+ * Experience host accounts and the emailed link, 「NIHO でログイン」 with the former NIHO-token login.
+ */
 export function hostLoginLabel(): string {
+  if (config.hostNihoLoginEnabled) return "NIHO アカウントでログイン";
   return config.hostAccountsEnabled ? "メールでログイン" : "NIHO でログイン";
 }
 
@@ -81,6 +85,31 @@ export async function experienceHostServiceIdToken(): Promise<string> {
   const token = parseBearerToken(headers.authorization ?? headers.Authorization);
   if (token === null) throw new Error("Experience service identity is unavailable");
   return token;
+}
+
+export type NihoIdentityLookup = { ok: true; nihoUserId: string } | { ok: false; reason: "rejected" | "unavailable" };
+
+/**
+ * Who the NIHO connection that was just exchanged belongs to: Host v1 `identity` (the NIHO user ID of an `ACTIVE`
+ * account), with Experience's service ID token beside the access token. `rejected`: NIHO refused the token or the
+ * account (4xx other than a timeout or a rate limit); `unavailable`: try again later. Neither carries the token.
+ */
+export async function lookupNihoIdentity(accessToken: string): Promise<NihoIdentityLookup> {
+  try {
+    const client = createSelectedExperienceHostApiClient({
+      nihoWebOrigin: config.nihoWebOrigin,
+      accessToken,
+      serviceIdToken: await experienceHostServiceIdToken(),
+      fetch,
+    });
+    const identity = await client.getIdentity();
+    if (identity.ok) return { ok: true, nihoUserId: identity.data.nihoUserId };
+    if (identity.kind === "error" && identity.status >= 400 && identity.status < 500 && identity.status !== 408 && identity.status !== 429) return { ok: false, reason: "rejected" };
+    return { ok: false, reason: "unavailable" };
+  } catch {
+    // An unusable service identity or origin: the same as NIHO being away, and never the token.
+    return { ok: false, reason: "unavailable" };
+  }
 }
 
 export type ProvidersLoad =

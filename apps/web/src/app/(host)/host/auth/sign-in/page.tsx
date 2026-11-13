@@ -3,7 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { HOST_ACCOUNT_LIMITS } from "@niho-experience/experience-store";
 import { hostButtonClass, HOST_HEADING } from "@/components/host/host-ui";
 import { config } from "@/lib/config";
-import { HOST_EMAIL_LOGIN_PATH, HOST_EMAIL_SIGN_IN_PATH, HOST_HOME_PATH, HOST_INTRO_PATH, hostReturnPathOrNull, withQuery } from "@/lib/host/routes";
+import { HostLoginLink } from "@/components/host/HostAppWindow";
+import { HOST_EMAIL_LOGIN_PATH, HOST_EMAIL_SIGN_IN_PATH, HOST_HOME_PATH, HOST_INTRO_PATH, HOST_LOGIN_PATH, hostReturnPathOrNull, withQuery } from "@/lib/host/routes";
 import { readHostSession, requireHostConsole } from "@/lib/host/server";
 
 export const metadata: Metadata = { title: "ログイン", robots: { index: false, follow: false } };
@@ -21,20 +22,39 @@ const ERRORS = {
  * A sensitive change that needs a recent sign-in (設定 › 受取口座, ADR 0003 slice 3) sends the host here with `reauth=1`
  * and `next` (an allowlisted page, hostReturnPathOrNull): the form is shown even to a signed-in host, says why, and the
  * opened link returns to that page.
+ *
+ * With the NIHO account login (EXPERIENCE_HOST_NIHO_LOGIN_ENABLED, Epic #591) this page is the host's entrance: a heading
+ * and one button, 「NIHO アカウントでログイン」, and nothing else (no explanation, no email link, no 「体験の提供について」).
+ * The email form stays behind `?method=email` (and for a sign-in a sensitive change asked for, `reauth=1`), reached by
+ * address only: the migration fallback until #598 removes it.
  */
 export default async function HostEmailSignInPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   requireHostConsole();
-  if (!config.hostAccountsEnabled) notFound();
   const query = await searchParams;
   const next = hostReturnPathOrNull(query.next);
   const reauth = query.reauth === "1" && next !== null;
   const sent = query.sent === "1";
   const error = query.error === "email" || query.error === "unavailable" ? ERRORS[query.error] : null;
+  if (config.hostNihoLoginEnabled && query.method !== "email" && !reauth && !sent && !error) {
+    // A signed-in host goes on to the page they came for; anyone else gets the one button.
+    if (await readHostSession()) redirect(next ?? HOST_HOME_PATH);
+    return (
+      <main id="main" className="mx-auto w-full max-w-xl px-4 py-16">
+        <h1 className={`${HOST_HEADING} text-2xl`}>ホストのログイン</h1>
+        <div className="mt-8">
+          {/* A plain link: login is a route handler, and /host belongs to the traveler site's root. */}
+          <HostLoginLink href={withQuery(HOST_LOGIN_PATH, { returnTo: next })} className={hostButtonClass("primary", "w-full justify-center sm:w-auto")}>NIHO アカウントでログイン</HostLoginLink>
+        </div>
+      </main>
+    );
+  }
+  if (!config.hostAccountsEnabled) notFound();
   // The 「メールを確認してください」 and error states stay here even for a signed-in host (a recent sign-in was asked for,
   // or the form needs fixing); otherwise a signed-in host goes on to the page it came for.
   if (!reauth && !sent && !error && await readHostSession()) redirect(next ?? HOST_HOME_PATH);
   /** This form again, with the page it returns to and why a sign-in was asked for. */
-  const again = withQuery(HOST_EMAIL_SIGN_IN_PATH, { reauth: reauth ? "1" : null, next });
+  // With the NIHO account login the email form is behind `method=email`: "send it again" must stay on the form, not fall to the entrance.
+  const again = withQuery(HOST_EMAIL_SIGN_IN_PATH, { method: config.hostNihoLoginEnabled ? "email" : null, reauth: reauth ? "1" : null, next });
   const minutes = HOST_ACCOUNT_LIMITS.linkTtlMinutes;
 
   if (sent) {

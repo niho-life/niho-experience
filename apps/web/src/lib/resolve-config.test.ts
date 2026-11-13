@@ -557,6 +557,34 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ ...on, ...publication, NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" }).hostAccountsEnabled).toBe(true);
   });
 
+  it("signs hosts in with their NIHO account only with host accounts and NIHO's service audience, and the preview only needs the console (Epic #591)", () => {
+    const mail = {
+      EXPERIENCE_API_MODE: "http", SITE_URL: "https://experience.example", EXPERIENCE_GUEST_MAIL_ENABLED: "true",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused", EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587",
+      EXPERIENCE_SMTP_USER: "sample-smtp-user", EXPERIENCE_SMTP_PASSWORD: "sample-smtp-password",
+      EXPERIENCE_MAIL_FROM: "NIHO Experiences <experiences@example.com>", EXPERIENCE_MAIL_REPLY_TO: "support@example.com",
+      EXPERIENCE_JOBS_AUDIENCE: "https://experience.example/internal/experience-jobs",
+      EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: "experience-jobs@example.iam.gserviceaccount.com",
+    };
+    const host = { HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key" };
+    const accounts = { ...mail, ...host, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" };
+    const on = { ...accounts, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" };
+    // Off by default; "1" is not "true". The email link stays the host accounts' login until it is on.
+    expect(resolveConfig({}).hostNihoLoginEnabled).toBe(false);
+    expect(resolveConfig(accounts).hostNihoLoginEnabled).toBe(false);
+    expect(resolveConfig({ ...on, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "1" }).hostNihoLoginEnabled).toBe(false);
+    expect(resolveConfig(on)).toMatchObject({ hostAccountsEnabled: true, hostNihoLoginEnabled: true });
+    // The real NIHO: the bindings and sessions live in the host accounts' DB, and the identity call carries the service ID token.
+    expect(() => resolveConfig({ ...mail, ...host, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" }))
+      .toThrow("EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
+    expect(() => resolveConfig({ ...accounts, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
+    expect(() => resolveConfig({ ...mail, ...host, HOST_CONSOLE_ENABLED: "false", EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
+    // The preview walks a synthetic NIHO and needs nothing but the console.
+    expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true" })).toMatchObject({ hostAccountsEnabled: false, hostNihoLoginEnabled: true });
+    expect(() => resolveConfig({ EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
+  });
+
   it("opens the host publication API with host accounts from Stripe and the payout consent version, without NIHO (ADR 0003 slice 3)", () => {
     const on = {
       EXPERIENCE_API_MODE: "http", SITE_URL: "https://experience.example", EXPERIENCE_GUEST_MAIL_ENABLED: "true",

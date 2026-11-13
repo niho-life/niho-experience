@@ -94,7 +94,7 @@ describe("routes while the flag is off", () => {
     expect((await requestLink(post("/host/auth/email", `email=${encodeURIComponent(ADDRESS)}`))).status).toBe(404);
     expect(openPage().status).toBe(404);
     expect((await openLink(post("/host/auth/open", `t=${LINK_TOKEN}`, { cookie: `${LINK_BINDING_COOKIE}=${BINDING}` }))).status).toBe(404);
-    expect(new URL(login(new NextRequest(`${SITE}/host/auth/login`)).headers.get("location")!, SITE).origin).toBe(state.config.nihoWebOrigin);
+    expect(new URL((await login(new NextRequest(`${SITE}/host/auth/login`))).headers.get("location")!, SITE).origin).toBe(state.config.nihoWebOrigin);
     expect(store.requestLogin).not.toHaveBeenCalled();
     expect(store.consumeLogin).not.toHaveBeenCalled();
   });
@@ -102,14 +102,14 @@ describe("routes while the flag is off", () => {
 
 describe("sign-in entry with host accounts on", () => {
   it("sends every 「ログイン」 link to the email form and closes the NIHO callback and relay", async () => {
-    const response = login(new NextRequest(`${SITE}/host/auth/login?surface=app&providerId=p_1`));
+    const response = await login(new NextRequest(`${SITE}/host/auth/login?surface=app&providerId=p_1`));
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/host/auth/sign-in");
     expect(response.headers.getSetCookie()).toEqual([]);
     // An invitation's 「メールでログイン」 keeps the invitation as the page the opened link returns to.
-    const invited = login(new NextRequest(`${SITE}/host/auth/login?invitationId=8f14e45f-ceea-467a-9575-1f2a3b4c5d6e`));
+    const invited = await login(new NextRequest(`${SITE}/host/auth/login?invitationId=8f14e45f-ceea-467a-9575-1f2a3b4c5d6e`));
     expect(invited.headers.get("location")).toBe(`/host/auth/sign-in?next=${encodeURIComponent("/host/invitations/8f14e45f-ceea-467a-9575-1f2a3b4c5d6e")}`);
-    expect(login(new NextRequest(`${SITE}/host/auth/login?invitationId=not-a-uuid`)).headers.get("location")).toBe("/host/auth/sign-in");
+    expect((await login(new NextRequest(`${SITE}/host/auth/login?invitationId=not-a-uuid`))).headers.get("location")).toBe("/host/auth/sign-in");
     expect((await callback(new NextRequest(`${SITE}/host/auth/callback?code=c&state=s`))).status).toBe(404);
     // A NIHO cookie left from before the switch is never relayed.
     const now = Date.now();

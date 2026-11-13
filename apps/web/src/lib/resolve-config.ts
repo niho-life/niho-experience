@@ -251,6 +251,23 @@ function hostAccountsSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnab
   return true;
 }
 
+/**
+ * ホストの NIHO アカウントでのログイン (Epic #591, #594, docs/host-accounts.md): /host signs hosts in with 「NIHO アカウントでログイン」
+ * (NIHO proves who they are, then the NIHO connection ends at once; the session is Experience's own) and the emailed link
+ * leaves the screen, its routes staying as the migration fallback. Off by default. With the real NIHO (http) it needs
+ * the host accounts (the experience DB holds the bindings and the sessions) and NIHO's service audience (the identity
+ * call carries Experience's service ID token); the preview (mock) only needs the console and walks a synthetic NIHO.
+ */
+function hostNihoLoginSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, hostAccountsEnabled: boolean): boolean {
+  const name = "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED";
+  if (env[name] !== "true") return false;
+  if (!hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true`);
+  if (apiMode !== "http") return true;
+  if (!hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
+  if (!env.NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE?.trim()) throw new Error(`${name}=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE in http mode`);
+  return true;
+}
+
 /** 開催回の担当 (#535 v0): the NIHO-managed (承認後決済) occurrences only, so it needs that sale and both consoles' data. */
 function occurrenceAssignmentSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean): boolean {
   const name = "EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED";
@@ -837,6 +854,7 @@ export function resolveConfig(env: Env) {
     && hostAccountsEnabled
     && experienceTranslateStandaloneRequested;
   const hostTeamEnabled = hostTeamSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
+  const hostNihoLoginEnabled = hostNihoLoginSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const occurrenceAssignmentEnabled = occurrenceAssignmentSetting(apiMode, env, hostConsoleEnabled);
   // After host accounts: with them, the host publication API reads Stripe and the experience DB instead of NIHO.
   const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
@@ -998,6 +1016,8 @@ export function resolveConfig(env: Env) {
     hostMailEnabled,
     // Experience host accounts (ADR 0003): the emailed sign-in link and server-side sessions replace the NIHO login.
     hostAccountsEnabled,
+    // 「NIHO アカウントでログイン」 (Epic #591): NIHO proves the host, Experience keeps the session.
+    hostNihoLoginEnabled,
     // Experience-native COHOST membership, independent from the legacy provider-operations consumer.
     hostTeamEnabled,
     occurrenceAssignmentEnabled,

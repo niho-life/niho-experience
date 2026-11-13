@@ -18,5 +18,5 @@ export default async function HostLaunchPage() {
   requireHostConsole();
   const session = await readHostSession();
   if (session && sessionUsableInApp(session)) redirect(HOST_HOME_PATH);
-  return <HostLaunchScreen hasSession={session !== null} emailLogin={config.hostAccountsEnabled} />;
+  return <HostLaunchScreen hasSession={session !== null} emailLogin={config.hostAccountsEnabled} nihoLogin={config.hostNihoLoginEnabled} />;
 }
