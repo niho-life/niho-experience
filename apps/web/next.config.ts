@@ -96,6 +96,7 @@ const nextConfig: NextConfig = {
       // The emailed sign-in link (Experience host accounts, ADR 0003): its token is in the fragment; its page posts with
       // `referrerPolicy: same-origin` so the POST still carries this site's Origin.
       { source: "/host/auth/open", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
+      { source: "/host/auth/invite", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
       // 設定 › カレンダー's bookings feed (#109): the secret is the path, read by calendar apps; never archived, never in a Referer.
       // These headers win over the route's own (Next.js keeps a header already set), so they say the same.
       {

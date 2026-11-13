@@ -28,6 +28,18 @@ preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock
 - **再ログイン**：受取口座の同意・取り消し、Stripe ダッシュボードを開く、結び付けと解除は、`HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes`（30 分）以内のログインを見る（意味は変えない）。古いとき、結び付いた NIHO アカウントで入るホストは NIHO で入り直す（`/host/auth/login?reauth=1&returnTo=…`、`max_age=300`。戻ると新しいセッションの `authenticated_at` は戻った時刻で、前のセッションは失効する）。結び付けていないホストは、これまでどおりメールのリンク（受取口座）か Stripe 自身のログイン（ダッシュボード）。`max_age` は NIHO の接続 URL の再認証の指定（niho-coliving/niho-app#20305）で、NIHO に再ログインを促すためだけに使う。**「直近か」の判定は Experience が、`exchange` の `authTime` から自分で行う**（URL の値はブラウザの持ち主が書き換えられるため）。結び付けも、NIHO の `authTime` が 30 分以内であることを Store が確かめる。
 - 公開の直近ログイン（ADR 0004 §6）は、いまの公開 API にはまだ 30 分の検査が無い。入れるときは同じ判定（`recentlyAuthenticated`）と再ログイン（`reauthenticationHref`）を使う。
 
+### 招待リンク（#596）
+
+運営（ops）が、登録した `hst_` を NIHO アカウントに結び付ける 1 回限りの招待を出す。新しい OWNER・既存の OWNER（メールのリンクで登録した人）・共同ホスト（COHOST。`docs/host-team.md`）は、どれも同じ手順。migration `0084`（`host_account_invitations`、`HostInvitations`）。
+
+1. ops が `provision-host-account.mjs` で招待を作る（下の「登録（ops）」）。招待は**メールの送信待ちの行**で、トークンは作らない。ops はリンクを持たない。
+2. メール job（毎分）が `listPendingInvitations` → `issueInvitationLink` でトークンを 1 回だけ作り、登録のアドレスへ `${SITE_URL}/host/auth/invite#t=<token>` を送る（日本語。有効期限・1 回・最初に開いたブラウザで続ける旨）。送信に失敗した同じトークンは送り直さない（ops が招待し直す）。
+3. `GET /host/auth/invite`（トークンは fragment。script が読んですぐ消し、同じパスへ POST）→ `POST /host/auth/invite`：最初にリンクを開いたブラウザに結び付く（そのブラウザの cookie `__Secure-niho_host_invite`＝32 バイトの乱数、Path=/host/auth、7 日、の SHA-256 を保存）。同じブラウザなら開き直せるし、招待し直したあとの新しい招待も同じブラウザで開ける（使い済み・置き換えの招待は値を持ったまま履歴になり、値を占有しない）。別の招待がその値を持っている共有ブラウザでは、新しい値で開き直す。成功なら 204 で、ページが `/host/auth/login?invite=1` へ進む。使えないリンクは 400 と理由で、ページが `/host/auth/error?reason=` へ送る：`invite-expired`（期限切れ、または新しい招待に置き換えられた）・`invite-used`（使用済み）・`invite-browser`（別のブラウザ）・`invite-invalid`（不明）。それぞれ次にすることを案内する（期限切れ・別ブラウザは運営に新しい招待を依頼）。
+4. `/host/auth/login?invite=1`：招待の cookie があるブラウザだけ、NIHO へ進む（再認証の指定なし）。戻ったら `acceptInvitation`（招待を持つブラウザの cookie が戻ってくること、NIHO user ID）が、**同じ transaction で** NIHO アカウントをその `hst_` に結び付け（経路 `INVITATION`）、招待を使い済みにする。続けて `startSessionForNihoIdentity` でセッションを開き、NIHO の接続をすぐ解除する。ほかの `hst_` に付いている NIHO アカウント（`invite-in-use`）、すでに別の NIHO アカウントが付いている招待先（`invite-has-identity`）は断って記録し、**招待は使えるまま**（正しい NIHO アカウントでやり直せる）。結び付け後にセッションだけ開けなかったときは、結び付けは残り、ホストは「NIHO アカウントでログイン」で入れる。
+- 招待は 1 つの `hst_` に 1 つだけ開く（新しく作ると前の未使用の招待は置き換わり、前のリンクは `invite-expired`）。NIHO アカウントがすでに結び付いている `hst_` には作れない（先に解除する）。有効期限は 7 日。行は消さない。
+- メールで作った記事・写真・公開版・同意・販売者は、`hst_` を変えないので変わらない（統合テストで、結び付けの前後で membership・アカウントの行・提供者一覧が同じことを確かめている）。URL・公開履歴も変わらない。
+- 既存の OWNER の移行：`invite` で招待し、OWNER が招待のメールからログインする。移行したあとも、メールのリンクは `?method=email` に残る（#598 で扱いを決める）。
+
 結び付けの Store（`HostAccountIdentities`、migration `0083`）は `packages/experience-store/README.md`。1 つの `hst_` に有効な NIHO user ID は 1 つ、同じ NIHO user ID は 1 つの `hst_` だけ。結び付け・解除・拒否は `host_account_identity_events` に残る。設定での結び付け・解除と再ログインは #595、招待リンクと既存 OWNER の移行は #596。
 
 ## 流れ
@@ -137,7 +149,10 @@ Experience 自前のチーム管理は `EXPERIENCE_HOST_TEAM_ENABLED`（既定 O
 ```sh
 node scripts/experience/provision-host-account.mjs plan <input.json>
 node scripts/experience/provision-host-account.mjs register <input.json> --yes
+node scripts/experience/provision-host-account.mjs invite <input.json> --yes   # 登録済みのホストを、NIHO アカウントへ招待する
 ```
+
+NIHO アカウントでのログイン（上の「NIHO アカウントでのログイン」）では、ホストは登録だけでは入れない。**招待**を出し、ホストが招待のメールのリンクから NIHO にログインして結び付ける（「招待リンク」）。入力に `"invite": true` を足すと、`register` の最後に招待も作る。`invite` の入力は `{ "email": "…" }`（登録済みのホストアカウントのアドレス）だけ。出力は ID・結果の種類だけで、**リンクは出さない**（メール job が送る。ops は持たない）。`invite` の `plan`（`--yes` なし）は、ホストアカウントの状態・NIHO アカウントの結び付き・開いている招待の有無を読むだけ。
 
 ```json
 {

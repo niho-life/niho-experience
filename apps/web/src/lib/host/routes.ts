@@ -14,6 +14,12 @@ export const HOST_AUTH_ERROR_PATH = "/host/auth/error";
 export const HOST_EMAIL_SIGN_IN_PATH = "/host/auth/sign-in";
 export const HOST_EMAIL_LOGIN_PATH = "/host/auth/email";
 export const HOST_LOGIN_LINK_PATH = "/host/auth/open";
+/**
+ * The invitation link of a registered host (Epic #591, #596): `/host/auth/invite#t=<token>` from the email. Its page posts the
+ * token to the same path; the browser that does so first is the one the invitation belongs to. The sign-in that follows
+ * is `/host/auth/login?invite=1` (HOST_LOGIN_PATH), whose return binds the NIHO account to the invited host account.
+ */
+export const HOST_INVITE_PATH = "/host/auth/invite";
 export const HOST_INVITATIONS_PATH = "/host/invitations";
 export const HOST_API_PREFIX = "/host/api/";
 /** Creates a short-lived Express dashboard login link after server-side OWNER checks. */
@@ -230,7 +236,13 @@ export function hostLandingPath(providerId: string | null, connect: unknown): st
  * Why the login did not finish; each has its own message on /host/auth/error. `link`: an emailed sign-in link that is
  * expired, used, or opened in another browser than the one that asked for it (Experience host accounts). With the NIHO
  * account login (Epic #591): `unregistered` is a NIHO account no host account is bound to (usually another method than
- * the one the host was registered with), `suspended` a bound host account that is suspended.
+ * the one the host was registered with), `suspended` a bound host account that is suspended. `invite-*` (#596): the
+ * invitation link ran out or was replaced (`expired`), was used (`used`), belongs to another browser (`browser`), or is
+ * unknown or no longer open when the NIHO sign-in came back (`invalid`); the NIHO account is bound to another host
+ * account (`in-use`) or the invited host account has another NIHO account (`has-identity`).
  */
-export const LOGIN_ERROR_REASONS = ["expired", "state", "denied", "rejected", "unavailable", "link", "unregistered", "suspended"] as const;
+export const LOGIN_ERROR_REASONS = [
+  "expired", "state", "denied", "rejected", "unavailable", "link", "unregistered", "suspended",
+  "invite-expired", "invite-used", "invite-browser", "invite-invalid", "invite-in-use", "invite-has-identity",
+] as const;
 export type LoginErrorReason = (typeof LOGIN_ERROR_REASONS)[number];

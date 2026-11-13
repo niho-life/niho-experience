@@ -1,8 +1,9 @@
 import "server-only";
 import { type NextRequest, type NextResponse } from "next/server";
+import type { NihoSessionResult } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
-import { hostAccountIdentities, hostAccounts } from "@/lib/experience/store-server";
-import { isOpaqueSecret, nowUtc, readExperienceHostSession, setAccountSessionCookie } from "./accounts";
+import { hostAccountIdentities, hostAccounts, hostInvitations } from "@/lib/experience/store-server";
+import { clearInviteBindingCookie, isOpaqueSecret, linkBindingHash, nowUtc, readExperienceHostSession, setAccountSessionCookie } from "./accounts";
 import { NIHO_REAUTHENTICATION_MAX_AGE_SECONDS, deleteConnection, exchangeCode, nihoConnectUrl } from "./niho-auth";
 import type { NihoIdentityOutcome } from "./niho-identity";
 import { loginStatesMatch, createLoginState, createPkceVerifier, pkceChallenge } from "./pkce";
@@ -10,7 +11,7 @@ import { nihoIdOrNull } from "./providers";
 import { forgetHostPushConnection } from "./push/server";
 import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostAccountSettingsPath, hostInvitationPath, hostReturnPathOrNull, invitationIdOrNull, withProvider, withQuery, type LoginErrorReason } from "./routes";
 import { clearLoginCookie, loginSealer, lookupNihoIdentity, nihoAuthDeps, seeOther, setLoginCookie, siteOrigin } from "./server";
-import { ACCOUNT_SESSION_COOKIE, decodeLoginState, LOGIN_COOKIE, LOGIN_MAX_AGE_SECONDS, type HostLoginState } from "./session";
+import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_COOKIE, LOGIN_MAX_AGE_SECONDS, type HostLoginState } from "./session";
 
 /*
  * 「NIHO アカウントでログイン」 (Epic #591, #594, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED): NIHO only proves who the host is.
@@ -31,6 +32,9 @@ import { ACCOUNT_SESSION_COOKIE, decodeLoginState, LOGIN_COOKIE, LOGIN_MAX_AGE_S
  *   (`max_age`) and the return opens a new session whose `authenticated_at` is now.
  * - link (`purpose: "link"`): a signed-in host binds the NIHO account they come back with to their host account in 設定.
  *   The return opens no session; it adds the binding (the store checks the host's recent session and NIHO's recent sign-in).
+ * - invitation (`purpose: "invite"`, #596): the host opened an invitation link from ops. The return binds the NIHO account to
+ *   the invited host account in the same transaction that uses the invitation up (the invitation belongs to the browser that
+ *   opened it, whose binding cookie must come back), then opens that host account's session as a sign-in does.
  */
 
 const MAX_CODE_LENGTH = 2048;
@@ -66,6 +70,13 @@ export function startNihoLogin(request: NextRequest): NextResponse {
 export function startNihoLink(providerId: string | null, hostAccountId: string): NextResponse {
   // The host account that asked is part of the sealed state: the return binds to it and to no other.
   return nihoRoundTrip({ providerId, returnPath: hostAccountSettingsPath(providerId), purpose: "link", hostAccountId }, true);
+}
+
+/** The host opened an invitation link in this browser: the same round trip, which on return binds the NIHO account to the invited host account. */
+export function startNihoInvite(request: NextRequest): NextResponse {
+  // The link's page set the browser's binding cookie when it opened the invitation; without it there is nothing to bind to.
+  if (!isOpaqueSecret(request.cookies.get(INVITE_BINDING_COOKIE)?.value)) return failed("invite-invalid");
+  return nihoRoundTrip({ providerId: null, purpose: "invite" }, false);
 }
 
 function nihoRoundTrip(intent: Pick<HostLoginState, "providerId" | "invitationId" | "returnPath" | "purpose" | "hostAccountId">, reauth: boolean): NextResponse {
@@ -123,7 +134,8 @@ export async function completeNihoLogin(request: NextRequest): Promise<NextRespo
   if (params.has("error")) return link ? linkBack(login, "denied") : failed("denied", login);
   const code = params.get("code");
   if (!code || code.length > MAX_CODE_LENGTH) return link ? linkBack(login, "unavailable") : failed("rejected", login);
-  return link ? completeNihoLink(request, login, code) : completeSignIn(request, login, code);
+  if (link) return completeNihoLink(request, login, code);
+  return login.purpose === "invite" ? completeInvite(request, login, code) : completeSignIn(request, login, code);
 }
 
 async function completeSignIn(request: NextRequest, login: HostLoginState, code: string): Promise<NextResponse> {
@@ -147,9 +159,14 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
   const { now, opened } = verified.value;
   if (opened.kind === "not-linked") return failed("unregistered", login);
   if (opened.kind === "account-suspended") return failed("suspended", login);
+  return signedIn(request, login, accounts, opened, now);
+}
 
-  // The session this browser held before ends, with its devices' push (another account on a shared device, or the same
-  // host signing in again). Best effort: the new session is open either way.
+/**
+ * The session is open: the one this browser held before ends (with its devices' push: another account on a shared device, or
+ * the same host signing in again; best effort, the new session is open either way), and the host goes where the sign-in was for.
+ */
+async function signedIn(request: NextRequest, login: HostLoginState, accounts: NonNullable<ReturnType<typeof hostAccounts>>, opened: Extract<NihoSessionResult, { kind: "ok" }>, now: number): Promise<NextResponse> {
   const previous = request.cookies.get(ACCOUNT_SESSION_COOKIE)?.value;
   if (isOpaqueSecret(previous) && previous !== opened.sessionToken) {
     try {
@@ -165,6 +182,48 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
   const response = seeOther(login.invitationId ? hostInvitationPath(login.invitationId) : returnPath ?? withProvider(HOST_HOME_PATH, login.providerId));
   clearLoginCookie(response);
   setAccountSessionCookie(response, opened.sessionToken, opened.absoluteExpiresAtUtc, now);
+  return response;
+}
+
+/**
+ * The return of an invitation's sign-in (#596): the NIHO account that came back is bound to the host account the invitation
+ * was made for, and the invitation is used up, in one transaction; then the host account's session opens. A NIHO account
+ * bound elsewhere or a host account bound to another NIHO account is told (the invitation stays usable); an invitation that
+ * is not open for this browser is `invite-invalid`. A session that fails to open after the binding leaves the binding: the
+ * host signs in with the NIHO button as everyone does.
+ */
+async function completeInvite(request: NextRequest, login: HostLoginState, code: string): Promise<NextResponse> {
+  const invitations = hostInvitations();
+  const identities = hostAccountIdentities();
+  const accounts = hostAccounts();
+  if (!invitations || !identities || !accounts) return failed("unavailable", login);
+  const binding = request.cookies.get(INVITE_BINDING_COOKIE)?.value;
+  if (!isOpaqueSecret(binding)) return failed("invite-invalid");
+
+  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeUtc) => {
+    const now = Date.now();
+    try {
+      const accepted = await invitations.acceptInvitation({ browserBindingHash: linkBindingHash(binding), nihoUserId, nowUtc: nowUtc(now) });
+      if (accepted.kind !== "accepted") return { accepted, opened: null, now };
+      return { accepted, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeUtc, now), nowUtc: nowUtc(now) }), now };
+    } catch (error) {
+      console.error(`[host-auth] invitation not accepted: ${error instanceof Error ? error.name : "unknown error"}`);
+      return null;
+    }
+  });
+  if (!verified.ok) return failed(verified.reason, login);
+  if (verified.value === null) return failed("unavailable", login);
+  const { accepted, opened, now } = verified.value;
+  switch (accepted.kind) {
+    case "invalid": return failed("invite-invalid");
+    case "identity-in-use": return failed("invite-in-use");
+    case "account-has-identity": return failed("invite-has-identity");
+    case "host-account-not-active": return failed("suspended");
+    case "accepted": break;
+  }
+  if (opened?.kind !== "ok") return failed("unavailable");
+  const response = await signedIn(request, login, accounts, opened, now);
+  clearInviteBindingCookie(response);
   return response;
 }
 

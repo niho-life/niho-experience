@@ -20,6 +20,7 @@ import type {
   ClaimedHostBookingMail,
   HostAddressConfirmationClaim,
   HostBookingMailClaim,
+  HostInvitationLinkIssue,
   HostLoginLinkIssue,
   RefundStatus,
   RefundSubmission,
@@ -973,6 +974,58 @@ describe("sign-in links of Experience host accounts (ADR 0003)", () => {
     const counts = await runExperienceJobs({ ...s.deps, hostLogins: null });
     expect(counts).not.toHaveProperty("hostLoginLinks");
     expect(counts).not.toHaveProperty("hostAccountPurge");
+  });
+});
+
+describe("invitation links of host accounts (Epic #591, #596)", () => {
+  const INVITE_TOKEN = "inviteToken".padEnd(43, "Q");
+  const ids = ["7c9e6679-7425-40de-944b-e07fc1f90ae7", "16fd2706-8baf-433b-82eb-8c7fada847da", "0f8fad5b-d9cb-469f-a165-70867728950e"];
+  const send = (n: number) => ({ kind: "send" as const, token: `${INVITE_TOKEN.slice(0, -1)}${n}`, toEmail: `invited${n}@example.test`, expiresAtUtc: "2026-11-08T00:00:00.000Z" });
+  function hostInvitations(issues: ({ kind: "skip" } | ReturnType<typeof send>)[], pending = ids) {
+    return {
+      listPendingInvitations: vi.fn<(input: { nowUtc: string; limit: number }) => Promise<readonly string[]>>(async () => [...pending]),
+      issueInvitationLink: vi.fn<(input: { invitationId: string; nowUtc: string }) => Promise<HostInvitationLinkIssue>>(async () => issues.shift() ?? { kind: "skip" }),
+    };
+  }
+
+  it("sends each pending invitation once with the token in the fragment only, and skips one that can no longer go", async () => {
+    const invitations = hostInvitations([send(1), { kind: "skip" }, send(3)]);
+    const counts = await runExperienceJobs({ ...s.deps, hostInvitations: invitations });
+    expect(counts.hostInvitations).toEqual({ claimed: 3, sent: 2, skipped: 1, failed: 0 });
+    expect(invitations.listPendingInvitations).toHaveBeenCalledWith({ nowUtc: NOW.toISOString(), limit: EXPERIENCE_JOB_LIMITS.hostInvitations });
+    expect(invitations.issueInvitationLink.mock.calls.map(([input]) => input)).toEqual(ids.map((invitationId) => ({ invitationId, nowUtc: NOW.toISOString() })));
+    expect(s.sent.map((mail) => mail.to)).toEqual(["invited1@example.test", "invited3@example.test"]);
+    const [mail] = s.sent;
+    expect(mail!.subject).toBe("NIHO 体験ホストへのご招待");
+    expect(mail!.text).toContain(`${SITE}/host/auth/invite#t=${send(1).token}`);
+    expect(mail!.html).toContain(`${SITE}/host/auth/invite#t=${send(1).token}`);
+    expect(mail!.text).toContain("1 回だけ使えます");
+    expect(mail!.text).toContain("最初にリンクを開いたブラウザで続けてください。");
+    expect(mail!.text).not.toContain(`?t=${send(1).token}`);
+    expect(mail).not.toHaveProperty("deliveryRef");
+    expect(experienceJobActivity(counts).active).toBe(true);
+  });
+
+  it("never sends an invitation again after a failed send, and a transient failure ends the step for this run", async () => {
+    const invitations = hostInvitations([send(1), send(2), send(3)]);
+    s.results.push({ ok: false, failure: "permanent" }, { ok: false, failure: "transient" });
+    const counts = await runExperienceJobs({ ...s.deps, hostInvitations: invitations });
+    expect(counts.hostInvitations).toEqual({ claimed: 2, sent: 0, skipped: 0, failed: 2 });
+    expect(invitations.issueInvitationLink).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a failure by its class only, never a token or an address, and does not run while the NIHO login is off", async () => {
+    const output = [vi.spyOn(console, "log"), vi.spyOn(console, "info"), vi.spyOn(console, "warn"), vi.spyOn(console, "error")].map((spy) => spy.mockImplementation(() => {}));
+    const invitations = hostInvitations([send(1)]);
+    invitations.listPendingInvitations.mockRejectedValueOnce(new Error(`list failed for ${send(1).toEmail} ${send(1).token}`));
+    const counts = await runExperienceJobs({ ...s.deps, hostInvitations: invitations });
+    expect(counts.hostInvitations).toEqual({ error: "unavailable" });
+    expect(s.onStepError).toHaveBeenCalledWith("hostInvitations", "Error");
+    const reported = JSON.stringify(counts) + JSON.stringify(s.onStepError.mock.calls) + JSON.stringify(output.flatMap((spy) => spy.mock.calls));
+    expect(reported).not.toContain(send(1).token);
+    expect(reported).not.toContain("invited1@example.test");
+    for (const spy of output) spy.mockRestore();
+    expect(await runExperienceJobs({ ...s.deps, hostInvitations: null })).not.toHaveProperty("hostInvitations");
   });
 });
 

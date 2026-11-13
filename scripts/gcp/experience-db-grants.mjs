@@ -146,6 +146,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // The audit trail of bindings is append-only.
   host_account_identities: { write: I, updateColumns: ["last_login_at", "unlinked_at"] },
   host_account_identity_events: { write: I },
+  // ホストの招待リンク (#596, 0084): created, minted and opened, then used up or superseded; never deleted.
+  host_account_invitations: { write: IU },
   host_login_requests: { write: IUD },
   // ホストへのメールの宛先 (#194, 0038): the sign-in's copy and the host's choice; DELETE when access ends (the mail job).
   host_notification_address_confirmations: { write: IUD },

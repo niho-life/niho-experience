@@ -1,7 +1,7 @@
 import "server-only";
 import { otaSiteLabel } from "@/host/ota-sites";
 import { hostPushLines, whenJa, type HostPushEvent } from "@/lib/host/push/payload";
-import { HOST_LOGIN_LINK_PATH, HOST_NOTIFICATION_EMAIL_PATH, HOST_SETTINGS_PATH } from "@/lib/host/routes";
+import { HOST_INVITE_PATH, HOST_LOGIN_LINK_PATH, HOST_NOTIFICATION_EMAIL_PATH, HOST_SETTINGS_PATH } from "@/lib/host/routes";
 import { absolute, mail, oneLine, type MailBlock, type RenderedMail } from "./templates";
 
 /*
@@ -109,6 +109,27 @@ export function hostLoginLinkEmail(input: { readonly siteUrl: string; readonly t
     },
     { kind: "p", text: "メールのアプリの中でリンクが開いたときは、リンクをコピーして、リクエストしたブラウザに貼り付けてください。" },
     { kind: "p", text: "心当たりがなければ、このメールは無視してください。リクエストしたブラウザで開かない限り、ログインはされません。" },
+    REPLY,
+  ], "ja");
+}
+
+/**
+ * 「NIHO 体験ホストへのご招待」 (Epic #591, #596): the link that binds the host's NIHO account to the host account ops
+ * registered (`/host/auth/invite#t=<token>`; the token in the fragment only). It works until `expiresAt`, once, in the
+ * browser that opens it first. The email says which NIHO account to sign in with and what to do when a mail app opens the link.
+ */
+export function hostInvitationEmail(input: { readonly siteUrl: string; readonly token: string; readonly expiresAt: string }): RenderedMail {
+  const until = JST.format(new Date(input.expiresAt));
+  return mail("NIHO 体験ホストへのご招待", [
+    { kind: "p", text: "NIHO 体験ホストを、NIHO アカウントでご利用いただけるようにするための招待です。" },
+    {
+      kind: "link",
+      lead: `下のリンクを開いて、NIHO にログインしてください。ご登録の NIHO アカウント（いつも使っているログインの方法）でお願いします。リンクは ${until} まで、1 回だけ使えます。最初にリンクを開いたブラウザで続けてください。`,
+      label: "NIHO アカウントでログインする",
+      href: `${absolute(input.siteUrl, HOST_INVITE_PATH)}#t=${encodeURIComponent(input.token)}`,
+    },
+    { kind: "p", text: "メールのアプリの中でリンクが開いたときは、そのブラウザのままログインを続けてください。別のブラウザで開き直すと、使えなくなります。" },
+    { kind: "p", text: "心当たりがなければ、このメールは無視してください。" },
     REPLY,
   ], "ja");
 }
