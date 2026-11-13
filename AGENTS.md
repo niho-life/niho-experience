@@ -1,6 +1,6 @@
 # NIHO Experience 作業ルール
 
-- オーナー向け報告、Issue、PR、仕様文書は日本語。旅行者向けUIは英語を先行する。
+- オーナー向け報告、Issue、PR、仕様文書は日本語。旅行者向けUIは、英語サイトと日本語サイトがそれぞれの構成を持つ（日本語サイトは英語サイトの訳ではない。オーナー決定 2026-11-14、#561）。日本語サイトの変更で英語側の表示・URLを変えない。
 - まず対象Issueと `docs/architecture.md`、UI変更では `docs/design-brief.md` を読む。優先順は顧客UX、開発・運用速度、コスト。
 - 担当Issue・触るファイル範囲・依存するAPI版を着手時に明示する。同じファイルの並行編集は担当を決める。対象外の差分を変更・破棄しない。
 - niho-experience の実装には固定の4 worktree `~/Documents/app/NIHO/niho-experience-paneB-1`、`niho-experience-paneB-2`、`niho-experience-paneB-3`、`niho-experience-paneB-4` を使う。`scripts/seat.sh status` で状態を確認し、clean な topic branch がある seat も再利用してよい。`scripts/seat.sh start <seat> <topic>` は最新 `origin/main` から `paneB-<seat>/<topic>` を作り、以前の branch ref は残す（上書き・削除しない）。未コミット差分がある seat は保護し、同じ worktree を複数の書き手が同時編集しない。topic や修復のために worktree を追加せず、追加はオーナーの明示指示時だけ。詳細は [座席と topic branch の運用](docs/panes/panes-workflow.md)。

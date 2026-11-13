@@ -1,0 +1,125 @@
+"use client";
+
+import { useState } from "react";
+import type { AdminPeopleListingRow } from "@niho-experience/experience-store";
+import { PEOPLE_LISTING_LIMITS } from "@niho-experience/experience-store";
+
+const API = "/admin/api/people";
+const BUTTON = "min-h-11 rounded-full border border-line-strong px-4 font-extrabold hover:bg-sand disabled:opacity-50";
+const PRIMARY = "min-h-11 rounded-full bg-ink px-5 font-extrabold text-white hover:bg-ink/90 disabled:opacity-50";
+const FIELD = "mt-1 block min-h-11 w-full rounded-xl border border-line-strong bg-canvas px-3 font-normal";
+
+type Draft = { slug: string; roleJa: string; areaJa: string; quoteJa: string; introJa: string; sortOrder: string };
+
+const draftOf = (row: AdminPeopleListingRow): Draft => ({
+  slug: row.listing?.slug ?? "", roleJa: row.listing?.roleJa ?? "", areaJa: row.listing?.areaJa ?? "",
+  quoteJa: row.listing?.quoteJa ?? "", introJa: row.listing?.introJa ?? "", sortOrder: String(row.listing?.sortOrder ?? 100),
+});
+
+const ERRORS: Record<number, string> = {
+  400: "入力を確かめてください（スラッグは小文字の英数字とハイフン、肩書は80字まで、エリアは40字まで、ひとこと160字まで）。",
+  404: "この提供者の公開用の情報が見つかりません。",
+  409: "別の人が先に更新したか、スラッグがほかの人と重なっています。再読み込みして確認してください。",
+};
+
+/**
+ * 街の人 (#564): which providers the Japanese site shows on 街の人, and how. A provider is shown only while their public
+ * profile stands and a rights-confirmed photo is selected: the card says which of the two is missing. The photo, the name
+ * and the bio are edited where they always were (提供者); this page only adds the role, area, line and order.
+ */
+export function AdminPeople({ initial }: { initial: AdminPeopleListingRow[] }) {
+  const [rows, setRows] = useState(initial);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function reload() {
+    try {
+      const response = await fetch(API, { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) throw new Error("reload failed");
+      setRows(((await response.json()) as { people: AdminPeopleListingRow[] }).people);
+      setMessage(null);
+    } catch { setMessage("一覧を読み込めませんでした。通信を確認してもう一度お試しください。"); }
+  }
+
+  const shown = rows.filter((row) => row.visible).length;
+  return (
+    <div className="mx-auto max-w-5xl space-y-5 px-4 py-8 md:px-7">
+      <div>
+        <h1 className="font-display text-2xl font-medium">街の人</h1>
+        <p className="mt-1 text-ink-soft">
+          日本語サイトの「街の人」に載せる人を決めます（いま {shown} 人が表示中）。名前・写真・紹介文は「提供者」の画面にあるものをそのまま使います。
+          写真の許可を取り下げると、この画面で何もしなくても表示から外れます。運営を手伝う人は、ここで選ばないかぎり載りません。
+        </p>
+      </div>
+      <div><button type="button" onClick={() => void reload()} className={BUTTON}>再読み込み</button></div>
+      {message ? <p role="alert" className="font-bold text-danger">{message}</p> : null}
+      <ul className="space-y-4">
+        {rows.map((row) => <PersonCard key={`${row.providerId}:${row.listing?.version ?? 0}`} row={row} onChanged={setRows} />)}
+        {rows.length === 0 ? <li className="rounded-2xl border border-line bg-canvas p-8 text-center text-ink-soft">公開用の情報がある提供者はまだいません</li> : null}
+      </ul>
+    </div>
+  );
+}
+
+function PersonCard({ row, onChanged }: { row: AdminPeopleListingRow; onChanged: (rows: AdminPeopleListingRow[]) => void }) {
+  const [draft, setDraft] = useState<Draft>(() => draftOf(row));
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const listed = row.listing !== null;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(draftOf(row));
+  const complete = draft.slug.trim() !== "" && draft.roleJa.trim() !== "" && draft.areaJa.trim() !== "" && /^\d{1,4}$/.test(draft.sortOrder);
+
+  async function send(method: "PUT" | "DELETE") {
+    if (busy) return;
+    setBusy(true); setNotice(null);
+    try {
+      const body = method === "PUT"
+        ? { providerId: row.providerId, expectedVersion: row.listing?.version ?? null, listing: { slug: draft.slug.trim(), roleJa: draft.roleJa.trim(), areaJa: draft.areaJa.trim(), quoteJa: draft.quoteJa.trim() === "" ? null : draft.quoteJa.trim(), introJa: draft.introJa.trim() === "" ? null : draft.introJa, sortOrder: Number(draft.sortOrder) } }
+        : { providerId: row.providerId, expectedVersion: row.listing?.version };
+      const response = await fetch(API, { method, cache: "no-store", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      if (!response.ok) { setNotice({ tone: "error", text: ERRORS[response.status] ?? "保存できませんでした。もう一度お試しください。" }); return; }
+      onChanged(((await response.json()) as { people: AdminPeopleListingRow[] }).people);
+    } catch { setNotice({ tone: "error", text: "通信できませんでした。もう一度お試しください。" }); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <li className="rounded-2xl border border-line bg-canvas p-4 sm:p-5">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="text-lg font-extrabold">{row.publicDisplayName}</h2>
+        {row.visible ? <span className="rounded-full bg-leaf-pale px-2.5 py-0.5 text-sm font-bold">街の人に表示中</span> : null}
+        {listed && !row.visible ? <span className="rounded-full bg-danger px-2.5 py-0.5 text-sm font-bold text-white">登録済みだが表示されていません</span> : null}
+        {!listed ? <span className="rounded-full border border-line-strong px-2.5 py-0.5 text-sm font-bold">未登録</span> : null}
+        <span className="ml-auto text-sm text-ink-soft">公開中の体験 {row.publicExperienceCount} 件</span>
+      </div>
+      <p className={`mt-1 text-sm ${row.photoReady ? "text-ink-soft" : "font-bold text-danger"}`}>
+        {row.photoReady ? "写真：公開してよい写真があります" : "写真：公開してよい提供者写真がありません。「提供者」の画面で、許可を確認した写真を登録してください。登録するまで街の人には表示されません。"}
+        {"　"}紹介文：{row.hasHostBio ? "本人が書いた紹介文があります" : "本人の紹介文はありません"}
+      </p>
+      <form className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (complete && dirty) void send("PUT"); }}>
+        <label className="font-bold">スラッグ（URL の一部。英数字とハイフン）
+          <input className={FIELD} value={draft.slug} maxLength={PEOPLE_LISTING_LIMITS.slugMax} onChange={(event) => setDraft({ ...draft, slug: event.target.value })} placeholder="例：kintsugi-sato" />
+        </label>
+        <label className="font-bold">並び順（小さいほど先）
+          <input className={FIELD} inputMode="numeric" value={draft.sortOrder} maxLength={4} onChange={(event) => setDraft({ ...draft, sortOrder: event.target.value })} />
+        </label>
+        <label className="font-bold">肩書
+          <input className={FIELD} value={draft.roleJa} maxLength={PEOPLE_LISTING_LIMITS.roleMax} onChange={(event) => setDraft({ ...draft, roleJa: event.target.value })} placeholder="例：金継ぎ職人" />
+        </label>
+        <label className="font-bold">エリア
+          <input className={FIELD} value={draft.areaJa} maxLength={PEOPLE_LISTING_LIMITS.areaMax} onChange={(event) => setDraft({ ...draft, areaJa: event.target.value })} placeholder="例：鎌倉・長谷" />
+        </label>
+        <label className="font-bold sm:col-span-2">本人のひとこと（任意）
+          <input className={FIELD} value={draft.quoteJa} maxLength={PEOPLE_LISTING_LIMITS.quoteMax} onChange={(event) => setDraft({ ...draft, quoteJa: event.target.value })} />
+        </label>
+        <label className="font-bold sm:col-span-2">紹介文（任意。空のときは、本人が書いた紹介文があればそれを出します）
+          <textarea className={`${FIELD} min-h-32 py-2`} value={draft.introJa} maxLength={PEOPLE_LISTING_LIMITS.introMax} onChange={(event) => setDraft({ ...draft, introJa: event.target.value })} />
+        </label>
+        <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+          <button type="submit" disabled={busy || !complete || !dirty} className={PRIMARY}>{busy ? "保存しています…" : listed ? "保存する" : "街の人に載せる"}</button>
+          {listed ? <button type="button" disabled={busy} className={BUTTON} onClick={() => { if (window.confirm(`${row.publicDisplayName} さんを街の人から外しますか？（公開用の情報と写真はそのまま残ります）`)) void send("DELETE"); }}>街の人から外す</button> : null}
+          {notice ? <span role={notice.tone === "error" ? "alert" : "status"} className={`font-bold ${notice.tone === "error" ? "text-danger" : "text-moss"}`}>{notice.text}</span> : null}
+        </div>
+      </form>
+    </li>
+  );
+}

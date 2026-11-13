@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { EMPTY_EXPERIENCE_CLASSIFICATION, parseExperienceClassification, type ExperienceClassification } from "@niho-experience/experience-domain";
 import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
+import { VISIBLE_PUBLICATIONS_CTE } from "./public-publication-scope.ts";
 import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import type { DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -144,14 +145,17 @@ export class ProductClassificationRepository {
     );
   }
 
-  /** Published products' classification by slug, for the public site. A slug of two products is left out. */
+  /**
+   * The classification of what the public catalog shows, by slug: the same visible publications every anonymous reader uses
+   * (a stopped, suspended or unpublished product is not there, whatever its product status says). A slug of two is left out.
+   */
   async listPublic(): Promise<PublicClassificationBySlug> {
     const rows = await this.#pool.query<DbRow>(
-      `SELECT p.slug, c.category, c.area, c.companions, c.occasions,
-              count(*) OVER (PARTITION BY p.slug) AS same_slug
-         FROM experience_products p
-         JOIN experience_product_classifications c ON c.provider_id = p.provider_id AND c.product_id = p.id
-        WHERE p.status = 'PUBLISHED'`,
+      `WITH ${VISIBLE_PUBLICATIONS_CTE}
+       SELECT v.slug, c.category, c.area, c.companions, c.occasions,
+              (SELECT count(*) FROM visible_publications d WHERE d.slug = v.slug) AS same_slug
+         FROM visible_publications v
+         JOIN experience_product_classifications c ON c.provider_id = v.provider_id AND c.product_id = v.product_id`,
     );
     const map = new Map<string, ExperienceClassification>();
     for (const row of rows.rows) if (Number(row.same_slug) === 1) map.set(String(row.slug), fromRow(row));

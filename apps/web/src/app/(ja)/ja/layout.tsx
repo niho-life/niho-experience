@@ -2,15 +2,14 @@ import "../../globals.css";
 import "@niho/experience-presentation/v1/styles.css";
 import type { Metadata, Viewport } from "next";
 import { AttributionCapture } from "@/components/AttributionCapture";
-import { CodeSiteChrome } from "@/components/SiteChrome";
-import { LanguageSwitch } from "@/components/LanguageSwitch";
+import { JapaneseSiteChrome } from "@/components/site/JapaneseSiteChrome";
 import { SiteLocaleProvider } from "@/components/SiteLocale";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { attributionEnabled } from "@/lib/attribution-enabled";
 import { config } from "@/lib/config";
 import { getPreparedJapaneseStaticRelease } from "@/lib/localized-content";
-import { inquiryFooterLinks } from "@/lib/group-inquiry-links";
-import { privacyFooterLink } from "@/lib/privacy-link";
+import { groupInquiryOpen } from "@/lib/group-inquiry-links";
+import { hostSignedIn } from "@/lib/host/signed-in";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +38,7 @@ export default async function JapaneseRootLayout({ children }: { children: React
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-full focus:bg-ink focus:px-4 focus:py-2 focus:text-white">{data.copy.copy.text("chrome.skipToContent")}</a>
       <SiteLocaleProvider locale="ja" releaseId={data.copy.releaseId} values={data.copy.values}>
         <AttributionCapture enabled={attributionEnabled()} />
-        <CodeSiteChrome copy={data.copy.copy} locale="ja" languageSwitch={<LanguageSwitch counterparts={data.counterparts} />} footerLinks={[...inquiryFooterLinks(), privacyFooterLink("ja")]}>{children}</CodeSiteChrome>
+        <JapaneseSiteChrome counterparts={data.counterparts} hostSignedIn={await hostSignedIn()} inquiryOpen={groupInquiryOpen()}>{children}</JapaneseSiteChrome>
       </SiteLocaleProvider>
     </body></html>;
 }
