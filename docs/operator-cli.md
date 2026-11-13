@@ -112,6 +112,10 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 | `product` | `create`・`draft`・`calendar-add`・`photo-add` | edit |
 | `product` | `terms`（価格・販売条件） | terms |
 | `product` | `publish`・`suspend`・`resume` | publish |
+| `inquiry` | `list`（`--status`・`--id`） | read |
+| `inquiry` | `update --id <uuid> [--status] [--assignee] [--due] [--note]` | edit |
+| `assignment` | `list`（`--provider`・`--occurrence`） | read |
+| `assignment` | `claim`・`decline`・`release`（`--provider --occurrence [--subject] [--reason]`） | edit |
 
 ## よくある作業
 
@@ -171,3 +175,14 @@ node scripts/experience/ops.mjs people withdraw --provider prov-a --yes      # �
 8. **停止する**（`product suspend --product <id> --reason SYNTHETIC_CLEANUP --yes`）：運営停止。合成の商品の片付けなど。公開状態の版は、公開済みの商品でも読める専用の `GET /admin/api/experience-publications/providers/<p>/products/<x>` から取る（下書き用の `product show` は公開済みには答えない）。止めたあと、持ち主が再開するまで出ない（`resume` は運営停止を解くだけ）。
 
 どの変更も、読んだときの版を付けて送る。画面などで先に変わっていたら `409`（終了コード 4）で止まり、上書きしない。`product show` は、いまの下書き・販売条件・写真・公開の妨げ・版を返す（予約者の情報は出ない）。
+
+### 相談の受付一覧と、開催回の担当の記録
+
+- `inquiry list` は、送り手の氏名・メールアドレス・本文・詳細を**出さない**（種別・状態・返信期限・次の期日・担当ラベル・スタッフのメモ・体験の slug だけ）。`inquiry update` は、書いた項目（`--status`・`--assignee`・`--due`・`--note`。空文字で消す）だけが変わる。相手にメールは送らない。
+- `assignment list` は開催回の一覧。`--provider` と `--occurrence` を付けると、その開催回の候補者と履歴。`claim`・`decline`・`release` は、その人に代わって担当を記録する（先に取られていれば `already_assigned`（終了コード 4）。同じ記録は同じ日なら1件（再送）で、担当を外したあとに同じ人がもう一度引き受けるときは `--again`）。**合意した報酬（`SET_FEE`）は CLI では扱わない**（proxy が `403 not_available_from_cli` で断る。金額は画面で人が入れる）。
+
+### まだ CLI に無いもの
+
+- **記事**（#576 ⑤）：記事は `/write`（ホストと同じログイン）で提供者の OWNER が書く作りで、管理画面側の記事の編集 API が無い（「先に画面だけがある操作は API を先に整える」）。AI に記事の下書き・公開を頼むには、OWNER の代わりに事務局が書く API（商品の代理登録と同じ形の `*AsAdmin`）を先につくる必要がある。方針の決定が要るので、Issue #576 に論点を残している。
+- **予約の取消・返金・精算・受取口座**：扱わない（領域に入れていない）。stg の合成データの片付けは、商品の `suspend` まで（予約の取消は返金を伴いうるので、画面で人が行う）。
+- 販売者（seller workspace）の新規登録：運用スクリプト `scripts/experience/provision-host-seller.mjs`。

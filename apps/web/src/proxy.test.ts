@@ -185,6 +185,16 @@ describe("proxy (運営の CLI)", () => {
     expect(await response.json()).toEqual({ error: "operation_already_recorded" });
   });
 
+  it("refuses the agreed fee of an occurrence (money) from the CLI, and records the other assignment actions", async () => {
+    const send = (action: string) => proxy(cli("/admin/api/occurrence-assignments", { method: "POST", body: { action, providerId: "p1", occurrenceId: "o1", commandId: "c" } }));
+    const refused = await send("SET_FEE");
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "not_available_from_cli" });
+    expect(state.requests.record).not.toHaveBeenCalled();
+    expect((await send("CLAIM")).status).toBe(200);
+    expect(state.requests.record).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses a write it cannot record, and a body over the limit", async () => {
     state.requests.record.mockRejectedValue(new Error("db down"));
     expect((await proxy(cli("/admin/api/product-classifications", { method: "PUT", body }))).status).toBe(503);
