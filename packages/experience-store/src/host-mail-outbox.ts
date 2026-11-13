@@ -113,7 +113,8 @@ const byId = (a: { id: string }, b: { id: string }) => a.id.length - b.id.length
 const RECIPIENT = (row: string) => `${row}.payload->>'to'`;
 
 /**
- * SQL: the row's person still gets this booking: an active OWNER of its provider, or for an OTA booking an active, unexpired
+ * SQL: the row's person still gets this booking: an active OWNER of its provider (a message addressed to a person, #608, also the
+ * person: an active OWNER or COHOST named in the payload), or for an OTA booking an active, unexpired
  * operator of its product. An assignment request (#535) goes to whoever can still take the occurrence (an active OWNER or
  * COHOST, or an active, unexpired operator of the product), and once the occurrence has an assignee only to that person.
  */
@@ -121,6 +122,8 @@ const STILL_RECIPIENT = (row: string) =>
   `(${HOST_ACCOUNT_USABLE(RECIPIENT(row))} AND (
     (${row}.topic <> '${HOST_MAIL_TOPICS.assignmentRequest}' AND EXISTS (SELECT 1 FROM provider_memberships rm
              WHERE rm.provider_id = ${row}.provider_id AND rm.niho_user_id = ${RECIPIENT(row)} AND rm.active AND rm.role = 'OWNER'))
+    OR (${row}.topic = '${HOST_MAIL_TOPICS.guestQuestion}' AND ${row}.payload->>'toMemberId' = ${RECIPIENT(row)} AND EXISTS (SELECT 1 FROM provider_memberships rm
+             WHERE rm.provider_id = ${row}.provider_id AND rm.niho_user_id = ${RECIPIENT(row)} AND rm.active AND rm.role IN ('OWNER', 'COHOST')))
     OR (${row}.topic = '${HOST_MAIL_TOPICS.otaBooking}' AND EXISTS (
           SELECT 1 FROM product_operator_grants rg
            WHERE rg.provider_id = ${row}.provider_id AND rg.product_id = ${row}.payload->>'productId'

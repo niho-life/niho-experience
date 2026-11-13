@@ -322,17 +322,18 @@ function validPersonMessage(input: SubmitPersonMessageInput): ValidPersonMessage
 
 /** Validated host reply input: the English the guest gets, and the Japanese the host wrote (or null). */
 interface ValidReply {
-  english: string;
+  /** null: left out; allowed only for a guest who writes Japanese (#608), whose reply is then kept in Japanese alone. */
+  english: string | null;
   japanese: string | null;
   commandId: string;
 }
 
-function validReply(input: { english: string; japanese: string | null; commandId: string }): ValidReply {
+function validReply(input: { english: string | null; japanese: string | null; commandId: string }): ValidReply {
   const commandId = uuid(input?.commandId, "commandId");
-  const english = text(input?.english, "english", 1, GUEST_QUESTION_LIMITS.hostMessageMaxLength);
-  const japanese = input?.japanese === null || input?.japanese === undefined || (typeof input.japanese === "string" && input.japanese.trim() === "")
-    ? null
-    : text(input.japanese, "japanese", 1, GUEST_QUESTION_LIMITS.hostMessageMaxLength);
+  const blank = (value: unknown) => value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+  const english = blank(input?.english) ? null : text(input.english, "english", 1, GUEST_QUESTION_LIMITS.hostMessageMaxLength);
+  const japanese = blank(input?.japanese) ? null : text(input.japanese, "japanese", 1, GUEST_QUESTION_LIMITS.hostMessageMaxLength);
+  if (english === null && japanese === null) throw new StoreValidationError("english is required.");
   return { english, japanese, commandId };
 }
 
@@ -405,9 +406,12 @@ async function enqueue(client: PoolClient, providerId: string, threadId: string,
  * A guest wrote to the host: `guest_question.received` (the Japanese translation, #285 slice 5) and the
  * host's push (GUEST_MESSAGE, which the OWNER can turn off), each its own row because a row is done once.
  */
-async function enqueueGuestMessage(client: PoolClient, providerId: string, threadId: string, messageId: string, experienceTitle: string): Promise<void> {
+async function enqueueGuestMessage(
+  client: PoolClient, providerId: string, threadId: string, messageId: string, experienceTitle: string,
+  person?: { readonly name: string; readonly memberId: string },
+): Promise<void> {
   await enqueue(client, providerId, threadId, messageId, "guest_question.received");
-  await enqueueGuestQuestionNotification(client, { providerId, threadId, messageId, experienceTitle });
+  await enqueueGuestQuestionNotification(client, { providerId, threadId, messageId, experienceTitle, ...(person === undefined ? {} : { person }) });
 }
 
 /**
@@ -546,7 +550,16 @@ export async function bookingForThread(client: PoolClient, providerId: string, p
  * The host's message in a thread locked for it: the same command again answers the same message, another reply with
  * it is refused; a closed booking's thread takes no new one. Queued for the mail worker (`guest_question.reply`).
  */
-async function insertHostReply(client: PoolClient, actor: HostActor, threadId: string, reply: ValidReply, open: boolean): Promise<GuestQuestionMessage> {
+async function insertHostReply(client: PoolClient, actor: HostActor, threadId: string, validated: ValidReply, open: boolean): Promise<GuestQuestionMessage> {
+  // A guest who writes Japanese can be answered in Japanese alone (#608): the Japanese is also what is kept as the message's text.
+  // A guest who writes English needs the English.
+  let reply: { english: string; japanese: string | null; commandId: string };
+  if (validated.english !== null) reply = { ...validated, english: validated.english };
+  else {
+    const language = await client.query("SELECT guest_language FROM guest_question_threads WHERE provider_id = $1 AND id = $2::uuid", [actor.providerId, threadId]);
+    if (language.rows[0]?.guest_language !== "JA" || validated.japanese === null) throw new StoreValidationError("english is required.");
+    reply = { english: validated.japanese, japanese: validated.japanese, commandId: validated.commandId };
+  }
   const previous = await client.query<DbRow>(
     `SELECT ${MESSAGE_COLUMNS}, thread_id, author_niho_user_id FROM guest_question_messages WHERE provider_id = $1 AND command_id = $2::uuid`,
     [actor.providerId, reply.commandId],
@@ -683,7 +696,7 @@ export class GuestQuestionRepository {
     const message = validPersonMessage(input);
     return withTransaction(this.#pool, async (client) => {
       const person = await client.query<DbRow>(
-        `SELECT listing.id, listing.provider_id, listing.name_ja
+        `SELECT listing.id, listing.provider_id, listing.name_ja, listing.member_id
            FROM experience_people_listings listing
            ${PEOPLE_PHOTO_JOIN}
           WHERE listing.slug = $1 AND ${PEOPLE_MEMBER_CONDITION}
@@ -694,6 +707,7 @@ export class GuestQuestionRepository {
       const providerId = String(person.rows[0].provider_id);
       const listingId = String(person.rows[0].id);
       const personName = String(person.rows[0].name_ja);
+      const memberId = String(person.rows[0].member_id);
       // One message at a time per person, so the counts below hold until this one is in.
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 53))", [`person-messages:${providerId}`]);
       const repeated = await client.query(
@@ -730,7 +744,7 @@ export class GuestQuestionRepository {
            FROM guest_question_threads WHERE provider_id = $2 AND id = $3::uuid`,
         [messageId, providerId, threadId, message.message],
       );
-      await enqueueGuestMessage(client, providerId, threadId, messageId, PERSON_THREAD_LABEL);
+      await enqueueGuestMessage(client, providerId, threadId, messageId, PERSON_THREAD_LABEL, { name: personName, memberId });
       return RECEIVED;
     });
   }
@@ -847,7 +861,7 @@ export class GuestQuestionRepository {
    * worker. The same commandId with the same reply answers the same message; with anything else,
    * StoreConflictError. A booking's thread that no longer takes messages (#285 slice 6b): BookingMessagesClosedError.
    */
-  async reply(actor: HostActor, threadId: string, input: { english: string; japanese: string | null; commandId: string }): Promise<GuestQuestionMessage> {
+  async reply(actor: HostActor, threadId: string, input: { english: string | null; japanese: string | null; commandId: string }): Promise<GuestQuestionMessage> {
     const id = uuid(threadId, "threadId");
     const reply = validReply(input);
     return replying(() => withTransaction(this.#pool, async (client) => {
@@ -869,7 +883,7 @@ export class GuestQuestionRepository {
    * message starts when nobody wrote yet. Idempotent by commandId as `reply`. Not found as findBookingThread; a
    * booking that no longer takes messages: BookingMessagesClosedError.
    */
-  async replyToBooking(actor: HostActor, publicBookingId: string, input: { english: string; japanese: string | null; commandId: string }): Promise<{ threadId: string; message: GuestQuestionMessage }> {
+  async replyToBooking(actor: HostActor, publicBookingId: string, input: { english: string | null; japanese: string | null; commandId: string }): Promise<{ threadId: string; message: GuestQuestionMessage }> {
     const bookingId = uuid(publicBookingId, "publicBookingId");
     const reply = validReply(input);
     return replying(() => withTransaction(this.#pool, async (client) => {
@@ -1133,8 +1147,10 @@ export class GuestQuestionRepository {
         const providerId = String(link.provider_id);
         const threadId = String(link.thread_id);
         const thread = await client.query<DbRow>(
-          `SELECT p.public_title FROM guest_question_threads t
+          `SELECT p.public_title, t.person_name, listing.member_id
+             FROM guest_question_threads t
              LEFT JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
+             LEFT JOIN experience_people_listings listing ON listing.id = t.person_listing_id AND listing.provider_id = t.provider_id
             WHERE t.provider_id = $1 AND t.id = $2::uuid FOR NO KEY UPDATE OF t`,
           [providerId, threadId],
         );
@@ -1157,7 +1173,10 @@ export class GuestQuestionRepository {
             WHERE t.provider_id = $1 AND t.id = $2::uuid AND m.provider_id = $1 AND m.id = $3::uuid`,
           [providerId, threadId, created.id],
         );
-        await enqueueGuestMessage(client, providerId, threadId, String(created.id), String(thread.rows[0]!.public_title ?? PERSON_THREAD_LABEL));
+        // A message addressed to a person goes to them and the OWNERs; one whose listing is gone (or has no member now) goes to the OWNERs.
+        const addressed = thread.rows[0]!;
+        const person = typeof addressed.person_name === "string" && typeof addressed.member_id === "string" ? { name: addressed.person_name, memberId: addressed.member_id } : undefined;
+        await enqueueGuestMessage(client, providerId, threadId, String(created.id), String(addressed.public_title ?? PERSON_THREAD_LABEL), person);
         return RECEIVED;
       });
     } catch (error) {

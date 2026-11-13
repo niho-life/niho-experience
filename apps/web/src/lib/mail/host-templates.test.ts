@@ -27,6 +27,18 @@ describe("host emails", () => {
     expect(mail.text).toContain(`${SITE}/host/bookings?providerId=provider-b`);
     expect(mail.html).toContain(`href="${SITE}/host/bookings?providerId=provider-b"`);
   });
+  it("names whom a message is addressed to in the subject and has no experience line (#608)", () => {
+    const parsed = hostPushEventFromOutbox({
+      id: "1", providerId: "provider-a", topic: HOST_NOTIFICATION_TOPICS.guestQuestion,
+      payload: { v: 1, threadId: "00000000-0000-4000-8000-0000000000aa", messageId: "00000000-0000-4000-8000-000000000101", experienceTitle: "人物ページから", personName: "高浜拓也", toMemberId: "hst_0123456789abcdef0123456789abcdef" },
+      attempts: 1, createdAt: "2026-11-08T09:00:00.000Z",
+    }, Date.parse("2026-11-08T09:00:00.000Z"));
+    if (!parsed.ok) throw new Error("Synthetic message did not produce an event");
+    const mail = hostNotificationEmail(parsed.event, { siteUrl: SITE });
+    expect(mail.subject).toBe("高浜拓也さんあてにメッセージが届きました");
+    expect(mail.text).not.toContain("人物ページから");
+    expect(mail.text).toContain(`${SITE}/host/messages?thread=00000000-0000-4000-8000-0000000000aa&providerId=provider-a`);
+  });
   it("words an OTA cancellation as its push, escaped, with where to handle it", () => {
     const mail = hostBookingEmail(ota, { siteUrl: SITE });
     expect(mail.subject).toBe("GetYourGuide の予約が取り消されました：Synthetic <tea> 11/14（土）10:00");

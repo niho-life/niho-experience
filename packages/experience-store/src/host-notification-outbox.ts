@@ -51,6 +51,9 @@ export interface GuestQuestionPayload {
   readonly threadId: string;
   readonly messageId: string;
   readonly experienceTitle: string;
+  /** A message addressed to a person of the provider (#589, #608): their name, and their account (it also gets the notification). */
+  readonly personName?: string;
+  readonly toMemberId?: string;
 }
 
 /**
@@ -191,6 +194,8 @@ const SEATS_MAX = 500;
 const HOUR_MS = 60 * 60 * 1000;
 const MESSAGE_KEYS = ["bookingId", "experienceTitle", "messageId", "seats", "startsAt", "v"];
 const QUESTION_KEYS = ["experienceTitle", "messageId", "threadId", "v"];
+const QUESTION_PERSON_KEYS = ["personName", "toMemberId"];
+const PERSON_NAME_MAX = 40;
 const NEW_BOOKING_KEYS = ["bookingId", "experienceTitle", "seats", "startsAt", "v"];
 const ASSIGNMENT_REQUEST_KEYS = ["bookingId", "experienceTitle", "occurrenceId", "productId", "seats", "startsAt", "v"];
 const BOOKING_MESSAGE_KEYS = ["experienceTitle", "messageId", "seats", "startsAt", "threadId", "v"];
@@ -240,10 +245,16 @@ export function parseGuestMessagePayload(value: unknown): GuestMessagePayload | 
 
 /** The question's payload, or null for anything else. */
 export function parseGuestQuestionPayload(value: unknown): GuestQuestionPayload | null {
-  if (!isRecord(value) || !hasExactKeys(value, QUESTION_KEYS) || value.v !== 1) return null;
-  const { threadId, messageId, experienceTitle } = value;
+  if (!isRecord(value) || value.v !== 1) return null;
+  const keys = Object.keys(value);
+  if (!QUESTION_KEYS.every((key) => keys.includes(key)) || !keys.every((key) => QUESTION_KEYS.includes(key) || QUESTION_PERSON_KEYS.includes(key))) return null;
+  const { threadId, messageId, experienceTitle, personName, toMemberId } = value;
   if (!publicId(threadId) || !publicId(messageId) || !title(experienceTitle)) return null;
-  return { v: 1, threadId, messageId, experienceTitle };
+  // The person's name and account come together or not at all.
+  if ((personName === undefined) !== (toMemberId === undefined)) return null;
+  if (personName !== undefined && (typeof personName !== "string" || personName.trim().length === 0 || personName.length > PERSON_NAME_MAX)) return null;
+  if (toMemberId !== undefined && (typeof toMemberId !== "string" || toMemberId.length < 1 || toMemberId.length > 256)) return null;
+  return { v: 1, threadId, messageId, experienceTitle, ...(personName === undefined || toMemberId === undefined ? {} : { personName: personName as string, toMemberId: toMemberId as string }) };
 }
 
 /** The booking message's payload, or null for anything else. */
@@ -431,14 +442,25 @@ export async function enqueueGuestMessageNotification(client: PoolClient, input:
  */
 export async function enqueueGuestQuestionNotification(
   client: PoolClient,
-  input: { readonly providerId: string; readonly threadId: string; readonly messageId: string; readonly experienceTitle: string },
+  input: {
+    readonly providerId: string; readonly threadId: string; readonly messageId: string; readonly experienceTitle: string;
+    /** A message addressed to a person (#589, #608): the notification goes to this member and the provider's OWNERs, and names them. */
+    readonly person?: { readonly name: string; readonly memberId: string };
+  },
 ): Promise<number> {
   assertStoreIdentifier(input.providerId, "providerId");
   if (!publicId(input.threadId)) throw new StoreValidationError("threadId must contain 1-48 letters, digits, '_' or '-'.");
   if (!publicId(input.messageId)) throw new StoreValidationError("messageId must contain 1-48 letters, digits, '_' or '-'.");
   const experienceTitle = typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "";
   if (!title(experienceTitle)) throw new StoreValidationError("experienceTitle must contain text.");
-  const payload: GuestQuestionPayload = { v: 1, threadId: input.threadId, messageId: input.messageId, experienceTitle };
+  if (input.person !== undefined) {
+    assertStoreIdentifier(input.person.memberId, "person.memberId");
+    if (typeof input.person.name !== "string" || input.person.name.trim().length === 0 || input.person.name.length > PERSON_NAME_MAX) throw new StoreValidationError("person.name must be 1-40 characters.");
+  }
+  const payload: GuestQuestionPayload = {
+    v: 1, threadId: input.threadId, messageId: input.messageId, experienceTitle,
+    ...(input.person === undefined ? {} : { personName: input.person.name, toMemberId: input.person.memberId }),
+  };
   const added = await insertRow(client, {
     providerId: input.providerId,
     bookingId: input.threadId,
@@ -448,7 +470,10 @@ export async function enqueueGuestQuestionNotification(
     payload,
     availableAt: null,
   });
-  await enqueueHostBookingMails(client, { providerId: input.providerId, topic: HOST_MAIL_TOPICS.guestQuestion, aggregateType: QUESTION_AGGREGATE_TYPE, aggregateId: input.threadId, deduplicationKey: `guest-question:${input.messageId}`, payload });
+  await enqueueHostBookingMails(client, {
+    providerId: input.providerId, topic: HOST_MAIL_TOPICS.guestQuestion, aggregateType: QUESTION_AGGREGATE_TYPE, aggregateId: input.threadId,
+    deduplicationKey: `guest-question:${input.messageId}`, payload, ...(input.person === undefined ? {} : { alsoTo: input.person.memberId }),
+  });
   return added;
 }
 

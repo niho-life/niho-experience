@@ -284,7 +284,8 @@ export async function loadMoreGuestQuestions(providerId: string, cursor: string)
 export async function replyToGuestQuestion(providerId: string, threadId: string, reply: { japanese: string; english: string; commandId: string }): Promise<HostActionResult<{ thread: HostThread }>> {
   const owner = await asOwner(providerId, GUEST_QUESTION_REPLY_FAILED_TEXT);
   if (!owner.ok) return owner;
-  const input = { english: reply.english, japanese: reply.japanese.trim() || null, commandId: reply.commandId };
+  // An empty English is allowed only for a guest who writes Japanese (#608): the store refuses it otherwise.
+  const input = { english: reply.english.trim() === "" ? null : reply.english, japanese: reply.japanese.trim() || null, commandId: reply.commandId };
   const bookingId = bookingOfNewThread(threadId);
   try {
     let storedId = threadId;

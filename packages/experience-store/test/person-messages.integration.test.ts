@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import type { Pool } from "pg";
-import { StoreAccessDeniedError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "../src/errors.ts";
+import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { GuestQuestionRepository, PERSON_THREAD_LABEL, type ClaimedQuestionReply, type SubmitPersonMessageInput } from "../src/guest-questions.ts";
 import { PeopleListingRepository } from "../src/people-listings.ts";
@@ -70,7 +70,7 @@ describe("PostgreSQL messages to a person (#589)", { skip: databaseUrl === undef
       const outbox = await pool.query("SELECT topic, provider_id, aggregate_id, payload FROM outbox_messages WHERE aggregate_type = 'guest_question_thread' ORDER BY id");
       assert.deepEqual(outbox.rows, [
         { topic: "guest_question.received", provider_id: takuya.providerId, aggregate_id: threadId, payload: { threadId, messageId } },
-        { topic: "host.notify.guest_question", provider_id: takuya.providerId, aggregate_id: threadId, payload: { v: 1, threadId, messageId, experienceTitle: PERSON_THREAD_LABEL } },
+        { topic: "host.notify.guest_question", provider_id: takuya.providerId, aggregate_id: threadId, payload: { v: 1, threadId, messageId, experienceTitle: PERSON_THREAD_LABEL, personName: "高浜 拓也", toMemberId: "owner-takuya" } },
       ]);
       assert.doesNotMatch(JSON.stringify(outbox.rows), /example\.com|山田|お話/);
 
@@ -203,6 +203,85 @@ describe("PostgreSQL messages to a person (#589)", { skip: databaseUrl === undef
       await pool.query("DELETE FROM experience_people_listings WHERE slug='staff-hana'");
       const after = await questions.listThreads(takuya.actor);
       assert.ok(after.threads.some((thread) => thread.personName === "スタッフ 花"));
+    } finally {
+      await db.dispose();
+    }
+  });
+  it("notifies the addressed person and the OWNERs only, by email and push, and names the person (#608)", async () => {
+    const db = await createIsolatedDatabase(databaseUrl, "person_messages_notify", { max: 4 });
+    try {
+      const pool = db.pool;
+      const questions = new GuestQuestionRepository(pool);
+      const takuya = await listedPerson(pool, "高浜 拓也", "takuya", true);
+      const hana = await listedPerson(pool, "スタッフ 花", "staff-hana", true, { providerId: takuya.providerId });
+      await listedPerson(pool, "スタッフ 次郎", "staff-jiro", true, { providerId: takuya.providerId });
+      // Everyone has an address here; the OWNER and two co-hosts.
+      for (const user of ["owner-takuya", "owner-staff-hana", "owner-staff-jiro"]) {
+        await pool.query("INSERT INTO host_notification_addresses (niho_user_id, override_email, override_confirmed_at) VALUES ($1, $2, clock_timestamp())", [user, `${user}@example.com`]);
+      }
+      const recipients = async () => (await pool.query("SELECT payload->>'to' AS recipient FROM outbox_messages WHERE topic = 'host.mail.guest_question' ORDER BY 1")).rows.map((row) => row.recipient);
+
+      // A message to a co-host: the co-host and the OWNER get the email; the other co-host does not.
+      await questions.submitPersonMessage(message({ personSlug: "staff-hana" }));
+      assert.deepEqual(await recipients(), ["owner-staff-hana", "owner-takuya"]);
+      const rows = await pool.query("SELECT topic, payload FROM outbox_messages WHERE topic IN ('host.notify.guest_question', 'host.mail.guest_question') ORDER BY id");
+      for (const row of rows.rows) {
+        assert.equal(row.payload.personName, "スタッフ 花");
+        assert.equal(row.payload.toMemberId, "owner-staff-hana");
+      }
+      assert.equal(rows.rows.filter((row) => row.topic === "host.notify.guest_question").length, 1);
+
+      // A message to the OWNER: one email, not two.
+      await pool.query("DELETE FROM outbox_messages WHERE topic LIKE 'host.%'");
+      await questions.submitPersonMessage(message({ personSlug: "takuya", guestEmail: "other@example.com" }));
+      assert.deepEqual(await recipients(), ["owner-takuya"]);
+
+      // The guest's answer on the reply page is addressed the same way; a withdrawn listing falls back to the OWNERs.
+      await pool.query("DELETE FROM outbox_messages WHERE topic LIKE 'host.%'");
+      const threadId = String((await pool.query("SELECT id FROM guest_question_threads WHERE person_name = 'スタッフ 花'")).rows[0].id);
+      await questions.reply(hana.actor, threadId, { english: null, japanese: "ありがとうございます。", commandId: randomUUID() });
+      const [claimed] = await questions.claimReplyDeliveries({ limit: 1, leaseSeconds: 120, linkTtlDays: 14 });
+      await questions.submitGuestReply((claimed as ClaimedQuestionReply).replyToken, { message: "来週はいかがでしょう。", clientRequestKey: randomUUID() });
+      assert.deepEqual(await recipients(), ["owner-staff-hana", "owner-takuya"]);
+      await pool.query("DELETE FROM outbox_messages WHERE topic LIKE 'host.%'");
+      await pool.query("DELETE FROM experience_people_listings WHERE slug = 'staff-hana'");
+      await questions.reply(hana.actor, threadId, { english: null, japanese: "では来週にしましょう。", commandId: randomUUID() });
+      const [again] = await questions.claimReplyDeliveries({ limit: 1, leaseSeconds: 120, linkTtlDays: 14 });
+      await pool.query("DELETE FROM outbox_messages WHERE topic LIKE 'host.%'");
+      await questions.submitGuestReply((again as ClaimedQuestionReply).replyToken, { message: "ありがとうございます。", clientRequestKey: randomUUID() });
+      assert.deepEqual(await recipients(), ["owner-takuya"]);
+    } finally {
+      await db.dispose();
+    }
+  });
+
+  it("answers a guest who writes Japanese in Japanese alone, and still needs the English for a guest who writes English (#608)", async () => {
+    const db = await createIsolatedDatabase(databaseUrl, "person_messages_japanese_reply", { max: 4 });
+    try {
+      const pool = db.pool;
+      const questions = new GuestQuestionRepository(pool);
+      const takuya = await listedPerson(pool, "高浜 拓也", "takuya", true);
+      await questions.submitPersonMessage(message());
+      const threadId = String((await pool.query("SELECT id FROM guest_question_threads")).rows[0].id);
+
+      // Nothing at all is refused; so is a blank English.
+      await assert.rejects(() => questions.reply(takuya.actor, threadId, { english: null, japanese: null, commandId: randomUUID() }), StoreValidationError);
+      await assert.rejects(() => questions.reply(takuya.actor, threadId, { english: "  ", japanese: "  ", commandId: randomUUID() }), StoreValidationError);
+
+      // Japanese alone: kept as the message, sent as the Japanese, and the same command is the same reply.
+      const commandId = randomUUID();
+      const sent = await questions.reply(takuya.actor, threadId, { english: null, japanese: "ご連絡ありがとうございます。", commandId });
+      assert.equal(sent.body, "ご連絡ありがとうございます。");
+      assert.equal(sent.bodyJa, "ご連絡ありがとうございます。");
+      assert.equal((await questions.reply(takuya.actor, threadId, { english: null, japanese: "ご連絡ありがとうございます。", commandId })).id, sent.id);
+      await assert.rejects(() => questions.reply(takuya.actor, threadId, { english: null, japanese: "別の返信", commandId }), StoreConflictError);
+      const [claimed] = await questions.claimReplyDeliveries({ limit: 1, leaseSeconds: 120, linkTtlDays: 14 });
+      assert.equal((claimed as ClaimedQuestionReply).japanese, "ご連絡ありがとうございます。");
+
+      // A guest who writes English still needs the English (here a question about an experience, in English).
+      await pool.query("UPDATE guest_question_threads SET guest_language = 'EN'");
+      await assert.rejects(() => questions.reply(takuya.actor, threadId, { english: null, japanese: "日本語だけ", commandId: randomUUID() }), StoreValidationError);
+      assert.equal((await questions.reply(takuya.actor, threadId, { english: "Thank you.", japanese: "ありがとう", commandId: randomUUID() })).body, "Thank you.");
     } finally {
       await db.dispose();
     }

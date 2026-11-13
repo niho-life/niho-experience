@@ -233,7 +233,6 @@ export function questionReplyEmailJa(input: QuestionReplyMailInput & { readonly 
     greeting(input.guestName),
     { kind: "p", text: experience === null ? `あなたのメッセージに、${host}さんが返信しました。` : `${experience}についてのご質問に、${host}が返信しました。` },
     { kind: "quote", text: body(input.japanese ?? input.reply) },
-    { kind: "link", lead: `${host}へ返信するには、このリンクを開いてください。このリンクで返信できるのは1回で、期限は${input.linkTtlDays}日です。`, label: `${host}に返信する`, href: link },
-    { kind: "p", text: "このメールへの返信は、" + host + "ではなく NIHO事務局に届き、NIHO事務局が日本語でご案内します。" },
+    { kind: "link", lead: `返信は、下のボタンから送ってください。このボタンで返信できるのは1回で、期限は${input.linkTtlDays}日です。`, label: `${host}に返信する`, href: link },
   ]);
 }

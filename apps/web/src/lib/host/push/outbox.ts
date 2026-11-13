@@ -94,6 +94,7 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         kind: "GUEST_MESSAGE",
         question: true,
         experienceTitle: payload.experienceTitle,
+        ...(payload.personName === undefined || payload.toMemberId === undefined ? {} : { person: { name: payload.personName, memberId: payload.toMemberId } }),
         url: withQuery(HOST_MESSAGES_PATH, { thread: payload.threadId, providerId }),
         // A guest's later answer in the same thread replaces the earlier notification.
         tag: `question-${payload.threadId}`,

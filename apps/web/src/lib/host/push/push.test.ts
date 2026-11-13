@@ -159,6 +159,7 @@ describe("notifyHostDevices", () => {
     const subscriptions: HostPushDeps["subscriptions"] = {
       recipients: vi.fn(async () => Object.keys(statuses).map(device)),
       ownerRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
+      personRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
       productRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
       assignmentRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
       recordSent: vi.fn(async (id: string) => { log.push(`sent ${id}`); }),
@@ -210,6 +211,14 @@ describe("notifyHostDevices", () => {
     expect(run.subscriptions.ownerRecipients).toHaveBeenCalledWith("sample-provider-kitchen", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
     expect(run.subscriptions.recipients).not.toHaveBeenCalled();
     expect(run.subscriptions.productRecipients).not.toHaveBeenCalled();
+  });
+
+  it("sends a message addressed to a person to the OWNERs' devices and that person's only (#608)", async () => {
+    const run = deps({ 1: 201 });
+    await notifyHostDevices({ ...event, question: true, person: { name: "高浜拓也", memberId: "hst_0123456789abcdef0123456789abcdef" } }, run.deps);
+    expect(run.subscriptions.personRecipients).toHaveBeenCalledWith("sample-provider-kitchen", "hst_0123456789abcdef0123456789abcdef", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
+    expect(run.subscriptions.recipients).not.toHaveBeenCalled();
+    expect(run.subscriptions.ownerRecipients).not.toHaveBeenCalled();
   });
 
   it("refuses an event that would leave the app before sending anything", async () => {

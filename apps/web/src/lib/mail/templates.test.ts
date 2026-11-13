@@ -52,8 +52,8 @@ describe("questionReplyEmail", () => {
     expect(mail.subject).toBe("Sample Host replied to your question about Synthetic tea ceremony");
     expect(mail.text).toContain("Yes, we have a vegetarian option.\nSee you soon!");
     expect(mail.html).toContain("Yes, we have a vegetarian option.<br>See you soon!");
-    expect(mail.text).toContain("You can answer once with it, within 14 days.");
-    expect(mail.text).toContain("Replying to this email reaches NIHO support, not Sample Host.");
+    expect(mail.text).toContain("use the button below. You can answer once with it, within 14 days.");
+    expect(mail.text).not.toMatch(/NIHO support|reaches/);
     for (const part of [mail.subject, mail.text, mail.html]) {
       const at = [...part.matchAll(new RegExp(TOKEN, "g"))].map((match) => part.slice(0, match.index));
       expect(at.every((before) => before.endsWith(`${SITE}/questions/reply#t=`))).toBe(true);
