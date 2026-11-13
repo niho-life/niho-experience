@@ -37,4 +37,6 @@ node scripts/experience/ops.mjs <対象> <操作> --file 変更.json --yes      
 
 ## よくある作業
 
-（対象が入るたびに `docs/operator-cli.md` の「よくある作業」へ足す。このファイルには手順の要点だけ。）
+- 商品の分類を入れる：`classification options` で値を確かめ、`{ "items": [{ "slug": "...", "classification": { "category": "walk" } }] }` を書いて、`classification apply --file` で差分を見てから `--yes`。書いたキーだけが変わる。手順は `docs/operator-cli.md` の「よくある作業」。
+
+（対象が入るたびに、手順の要点だけをここへ、詳しくは `docs/operator-cli.md` の「よくある作業」へ足す。）

@@ -1,4 +1,4 @@
-import { StoreNotFoundError, StoreValidationError } from "@niho-experience/experience-store";
+import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "@niho-experience/experience-store";
 import { adminJson, adminMutationAllowed, isAdminHttp, loadAdminHttpSession } from "@/lib/admin/server";
 import { productClassificationRepository } from "@/lib/experience/store-server";
 import { readBoundedJson } from "@/lib/read-bounded-json";
@@ -15,6 +15,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 
 function failure(error: unknown): Response {
   if (error instanceof StoreNotFoundError) return adminJson({ error: "not_found" }, 404);
+  if (error instanceof StoreConflictError) return adminJson({ error: "conflict" }, 409);
   if (error instanceof StoreValidationError) return adminJson({ error: "invalid_input" }, 400);
   console.error("Product classification failed", { error: error instanceof Error ? error.name : typeof error });
   return adminJson({ error: "unavailable" }, 503);
@@ -42,7 +43,10 @@ export async function GET(request: Request): Promise<Response> {
   } catch (error) { return failure(error); }
 }
 
-/** `{ items: [{ providerId, productId, classification }] }`: all or none. */
+/**
+ * `{ items: [{ providerId, productId, classification, expected? }] }`: all or none. `expected` (運営の CLI, #576) is the value
+ * the caller read: if the product's value is no longer that, nothing is saved (409 `conflict`).
+ */
 export async function PUT(request: Request): Promise<Response> {
   const current = await boundary(request, true); if (!current.ok) return current.response;
   if (new URL(request.url).search || request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") return adminJson({ error: "invalid_input" }, 400);
@@ -54,7 +58,7 @@ export async function PUT(request: Request): Promise<Response> {
   } catch { return adminJson({ error: "invalid_input" }, 400); }
   const items = body.items;
   if (Object.keys(body).join() !== "items" || !Array.isArray(items)
-    || items.some((item) => typeof item !== "object" || item === null || Array.isArray(item) || Object.keys(item).sort().join() !== "classification,productId,providerId"
+    || items.some((item) => typeof item !== "object" || item === null || Array.isArray(item) || !["classification,productId,providerId", "classification,expected,productId,providerId"].includes(Object.keys(item).sort().join())
       || typeof item.providerId !== "string" || typeof item.productId !== "string")) return adminJson({ error: "invalid_input" }, 400);
   try { return adminJson({ saved: await current.repository.adminSave(current.actor, items as never) }); } catch (error) { return failure(error); }
 }

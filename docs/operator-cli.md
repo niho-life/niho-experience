@@ -99,8 +99,32 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 
 ## 対象と操作
 
-（段階ごとに足す。いま使えるのは `auth check` だけ。）
-
 | 対象 | 操作 | 段階 |
 | --- | --- | --- |
 | `auth` | `check` | read |
+| `classification` | `list`（`--slug`・`--status`・`--unclassified`）、`options` | read |
+| `classification` | `apply --file 変更.json` | edit |
+
+## よくある作業
+
+### 商品の分類（カテゴリー・エリア・だれと・こんな日に）を入れる
+
+分類の値は `classification options` が返す（サイトの定義が正本。`docs/product-classification.md`）。変更はファイルに書く。**書いたキーだけが変わる**（`category`・`area`・`companions`・`occasions`）。商品は `slug`、または `providerId` と `productId` で指す（同じ slug が複数の提供者にあるときは後者）。
+
+```json
+{ "items": [
+  { "slug": "kita-kamakura-walk", "classification": { "category": "walk", "area": "kita", "companions": ["solo", "friends"] } },
+  { "providerId": "prov-a", "productId": "p-2", "classification": { "occasions": ["rain"] } }
+] }
+```
+
+```bash
+node scripts/experience/ops.mjs classification list --unclassified          # まだ分類が無い商品
+node scripts/experience/ops.mjs classification apply --file changes.json        # 差分だけ（何も送らない）
+node scripts/experience/ops.mjs classification apply --file changes.json --yes  # 適用
+```
+
+- 結果は項目ごと（`unchanged`・`dry_run`・`applied`・`failed`・`not_attempted`）。同じファイルをもう一度流しても、すでに入っている項目は `unchanged` で、二重にならない。
+- 送るのは50商品ずつ（1回の要求は全部成功か全部失敗）。各商品に、読んだ値（`expected`）を付けて送る。画面などで先に変わっていたら、その要求は保存せずに `409 conflict`（終了コード 4）。CLI はそこで止まり、済んだ分・未着手の分を返す。読み直して同じコマンドをもう一度。
+- ファイルに誤り（不明な商品・曖昧な slug・定義にない値）があるときは、何も送らずに止まる。
+- 分類は公開版の一部ではなく、保存するとすぐ日本語の一覧・カード・詳細に反映される（再公開は要らない）。公開してよいかの判断は人（本番は了承を取る）。

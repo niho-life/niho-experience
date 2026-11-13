@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
+import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
 import { ProductClassificationRepository } from "../src/product-classifications.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
@@ -58,6 +58,30 @@ describe("product classification (#529)", { skip: databaseUrl === undefined ? "T
       await assert.rejects(repository.adminSave(ADMIN, [{ providerId: "prov-a", productId: "p-live", classification: all }, { providerId: "prov-a", productId: "p-live", classification: all }]), StoreValidationError);
       await assert.rejects(repository.adminSave(ADMIN, []), StoreValidationError);
       assert.equal((await pool.query("SELECT updated_by_admin FROM experience_product_classifications WHERE product_id='p-draft'")).rows[0]?.updated_by_admin, true);
+
+      // 運営の CLI (#576): `expected` is what the caller read. It saves while that is still the value, and refuses (saving nothing) once
+      // somebody changed it, whether by the Admin screens, the owner, or another CLI run that came first.
+      const read = (await repository.adminList(ADMIN)).find((row) => row.productId === "p-live")!.classification;
+      const next = { category: "walk", area: "hase", companions: [], occasions: ["rain"] } as const;
+      assert.equal(await repository.adminSave(ADMIN, [{ providerId: "prov-a", productId: "p-live", classification: next, expected: read }]), 1);
+      await assert.rejects(repository.adminSave(ADMIN, [
+        { providerId: "prov-a", productId: "p-draft", classification: next, expected: all },
+        { providerId: "prov-a", productId: "p-live", classification: all, expected: read },
+      ]), StoreConflictError);
+      assert.deepEqual((await repository.adminList(ADMIN)).find((row) => row.productId === "p-live")?.classification, next, "a refused compare-and-set changes nothing");
+      assert.deepEqual((await repository.adminList(ADMIN)).find((row) => row.productId === "p-draft")?.classification, all, "and not the products before it in the same save");
+      await assert.rejects(repository.adminSave(ADMIN, [{ providerId: "prov-a", productId: "p-live", classification: all, expected: { category: "bogus" } }]), StoreValidationError);
+      // An unclassified product's value is the empty one.
+      const empty = { category: null, area: null, companions: [], occasions: [] } as const;
+      await pool.query("DELETE FROM experience_product_classifications WHERE product_id = 'p-other'");
+      assert.equal(await repository.adminSave(ADMIN, [{ providerId: "prov-b", productId: "p-other", classification: all, expected: empty }]), 1);
+      // Two compare-and-sets from the same read: one wins, the other is refused, never both applied.
+      const race = await Promise.allSettled([
+        repository.adminSave(ADMIN, [{ providerId: "prov-a", productId: "p-live", classification: { ...next, category: "sea" }, expected: next }]),
+        repository.adminSave(ADMIN, [{ providerId: "prov-a", productId: "p-live", classification: { ...next, category: "zen" }, expected: next }]),
+      ]);
+      assert.deepEqual(race.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
+      assert.ok((race.find((r) => r.status === "rejected") as PromiseRejectedResult).reason instanceof StoreConflictError);
 
       // The public read is the visible publications' only (here none: a product status alone shows nothing); the positive case
       // and the stop are in managed-experience-sales.integration.test.ts, which publishes real products.
