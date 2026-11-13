@@ -107,9 +107,9 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 | `people` | `list`（`--listed`・`--unlisted`・`--provider`） | read |
 | `people` | `apply --file 変更.json`、`withdraw --provider <providerId>` | publish |
 | `provider` | `list` | read |
-| `provider` | `create --name … --kind PERSON\|BUSINESS --consent-confirmed` | edit |
+| `provider` | `create --name … --kind PERSON\|BUSINESS --consent-confirmed`・`profile --provider …`（既存の提供者の公開プロフィール）・`photo-add --provider … --file …`（提供者の写真・ロゴ） | edit |
 | `product` | `list`・`show`・`calendar` | read |
-| `product` | `create`・`draft`・`calendar-add`・`photo-add` | edit |
+| `product` | `create`・`draft`・`review`・`calendar-add`・`photo-add` | edit |
 | `product` | `terms`（価格・販売条件） | terms |
 | `product` | `publish`・`suspend`・`resume` | publish |
 | `inquiry` | `list`（`--status`・`--id`） | read |
@@ -166,16 +166,17 @@ node scripts/experience/ops.mjs people withdraw --provider prov-a --yes      # �
 
 ### 新しい日本語の商品を出す（stg の例。画面は使わない）
 
-前提：商品を載せる提供者に **販売者の登録（seller workspace）** が済んでいること（`provider list` の `sellers` に出る。新しい提供者の販売者は、移行・初期登録の運用スクリプト `scripts/experience/provision-host-seller.mjs`）。日本語のみの商品（`content.japaneseOnly`）は `EXPERIENCE_JAPANESE_SITE_ENABLED` が `true` の環境でだけ保存できる。以下は `--provider <providerId>` を付ける。商品の `id` は `product list` で分かる。
+前提：商品を載せる提供者に **販売者の登録（seller workspace）** と **公開プロフィール** があること。販売者は `provider list` の `sellers` に出る（新しい提供者の販売者は、移行・初期登録の運用スクリプト `scripts/experience/provision-host-seller.mjs`）。公開プロフィールが無ければ（`provider list` の `publicDisplayName` が `null`）、先に `provider profile --provider <id> --name … --kind … --consent-confirmed --yes`。商品の作成・一覧は、公開プロフィールのある提供者にだけ答える。日本語のみの商品（`content.japaneseOnly`）は `EXPERIENCE_JAPANESE_SITE_ENABLED` が `true` の環境でだけ保存できる。以下は `--provider <providerId>` を付ける。商品の `id` は `product list` で分かる。
 
 1. **下書きをつくる**（`product create --file draft.json`）。`slug`・`publicTitle`（日本語のみのときは日本語の題と同じ）・`unitAmount`（円。0 か 50 以上）・`content`。日本語のみなら `content` に `"japaneseOnly": true` と `ja`（`title`・`lead`・`description`・`language`・`highlights`・`included`・`notIncluded`・`knowBeforeYouGo`・`notSuitableFor`・`timeline`）を入れ、英語の欄（`lead`・`description`・`facts.language`・配列）は空にする。同じ `slug` が既にあれば `unchanged`。
 2. **原稿を直す**（`product draft --product <id> --file changes.json`）。`slug`・`publicTitle`・`content` のうち書いたものだけ。`content` は上のキーごとに混ぜる（`ja` は丸ごと置き換わる）。
 3. **料金・販売条件**（`product terms --product <id> --file terms.json`、**terms の段階**）。`unitAmount` と `saleTerms`。販売条件が未設定の商品は、全項目が要る（例：`{"saleTerms":{"offerPrices":null,"childPricing":null,"minimumParticipants":1,"minimumChargeableParticipants":1,"maxPartySize":6,"cancellationPolicy":"FREE_UNTIL_24H","cancellationWindowMinutesBeforeStart":1440,"cancellationRefundBasisPoints":10000,"minimumAttendance":null,"bookingQuestions":[],"conditionsVersion":null}}`）。設定済みなら、書いたキーだけが変わる。
 4. **日程の枠**（`product calendar-add --product <id> --file rule.json`）。`timeZone: "Asia/Tokyo"`・`startsOn`・`endsOn`（任意）・`localStartTime`・`durationMinutes`・`capacity`・`bookingCutoffMinutes`・`busyBufferBeforeMinutes`・`busyBufferAfterMinutes`・`recurrence`（`{"kind":"WEEKLY"}` など）。同じ内容をもう一度送っても増えない。`product calendar --product <id>` で、できた日付を見る。
 5. **写真**（`product photo-add --product <id> --file 写真.jpg --alt "English alt" --alt-ja "日本語の説明" [--credit "公開するクレジット"]`）。jpg・png、10MB まで。**権利を確認ずみの写真だけ**を上げる（オーナー決定 2026-11-14：権利確認の入力は不要。サーバーが求める確認は CLI が送る）。結果にファイルの sha256 が出る。
-6. **公開できるか見る**（`product publish --product <id> --seller-confirmation WRITTEN`）。`--yes` なしは、サーバーが返す公開の妨げ（`blockers`）と、いま公開できるかだけを出す。妨げが残っていれば、直してから。
-7. **公開する**：同じコマンドに `--yes`。**本番は依頼した人の了承を取ってから。** 公開すると `/ja/experiences/<slug>` に出る。
-8. **停止する**（`product suspend --product <id> --reason SYNTHETIC_CLEANUP --yes`）：運営停止。合成の商品の片付けなど。公開状態の版は、公開済みの商品でも読める専用の `GET /admin/api/experience-publications/providers/<p>/products/<x>` から取る（下書き用の `product show` は公開済みには答えない）。止めたあと、持ち主が再開するまで出ない（`resume` は運営停止を解くだけ）。
+6. **原稿を確認する**（`product review --product <id> --yes`）：日本語のみの商品は日本語の原稿を、事務局として確認する。公開の妨げ `MANUSCRIPT_REQUIRED` が消える。原稿を直すと確認は外れるので、最後に行う。
+7. **公開できるか見る**（`product publish --product <id> --seller-confirmation WRITTEN`）。`--yes` なしは、サーバーが返す公開の妨げ（`blockers`）と、いま公開できるかだけを出す。妨げが残っていれば、直してから。
+8. **公開する**：同じコマンドに `--yes`。**本番は依頼した人の了承を取ってから。** 公開すると `/ja/experiences/<slug>` に出る。
+9. **停止する**（`product suspend --product <id> --reason SYNTHETIC_CLEANUP --yes`）：運営停止。合成の商品の片付けなど。公開状態の版は、公開済みの商品でも読める専用の `GET /admin/api/experience-publications/providers/<p>/products/<x>` から取る（下書き用の `product show` は公開済みには答えない）。止めたあと、持ち主が再開するまで出ない（`resume` は運営停止を解くだけ）。
 
 どの変更も、読んだときの版を付けて送る。画面などで先に変わっていたら `409`（終了コード 4）で止まり、上書きしない。`product show` は、いまの下書き・販売条件・写真・公開の妨げ・版を返す（予約者の情報は出ない）。
 
@@ -213,3 +214,34 @@ node scripts/experience/ops.mjs guide stop --id <articleId> --yes               
 
 - **予約の取消・返金・精算・受取口座**：扱わない（領域に入れていない）。stg の合成データの片付けは、商品の `suspend` まで（予約の取消は返金を伴いうるので、画面で人が行う）。
 - 販売者（seller workspace）の新規登録：運用スクリプト `scripts/experience/provision-host-seller.mjs`。
+
+## stg での通しの確認（2026-11-14）
+
+stg（`https://experience-stg.niho.life`、`9332dee3`＝#581・#582 を含む main、migration `0079` 適用済み、`STG_OPERATOR_CLI_ENABLED=true`）に、オーナーの Google アカウントの ID トークン（`gcloud auth print-identity-token`）で、合成のデータを使って通した。画面は使っていない。
+
+| 確認 | 結果 |
+| --- | --- |
+| サインイン（`auth check`） | ○ |
+| 分類：差分（`--dry-run`）→ 適用 → 再実行 | ○ 差分だけ出て何も送らない／適用で `/ja/experiences?category=…` に出る／再実行は `unchanged` |
+| 分類：画面で同じ商品を変えた直後の古い版での適用 | ○ 読んだあとに画面と同じ保存で変えられた商品は、CLI の適用が `conflict`（終了コード 4）で止まり、画面で入れた値が残った |
+| 商品：公開プロフィール → 下書き → 販売条件 → 日程の枠 → 写真 → 原稿の確認 → 公開 → 停止 | ○ 日本語のみの合成の商品（0円）。`/ja/experiences/<slug>` は 200、英語側は 404、一覧に出る。停止で 404 に戻る。各コマンドは再実行で二重にならない（`unchanged`／写真は `photo_upload_unconfirmed` で止まる） |
+| 街の人：提供者の写真 → 載せる → 外す | ○ `/ja/people/<slug>` は載せると 200、外すと 404。一覧にも出る・消える |
+| 記事：作成 → 表紙の写真 → 公開 → 停止 | ○ 事務局名義（NIHO kamakura）の日本語の記事。`/ja/guides/<slug>` は公開で 200（英語側は 404）、一覧に出る。停止で 404 |
+| 相談の受付一覧：状態・担当・次の期日・メモの更新 | ○ 一覧に送り手の氏名・連絡先・本文は出ない。更新は差分 → `--yes`、再実行は `unchanged` |
+| 開催回の担当の代行記録 | 未確認（stg は `OCCURRENCE_ASSIGNMENT_ENABLED` の前提が無く 404） |
+| 監査 | ○ 上の書き込み22件が `operator_cli_requests` に、オーナーの管理者 ID（`adm_…`）・`claude-code`・メソッド・パスで残っていた（読み取りは記録しない）。確認はこのマシンから、stg の DB に read-only で |
+
+確認で見つけて直したこと：
+- 既存の販売者の提供者に**公開プロフィールが無く**、商品を作れなかった（一覧・作成が 404）→ `provider profile` を足した。
+- 公開の妨げ `MANUSCRIPT_REQUIRED` を消す操作（事務局の原稿の確認）が CLI に無かった → `product review` を足した。
+- 提供者の写真が無いと街の人が表示されない → `provider photo-add` を足した。
+- 公開済みの商品に `product publish` を再実行すると 403 の「許可リストにない」という誤った案内が出た → 公開済みは `unchanged`、下書き用 API の `FORBIDDEN` は別の案内にした。
+
+見つけたが直していないこと：
+- `guide publish` の結果の URL は、日本語の記事でも `/guides/<slug>`（英語側の 404）になる（サーバーの記事 API の既存の挙動。実際の URL は `/ja/guides/<slug>`）。
+
+stg に残したもの（CLI では消せない）：
+- 提供者「NIHO kamakura」（stg の販売者のある提供者）の公開プロフィールと提供者の写真（単色の画像）。
+- 合成の商品 `cli-check-20261114`（運営停止。持ち主の再開が要る状態のまま。販売条件・日程の枠・写真・分類も残る）。
+- 合成の記事 `cli-check-guide-20261114`（停止済みの下書き）と、その表紙の写真。
+- 合成の相談 1 件（`DONE`。送り手は `example.test` のアドレス。受付のメールは stg の通常の経路で送られる）。

@@ -82,6 +82,54 @@ describe("provider", () => {
   });
 });
 
+describe("provider profile", () => {
+  it("sets the public profile of an existing provider with the version it read, and a repeat changes nothing", async () => {
+    const providers = [{ providerId: "prv_9", publicDisplayName: null as string | null, providerKind: null as string | null, profileVersion: null as number | null }];
+    const sent: Array<{ method: string; path: string; body: { expectedVersion: number | null; profile?: unknown } }> = [];
+    const api: Api = {
+      env: "stg", aiKind: "claude-code",
+      async get() { return { status: 200, body: { providers } }; },
+      async send(method, path, body): Promise<ApiResponse> {
+        sent.push({ method, path, body: body as never });
+        const b = body as { expectedVersion: number | null; profile: { publicDisplayName: string; providerKind: string } };
+        if (b.expectedVersion !== providers[0]!.profileVersion) return { status: 409, body: { error: { code: "VERSION_CONFLICT" } } };
+        providers[0] = { providerId: "prv_9", publicDisplayName: b.profile.publicDisplayName, providerKind: b.profile.providerKind, profileVersion: (b.expectedVersion ?? 0) + 1 };
+        return { status: 200, body: {} };
+      },
+    };
+    const go = (argv: string[]) => run(["provider", "profile", ...argv], { environment: {}, api, now: () => NOW });
+    const flags = ["--provider", "prv_9", "--name", "NIHO kamakura", "--kind", "BUSINESS", "--consent-confirmed"];
+    expect((await go(flags)).output).toMatchObject({ mode: "dry-run", result: { status: "dry_run" } });
+    expect(sent).toEqual([]);
+    expect((await go(["--provider", "prv_9", "--name", "NIHO kamakura", "--kind", "BUSINESS", "--yes"])).exit).toBe(2);
+    expect((await go([...flags, "--yes"])).output).toMatchObject({ result: { status: "applied" } });
+    expect(sent[0]).toMatchObject({ method: "PUT", path: "/admin/api/product-workspaces/prv_9/profile", body: { expectedVersion: null, profile: { consentVersion: "provider-public-profile-v1", consentConfirmed: true } } });
+    expect((await go([...flags, "--yes"])).output).toMatchObject({ result: { status: "unchanged" } });
+    expect((await go(["--provider", "prv_9", "--name", "NIHO kamakura 2", "--kind", "BUSINESS", "--consent-confirmed", "--yes"])).output).toMatchObject({ result: { status: "applied" } });
+    expect(sent[1]!.body.expectedVersion).toBe(1);
+  });
+});
+
+describe("provider photo-add", () => {
+  it("sends the photo with the consent version, the placement and the media version it read, and refuses a missing alt text", async () => {
+    const sent: Array<{ path: string; headers: Record<string, string> }> = [];
+    const api: Api = {
+      env: "stg", aiKind: "claude-code",
+      async get() { return { status: 200, body: { providerMedia: { version: 3, assets: [] } } }; },
+      async send(_m, path, _b, _op, raw): Promise<ApiResponse> { sent.push({ path, headers: raw!.headers as Record<string, string> }); return { status: 201, body: {} }; },
+    };
+    const go = (argv: string[], bytes = new Uint8Array([1, 2])) => run(["provider", "photo-add", ...argv], { environment: {}, api, now: () => NOW, readBytes: () => bytes });
+    const base = ["--provider", "prv_9", "--file", "me.png", "--alt", "A person", "--alt-ja", "人物"];
+    expect((await go(["--provider", "prv_9", "--file", "me.png", "--alt", "A person", "--yes"])).exit).toBe(2);
+    expect(out(await go(base)).result).toMatchObject({ status: "dry_run", photo: { placement: "PROVIDER_PHOTO" }, mediaVersion: 3 });
+    expect(sent).toEqual([]);
+    expect(out(await go([...base, "--yes"])).result.status).toBe("applied");
+    expect(sent[0]!.path).toBe("/admin/api/product-workspaces/prv_9/provider-media");
+    expect(sent[0]!.headers).toMatchObject({ "x-experience-photo-rights-confirmed": "true", "x-experience-provider-profile-consent-version": "provider-public-profile-v1", "x-experience-media-placement": "PROVIDER_PHOTO", "x-experience-provider-media-version": "3" });
+    expect(out(await go([...base, "--logo", "--yes"])).result.placement).toBe("BUSINESS_LOGO");
+  });
+});
+
 describe("product create, show and list", () => {
   const draft = JSON.stringify({ slug: "tea", publicTitle: "茶", unitAmount: 5000, content });
   it("plans first, creates with --yes in JPY, and does not create the same slug twice", async () => {
@@ -198,6 +246,18 @@ describe("product publish", () => {
     expect(done).toMatchObject({ tier: "publish", mode: "apply", result: { status: "applied" } });
     expect(ready.sent[0]).toMatchObject({ method: "POST", body: { accepted: true, sellerConfirmationMethod: "WRITTEN", photoRightsConfirmed: true, consentVersion: CONSENT } });
   });
+  it("says a product that is already published is unchanged, and does not mistake the draft API's FORBIDDEN for a sign-in problem", async () => {
+    const fake = fakeApi();
+    fake.seed();
+    fake.setPublished();
+    const again = out(await exec(fake.api, [...flags, "--yes"]));
+    expect(again.result).toMatchObject({ status: "unchanged", state: { published: true } });
+    expect(fake.sent).toEqual([]);
+    const refused = await exec({ ...fake.api, get: async () => ({ status: 403, body: { error: { code: "FORBIDDEN" } } }) }, ["show", "--provider", "prv_1", "--product", "x1"]);
+    expect(refused.exit).toBe(1);
+    expect(out(refused).message).toContain("never published");
+  });
+
   it("reports a publication the server blocked (422) with its blockers", async () => {
     const fake = fakeApi();
     fake.seed();
