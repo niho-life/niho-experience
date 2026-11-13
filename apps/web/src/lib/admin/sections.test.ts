@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { adminBackLink, adminHomePath, adminSections, isAdminSectionActive, NO_ADMIN_SECTION_FLAGS, type AdminSectionFlags } from "./sections";
 
-const ALL: AdminSectionFlags = { bookingSupport: true, siteBookings: true, notifications: true, products: true, operators: true, preparations: true, channels: true };
+const ALL: AdminSectionFlags = { bookingSupport: true, siteBookings: true, notifications: true, inquiries: true, products: true, operators: true, preparations: true, channels: true };
 
 describe("adminSections", () => {
   it("lists every section in the menu order", () => {
-    expect(adminSections(ALL).map((section) => section.label)).toEqual(["予約支援", "予約", "通知", "提供者", "運営者", "掲載準備", "掲載先"]);
+    expect(adminSections(ALL).map((section) => section.label)).toEqual(["予約支援", "予約", "通知", "相談", "提供者", "運営者", "掲載準備", "掲載先"]);
     expect(adminSections(ALL).map((section) => section.href)).toEqual([
-      "/admin/bookings", "/admin/site-bookings", "/admin/notifications", "/admin/products", "/admin/operators", "/admin/preparations", "/admin/channels",
+      "/admin/bookings", "/admin/site-bookings", "/admin/notifications", "/admin/inquiries", "/admin/products", "/admin/operators", "/admin/preparations", "/admin/channels",
     ]);
   });
 
   it("shows only 予約・提供者・運営者 for a Google sign-in", () => {
-    const google = { ...ALL, bookingSupport: false, notifications: false, preparations: false, channels: false };
+    const google = { ...ALL, bookingSupport: false, notifications: false, inquiries: false, preparations: false, channels: false };
     expect(adminSections(google).map((section) => section.key)).toEqual(["site-bookings", "products", "operators"]);
   });
 

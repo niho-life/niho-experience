@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: "予約", robots: { index: false, fol
 
 export default async function JapaneseBookPage(props: { params: Promise<{ slug: string }>; searchParams: Promise<SearchParams> }) {
   if (config.apiMode === "http") {
-    const local = await getSitePublicExperience((await props.params).slug);
+    const local = await getSitePublicExperience((await props.params).slug, "ja");
     if (local?.kind !== "published" || !local.item.publication.japanese) notFound();
     return <div className="container-page py-8 lg:py-12"><SitePublicationBooking item={local.item} siteOrigin={new URL(config.siteUrl).origin} consentVersion={config.guestBookingConsentVersion} bookingsEnabled={config.bookingsEnabled && config.guestBookingEnabled} locale="ja" /></div>;
   }

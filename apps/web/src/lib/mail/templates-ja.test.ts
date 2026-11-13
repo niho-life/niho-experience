@@ -14,6 +14,7 @@ const confirmation: BookingConfirmationEmail = {
   guestLanguage: "JA",
   experienceTitle: "合成の茶道体験",
   experienceSlug: "sample-tea",
+  japaneseOnly: false,
   localDate: "2026-11-14",
   localStartTime: "10:00",
   timeZone: "Asia/Tokyo",

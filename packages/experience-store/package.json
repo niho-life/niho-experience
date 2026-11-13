@@ -22,6 +22,10 @@
       "types": "./src/site-sale-script.ts",
       "default": "./src/site-sale-script.ts"
     },
+    "./group-inquiry-fields": {
+      "types": "./src/group-inquiry-fields.ts",
+      "default": "./src/group-inquiry-fields.ts"
+    },
     "./host-bio-rules": {
       "types": "./src/host-bio-rules.ts",
       "default": "./src/host-bio-rules.ts"

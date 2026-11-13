@@ -23,6 +23,7 @@ const ICONS: Record<AdminSectionKey, HostIconName> = {
   bookings: "calendar",
   "site-bookings": "bookings",
   notifications: "bell",
+  inquiries: "article",
   products: "providers",
   operators: "operators",
   preparations: "article",

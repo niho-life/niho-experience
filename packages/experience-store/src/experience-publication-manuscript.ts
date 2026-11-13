@@ -111,6 +111,24 @@ export function englishPublicationManuscriptOf(title: unknown, content: UnknownR
   };
 }
 
+/**
+ * 日本語を原文にした商品（#59）。`content.japaneseOnly === true` のとき、日本語（`content.ja`）が唯一の原稿で、
+ * 英語の原稿・確認は要らず、英語側の公開面には出ない。英語を足す機能は v0 に無いので、印を外す＝英語を確認して
+ * 公開し直す、という扱いにはまだしない（docs/localization-consumer.md）。
+ * 印は内容全体の fingerprint（`publicationContentFingerprint`）に入るが、日英の原稿 fingerprint には入らない。
+ */
+export function isJapaneseOnlyContent(content: unknown): boolean {
+  return isRecord(content) && content.japaneseOnly === true;
+}
+
+/**
+ * 日本語のみの商品の「英語 fingerprint」。事務局の代理公開レビューの監査表（英語 fingerprint が NOT NULL）を
+ * migration なしで使うため、英語原稿が無いことを表す固定の値で埋める。実際の英語原稿の fingerprint と衝突しない
+ * （原稿は必ず title などの鍵を持つオブジェクトで、これは `japaneseOnly` だけを持つ）。
+ */
+export const JAPANESE_ONLY_ENGLISH_FINGERPRINT: string = createHash("sha256")
+  .update(`{"japaneseOnly":true}`, "utf8").digest("hex");
+
 /** A locale manuscript without an empty `faq`, the form every fingerprint is computed over. */
 export function fingerprintablePublicationManuscript(value: unknown): unknown {
   if (!isRecord(value) || !Object.hasOwn(value, "faq") || !emptyList(value.faq)) return value;

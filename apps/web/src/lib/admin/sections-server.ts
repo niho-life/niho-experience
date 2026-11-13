@@ -16,6 +16,8 @@ export function adminSectionFlags(): AdminSectionFlags {
     bookingSupport: preview || nihoRead,
     siteBookings: preview ? config.adminSiteBookingsPreviewEnabled : config.guestBookingEnabled,
     notifications: preview || nihoRead,
+    // 団体・個別の相談 (#532): the inbox page's own condition.
+    inquiries: isAdminHttp() && config.groupInquiryEnabled,
     products: preview ? config.adminProductWorkspacesPreviewEnabled : isAdminHttp() && config.experienceHostPublicationApiEnabled,
     operators: preview ? config.adminProductOperatorsPreviewEnabled : config.hostConsoleEnabled,
     preparations: isPreparationUiEnabled(),

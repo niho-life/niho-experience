@@ -55,7 +55,7 @@ const item = {
     providerPublicName: "Synthetic Actual Host", providerKind: "PERSON", meetingOverview: null,
     meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null, photos: [],
     providerPhoto: { src: "/api/public/experience-provider-media/00000000-0000-4000-8000-000000000001", alt: "Synthetic actual host", altJa: "合成の実提供者", publicCredit: null }, businessLogo: null,
-    japanese: null, publishedAtUtc: "2026-11-05T00:00:00.000Z",
+    japanese: null, japaneseOnly: false, publishedAtUtc: "2026-11-05T00:00:00.000Z",
   },
   saleTerms,
   hostBio: null,

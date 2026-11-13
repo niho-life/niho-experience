@@ -48,6 +48,11 @@ export interface BookingConfirmationEmail {
   readonly guestLanguage: "EN" | "JA";
   readonly experienceTitle: string;
   readonly experienceSlug: string;
+  /**
+   * 日本語を原文にした商品（#59）。英語側の詳細ページは無く、商品ページは `/ja/experiences/{slug}` だけにある。
+   * 省略は false（英語原文の商品）。並行する変更が作る fixture を壊さないよう、省略できる。
+   */
+  readonly japaneseOnly?: boolean;
   /** The occurrence's own date and start time (a host may have moved it), in `timeZone`. */
   readonly localDate: string;
   readonly localStartTime: string;
@@ -401,6 +406,7 @@ function emailFromRow(row: DbRow): BookingConfirmationEmail | null {
     guestLanguage: guestLanguageOf(row),
     experienceTitle: experienceTitleFor(row),
     experienceSlug: text(row.slug, "slug"),
+    japaneseOnly: row.japanese_only === true,
     localDate: text(occurrence.localDate, "occurrence_snapshot.localDate"),
     localStartTime: text(occurrence.localStartTime, "occurrence_snapshot.localStartTime"),
     timeZone: text(occurrence.timeZone, "occurrence_snapshot.timeZone"),
@@ -992,6 +998,7 @@ export class GuestMailOutbox {
                 g.guest_email, g.guest_name, g.guest_language, g.approval_status, g.checkout_session_ref,
                 g.adult_count, g.child_count, p.public_title, p.slug,
                 CASE WHEN g.guest_language='JA' THEN NULLIF(btrim(pub.content->'ja'->>'title'),'') END AS public_title_ja,
+                pub.content->>'japaneseOnly' = 'true' AS japanese_only,
                 provider.public_display_name AS provider_public_name,
                 guide_snapshot.guide AS meeting_guide,
                 (SELECT COALESCE(sum(x.amount), 0)::text FROM booking_refunds x
