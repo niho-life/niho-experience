@@ -18,6 +18,8 @@ export function adminSectionFlags(): AdminSectionFlags {
     notifications: preview || nihoRead,
     // 団体・個別の相談 (#532): the inbox page's own condition.
     inquiries: isAdminHttp() && config.groupInquiryEnabled,
+    // 街の人 (#564): the people page's own condition.
+    people: isAdminHttp() && config.experiencePublicationsEnabled,
     products: preview ? config.adminProductWorkspacesPreviewEnabled : isAdminHttp() && config.experienceHostPublicationApiEnabled,
     operators: preview ? config.adminProductOperatorsPreviewEnabled : config.hostConsoleEnabled,
     preparations: isPreparationUiEnabled(),
