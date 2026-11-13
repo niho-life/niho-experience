@@ -77,9 +77,9 @@ function BookingReturnJa({ type, showReview, freeBooking }: { type: BookingRetur
   const approval = type === "approval";
   const managedRequest = type === "managed-request";
   const eyebrow = type ? "ありがとうございます" : "もうすぐです";
-  const heading = managedRequest ? "NIHO事務局が内容を確認します" : approval ? "ホストが内容を確認します" : freeBooking ? "無料のご予約の確認メールをご確認ください" : type ? "ご予約の確認メールをご確認ください" : "メールをご確認ください";
+  const heading = managedRequest ? "お申込みを受け付けました" : approval ? "ホストが内容を確認します" : freeBooking ? "無料のご予約の確認メールをご確認ください" : type ? "ご予約の確認メールをご確認ください" : "メールをご確認ください";
   const lead = managedRequest
-    ? "お申込みの受付メールをお送りします。お申込みにカードの入力やお支払いは要りません。NIHO事務局が承認した場合は、Stripeのお支払いリンクをメールでお送りします。"
+    ? "まだ予約は確定していません。お申込みの受付メールをお送りします。事務局が内容を確認し、24時間以内にメールでお返事します。ここまでカードの入力やお支払いは要りません。日程が決まったら、お支払いのリンクをお送りします。"
     : approval
       ? "ホストが承認した場合にだけ、お支払いが発生します。結果はどちらの場合もメールでお知らせします。"
       : freeBooking
@@ -88,7 +88,7 @@ function BookingReturnJa({ type, showReview, freeBooking }: { type: BookingRetur
           ? "お支払いが完了すると、ご予約の確認をメールでお送りします。"
           : "ご予約についてメールでお知らせします。ホストの承認が必要な場合は、メールにそのことを書きます。";
   const steps: Step[] = [
-    { icon: "mail", title: managedRequest ? "NIHO事務局からの返信をお待ちください" : approval ? "お申込みについてのメール" : "確認メール", text: managedRequest ? "承認された場合は、期限内にお支払いリンクからお支払いください。お支払い後にご予約が確定します。" : approval ? "お申込みがホストに届いたことをお知らせします。ホストが答えたら、あらためてお送りします。" : freeBooking ? "体験、日時、人数と、ご予約のページへのリンクをお知らせします。お支払いは不要です。" : "体験、日時、人数、お支払い額と、ご予約のページへのリンクをお知らせします。" },
+    { icon: "mail", title: managedRequest ? "事務局からのお返事をお待ちください" : approval ? "お申込みについてのメール" : "確認メール", text: managedRequest ? "承認された場合は、期限内にお支払いリンクからお支払いください。お支払い後にご予約が確定します。" : approval ? "お申込みがホストに届いたことをお知らせします。ホストが答えたら、あらためてお送りします。" : freeBooking ? "体験、日時、人数と、ご予約のページへのリンクをお知らせします。お支払いは不要です。" : "体験、日時、人数、お支払い額と、ご予約のページへのリンクをお知らせします。" },
     { icon: "pin", title: "集合場所のご案内", text: "集合場所は、当日より前にお届けします。" },
     { icon: "cal", title: "ホストに会う", text: "当日は、ご案内した集合場所でホストにお会いください。" },
     ...(showReview ? [{ icon: "chat" as const, title: "感想を聞かせてください", text: "体験のあとで、いかがでしたかとおたずねします。" }] : []),
