@@ -25,14 +25,33 @@ export const OPERATOR_AI_HEADER = "x-niho-operator-ai";
 export const OPERATOR_OPERATION_HEADER = "x-niho-operation-id";
 
 const API_PREFIX = "/admin/api/";
+const WRITE_PREFIX = "/write/api/";
 /**
  * The /admin/api areas open to the CLI (the first path segment after /admin/api/). Everything else answers 403, so a
  * refund, a payout or a payout account (#576: never from a CLI) cannot be reached by adding a route. A stage adds its own area here.
  */
 export const OPERATOR_API_AREAS: readonly string[] = Object.freeze(["product-classifications", "people", "product-workspaces", "experience-publications", "inquiries", "occurrence-assignments"]);
 
-export const operatorApiPath = (pathname: string): boolean => pathname.startsWith(API_PREFIX);
-export const operatorApiAllowed = (pathname: string): boolean => operatorApiPath(pathname) && OPERATOR_API_AREAS.includes(pathname.slice(API_PREFIX.length).split("/", 1)[0]!);
+/** The /write/api areas the CLI may call: the article routes the writers use (never a host-session-only route). */
+export const OPERATOR_WRITE_AREAS: readonly string[] = Object.freeze(["guides", "categories"]);
+
+export const operatorApiPath = (pathname: string): boolean => pathname.startsWith(API_PREFIX) || pathname.startsWith(WRITE_PREFIX);
+export const operatorApiAllowed = (pathname: string): boolean => {
+  if (pathname.startsWith(API_PREFIX)) return OPERATOR_API_AREAS.includes(pathname.slice(API_PREFIX.length).split("/", 1)[0]!);
+  if (pathname.startsWith(WRITE_PREFIX)) return OPERATOR_WRITE_AREAS.includes(pathname.slice(WRITE_PREFIX.length).split("/", 1)[0]!);
+  return false;
+};
+
+/**
+ * Whether the assertion this request carries (set by src/proxy.ts only) allows this change: sealed for exactly this method and
+ * path, with the caller's operation ID. There is no cookie to forge, so no Origin check. `null` when there is no assertion.
+ */
+export function operatorMutationAllowed(request: Request, now = Date.now()): boolean | null {
+  const sealed = request.headers.get(OPERATOR_ASSERTION_HEADER);
+  if (sealed === null) return null;
+  const assertion = config.operatorCliEnabled ? openOperatorAssertion(sealed, now) : null;
+  return assertion !== null && assertion.operationId !== null && assertion.method === request.method && assertion.path === new URL(request.url).pathname;
+}
 
 const GOOGLE_ISSUERS = new Set(["https://accounts.google.com", "accounts.google.com"]);
 const GOOGLE_SUBJECT = /^[\x21-\x7E]{1,255}$/;
@@ -42,7 +61,7 @@ const OPERATION_ID = /^[A-Za-z0-9._:-]{8,64}$/;
 /** The largest body the CLI sends through the proxy: the BFFs' JSON limits are smaller; a product photo (/media) may be up to the 10 MB the image route takes. */
 export const OPERATOR_BODY_LIMIT = 1024 * 1024;
 export const OPERATOR_PHOTO_BODY_LIMIT = 10 * 1024 * 1024;
-const PHOTO_PATH = /^\/admin\/api\/product-workspaces\/[^/]+\/products\/[^/]+\/media$/;
+const PHOTO_PATH = /^\/(?:admin\/api\/product-workspaces\/[^/]+\/products\/[^/]+|write\/api\/guides\/[^/]+)\/media$/;
 export const operatorBodyLimit = (pathname: string): number => (PHOTO_PATH.test(pathname) ? OPERATOR_PHOTO_BODY_LIMIT : OPERATOR_BODY_LIMIT);
 /** How long the sealed assertion the proxy hands to a route handler is good for. */
 export const OPERATOR_ASSERTION_TTL_MS = 60_000;

@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   if (!raw.ok) return raw.response;
   const input = parseWriteCreate(raw.value);
   if (!input) return writeJson({ error: "invalid_input" }, 400);
-  if (!loaded.value.ownerProviderIds.includes(input.providerId)) return writeJson({ error: "forbidden" }, 403);
+  if (!loaded.value.office && !loaded.value.ownerProviderIds.includes(input.providerId)) return writeJson({ error: "forbidden" }, 403);
   try {
     const result = await createGuideIdempotently(loaded.value, input, experience);
     return writeJson({

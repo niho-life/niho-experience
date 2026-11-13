@@ -22,4 +22,4 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   return NextResponse.next({ request: { headers } });
 }
 
-export const config = { matcher: ["/admin/:path*"] };
+export const config = { matcher: ["/admin/:path*", "/write/api/:path*"] };

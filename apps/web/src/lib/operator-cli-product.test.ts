@@ -175,13 +175,12 @@ describe("product terms with terms already set", () => {
 });
 
 describe("product publish", () => {
-  const flags = ["publish", "--provider", "prv_1", "--product", "x1", "--seller-confirmation", "WRITTEN", "--photo-rights-confirmed"];
-  it("needs the seller's confirmation method and the photo rights confirmed by a person", async () => {
+  const flags = ["publish", "--provider", "prv_1", "--product", "x1", "--seller-confirmation", "WRITTEN"];
+  it("needs the seller's confirmation method", async () => {
     const fake = fakeApi();
     fake.seed();
-    expect((await exec(fake.api, ["publish", "--provider", "prv_1", "--product", "x1", "--photo-rights-confirmed", "--yes"])).exit).toBe(2);
-    expect((await exec(fake.api, ["publish", "--provider", "prv_1", "--product", "x1", "--seller-confirmation", "VERBAL", "--yes"])).exit).toBe(2);
-    expect((await exec(fake.api, ["publish", "--provider", "prv_1", "--product", "x1", "--seller-confirmation", "MAYBE", "--photo-rights-confirmed", "--yes"])).exit).toBe(2);
+    expect((await exec(fake.api, ["publish", "--provider", "prv_1", "--product", "x1", "--yes"])).exit).toBe(2);
+    expect((await exec(fake.api, ["publish", "--provider", "prv_1", "--product", "x1", "--seller-confirmation", "MAYBE", "--yes"])).exit).toBe(2);
     expect(fake.sent).toEqual([]);
   });
   it("is publish-tier: shows the blockers without --yes, refuses while any remains, and publishes the revision it read", async () => {
@@ -257,13 +256,13 @@ describe("product calendar", () => {
 });
 
 describe("product photo-add", () => {
-  const base = ["photo-add", "--provider", "prv_1", "--product", "x1", "--file", "tea.jpg", "--alt", "A tea bowl", "--alt-ja", "茶碗", "--photographer", "NIHO スタッフ", "--permission", "撮影者本人が書面で許諾", "--rights-confirmed"];
+  const base = ["photo-add", "--provider", "prv_1", "--product", "x1", "--file", "tea.jpg", "--alt", "A tea bowl", "--alt-ja", "茶碗"];
   const bytes = new Uint8Array([1, 2, 3, 4]);
-  it("needs the alt texts, who took it, how use was permitted and a person's confirmation, and takes jpg or png only", async () => {
+  it("needs the alt texts (no rights input: the owner clears the rights first), and takes jpg or png only", async () => {
     const fake = fakeApi();
     fake.seed();
     const without = (flag: string) => { const i = base.indexOf(flag); return base.filter((_, index) => !(index === i || (index === i + 1 && flag !== "--rights-confirmed"))); };
-    for (const flag of ["--alt", "--alt-ja", "--photographer", "--permission", "--rights-confirmed", "--file"]) expect((await exec(fake.api, [...without(flag), "--yes"], undefined, bytes)).exit, flag).toBe(2);
+    for (const flag of ["--alt", "--alt-ja", "--file"]) expect((await exec(fake.api, [...without(flag), "--yes"], undefined, bytes)).exit, flag).toBe(2);
     expect((await exec(fake.api, [...base.map((item) => (item === "tea.jpg" ? "tea.gif" : item)), "--yes"], undefined, bytes)).exit).toBe(2);
     expect((await exec(fake.api, [...base, "--yes"], undefined, new Uint8Array())).exit).toBe(1);
     expect(fake.sent).toEqual([]);
@@ -272,7 +271,7 @@ describe("product photo-add", () => {
     const fake = fakeApi();
     fake.seed();
     const planned = out(await exec(fake.api, base, undefined, bytes));
-    expect(planned.result).toMatchObject({ status: "dry_run", evidence: { photographer: "NIHO スタッフ", permission: "撮影者本人が書面で許諾", publicCredit: null }, photo: { bytes: 4, contentType: "image/jpeg" } });
+    expect(planned.result).toMatchObject({ status: "dry_run", evidence: { publicCredit: null }, photo: { bytes: 4, contentType: "image/jpeg" } });
     expect(planned.result.evidence.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(fake.sent).toEqual([]);
     const done = out(await exec(fake.api, [...base, "--credit", "撮影：NIHO", "--yes"], undefined, bytes));

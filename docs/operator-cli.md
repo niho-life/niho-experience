@@ -116,6 +116,9 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 | `inquiry` | `update --id <uuid> [--status] [--assignee] [--due] [--note]` | edit |
 | `assignment` | `list`（`--provider`・`--occurrence`） | read |
 | `assignment` | `claim`・`decline`・`release`（`--provider --occurrence [--subject] [--reason]`） | edit |
+| `guide` | `categories`・`list`・`show` | read |
+| `guide` | `create`・`draft`・`photo-add` | edit |
+| `guide` | `publish`・`stop` | publish |
 
 ## よくある作業
 
@@ -169,8 +172,8 @@ node scripts/experience/ops.mjs people withdraw --provider prov-a --yes      # �
 2. **原稿を直す**（`product draft --product <id> --file changes.json`）。`slug`・`publicTitle`・`content` のうち書いたものだけ。`content` は上のキーごとに混ぜる（`ja` は丸ごと置き換わる）。
 3. **料金・販売条件**（`product terms --product <id> --file terms.json`、**terms の段階**）。`unitAmount` と `saleTerms`。販売条件が未設定の商品は、全項目が要る（例：`{"saleTerms":{"offerPrices":null,"childPricing":null,"minimumParticipants":1,"minimumChargeableParticipants":1,"maxPartySize":6,"cancellationPolicy":"FREE_UNTIL_24H","cancellationWindowMinutesBeforeStart":1440,"cancellationRefundBasisPoints":10000,"minimumAttendance":null,"bookingQuestions":[],"conditionsVersion":null}}`）。設定済みなら、書いたキーだけが変わる。
 4. **日程の枠**（`product calendar-add --product <id> --file rule.json`）。`timeZone: "Asia/Tokyo"`・`startsOn`・`endsOn`（任意）・`localStartTime`・`durationMinutes`・`capacity`・`bookingCutoffMinutes`・`busyBufferBeforeMinutes`・`busyBufferAfterMinutes`・`recurrence`（`{"kind":"WEEKLY"}` など）。同じ内容をもう一度送っても増えない。`product calendar --product <id>` で、できた日付を見る。
-5. **写真**（`product photo-add --product <id> --file 写真.jpg --alt "English alt" --alt-ja "日本語の説明" --photographer "撮影者" --permission "許諾の根拠" --rights-confirmed [--credit "公開するクレジット"]`）。jpg・png、10MB まで。**撮影者と許諾を人が確認したものだけ**。`--photographer`・`--permission` は結果（`evidence`）に sha256 とあわせて出るので、Issue か PR に貼って残す。
-6. **公開できるか見る**（`product publish --product <id> --seller-confirmation WRITTEN --photo-rights-confirmed`）。`--yes` なしは、サーバーが返す公開の妨げ（`blockers`）と、いま公開できるかだけを出す。妨げが残っていれば、直してから。
+5. **写真**（`product photo-add --product <id> --file 写真.jpg --alt "English alt" --alt-ja "日本語の説明" [--credit "公開するクレジット"]`）。jpg・png、10MB まで。**権利を確認ずみの写真だけ**を上げる（オーナー決定 2026-11-14：権利確認の入力は不要。サーバーが求める確認は CLI が送る）。結果にファイルの sha256 が出る。
+6. **公開できるか見る**（`product publish --product <id> --seller-confirmation WRITTEN`）。`--yes` なしは、サーバーが返す公開の妨げ（`blockers`）と、いま公開できるかだけを出す。妨げが残っていれば、直してから。
 7. **公開する**：同じコマンドに `--yes`。**本番は依頼した人の了承を取ってから。** 公開すると `/ja/experiences/<slug>` に出る。
 8. **停止する**（`product suspend --product <id> --reason SYNTHETIC_CLEANUP --yes`）：運営停止。合成の商品の片付けなど。公開状態の版は、公開済みの商品でも読める専用の `GET /admin/api/experience-publications/providers/<p>/products/<x>` から取る（下書き用の `product show` は公開済みには答えない）。止めたあと、持ち主が再開するまで出ない（`resume` は運営停止を解くだけ）。
 
@@ -181,8 +184,32 @@ node scripts/experience/ops.mjs people withdraw --provider prov-a --yes      # �
 - `inquiry list` は、送り手の氏名・メールアドレス・本文・詳細を**出さない**（種別・状態・返信期限・次の期日・担当ラベル・スタッフのメモ・体験の slug だけ）。`inquiry update` は、書いた項目（`--status`・`--assignee`・`--due`・`--note`。空文字で消す）だけが変わる。相手にメールは送らない。
 - `assignment list` は開催回の一覧。`--provider` と `--occurrence` を付けると、その開催回の候補者と履歴。`claim`・`decline`・`release` は、その人に代わって担当を記録する（先に取られていれば `already_assigned`（終了コード 4）。同じ記録は同じ日なら1件（再送）で、担当を外したあとに同じ人がもう一度引き受けるときは `--again`）。**合意した報酬（`SET_FEE`）は CLI では扱わない**（proxy が `403 not_available_from_cli` で断る。金額は画面で人が入れる）。
 
+### 記事（読みもの）を書く（事務局名義）
+
+記事は、`/write` の記事 API（`/write/api/guides`。書き手が使うのと同じ経路）を、管理者の ID トークンで呼ぶ。事務局が提供者の代わりに書く（オーナー決定 2026-11-14：**公開名義は「NIHO kamakura」**、写真は権利を確認ずみのものだけを上げるので権利確認の入力は不要、公開と停止も CLI で行ってよい）。記事の保存・公開の検証（題・見出し・カテゴリー・言語・写真の掲載確認）は、書き手のときと同じサーバーの検証。
+
+```json
+{ "slug": "rainy-kamakura", "title": "雨の日の鎌倉", "description": "雨の日の過ごし方。", "categorySlug": "walks",
+  "content": { "markdown": "## 屋根の下で\n\n雨の日は、手を動かす体験がいいです。" } }
+```
+
+```bash
+node scripts/experience/ops.mjs guide categories                                   # 選べるカテゴリー
+node scripts/experience/ops.mjs guide create --provider <providerId> --file article.json --yes   # 下書き（言語は ja、著者は NIHO kamakura）
+node scripts/experience/ops.mjs guide draft --id <articleId> --file changes.json --yes            # 書いたキーだけ変える
+node scripts/experience/ops.mjs guide photo-add --id <articleId> --file 写真.jpg --alt "代替テキスト" --cover --yes   # --cover で表紙に
+node scripts/experience/ops.mjs guide publish --id <articleId>                       # 何が公開されるかを見る
+node scripts/experience/ops.mjs guide publish --id <articleId> --yes                 # 公開（本番は依頼した人の了承を取ってから）
+node scripts/experience/ops.mjs guide stop --id <articleId> --yes                    # 停止
+```
+
+- `--provider` は記事が属する提供者（存在する提供者なら、OWNER でなくてよい）。`create` は slug から決めた ID で作るので、同じ slug をもう一度流しても増えない。`photo-add` は、サーバーが操作 ID を先に記録するので「記録済み」を保存済みとは見なさない：アップロードに失敗した同じ日の再実行も、新しい操作 ID で上げ直す（途中で残った写真は未確認のままで、公開されない）。`--cover` をつけた再実行で、その記事の表紙がすでに同じ代替テキストとクレジットの確認済みの写真なら、何も送らない。`content.author` を書けば著者を変えられる（既定の紹介文は仮：`scripts/experience/ops/guide.ts` の `OFFICE_AUTHOR`）。
+- 写真は JPEG・PNG（10MB まで）。アップロードすると、掲載の確認（クレジットは `--credit`、既定は NIHO kamakura）までを行う。本文に使うときは、結果の `assetId` を記事の Markdown の写真の記法に書く。
+- 読んだ版（`expectedRevision`）を付けて送る。画面などで先に変わっていたら `409`（終了コード 4）で上書きしない。
+- 事務局が書いた記事は、提供者の OWNER の `/write` の一覧には出ない（作成者が事務局の ID のため）。体験への関連づけ（`draftProductLinks`）は CLI に入れていない（公開の関連表示は作成者が OWNER のときだけ出る作り）。
+- サーバー側：`GuideRepository` は、事務局が検証したときだけ `office` で作る（`guideOfficeRepository()`。フラグが OFF なら作れない）。事務局の ID は `adm_…` で、提供者の membership は見ず、提供者が存在することだけを見る。ホスト向けの `guideRepository()` は今までどおり OWNER だけ。
+
 ### まだ CLI に無いもの
 
-- **記事**（#576 ⑤）：記事は `/write`（ホストと同じログイン）で提供者の OWNER が書く作りで、管理画面側の記事の編集 API が無い（「先に画面だけがある操作は API を先に整える」）。AI に記事の下書き・公開を頼むには、OWNER の代わりに事務局が書く API（商品の代理登録と同じ形の `*AsAdmin`）を先につくる必要がある。方針の決定が要るので、Issue #576 に論点を残している。
 - **予約の取消・返金・精算・受取口座**：扱わない（領域に入れていない）。stg の合成データの片付けは、商品の `suspend` まで（予約の取消は返金を伴いうるので、画面で人が行う）。
 - 販売者（seller workspace）の新規登録：運用スクリプト `scripts/experience/provision-host-seller.mjs`。

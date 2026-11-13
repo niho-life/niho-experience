@@ -95,6 +95,16 @@ export function channelRuntime(): ChannelRuntime | null {
   }) : null;
 }
 
+/**
+ * 運営の CLI (#576 ⑤): the office writes articles for a provider. Built only for requests that carry a verified Admin
+ * assertion (`loadWriteContext`); never the host-facing repository.
+ */
+export function guideOfficeRepository(): GuideRepository | null {
+  if (!config.operatorCliEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuideRepository(pool, { office: true }) : null;
+}
+
 export function guideRepository(): GuideRepository | null {
   const pool = experiencePool();
   return pool ? new GuideRepository(pool) : null;

@@ -39,8 +39,8 @@ node scripts/experience/ops.mjs <対象> <操作> --file 変更.json --yes      
 
 - 商品の分類を入れる：`classification options` で値を確かめ、`{ "items": [{ "slug": "...", "classification": { "category": "walk" } }] }` を書いて、`classification apply --file` で差分を見てから `--yes`。書いたキーだけが変わる。手順は `docs/operator-cli.md` の「よくある作業」。
 - 街の人：`people list --unlisted` で候補を見て、`{ "items": [{ "providerId": "...", "listing": { "slug": "...", "roleJa": "...", "areaJa": "...", "sortOrder": 10 } }] }` を書き、`people apply --file` → 差分を見て `--yes`。外すのは `people withdraw --provider <id>`。**公開サイトにすぐ出る・消えるので、本番は依頼した人の了承を取ってから `--yes`。**
-- 新しい日本語の商品を出す：`docs/operator-cli.md`「新しい日本語の商品を出す」の順（`provider list` → `product create` → `draft` → `terms` → `calendar-add` → `photo-add` → `publish` の確認 → `publish --yes`）。**写真は、撮影者と許諾を人が確認したものだけ（`--photographer`・`--permission` を結果ごと Issue か PR に残す）。公開（`publish`）・停止（`suspend`）・料金や販売条件（`terms`）は、本番では依頼した人の了承を取ってから `--yes`。**
+- 新しい日本語の商品を出す：`docs/operator-cli.md`「新しい日本語の商品を出す」の順（`provider list` → `product create` → `draft` → `terms` → `calendar-add` → `photo-add` → `publish` の確認 → `publish --yes`）。**写真は、権利を確認ずみのものだけ上げる（オーナー決定：権利確認の入力は不要）。公開（`publish`）・停止（`suspend`）・料金や販売条件（`terms`）は、本番では依頼した人の了承を取ってから `--yes`。**
 - 相談の受付一覧：`inquiry list`（送り手の氏名・連絡先・本文は出ない）→ `inquiry update --id … --status … --assignee …`。開催回の担当：`assignment list` → `claim`／`decline`／`release`。**報酬（`SET_FEE`）・返金・精算・口座は扱えない。**
-- 記事は CLI に無い（`/write` で OWNER が書く作り）。頼まれたら、その旨を伝える。
+- 記事：`guide categories` → `guide create --provider … --file`（事務局名義の NIHO kamakura・言語 ja）→ `guide draft`／`guide photo-add --cover` → `guide publish`（何が公開されるかを見てから `--yes`。本番は了承を取る）。止めるのは `guide stop`。写真は権利ずみのものだけ。
 
 （対象が入るたびに、手順の要点だけをここへ、詳しくは `docs/operator-cli.md` の「よくある作業」へ足す。）

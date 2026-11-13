@@ -1,4 +1,5 @@
 import "server-only";
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import {
   StoreAccessDeniedError,
@@ -15,7 +16,9 @@ import {
   type SaveGuideDraftInput,
 } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
-import { experiencePublicationRepository, guideRepository } from "@/lib/experience/store-server";
+import { OPERATOR_ASSERTION_HEADER, openOperatorAssertion, operatorMutationAllowed } from "@/lib/admin/operator-cli";
+import { adminEmailAllowed } from "@/lib/admin/google-login";
+import { experiencePublicationRepository, guideOfficeRepository, guideRepository } from "@/lib/experience/store-server";
 import { clearSessionCookie, loadHostProvidersFresh, siteOrigin } from "@/lib/host/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { readBoundedJson, ResponseBodyTooLarge } from "@/lib/read-bounded-json";
@@ -40,6 +43,8 @@ type WriteProductRepository = Pick<ExperiencePublicationRepository, "listProduct
 
 export type WriteContext = {
   readonly actorId: string;
+  /** 運営の CLI (#576 ⑤): the office writes for a provider (an Admin assertion, not a provider OWNER's session). */
+  readonly office?: boolean;
   /** Safe client-facing identity projection. Private NIHO ids and email stay outside /write UI. */
   readonly ownerProviders: readonly { readonly id: string; readonly displayName: string }[];
   readonly ownerProviderIds: readonly string[];
@@ -58,6 +63,8 @@ export function writeImage(bytes: Buffer): Response {
 }
 
 export function writeMutationAllowed(request: Request): boolean {
+  const operator = operatorMutationAllowed(request);
+  if (operator !== null) return operator;
   return mutationFromSameOrigin(request.method, request.headers, siteOrigin());
 }
 
@@ -84,6 +91,17 @@ export async function loadWriteContext(providerId?: string): Promise<
   // would report success for an article travelers cannot see.
   if (config.apiMode === "http" && config.guidePublicSource !== "database") {
     return { ok: false, response: writeJson({ error: "write_not_ready" }, 503) };
+  }
+  // 運営の CLI (#576 ⑤): src/proxy.ts verified the admin's Google ID token and sealed this assertion; the allowlist is checked again.
+  if (config.operatorCliEnabled) {
+    const assertion = openOperatorAssertion((await headers()).get(OPERATOR_ASSERTION_HEADER), Date.now());
+    if (assertion) {
+      if (!adminEmailAllowed(assertion.email)) return { ok: false, response: writeJson({ error: "session_ended" }, 401) };
+      const repository = guideOfficeRepository();
+      const products = experiencePublicationRepository();
+      if (!repository || !products) return { ok: false, response: writeJson({ error: "unavailable" }, 503) };
+      return { ok: true, value: { actorId: assertion.actorId, office: true, ownerProviders: [], ownerProviderIds: [], repository, products } };
+    }
   }
   const providers = await loadHostProvidersFresh();
   if (providers.status === "signed-out") return { ok: false, response: writeJson({ error: "unauthenticated" }, 401) };

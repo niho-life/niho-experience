@@ -106,6 +106,11 @@ describe("operatorIdentity", () => {
     expect(operatorApiAllowed("/admin/api/experience-publications/providers/p/products/x/suspend")).toBe(true);
     expect(operatorBodyLimit("/admin/api/product-workspaces/p/products/x/media")).toBe(OPERATOR_PHOTO_BODY_LIMIT);
     for (const path of ["/admin/api/product-workspaces/p/products/x", "/admin/api/product-workspaces/p/provider-media", "/admin/api/people"]) expect(operatorBodyLimit(path), path).toBe(OPERATOR_BODY_LIMIT);
+    expect(operatorApiAllowed("/write/api/guides")).toBe(true);
+    expect(operatorApiAllowed("/write/api/guides/abc/publication")).toBe(true);
+    expect(operatorApiAllowed("/write/api/categories")).toBe(true);
+    expect(operatorBodyLimit("/write/api/guides/abc/media")).toBe(OPERATOR_PHOTO_BODY_LIMIT);
+    for (const path of ["/write/api/guides/abc/media/def", "/write/api/other", "/write/api/", "/write/guides", "/host/api/products"]) expect(operatorApiAllowed(path) && operatorBodyLimit(path) === OPERATOR_PHOTO_BODY_LIMIT, path).toBe(false);
     for (const path of ["/admin/api/refunds", "/admin/api/payouts", "/admin/api/bookings/x/cancel", "/admin/api/people-x", "/admin/auth/logout", "/admin/api/"]) expect(operatorApiAllowed(path), path).toBe(false);
   });
 });
@@ -193,6 +198,16 @@ describe("proxy (運営の CLI)", () => {
     expect(state.requests.record).not.toHaveBeenCalled();
     expect((await send("CLAIM")).status).toBe(200);
     expect(state.requests.record).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes the article routes under /write/api for a signed-in admin, records them, and refuses the rest of /write", async () => {
+    const make = (path: string, method = "POST") => proxy(cli(path, { method, body: method === "GET" ? undefined : { x: 1 } }));
+    const created = await make("/write/api/guides");
+    expect(created.status).toBe(200);
+    expect(state.requests.record).toHaveBeenCalledWith(expect.objectContaining({ path: "/write/api/guides", method: "POST", adminActorId: ACTOR }));
+    expect((await make("/write/api/guides/abc/publication", "DELETE")).status).toBe(200);
+    expect((await make("/write/api/uploads")).status).toBe(403);
+    expect((await make("/write/other")).status).toBe(200);
   });
 
   it("refuses a write it cannot record, and a body over the limit", async () => {

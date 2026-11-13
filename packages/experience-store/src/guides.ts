@@ -6,6 +6,7 @@ import {
   StoreNotFoundError,
   StoreValidationError,
 } from "./errors.ts";
+import { isAdminActorId } from "./admin-sessions.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import { assertNonEmptyText, assertStoreIdentifier } from "./validation.ts";
@@ -784,7 +785,16 @@ async function requireCurrentOwner(
   client: PoolClient,
   providerId: string,
   actorId: GuideActorId,
+  office = false,
 ): Promise<void> {
+  if (office) {
+    // 運営の CLI (#576 ⑤): the office writes for a provider. The web layer has verified an Admin session (the actor is an `adm_` ID,
+    // which no provider membership carries); only the provider has to exist.
+    if (!isAdminActorId(actorId)) throw new StoreAccessDeniedError();
+    const provider = await client.query("SELECT 1 FROM experience_providers WHERE id=$1 FOR SHARE", [providerId]);
+    if (provider.rows[0] === undefined) throw new StoreAccessDeniedError();
+    return;
+  }
   const result = await client.query(
     `SELECT 1 FROM provider_memberships
       WHERE provider_id=$1 AND niho_user_id=$2 AND active=true AND role='OWNER'
@@ -798,6 +808,7 @@ async function selectOwnedArticle(
   client: PoolClient,
   actorId: GuideActorId,
   articleId: string,
+  office = false,
 ): Promise<GuideArticleRecord> {
   const result = await client.query<DbRow>(
     `SELECT ${ARTICLE_COLUMNS}
@@ -809,7 +820,7 @@ async function selectOwnedArticle(
   const row = result.rows[0];
   if (row === undefined) throw new StoreAccessDeniedError();
   const article = articleFromRow(row);
-  await requireCurrentOwner(client, article.subject.providerId, actorId);
+  await requireCurrentOwner(client, article.subject.providerId, actorId, office);
   return article;
 }
 
@@ -817,6 +828,7 @@ async function getOwnedArticleForUpdate(
   client: PoolClient,
   actorId: GuideActorId,
   articleId: string,
+  office = false,
 ): Promise<GuideArticleRecord> {
   const result = await client.query<DbRow>(
     `SELECT ${ARTICLE_COLUMNS}
@@ -829,7 +841,7 @@ async function getOwnedArticleForUpdate(
   const row = result.rows[0];
   if (row === undefined) throw new StoreAccessDeniedError();
   const article = articleFromRow(row);
-  await requireCurrentOwner(client, article.subject.providerId, actorId);
+  await requireCurrentOwner(client, article.subject.providerId, actorId, office);
   return article;
 }
 
@@ -920,12 +932,17 @@ async function activePublicLinksByPublication(
              AND publication.subject_kind='PROVIDER'
              AND publication.subject_provider_id=l.provider_id
         )
-        AND EXISTS (
-          SELECT 1 FROM provider_memberships membership
-           WHERE membership.provider_id=l.provider_id
-             AND membership.niho_user_id=l.link_created_by_niho_user_id
-             AND membership.active=true
-             AND membership.role='OWNER'
+        AND (
+          -- 運営の CLI (#576 ⑤): a link made when the office published (the creator is an Admin actor ID, which only a verified
+          -- Admin session and the office repository can write, and no provider membership carries) stays with that publication.
+          l.link_created_by_niho_user_id ~ '^adm_[0-9a-f]{32}$'
+          OR EXISTS (
+            SELECT 1 FROM provider_memberships membership
+             WHERE membership.provider_id=l.provider_id
+               AND membership.niho_user_id=l.link_created_by_niho_user_id
+               AND membership.active=true
+               AND membership.role='OWNER'
+          )
         )
       ORDER BY l.publication_id, l.display_order NULLS LAST, l.provider_id, l.product_id`,
     [publicationIds],
@@ -992,9 +1009,15 @@ async function activePublicMediaByPublication(
 
 export class GuideRepository {
   readonly #pool: Pool;
+  readonly #office: boolean;
 
-  constructor(pool: Pool) {
+  /**
+   * `office: true` (運営の CLI, #576 ⑤) is for code that has verified an Admin session: the actor is an `adm_` ID and writes for
+   * any provider's articles instead of a provider OWNER's own. The host-facing repository is never built with it.
+   */
+  constructor(pool: Pool, options: { readonly office?: boolean } = {}) {
     this.#pool = pool;
+    this.#office = options.office === true;
   }
 
   async listActiveCategories(): Promise<readonly GuideCategory[]> {
@@ -1026,7 +1049,7 @@ export class GuideRepository {
     }
     try {
       return await withTransaction(this.#pool, async (client) => {
-        await requireCurrentOwner(client, input.subject.providerId, actorId);
+        await requireCurrentOwner(client, input.subject.providerId, actorId, this.#office);
         const inserted = await client.query(
           `INSERT INTO guide_articles (
              id, slug, creator_niho_user_id, subject_kind, subject_provider_id,
@@ -1046,7 +1069,7 @@ export class GuideRepository {
           ],
         );
         if (inserted.rows[0] === undefined) throw new StoreConflictError("The guide ID or global slug is already in use.");
-        return selectOwnedArticle(client, actorId, input.id);
+        return selectOwnedArticle(client, actorId, input.id, this.#office);
       });
     } catch (error) {
       if (isUniqueViolation(error)) throw new StoreConflictError("The guide ID or global slug is already in use.");
@@ -1058,6 +1081,18 @@ export class GuideRepository {
   async listArticles(actorId: GuideActorId): Promise<readonly GuideArticleRecord[]> {
     validateActorId(actorId);
     return withTransaction(this.#pool, async (client) => {
+      if (this.#office) {
+        if (!isAdminActorId(actorId)) throw new StoreAccessDeniedError();
+        const all = await client.query<DbRow>(
+          `SELECT ${ARTICLE_COLUMNS}
+             FROM guide_articles a
+             LEFT JOIN guide_publications p ON p.id=a.current_publication_id
+            WHERE a.subject_kind='PROVIDER'
+            ORDER BY a.updated_at DESC, a.id
+            LIMIT 500`,
+        );
+        return all.rows.map(articleFromRow);
+      }
       const owners = await client.query<DbRow>(
         `SELECT provider_id FROM provider_memberships
           WHERE niho_user_id=$1 AND active=true AND role='OWNER'
@@ -1083,7 +1118,7 @@ export class GuideRepository {
   async getArticle(actorId: GuideActorId, articleId: string): Promise<GuideArticleRecord> {
     validateActorId(actorId);
     assertStoreIdentifier(articleId, "articleId");
-    return withTransaction(this.#pool, (client) => selectOwnedArticle(client, actorId, articleId));
+    return withTransaction(this.#pool, (client) => selectOwnedArticle(client, actorId, articleId, this.#office));
   }
 
   async saveDraft(
@@ -1099,7 +1134,7 @@ export class GuideRepository {
     const review = reviewGuideMarkdown(input.content.markdown);
     try {
       return await withTransaction(this.#pool, async (client) => {
-        const article = await getOwnedArticleForUpdate(client, actorId, articleId);
+        const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
         if (article.revision !== expectedRevision) throw new StoreConflictError("Guide draft revision mismatch.");
         const cover = input.cover === undefined ? article.cover : input.cover ?? undefined;
         if (input.draftProductLinks !== undefined) {
@@ -1141,7 +1176,7 @@ export class GuideRepository {
             );
           }
         }
-        return selectOwnedArticle(client, actorId, articleId);
+        return selectOwnedArticle(client, actorId, articleId, this.#office);
       });
     } catch (error) {
       if (isUniqueViolation(error)) throw new StoreConflictError("The global guide slug is already in use.");
@@ -1162,7 +1197,7 @@ export class GuideRepository {
       throw new StoreValidationError("guide publication visibility is invalid.");
     }
     return withTransaction(this.#pool, async (client) => {
-      const article = await getOwnedArticleForUpdate(client, actorId, articleId);
+      const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
       if (article.status === "OPS_STOPPED") {
         throw new StoreConflictError("An operations-stopped guide must be released before publication.");
       }
@@ -1353,7 +1388,7 @@ export class GuideRepository {
     assertStoreIdentifier(articleId, "articleId");
     validateRevision(expectedRevision);
     return withTransaction(this.#pool, async (client) => {
-      const article = await getOwnedArticleForUpdate(client, actorId, articleId);
+      const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
       if (article.revision !== expectedRevision) throw new StoreConflictError("Guide draft revision mismatch.");
       if (article.status !== "PUBLISHED") throw new StoreConflictError("The guide has no current publication to stop.");
       await client.query(
@@ -1363,7 +1398,7 @@ export class GuideRepository {
           WHERE id=$1`,
         [articleId],
       );
-      return selectOwnedArticle(client, actorId, articleId);
+      return selectOwnedArticle(client, actorId, articleId, this.#office);
     });
   }
 
@@ -1378,7 +1413,7 @@ export class GuideRepository {
     assertNonEmptyText(input.objectKey, "guide media objectKey", 512);
     if (/[\u0000-\u001f\u007f]/.test(input.objectKey)) throw new StoreValidationError("guide media objectKey contains control characters.");
     return withTransaction(this.#pool, async (client) => {
-      await getOwnedArticleForUpdate(client, actorId, articleId);
+      await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
       const result = await client.query<DbRow>(
         `INSERT INTO guide_media_assets (
            id, article_id, creator_niho_user_id, uploaded_by_actor_id, object_key
@@ -1408,7 +1443,7 @@ export class GuideRepository {
       || !Number.isSafeInteger(input.byteSize) || input.byteSize < 1 || input.byteSize > 10 * 1024 * 1024
     ) throw new StoreValidationError("guide media output dimensions or size are invalid.");
     return withTransaction(this.#pool, async (client) => {
-      await getOwnedArticleForUpdate(client, actorId, articleId);
+      await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
       const result = await client.query<DbRow>(
         `UPDATE guide_media_assets
             SET state='READY', width=$3, height=$4, byte_size=$5, ready_at=clock_timestamp()
@@ -1428,7 +1463,7 @@ export class GuideRepository {
     assertStoreIdentifier(articleId, "articleId");
     validateAssetId(assetId);
     return withTransaction(this.#pool, async (client) => {
-      await selectOwnedArticle(client, actorId, articleId);
+      await selectOwnedArticle(client, actorId, articleId, this.#office);
       const result = await client.query<DbRow>(
         `SELECT ${MEDIA_ASSET_COLUMNS}
            FROM guide_media_assets
@@ -1447,7 +1482,7 @@ export class GuideRepository {
     validateActorId(actorId);
     assertStoreIdentifier(articleId, "articleId");
     return withTransaction(this.#pool, async (client) => {
-      await selectOwnedArticle(client, actorId, articleId);
+      await selectOwnedArticle(client, actorId, articleId, this.#office);
       const result = await client.query<DbRow>(
         `SELECT ${MEDIA_ASSET_COLUMNS}
            FROM guide_media_assets
@@ -1486,7 +1521,7 @@ export class GuideRepository {
     assertNonEmptyText(publicCredit, "guide media publicCredit", 300);
     const normalizedCredit = publicCredit.trim();
     return withTransaction(this.#pool, async (client) => {
-      await getOwnedArticleForUpdate(client, actorId, articleId);
+      await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
       const currentResult = await client.query<DbRow>(
         `SELECT ${MEDIA_ASSET_COLUMNS}
            FROM guide_media_assets
@@ -1535,7 +1570,7 @@ export class GuideRepository {
     validateAssetId(assetId);
     if (expectedRevision !== undefined) validateRevision(expectedRevision);
     return withTransaction(this.#pool, async (client) => {
-      const article = await getOwnedArticleForUpdate(client, actorId, articleId);
+      const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
       if (expectedRevision !== undefined && article.revision !== expectedRevision) {
         throw new StoreConflictError("Guide draft revision mismatch.");
       }
@@ -1572,7 +1607,7 @@ export class GuideRepository {
           [articleId, assetId],
         );
       }
-      return selectOwnedArticle(client, actorId, articleId);
+      return selectOwnedArticle(client, actorId, articleId, this.#office);
     });
   }
 
