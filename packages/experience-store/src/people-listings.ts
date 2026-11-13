@@ -15,6 +15,14 @@ type DbRow = Record<string, unknown>;
 
 export const PEOPLE_LISTING_LIMITS = { roleMax: 80, areaMax: 40, quoteMax: 160, introMax: 1200, slugMin: 2, slugMax: 60 } as const;
 
+/** A product a person is met through, of any provider (#585). */
+export interface PeopleListingExperienceRef {
+  readonly providerId: string;
+  readonly productId: string;
+}
+
+export const PEOPLE_LISTING_EXPERIENCES_MAX = 50;
+
 export interface PeopleListingInput {
   readonly slug: string;
   readonly roleJa: string;
@@ -23,6 +31,11 @@ export interface PeopleListingInput {
   /** null: the provider's own bio is shown, if they wrote one. */
   readonly introJa: string | null;
   readonly sortOrder: number;
+  /**
+   * Other providers' (or the provider's own) products this person is met through (#585), in the order shown. Left out (undefined):
+   * the links are not touched. An array replaces them, an empty one clears them.
+   */
+  readonly experiences?: readonly PeopleListingExperienceRef[];
 }
 
 export interface AdminPeopleListingRow {
@@ -33,7 +46,12 @@ export interface AdminPeopleListingRow {
   readonly hasHostBio: boolean;
   /** Public experiences this provider has now (any language). */
   readonly publicExperienceCount: number;
-  readonly listing: (PeopleListingInput & { readonly version: number; readonly updatedAtUtc: string }) | null;
+  readonly listing: (Omit<PeopleListingInput, "experiences"> & {
+    readonly version: number;
+    readonly updatedAtUtc: string;
+    /** The linked products with what the Admin needs to recognise them. */
+    readonly experiences: readonly (PeopleListingExperienceRef & { readonly slug: string; readonly title: string; readonly status: "DRAFT" | "PUBLISHED" | "ARCHIVED" })[];
+  }) | null;
   /** The person is on the public pages right now. */
   readonly visible: boolean;
 }
@@ -47,7 +65,10 @@ export interface PublicPerson {
   /** The listing's introduction, else the provider's own bio, else null. */
   readonly introJa: string | null;
   readonly photo: { readonly src: string; readonly altJa: string; readonly credit: string | null };
-  /** The slugs of this person's public experiences, newest first (the page filters them to the language it shows). */
+  /**
+   * The slugs of the public experiences this person is met through, newest first: the provider's own and the products linked
+   * to the listing (#585). The page filters them to the language it shows.
+   */
   readonly experienceSlugs: readonly string[];
   readonly sortOrder: number;
 }
@@ -82,6 +103,20 @@ export function validatePeopleListingInput(raw: PeopleListingInput): PeopleListi
     }
   }
   if (!Number.isInteger(raw.sortOrder) || raw.sortOrder < 0 || raw.sortOrder > 9999) throw new StoreValidationError("sortOrder must be an integer from 0 to 9999.");
+  let experiences: PeopleListingExperienceRef[] | undefined;
+  if (raw.experiences !== undefined) {
+    if (!Array.isArray(raw.experiences) || raw.experiences.length > PEOPLE_LISTING_EXPERIENCES_MAX) throw new StoreValidationError(`experiences must be a list of at most ${PEOPLE_LISTING_EXPERIENCES_MAX} products.`);
+    const seen = new Set<string>();
+    experiences = raw.experiences.map((ref, index) => {
+      if (!ref || typeof ref !== "object" || typeof ref.providerId !== "string" || typeof ref.productId !== "string") throw new StoreValidationError(`experiences[${index}] needs providerId and productId.`);
+      assertStoreIdentifier(ref.providerId, `experiences[${index}].providerId`);
+      assertStoreIdentifier(ref.productId, `experiences[${index}].productId`);
+      const key = `${ref.providerId}\u0000${ref.productId}`;
+      if (seen.has(key)) throw new StoreValidationError(`experiences[${index}] appears twice.`);
+      seen.add(key);
+      return { providerId: ref.providerId, productId: ref.productId };
+    });
+  }
   return {
     slug,
     roleJa: line(raw.roleJa, "roleJa", PEOPLE_LISTING_LIMITS.roleMax, true) as string,
@@ -89,6 +124,7 @@ export function validatePeopleListingInput(raw: PeopleListingInput): PeopleListi
     quoteJa: line(raw.quoteJa, "quoteJa", PEOPLE_LISTING_LIMITS.quoteMax, false),
     introJa: intro,
     sortOrder: raw.sortOrder,
+    ...(experiences === undefined ? {} : { experiences }),
   };
 }
 
@@ -106,7 +142,11 @@ const PUBLIC_COLUMNS = `
   profile.public_display_name,
   photo.asset_id::text AS photo_asset_id,photo.alt_text_ja AS photo_alt_ja,photo.public_credit AS photo_credit,
   COALESCE((SELECT jsonb_agg(visible.slug ORDER BY visible.published_at DESC,visible.slug)
-              FROM visible_publications visible WHERE visible.provider_id=listing.provider_id),'[]'::jsonb) AS experience_slugs`;
+              FROM visible_publications visible
+             WHERE visible.provider_id=listing.provider_id
+                OR EXISTS (SELECT 1 FROM experience_people_listing_experiences link
+                            WHERE link.listing_provider_id=listing.provider_id
+                              AND link.product_provider_id=visible.provider_id AND link.product_id=visible.product_id)),'[]'::jsonb) AS experience_slugs`;
 
 const PUBLIC_FROM = `
   FROM experience_people_listings listing
@@ -133,6 +173,21 @@ function publicPerson(row: DbRow): PublicPerson {
   };
 }
 
+/** Replaces the linked products as a whole, in the order given. Every product must exist and not be archived. */
+async function replaceLinks(client: { query: Pool["query"] }, listingProviderId: string, refs: readonly PeopleListingExperienceRef[]): Promise<void> {
+  for (const ref of refs) {
+    const found = await client.query("SELECT 1 FROM experience_products WHERE provider_id=$1 AND id=$2 AND status<>'ARCHIVED' FOR SHARE", [ref.providerId, ref.productId]);
+    if (!found.rows[0]) throw new StoreNotFoundError("A linked experience was not found.");
+  }
+  await client.query("DELETE FROM experience_people_listing_experiences WHERE listing_provider_id=$1", [listingProviderId]);
+  for (const [index, ref] of refs.entries()) {
+    await client.query(
+      "INSERT INTO experience_people_listing_experiences (listing_provider_id,product_provider_id,product_id,sort_order) VALUES ($1,$2,$3,$4)",
+      [listingProviderId, ref.providerId, ref.productId, index],
+    );
+  }
+}
+
 export class PeopleListingRepository {
   readonly #pool: Pool;
 
@@ -151,7 +206,12 @@ export class PeopleListingRepository {
                        WHERE photo.provider_id=profile.provider_id AND photo.placement='PROVIDER_PHOTO') AS photo_ready,
               EXISTS (SELECT 1 FROM provider_host_bios bio WHERE bio.provider_id=profile.provider_id) AS has_bio,
               (SELECT count(*)::int FROM visible_publications visible WHERE visible.provider_id=profile.provider_id) AS experience_count,
-              listing.slug,listing.role_ja,listing.area_ja,listing.quote_ja,listing.intro_ja,listing.sort_order,listing.version,listing.updated_at
+              listing.slug,listing.role_ja,listing.area_ja,listing.quote_ja,listing.intro_ja,listing.sort_order,listing.version,listing.updated_at,
+              COALESCE((SELECT jsonb_agg(jsonb_build_object('providerId',link.product_provider_id,'productId',link.product_id,'slug',product.slug,'title',product.public_title,'status',product.status)
+                                         ORDER BY link.sort_order,product.slug)
+                          FROM experience_people_listing_experiences link
+                          JOIN experience_products product ON product.provider_id=link.product_provider_id AND product.id=link.product_id
+                         WHERE link.listing_provider_id=listing.provider_id),'[]'::jsonb) AS linked_experiences
          FROM experience_provider_public_profiles profile
          LEFT JOIN experience_people_listings listing ON listing.provider_id=profile.provider_id
         ORDER BY (listing.provider_id IS NULL),listing.sort_order,profile.public_display_name COLLATE "C",profile.provider_id COLLATE "C"
@@ -170,6 +230,10 @@ export class PeopleListingRepository {
           quoteJa: typeof row.quote_ja === "string" ? row.quote_ja : null,
           introJa: typeof row.intro_ja === "string" ? row.intro_ja : null,
           sortOrder: Number(row.sort_order), version: Number(row.version), updatedAtUtc: iso(row.updated_at),
+          experiences: (Array.isArray(row.linked_experiences) ? row.linked_experiences : []).map((link: Record<string, unknown>) => ({
+            providerId: String(link.providerId), productId: String(link.productId), slug: String(link.slug), title: String(link.title),
+            status: link.status as "DRAFT" | "PUBLISHED" | "ARCHIVED",
+          })),
         } : null,
         visible: listed && row.photo_ready === true,
       };
@@ -200,6 +264,7 @@ export class PeopleListingRepository {
             [providerId, input.slug, input.roleJa, input.areaJa, input.quoteJa, input.introJa, input.sortOrder, adminNihoUserId, expectedVersion],
           );
         if (result.rowCount !== 1) throw new StoreConflictError("The listing changed; reload and try again.");
+        if (input.experiences !== undefined) await replaceLinks(client, providerId, input.experiences);
       } catch (error) {
         if ((error as { code?: string }).code === "23505") throw new StoreConflictError("That slug is already used by another person.");
         throw error;
@@ -236,21 +301,31 @@ export class PeopleListingRepository {
   }
 
   /**
-   * For an experience page or card that wants a link to the person: which listed person delivers each of these
-   * experiences (by experience slug). Experiences whose provider is not on 街の人 are left out.
+   * For an experience page or card that wants a link to the people: which listed people an experience is met through (by
+   * experience slug), in the Admin's order: the provider's own listing and the people the product is linked to (#585).
+   * Experiences nobody is listed for are left out.
    */
-  async personForExperiences(experienceSlugs: readonly string[]): Promise<ReadonlyMap<string, { readonly slug: string; readonly name: string }>> {
+  async personForExperiences(experienceSlugs: readonly string[]): Promise<ReadonlyMap<string, readonly { readonly slug: string; readonly name: string }[]>> {
     const unique = [...new Set(experienceSlugs)].filter((slug) => typeof slug === "string" && slug.length > 0 && slug.length <= 160).slice(0, 200);
     if (unique.length === 0) return new Map();
     const result = await this.#pool.query<DbRow>(
       `WITH ${VISIBLE_PUBLICATIONS_CTE}
        SELECT visible.slug AS experience_slug,listing.slug AS person_slug,profile.public_display_name
          FROM visible_publications visible
-         JOIN experience_people_listings listing ON listing.provider_id=visible.provider_id
+         JOIN experience_people_listings listing
+           ON listing.provider_id=visible.provider_id
+           OR EXISTS (SELECT 1 FROM experience_people_listing_experiences link
+                       WHERE link.listing_provider_id=listing.provider_id AND link.product_provider_id=visible.provider_id AND link.product_id=visible.product_id)
          JOIN experience_provider_public_profiles profile ON profile.provider_id=listing.provider_id
          ${PHOTO_JOIN}
-        WHERE visible.slug = ANY($1::text[])`, [unique],
+        WHERE visible.slug = ANY($1::text[])
+        ORDER BY listing.sort_order,listing.slug COLLATE "C"`, [unique],
     );
-    return new Map(result.rows.map((row) => [String(row.experience_slug), { slug: String(row.person_slug), name: String(row.public_display_name) }]));
+    const map = new Map<string, { slug: string; name: string }[]>();
+    for (const row of result.rows) {
+      const slug = String(row.experience_slug);
+      map.set(slug, [...(map.get(slug) ?? []), { slug: String(row.person_slug), name: String(row.public_display_name) }]);
+    }
+    return map;
   }
 }

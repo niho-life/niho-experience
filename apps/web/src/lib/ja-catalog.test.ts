@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SitePublicExperience } from "./experience/site-publications";
-import { filterJaCards, jaCapacity, jaCardOf, jaCategoryCounts, jaDuration, jaListHref, jaQueryHasFilter, jaYen, parseJaListQuery, type JaCard } from "./ja-catalog";
+import { filterJaCards, jaCapacity, jaCardOf, jaGuideLine, jaCategoryCounts, jaDuration, jaListHref, jaQueryHasFilter, jaYen, parseJaListQuery, type JaCard } from "./ja-catalog";
 
 /** 日本語サイトの一覧とカード (#529): the card from a publication, the query, the filters. Synthetic data only. */
 const DAYS = [{ key: "2026-11-15" }, { key: "2026-11-16" }, { key: "2026-11-17" }];
@@ -39,6 +39,15 @@ describe("jaCardOf", () => {
   it("says 「が案内」 for a business, and nothing when no public name is confirmed (the seller is not the person)", () => {
     expect(jaCardOf(item({ providerKind: "BUSINESS", providerPublicName: "鎌倉の会社" }), undefined)?.withLine).toBe("鎌倉の会社が案内");
     expect(jaCardOf(item({ providerPublicName: null }), undefined)?.withLine).toBeNull();
+  });
+
+  it("says who guides it when people on 街の人 are linked (#585), in place of the provider's name, up to three", () => {
+    expect(jaCardOf(item(), undefined, [{ name: "菅 倫明" }])?.withLine).toBe("菅 倫明さんが案内");
+    expect(jaCardOf(item(), undefined, [{ name: "菅 倫明" }, { name: "高浜 拓也" }])?.withLine).toBe("菅 倫明・高浜 拓也が案内");
+    expect(jaGuideLine(["a", "b", "c", "d"])).toBe("a・b・cが案内");
+    expect(jaGuideLine([])).toBeNull();
+    expect(jaGuideLine([" ", ""])).toBeNull();
+    expect(jaCardOf(item(), undefined, [])?.withLine).toBe("まさとさんと");
   });
 
   it("is not a card without Japanese text or a sale, and an unclassified product has the empty classification", () => {

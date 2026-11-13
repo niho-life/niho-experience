@@ -11,6 +11,11 @@ import { EXIT, OpsError, failureOf, writeOne, type Action, type ApiResponse, typ
 
 const API = "/admin/api/people";
 const FIELDS = ["slug", "roleJa", "areaJa", "quoteJa", "introJa", "sortOrder"] as const;
+/** 街の人 → 体験 (#585): the products a person is met through. Names the way a product is named in the classification file. */
+const PRODUCTS_API = "/admin/api/product-classifications";
+const EXPERIENCES_MAX = 50;
+export interface ExperienceRef { readonly providerId: string; readonly productId: string }
+interface ProductRef extends ExperienceRef { readonly slug: string }
 
 export interface PersonRow {
   readonly providerId: string;
@@ -18,7 +23,7 @@ export interface PersonRow {
   readonly photoReady: boolean;
   readonly hasHostBio: boolean;
   readonly publicExperienceCount: number;
-  readonly listing: (Record<(typeof FIELDS)[number], unknown> & { readonly version: number; readonly updatedAtUtc: string }) | null;
+  readonly listing: (Record<(typeof FIELDS)[number], unknown> & { readonly version: number; readonly updatedAtUtc: string; readonly experiences?: readonly (ExperienceRef & { readonly slug?: string })[] }) | null;
   readonly visible: boolean;
 }
 
@@ -32,7 +37,13 @@ async function listPeople(context: Context): Promise<readonly PersonRow[]> {
   return people as PersonRow[];
 }
 
-const fieldsOf = (listing: PersonRow["listing"]): Record<string, unknown> => listing ? Object.fromEntries(FIELDS.map((field) => [field, listing[field] ?? null])) : {};
+const fieldsOf = (listing: PersonRow["listing"]): Record<string, unknown> => listing
+  ? {
+    ...Object.fromEntries(FIELDS.map((field) => [field, listing[field] ?? null])),
+    // The links as the server takes them (providerId and productId, in order), when the server says them.
+    ...(Array.isArray(listing.experiences) ? { experiences: listing.experiences.map((link) => ({ providerId: link.providerId, productId: link.productId })) } : {}),
+  }
+  : {};
 
 export interface PersonItem {
   readonly providerId: string;
@@ -49,8 +60,17 @@ export function parsePeopleFile(text: string): readonly PersonItem[] {
   return items.map((item, index) => {
     const where = `items[${index}]`;
     if (!isRecord(item) || Object.keys(item).sort().join() !== "listing,providerId" || typeof item.providerId !== "string" || !item.providerId || !isRecord(item.listing)) throw new OpsError("invalid_file", `${where} needs providerId and a listing object.`);
-    const extra = Object.keys(item.listing).filter((key) => !(FIELDS as readonly string[]).includes(key));
-    if (extra.length > 0 || Object.keys(item.listing).length === 0) throw new OpsError("invalid_file", `${where}.listing takes ${FIELDS.join(", ")} (at least one).`);
+    const extra = Object.keys(item.listing).filter((key) => !(FIELDS as readonly string[]).includes(key) && key !== "experiences");
+    if (extra.length > 0 || Object.keys(item.listing).length === 0) throw new OpsError("invalid_file", `${where}.listing takes ${[...FIELDS, "experiences"].join(", ")} (at least one).`);
+    const experiences = item.listing.experiences;
+    if (experiences !== undefined) {
+      if (!Array.isArray(experiences) || experiences.length > EXPERIENCES_MAX) throw new OpsError("invalid_file", `${where}.listing.experiences must be a list of at most ${EXPERIENCES_MAX} products.`);
+      for (const entry of experiences) {
+        const slug = typeof entry === "string" && entry !== "";
+        const ids = isRecord(entry) && Object.keys(entry).sort().join() === "productId,providerId" && typeof entry.providerId === "string" && typeof entry.productId === "string";
+        if (!slug && !ids) throw new OpsError("invalid_file", `${where}.listing.experiences names a product by its slug, or by {"providerId", "productId"}.`);
+      }
+    }
     if (seen.has(item.providerId)) throw new OpsError("invalid_file", `${where}: ${item.providerId} appears twice.`);
     seen.add(item.providerId);
     return { providerId: item.providerId, listing: item.listing };
@@ -66,6 +86,40 @@ export function desiredListing(current: Readonly<Record<string, unknown>> | null
   } catch (error) {
     throw new OpsError("invalid_listing", error instanceof Error ? error.message : "The listing is invalid.");
   }
+}
+
+/**
+ * The products a listing's `experiences` name: a slug resolves to its one product (more than one provider with that slug is
+ * `slug_is_ambiguous_use_providerId_and_productId`), a `{providerId, productId}` must exist. Archived products are not offered.
+ */
+export function resolveExperiences(products: readonly (ExperienceRef & { readonly slug: string; readonly status?: string })[], entries: readonly unknown[]): ExperienceRef[] {
+  const usable = products.filter((product) => product.status !== "ARCHIVED") as readonly ProductRef[];
+  const seen = new Set<string>();
+  return entries.map((entry) => {
+    let match: ProductRef | undefined;
+    if (typeof entry === "string") {
+      const found = usable.filter((product) => product.slug === entry);
+      if (found.length > 1) throw new OpsError("slug_is_ambiguous_use_providerId_and_productId", `The slug ${entry} is used by more than one provider; name it by providerId and productId.`);
+      match = found[0];
+      if (!match) throw new OpsError("unknown_experience", `No experience has the slug ${entry}.`);
+    } else {
+      const ref = entry as ExperienceRef;
+      match = usable.find((product) => product.providerId === ref.providerId && product.productId === ref.productId);
+      if (!match) throw new OpsError("unknown_experience", `No experience ${ref.providerId}/${ref.productId}.`);
+    }
+    const key = `${match.providerId}/${match.productId}`;
+    if (seen.has(key)) throw new OpsError("invalid_listing", `${match.slug} appears twice in experiences.`);
+    seen.add(key);
+    return { providerId: match.providerId, productId: match.productId };
+  });
+}
+
+async function listProductRefs(context: Context): Promise<readonly (ProductRef & { readonly status?: string })[]> {
+  const response = await context.api.get(PRODUCTS_API);
+  if (response.status !== 200) throw failureOf(response, "product list");
+  const products = (response.body as { products?: unknown } | null)?.products;
+  if (!Array.isArray(products)) throw new OpsError("unexpected_response", "The product list was not understood.");
+  return products as (ProductRef & { readonly status?: string })[];
 }
 
 interface State { readonly version: number | null; readonly listing: Record<string, unknown> }
@@ -89,24 +143,28 @@ const respondOk = (response: ApiResponse) => response;
 
 const apply: Action = {
   tier: "publish",
-  summary: "Lists providers on 街の人, or changes their row (slug, roleJa, areaJa, quoteJa, introJa, sortOrder). Only the keys given change. A person appears on the public site at once. Without --yes it prints the differences only.",
+  summary: "Lists providers on 街の人, or changes their row (slug, roleJa, areaJa, quoteJa, introJa, sortOrder, experiences: the products they are met through, by slug or {providerId, productId}, replaced as a whole when given). Only the keys given change. A person appears on the public site at once. Without --yes it prints the differences only.",
   async run(context) {
     const file = context.args.flags.file;
     if (typeof file !== "string") throw new OpsError("usage", "--file <people.json> is required.", EXIT.usage);
     const text = context.readFile(file);
     const seed = createHash("sha256").update(text).digest("hex").slice(0, 16);
     const results: WriteResult[] = [];
-    for (const item of parsePeopleFile(text)) {
+    const items = parsePeopleFile(text);
+    // Products are read once, and only when a listing names experiences.
+    const products = items.some((item) => item.listing.experiences !== undefined) ? await listProductRefs(context) : [];
+    for (const item of items) {
       try {
+        const given = item.listing.experiences === undefined ? item.listing : { ...item.listing, experiences: resolveExperiences(products, item.listing.experiences as unknown[]) };
         let version: number | null = null;
         results.push(await writeOne<Record<string, unknown>>(context, [seed, "people-apply"], {
           key: item.providerId,
           read: async () => { const state = stateOf(await listPeople(context), item.providerId); version = state.version; return state.listing; },
-          desired: (current) => desiredListing(version === null ? null : current, item.listing),
+          desired: (current) => desiredListing(version === null ? null : current, given),
           send: async (_current, desired, operationId) => respondOk(await context.api.send("PUT", API, { providerId: item.providerId, listing: desired, expectedVersion: version }, operationId)),
         }));
       } catch (error) {
-        if (error instanceof OpsError && error.exit !== EXIT.failed && error.code !== "invalid_listing" && error.code !== "provider_has_no_public_profile") throw error;
+        if (error instanceof OpsError && error.exit !== EXIT.failed && error.code !== "invalid_listing" && error.code !== "provider_has_no_public_profile" && error.code !== "unknown_experience" && error.code !== "slug_is_ambiguous_use_providerId_and_productId") throw error;
         results.push(failed(item.providerId, error));
       }
     }

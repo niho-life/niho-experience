@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { run } from "../../../../scripts/experience/ops/main.ts";
-import { desiredListing, parsePeopleFile, type PersonRow } from "../../../../scripts/experience/ops/people.ts";
+import { desiredListing, parsePeopleFile, resolveExperiences, type PersonRow } from "../../../../scripts/experience/ops/people.ts";
 import type { Api, ApiResponse } from "../../../../scripts/experience/ops/core.ts";
 
 /* 運営の CLI (#576) ③: the 街の人 target against an in-memory copy of /admin/api/people. No network; synthetic providers only. */
@@ -10,6 +10,15 @@ type Listing = NonNullable<PersonRow["listing"]>;
 const listing = (over: Partial<Listing> = {}): Listing => ({ slug: "yuki", roleJa: "料理家", areaJa: "長谷", quoteJa: null, introJa: null, sortOrder: 10, version: 1, updatedAtUtc: "2026-11-01T00:00:00.000Z", ...over });
 const person = (providerId: string, over: Partial<PersonRow> = {}): PersonRow => ({ providerId, publicDisplayName: `Name ${providerId}`, photoReady: true, hasHostBio: true, publicExperienceCount: 1, listing: null, visible: false, ...over });
 
+/** The products every provider has (the classification list the CLI reads to resolve slugs). */
+const PRODUCTS = [
+  { providerId: "prov-zen", productId: "zen-karate", slug: "zen-karate", title: "円覚寺で禅と空手を体験", status: "PUBLISHED" },
+  { providerId: "prov-niho", productId: "dinner", slug: "dinner", title: "コミュニティディナー", status: "PUBLISHED" },
+  { providerId: "prov-a", productId: "twin-a", slug: "twin", title: "同じ slug A", status: "PUBLISHED" },
+  { providerId: "prov-b", productId: "twin-b", slug: "twin", title: "同じ slug B", status: "PUBLISHED" },
+  { providerId: "prov-old", productId: "old", slug: "old", title: "保管", status: "ARCHIVED" },
+];
+
 function fakeApi(initial: PersonRow[]) {
   const people = new Map(initial.map((item) => [item.providerId, { ...item }]));
   const sent: Array<{ method: string; body: Record<string, unknown>; operationId: string }> = [];
@@ -17,7 +26,7 @@ function fakeApi(initial: PersonRow[]) {
   const hooks = { beforeSend: () => {} };
   const api: Api = {
     env: "stg", aiKind: "claude-code",
-    async get() { return { status: 200, body: { people: [...people.values()] } }; },
+    async get(path) { return path.includes("product-classifications") ? { status: 200, body: { products: PRODUCTS } } : { status: 200, body: { people: [...people.values()] } }; },
     async send(method, _path, rawBody, operationId): Promise<ApiResponse> {
       hooks.beforeSend();
       const body = rawBody as Record<string, unknown>;
@@ -30,6 +39,9 @@ function fakeApi(initial: PersonRow[]) {
       if (method === "PUT") {
         if (body.expectedVersion !== version) return { status: 409, body: { error: "conflict" } };
         const next = body.listing as Omit<Listing, "version" | "updatedAtUtc">;
+        // The server takes the links as given and answers them with what a product is called.
+        const refs = (next as { experiences?: Array<{ providerId: string; productId: string }> }).experiences;
+        if (refs) (next as Record<string, unknown>).experiences = refs.map((ref) => ({ ...ref, ...PRODUCTS.find((product) => product.providerId === ref.providerId && product.productId === ref.productId) }));
         if ([...people.values()].some((other) => other !== row && other.listing?.slug === next.slug)) return { status: 409, body: { error: "conflict" } };
         people.set(row.providerId, { ...row, listing: { ...next, version: (version ?? 0) + 1, updatedAtUtc: "2026-11-14T00:00:00.000Z" }, visible: row.photoReady });
       } else {
@@ -134,5 +146,56 @@ describe("people withdraw and list", () => {
     expect(await count("--listed")).toBe(1);
     expect(await count("--unlisted")).toBe(1);
     expect(await count("--provider", "p2")).toBe(1);
+  });
+});
+
+describe("people apply: experiences (#585)", () => {
+  const link = (experiences: unknown) => JSON.stringify({ items: [{ providerId: "p1", listing: { experiences } }] });
+  const listed = () => fakeApi([person("p1", { listing: listing({ experiences: [] } as never), visible: true })]);
+
+  it("takes a slug, or {providerId, productId}, and nothing else", () => {
+    expect(parsePeopleFile(link(["zen-karate", { providerId: "prov-a", productId: "twin-a" }]))).toHaveLength(1);
+    for (const bad of ["zen-karate", [""], [1], [{ providerId: "x" }], [{ providerId: "x", productId: "y", slug: "z" }], Array.from({ length: 51 }, () => "a")]) {
+      expect(() => parsePeopleFile(link(bad)), JSON.stringify(bad)).toThrow();
+    }
+  });
+
+  it("resolves a slug to its one product, refuses an unknown, ambiguous or archived one, and a product named twice", () => {
+    expect(resolveExperiences(PRODUCTS, ["zen-karate", { providerId: "prov-b", productId: "twin-b" }])).toEqual([{ providerId: "prov-zen", productId: "zen-karate" }, { providerId: "prov-b", productId: "twin-b" }]);
+    expect(() => resolveExperiences(PRODUCTS, ["twin"])).toThrow(/ambiguous|more than one/);
+    expect(() => resolveExperiences(PRODUCTS, ["nope"])).toThrow(/slug nope/);
+    expect(() => resolveExperiences(PRODUCTS, ["old"])).toThrow(/slug old/);
+    expect(() => resolveExperiences(PRODUCTS, [{ providerId: "prov-a", productId: "nope" }])).toThrow(/prov-a\/nope/);
+    expect(() => resolveExperiences(PRODUCTS, ["zen-karate", { providerId: "prov-zen", productId: "zen-karate" }])).toThrow(/twice/);
+  });
+
+  it("shows the links as a difference without --yes, sends them replaced as a whole with --yes, and a repeat changes nothing", async () => {
+    const fake = listed();
+    const dry = await execute(fake.api, ["apply", "--file", "f.json"], link(["zen-karate", "dinner"]));
+    expect(statuses(dry)).toEqual(["dry_run"]);
+    expect(body(dry).result!.items![0]!.changes.map((change) => change.path)).toEqual(["experiences"]);
+    expect(fake.sent).toEqual([]);
+    expect(statuses(await execute(fake.api, ["apply", "--file", "f.json", "--yes"], link(["zen-karate", "dinner"])))).toEqual(["applied"]);
+    expect(fake.sent[0]).toMatchObject({ method: "PUT", body: { providerId: "p1", expectedVersion: 1, listing: { experiences: [{ providerId: "prov-zen", productId: "zen-karate" }, { providerId: "prov-niho", productId: "dinner" }] } } });
+    expect(statuses(await execute(fake.api, ["apply", "--file", "f.json", "--yes"], link(["zen-karate", "dinner"])))).toEqual(["unchanged"]);
+    // Replaced: only the one named is left; an empty list clears.
+    expect(statuses(await execute(fake.api, ["apply", "--file", "f.json", "--yes"], link(["dinner"])))).toEqual(["applied"]);
+    expect(statuses(await execute(fake.api, ["apply", "--file", "f.json", "--yes"], link([])))).toEqual(["applied"]);
+  });
+
+  it("leaves the links alone when the file does not say them", async () => {
+    const fake = fakeApi([person("p1", { listing: listing({ experiences: [{ providerId: "prov-zen", productId: "zen-karate", slug: "zen-karate" }] } as never), visible: true })]);
+    const out = await execute(fake.api, ["apply", "--file", "f.json", "--yes"], JSON.stringify({ items: [{ providerId: "p1", listing: { quoteJa: "ひとこと" } }] }));
+    expect(statuses(out)).toEqual(["applied"]);
+    expect(fake.sent[0]).toMatchObject({ body: { listing: { quoteJa: "ひとこと", experiences: [{ providerId: "prov-zen", productId: "zen-karate" }] } } });
+  });
+
+  it("says which item is wrong (an unknown or ambiguous slug) without sending it, and carries on with the others", async () => {
+    const fake = fakeApi([person("p1", { listing: listing({ experiences: [] } as never), visible: true }), person("p2", { listing: listing({ slug: "kei", experiences: [] } as never), visible: true })]);
+    const file = JSON.stringify({ items: [{ providerId: "p1", listing: { experiences: ["nope"] } }, { providerId: "p2", listing: { experiences: ["twin"] } }] });
+    const out = await execute(fake.api, ["apply", "--file", "f.json", "--yes"], file);
+    expect(out.exit).toBe(1);
+    expect(body(out).items).toMatchObject([{ key: "p1", status: "failed", error: "unknown_experience" }, { key: "p2", status: "failed", error: "slug_is_ambiguous_use_providerId_and_productId" }]);
+    expect(fake.sent).toEqual([]);
   });
 });

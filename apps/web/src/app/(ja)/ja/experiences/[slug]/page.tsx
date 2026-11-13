@@ -38,9 +38,9 @@ export default async function JapaneseExperiencePage(props: Props) {
     const card = cards.find((entry) => entry.slug === local.item.publication.slug) ?? null;
     const category = card?.classification.category ?? null;
     const related = category ? cards.filter((entry) => entry.classification.category === category && entry.slug !== local.item.publication.slug).slice(0, 3) : [];
-    // 街の人 (#564): when this experience's person is listed, the section links to their page.
-    const listed = (await loadPeople()).find((entry) => entry.experienceSlugs.includes(local.item.publication.slug));
-    return <JaExperiencePage item={local.item} cancelled={(await props.searchParams).checkout === "cancelled"} card={card} related={related} person={listed ? { slug: listed.slug, name: listed.name, roleJa: listed.roleJa } : null} />;
+    // 街の人 (#564, #585): the people this experience is met through (the provider's own listing and any person linked to it).
+    const guides = (await loadPeople()).filter((entry) => entry.experienceSlugs.includes(local.item.publication.slug));
+    return <JaExperiencePage item={local.item} cancelled={(await props.searchParams).checkout === "cancelled"} card={card} related={related} people={guides} />;
   }
   return ExperiencePageContent({ ...props, locale: "ja" });
 }
