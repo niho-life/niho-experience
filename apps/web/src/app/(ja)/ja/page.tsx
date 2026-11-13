@@ -5,6 +5,8 @@ import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { CardDates, type CardDatesSource } from "@/components/CardDates";
 import { guestBookingSources } from "@/lib/guest-booking-source";
 import { HomeFinder } from "@/components/HomeFinder";
+import { InquiryBand } from "@/components/InquiryBand";
+import { groupInquiryOpen } from "@/lib/group-inquiry-links";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { getApi } from "@/lib/api";
 import { config } from "@/lib/config";
@@ -62,5 +64,5 @@ export default async function JapaneseHome() {
     postcards: POSTCARDS.map((postcard) => ({ id: postcard.src, image: { src: postcard.src, alt: postcard.alt, position: postcard.position }, place: postcard.place, rotate: postcard.rotate })),
     hostBand: { src: HOST_BAND_VIDEO.src, poster: HOST_BAND_VIDEO.poster },
   };
-  return <HomeViewV1 model={model} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy.copy} />;
+  return <><HomeViewV1 model={model} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy.copy} />{groupInquiryOpen() ? <InquiryBand /> : null}</>;
 }

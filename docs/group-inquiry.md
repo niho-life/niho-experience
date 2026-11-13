@@ -34,8 +34,25 @@ Issue #532（受付の一覧の最小は #533 の一部）。親は #527。オ�
 | `host` | 人物（提供者）の表示名。「◯◯さんへの相談」と出る。 |
 
 - 値が合わないときは無視する（フォームは文脈なしで開く）。名前・メール・相談の内容は URL に載せない。
-- 入口の作り方は `inquiryHref(locale, {...})`（`apps/web/src/lib/group-inquiry-entry.ts`）。今回つないだ入口は**体験ページ**（`SitePublicationPage` の「相談してみる」。flag が開いているときだけ）。人物のページ・学校向け・法人向けの案内ページは、この関数でリンクを作る（v0 では各ページを作らない）。
+- 入口の作り方は `inquiryHref(locale, {...})`（`apps/web/src/lib/group-inquiry-entry.ts`）。入口は下の「入口のページ」にまとめた。
 - 流入元は、入口（上の `from`）と `utm_source` / `utm_medium` / `utm_campaign`（初回のものをメモリだけで持ち、Do Not Track なら送らない。`lib/booking-attribution.ts` と同じ）が取れる範囲。#531 が決める流入の計測とは別に、取れたものを残すだけ。
+
+## 入口のページ（法人・学校・人物・トップ・フッター）
+
+すべて `EXPERIENCE_GROUP_INQUIRY_ENABLED` の内側（off の間はリンクもページも出ない）。日本語のページは日本語サイトの flag（`EXPERIENCE_JAPANESE_SITE_ENABLED`）が off なら、今までどおり `/ja` 全体が出ない。
+
+| 入口 | 場所 | 開き方 |
+| --- | --- | --- |
+| 法人・団体の方へ | `/ja/business`（日本語のみ） | 「相談する」→ `/ja/inquiry?type=corporate&from=corporate` |
+| 学校の方へ | `/ja/schools`（日本語のみ） | 「資料と見積を相談する」→ `/ja/inquiry?type=school&from=school` |
+| 体験ページ | 「相談してみる」の節（`SitePublicationPage`、日英） | 体験の slug・タイトル・ホスト名つき（`from=experience`） |
+| 人物（提供者）のページ | 体験ページの「ホストについて」にある「◯◯さんに相談する」（人物だけの公開ページはまだ無い） | ホスト名つき（`from=provider`） |
+| `/ja` のトップ | 下部の帯（`InquiryBand`） | `/ja/inquiry`、法人・学校のページへ |
+| `/ja` のフッター | 「相談する」「法人・団体の方へ」「学校の方へ」（`inquiryFooterLinks()`） | 同上 |
+
+- 2つの案内ページの中身は、できること／人数／時間／料金の目安／よくある質問／相談ボタン。文面と数字は `apps/web/src/lib/group-inquiry-guide.ts` の1か所にある。**金額・人数・時間・期間はすべて仮**で、数字は `GROUP_GUIDE_NUMBERS`（と `GROUP_GUIDE_FACTS`）だけに置き、文面はそこから読む（テストが、文面に手書きの数字が無いことを確かめる）。公開の前に、オーナーが全項目を確認する。
+- 実績・事例・利用者の声は書かない。「必ず実施」のような保証は書かない（テストが禁止語を確かめる）。当日の立ち会いは「必要なときに、お見積りに含めます」。はじめの相談は無料・20分ほど。
+- 案内ページは英語版を作らない。`/ja` の layout・言語切替・sitemap・hreflang は触っていない（フッターの links 配列と、トップの末尾に帯を1つ足しただけ）。
 
 ## 送信と、その後
 
