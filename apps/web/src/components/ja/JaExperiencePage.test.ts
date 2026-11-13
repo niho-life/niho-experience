@@ -35,13 +35,21 @@ const render = async (value = item(), related: JaCard[] = [], person: { slug: st
 describe("JaExperiencePage", () => {
   it("is in the order the owner described, from the title to what to know, with the person", async () => {
     const html = await render();
-    const order = ["合成の山道を歩く", "まさとさんと", "所要時間", "人数", "エリア", "山道を歩きます。", "当日の流れ", "会いにいく人", "料金に含まれるもの", "集合場所", "知っておいてほしいこと", "取消について"];
+    const order = ["合成の山道を歩く", "まさとさんと", "所要時間", "人数", "エリア", "対応言語", "山道を歩きます。", "当日の流れ", "会いにいく人", "料金に含まれるもの", "集合場所", "知っておいてほしいこと", "取消について"];
     let last = -1;
     for (const text of order) { const at = html.indexOf(text, last + 1); expect(at, text).toBeGreaterThan(last); last = at; }
     expect(html).toContain("鎌倉で山を案内しています。");
     expect(html).toContain("集合場所は、予約が確定したあとにお伝えします。");
     expect(html).toContain("北鎌倉");
     expect(html).not.toContain("今日の担当");
+  });
+
+  it("keeps the language the experience is held in, so a guest is not led to expect Japanese when it is held in English", async () => {
+    const value = item();
+    (value.publication.japanese as { language: string }).language = "英語";
+    const html = await render(value);
+    expect(html).toContain("対応言語");
+    expect(html).toContain("英語");
   });
 
   it("links the person's section to their page on 街の人 when they are listed, and not otherwise", async () => {

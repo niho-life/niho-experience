@@ -84,6 +84,7 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
             {durations.length ? <li><span className="block text-[0.75rem] font-extrabold text-muted">所要時間</span><p className="font-extrabold">{durations.length === 1 ? jaDuration(durations[0]!) : `${jaDuration(durations[0]!)}〜${jaDuration(durations.at(-1)!)}`}</p></li> : null}
             {card?.capacity ? <li><span className="block text-[0.75rem] font-extrabold text-muted">人数</span><p className="font-extrabold">{jaCapacity(card.capacity)}</p></li> : null}
             {area ? <li><span className="block text-[0.75rem] font-extrabold text-muted">エリア</span><p className="font-extrabold">{area}</p></li> : null}
+            {content.language.trim() ? <li><span className="block text-[0.75rem] font-extrabold text-muted">対応言語</span><p className="font-extrabold">{content.language.trim()}</p></li> : null}
           </ul>
           {sellerInformationHref ? <a href={sellerInformationHref} rel="noopener noreferrer" className="mt-2 inline-flex min-h-6 items-center text-sm text-muted underline underline-offset-2 hover:text-ink">販売者情報</a> : null}
         </header>
