@@ -13,7 +13,7 @@ const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const HKDF_SALT = "niho-experience/host-cookie";
 
-export type SealPurpose = "session" | "login" | "product-operator-invitation" | "google-calendar-oauth" | "admin-preview-session" | "admin-http-login" | "admin-http-session" | "admin-google-login" | "editor-http-login" | "editor-http-session" | "experience-preparation-review-token";
+export type SealPurpose = "session" | "login" | "product-operator-invitation" | "google-calendar-oauth" | "admin-preview-session" | "admin-http-login" | "admin-http-session" | "admin-google-login" | "operator-cli-assertion" | "editor-http-login" | "editor-http-session" | "experience-preparation-review-token";
 
 interface SealKey {
   id: string;

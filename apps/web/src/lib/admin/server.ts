@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { NextResponse } from "next/server";
 import { config } from "@/lib/config";
@@ -34,7 +34,8 @@ import {
   type AdminHttpSession,
 } from "./http-session";
 import type { AdminActor } from "./actor";
-import { ADMIN_GOOGLE_SESSION_COOKIE, clearAdminGoogleSessionCookie, loadExperienceAdminSession, type ExperienceAdminSessionLoad } from "./google-login";
+import { OPERATOR_ASSERTION_HEADER, openOperatorAssertion } from "./operator-cli";
+import { ADMIN_GOOGLE_SESSION_COOKIE, adminEmailAllowed, clearAdminGoogleSessionCookie, loadExperienceAdminSession, type ExperienceAdminSessionLoad } from "./google-login";
 
 export const isAdminPreview = () => config.apiMode === "mock" && config.adminSupportConsoleEnabled;
 export const isAdminHttp = () => config.apiMode === "http" && config.adminSupportConsoleEnabled;
@@ -153,6 +154,19 @@ export const loadNihoAdminHttpSession = cache(async (): Promise<NihoAdminHttpSes
  */
 export const loadAdminHttpSession = cache(async (): Promise<AdminHttpSessionLoad> => {
   if (!isAdminGoogleLogin()) return loadNihoAdminHttpSession();
+  // 運営の CLI (#576): the assertion src/proxy.ts sealed for a Bearer ID token it verified. The allowlist is checked again here.
+  if (config.operatorCliEnabled) {
+    const assertion = openOperatorAssertion((await headers()).get(OPERATOR_ASSERTION_HEADER), Date.now());
+    if (assertion) {
+      if (!adminEmailAllowed(assertion.email)) return { status: "rejected" };
+      return {
+        status: "ok",
+        kind: "experience",
+        actor: { id: assertion.actorId, displayName: assertion.email },
+        session: { kind: "experience", sessionRef: "operator-cli", email: assertion.email, authenticatedAt: Date.now(), idleExpiresAt: assertion.expiresAt, absoluteExpiresAt: assertion.expiresAt, via: "cli", aiKind: assertion.aiKind, operationId: assertion.operationId },
+      };
+    }
+  }
   const jar = await cookies();
   return loadExperienceAdminSession(jar.get(ADMIN_GOOGLE_SESSION_COOKIE)?.value);
 });
@@ -233,6 +247,13 @@ export function adminHttpRefreshDue(session: AdminHttpSession, now: number): boo
 }
 
 export function adminMutationAllowed(request: Request): boolean {
+  // 運営の CLI (#576): a change is allowed when the proxy sealed an assertion for exactly this method and path, with the
+  // caller's operation ID (it recorded the request first). There is no cookie to forge, so no Origin check.
+  const sealed = request.headers.get(OPERATOR_ASSERTION_HEADER);
+  if (sealed !== null) {
+    const assertion = config.operatorCliEnabled ? openOperatorAssertion(sealed, Date.now()) : null;
+    return assertion !== null && assertion.operationId !== null && assertion.method === request.method && assertion.path === new URL(request.url).pathname;
+  }
   return mutationFromSameOrigin(request.method, request.headers, isAdminHttp() ? config.adminOrigin : new URL(config.siteUrl).origin);
 }
 

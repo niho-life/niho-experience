@@ -263,6 +263,8 @@ export { GROUP_INQUIRY_ENTRIES, GROUP_INQUIRY_FIELDS, GROUP_INQUIRY_KINDS, GROUP
 export type { GroupInquiryDetails, GroupInquiryEntry, GroupInquiryKind, GroupInquiryLocale, GroupInquiryStatus } from "./group-inquiry-fields.ts";
 export { ADMIN_SESSION_LIMITS, AdminSessions, adminActorIdForGoogleSubject, isAdminActorId } from "./admin-sessions.ts";
 export type { AdminActorId, AdminSession, AdminSessionOpened } from "./admin-sessions.ts";
+export { OPERATOR_AI_KINDS, OPERATOR_WRITE_METHODS, OperatorCliRequests } from "./operator-cli-requests.ts";
+export type { OperatorAiKind, OperatorCliRequestInput, OperatorWriteMethod } from "./operator-cli-requests.ts";
 export { isHostSellerRef } from "./host-sellers.ts";
 export { ProviderPayoutAccountConsents } from "./payout-account-consents.ts";
 export type { PayoutAccountConsent, PayoutAccountConsentRecord, PayoutAccountConsentWithdrawal } from "./payout-account-consents.ts";

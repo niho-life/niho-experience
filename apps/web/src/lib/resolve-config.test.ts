@@ -765,6 +765,18 @@ describe("admin support console settings", () => {
       }
     });
 
+    it("opens the operator CLI (#576) only with the Google admin login and named OAuth clients", () => {
+      const cli = { ...google, EXPERIENCE_OPERATOR_CLI_ENABLED: "true", EXPERIENCE_OPERATOR_CLI_AUDIENCES: "32555940559.apps.googleusercontent.com; 123-abc.apps.googleusercontent.com " };
+      expect(resolveConfig(google)).toMatchObject({ operatorCliEnabled: false, operatorCliAudiences: [] });
+      expect(resolveConfig({ ...cli, EXPERIENCE_API_MODE: "mock" }).operatorCliEnabled).toBe(false);
+      expect(resolveConfig({ ...cli, EXPERIENCE_OPERATOR_CLI_ENABLED: "1" }).operatorCliEnabled).toBe(false);
+      expect(resolveConfig(cli)).toMatchObject({ operatorCliEnabled: true, operatorCliAudiences: ["32555940559.apps.googleusercontent.com", "123-abc.apps.googleusercontent.com"] });
+      expect(() => resolveConfig({ ...cli, EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED: "false", NIHO_FIREBASE_WEB_API_KEY: "key", NIHO_EXPERIENCE_ADMIN_ORIGIN: "https://experience.example" })).toThrow("EXPERIENCE_OPERATOR_CLI_ENABLED=true needs EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED=true");
+      for (const audiences of [undefined, "", ";", "gcloud", "x.apps.googleusercontent.com", "32555940559.apps.googleusercontent.com;", "32555940559.apps.googleusercontent.com,123-abc.apps.googleusercontent.com", "https://32555940559.apps.googleusercontent.com"]) {
+        expect(() => resolveConfig({ ...cli, EXPERIENCE_OPERATOR_CLI_AUDIENCES: audiences }), String(audiences)).toThrow("EXPERIENCE_OPERATOR_CLI_ENABLED=true needs EXPERIENCE_OPERATOR_CLI_AUDIENCES");
+      }
+    });
+
     it("refuses to start with a flag that sends a NIHO admin token", () => {
       expect([...NIHO_ADMIN_TOKEN_FLAGS].sort()).toEqual([
         "ADMIN_OPERATIONS_API_ENABLED", "ADMIN_SUPPORT_CASE_API_ENABLED", "ADMIN_SUPPORT_READ_API_ENABLED", "EXPERIENCE_ASSISTED_LAUNCH_API_ENABLED", "EXPERIENCE_FEE_SUMMARY_API_ENABLED",
