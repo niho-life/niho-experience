@@ -252,8 +252,8 @@ stg に残したもの（CLI では消せない）：
 英語のサイトは、提供者の名前（「Hosted by」「Ask …」・一覧のカード・予約メール・構造化データ）に**英語の公開名**を使います。`/ja` は日本語の公開名のままです。
 
 ```bash
-node scripts/experience/ops.mjs provider profile --provider <providerId> --name-en "Shiryu" --yes   # 英語名だけ足す・変える（ほかは今のまま）
-node scripts/experience/ops.mjs provider profile --provider <providerId> --clear-name-en --yes      # 外す（英語のサイトは日本語の名前に戻る）
+node scripts/experience/ops.mjs provider profile --provider <providerId> --name <今の日本語の公開名> --kind PERSON --consent-confirmed --name-en "Shiryu" --yes   # 英語名を足す・変える（日本語名と種別は今の値を渡す）
+node scripts/experience/ops.mjs provider profile --provider <providerId> --name <今の日本語の公開名> --kind PERSON --consent-confirmed --clear-name-en --yes   # 外す（英語のサイトは日本語の名前に戻る）
 node scripts/experience/ops.mjs provider create --name 志龍 --name-en "Shiryu" --kind PERSON --consent-confirmed --yes
 ```
 
