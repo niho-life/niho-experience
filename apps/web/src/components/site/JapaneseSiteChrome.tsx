@@ -10,7 +10,7 @@ import { LanguageButton } from "./LanguageButton";
  * 配色・書体・手描きのアイコンは公開サイトの部品（presentation v1）のまま。英語側の `SiteChrome.tsx` とは別。
  *
  * ヘッダーは1行：ロゴ、ナビ、言語のボタン。スマホ幅では「さがす」「相談」と言語のボタンだけにし、ほかはフッターから行く。
- * まだ無いページ（街の人 #564・読みもの #154・ご利用の案内 #565・カテゴリー #529）へのリンクは、そのページが main に入ってから
+ * まだ無いページ（読みもの #154・カテゴリー #529）へのリンクは、そのページが main に入ってから
  * `NAV` と `FOOTER_LINKS` に足す（入るまで出さない）。
  */
 
@@ -24,14 +24,16 @@ type NavItem = { href: string; label: ReactNode; mobile: boolean; needsInquiry?:
 /** ヘッダーのナビ（上から順）。スマホ幅に出すのは `mobile` のものだけ。 */
 const NAV: readonly NavItem[] = [
   { href: "/ja/experiences", label: <><span className="max-sm:hidden">体験を</span>さがす</>, mobile: true },
-  // 街の人（#564）・読みもの（#154）は、そのページが入ってからここに足す。
+  { href: "/ja/people", label: "街の人", mobile: false },
+  // 読みもの（#154）は、そのページが入ってからここに足す。
   { href: "/ja/business", label: "法人・学校", mobile: false, needsInquiry: true },
   { href: "/ja/inquiry", label: <>相談<span className="max-sm:hidden">する</span></>, mobile: true, needsInquiry: true },
 ];
 
 type FooterLink = { href: string; label: string; needsInquiry?: boolean };
-/** フッターの2つ目のまとまり。カテゴリーのまとまり（#529）・街の人・読みもの・ご利用の案内は、入ってから足す。 */
+/** フッターの2つ目のまとまり。カテゴリーのまとまり（#529）・読みものは、入ってから足す。 */
 const FOOTER_LINKS: readonly FooterLink[] = [
+  { href: "/ja/people", label: "街の人" },
   { href: "/ja/inquiry", label: "個別の相談", needsInquiry: true },
   { href: "/ja/business", label: "法人・団体の方へ", needsInquiry: true },
   { href: "/ja/schools", label: "学校の方へ", needsInquiry: true },

@@ -23,6 +23,17 @@ export const JA_HOME_HERO_PHOTOS: readonly HeroPhoto[] = [
 export const HERO_ROTATE_MS = 5000;
 
 /**
+ * トップに紹介する街の人：事務局が選んだスラッグ。街の人に載っていない・外した人なら、載っている先頭の人にする。
+ * 載っている人が0人のときは、街の人のまとまり自体を出さない。
+ */
+export const JA_HOME_FEATURED_PERSON_SLUG: string | null = null;
+export const JA_HOME_FACES_LIMIT = 7;
+
+export function pickFeaturedPerson<T extends { slug: string }>(people: readonly T[], slug: string | null = JA_HOME_FEATURED_PERSON_SLUG): T | null {
+  return people.find((person) => person.slug === slug) ?? people[0] ?? null;
+}
+
+/**
  * おすすめの体験：事務局が選んだ slug（上から順）。載っていない・公開していない slug は飛ばし、上限まで足りないぶんは
  * 公開中の体験で埋める。ここが空なら公開中の体験の先頭から。見出しに日付の条件（「今週末に行ける」など）は付けない。
  */

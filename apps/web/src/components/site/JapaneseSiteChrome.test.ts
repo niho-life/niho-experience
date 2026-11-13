@@ -33,15 +33,16 @@ describe("日本語サイトのヘッダーとフッター（#562）", () => {
   it("スマホ幅では「さがす」「相談」と言語のボタンだけ（ほかは sm 以上）", () => {
     const html = render({});
     const items = [...html.matchAll(/<li class="hidden sm:block">/g)];
-    // 法人・学校とホストの方が sm 以上、ほか（さがす・相談・言語）は常に見える
-    expect(items).toHaveLength(2);
+    // 街の人・法人・学校とホストの方が sm 以上、ほか（さがす・相談・言語）は常に見える
+    expect(items).toHaveLength(3);
     expect(html).toContain("max-sm:hidden");
   });
 
-  it("まだ無いページ（街の人・読みもの・ご利用の案内・カテゴリー）へのリンクを出さない", () => {
+  it("街の人はヘッダーとフッターに出る（スマホ幅のヘッダーでは出さない）。まだ無いページ（読みもの・カテゴリー）へのリンクは出さない", () => {
     const html = render({});
-    for (const path of ["/ja/people", "/ja/guides", "/ja/promise", "/ja/guide"]) expect(html).not.toContain(`href="${path}"`);
-    expect(html).not.toContain("街の人");
+    expect(html).toMatch(/<li class="hidden sm:block"><a[^>]*href="\/ja\/people"[^>]*>街の人<\/a><\/li>/);
+    expect(html.match(/href="\/ja\/people"/g)).toHaveLength(2);
+    for (const path of ["/ja/guides", "/ja/promise", "/ja/guide"]) expect(html).not.toContain(`href="${path}"`);
     expect(html).not.toContain("読みもの");
   });
 
