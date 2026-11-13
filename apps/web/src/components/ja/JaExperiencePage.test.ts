@@ -93,6 +93,18 @@ describe("JaExperiencePage", () => {
     expect(html).not.toContain("日にちを選んで予約へ");
   });
 
+  it("keeps the seller information link in the booking column, with or without a sale", async () => {
+    const withDisclosure = (value: SitePublicExperience) => ({ ...value, sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Seller", externalUrl: "https://seller.example.test/legal" } }) as unknown as SitePublicExperience;
+    for (const value of [withDisclosure(item()), withDisclosure(item([]))]) {
+      const html = await render(value);
+      const aside = html.slice(html.indexOf('<aside id="book"'), html.indexOf("</aside>"));
+      expect(aside).toContain("販売者情報");
+      expect(aside).toContain("https://seller.example.test/legal");
+      // Not under the facts at the top.
+      expect(html.slice(0, html.indexOf('<aside id="book"')).includes("販売者情報")).toBe(false);
+    }
+  });
+
   it("shows other experiences of the category and says nothing is bookable when there is no sale", async () => {
     expect(await render(item(), [{ ...card, slug: "other", title: "もうひとつの体験" }])).toContain("歩くの体験をもっと");
     const none = await render(item([]));

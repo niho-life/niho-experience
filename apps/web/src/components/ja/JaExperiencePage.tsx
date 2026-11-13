@@ -160,8 +160,8 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
               {approval ? <p className="mt-2 text-sm text-ink-soft">申込みを送ると、日程を確認してご連絡します。お支払いは、確認のあとにご案内します。</p> : null}
               {config.groupInquiryEnabled ? <Link href={askHref} className="mt-3 block text-center text-sm font-bold text-moss underline underline-offset-4">ほかの日を相談する</Link> : null}
               {cancellation.length ? <ul className="mt-5 space-y-1.5 border-t border-line pt-4 text-sm text-ink-soft">{cancellation.map((line) => <li key={`${line.label}-${line.text}`} className="flex gap-2"><HandIcon name="umbrella" className="mt-0.5 size-5 shrink-0" /><span>{line.label ? `${line.label}：` : ""}{line.text}</span></li>)}</ul> : null}
-              {sellerInformationHref ? <p className="mt-4 border-t border-line pt-3 text-[0.8125rem]"><a href={sellerInformationHref} rel="noopener noreferrer" className="inline-flex min-h-6 items-center text-muted underline underline-offset-2 hover:text-ink">販売者情報</a></p> : null}
             </> : <p className="text-ink-soft">この体験は現在、予約を受け付けていません。</p>}
+            {sellerInformationHref ? <p className="mt-4 border-t border-line pt-3 text-[0.8125rem]"><a href={sellerInformationHref} rel="noopener noreferrer" className="inline-flex min-h-6 items-center text-muted underline underline-offset-2 hover:text-ink">販売者情報</a></p> : null}
           </aside>
         </div>
 
