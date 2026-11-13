@@ -39,10 +39,24 @@ export interface IdTokenResult {
   idTokenExpiresAt: number;
 }
 
-/** NIHO's confirmation page for this site. */
-export function nihoConnectUrl(nihoOrigin: string, params: { challenge: string; state: string; origin: string }): string {
+/**
+ * Who the connection page is for (niho-coliving/niho-app#20306: NIHO orders its login methods by it; the host order puts
+ * LINE first). The parameter's name and values are NIHO's contract and are not final until that issue closes: change them
+ * here and nowhere else.
+ */
+export const NIHO_CONNECT_AUDIENCE_PARAM = "audience";
+export type NihoConnectAudience = "host";
+
+/**
+ * NIHO's confirmation page for this site. `maxAgeSeconds` asks NIHO to sign the person in again when their last sign-in
+ * is older (`max_age`, 60 to 86400 seconds; niho-coliving/niho-app#20305): a sensitive change's re-authentication (#595).
+ */
+export function nihoConnectUrl(nihoOrigin: string, params: { challenge: string; state: string; origin: string; audience?: NihoConnectAudience; maxAgeSeconds?: number }): string {
   const url = new URL("/connect/niho-experience", nihoOrigin);
-  url.search = new URLSearchParams({ v: "1", challenge: params.challenge, state: params.state, origin: params.origin }).toString();
+  const search = new URLSearchParams({ v: "1", challenge: params.challenge, state: params.state, origin: params.origin });
+  if (params.audience) search.set(NIHO_CONNECT_AUDIENCE_PARAM, params.audience);
+  if (params.maxAgeSeconds !== undefined) search.set("max_age", String(params.maxAgeSeconds));
+  url.search = search.toString();
   return url.href;
 }
 
@@ -123,10 +137,14 @@ export async function signInWithCustomToken(deps: NihoAuthDeps, customToken: str
   return { ok: true, value: { idToken: body.idToken, idTokenExpiresAt: now + expiresIn * 1000 } };
 }
 
-/** Ends the connection on NIHO (logout). Best effort: the caller clears the cookie either way. */
-export async function deleteConnection(deps: NihoAuthDeps, connectionId: string, accessToken: string): Promise<boolean> {
+/**
+ * Ends the connection on NIHO. Best effort: the caller clears the cookie either way. A logout says so (`reason=logout`);
+ * the sign-in that only proves who the person is ends its connection with no reason at all (`reason: null`), the plain
+ * `DELETE /api/auth/app-connections/{id}` NIHO's identity-only scope allows.
+ */
+export async function deleteConnection(deps: NihoAuthDeps, connectionId: string, accessToken: string, options: { reason?: "logout" | null } = {}): Promise<boolean> {
   const url = new URL(`/api/auth/app-connections/${encodeURIComponent(connectionId)}`, deps.nihoOrigin);
-  url.searchParams.set("reason", "logout");
+  if (options.reason !== null) url.searchParams.set("reason", "logout");
   try {
     const response = await deps.fetch(url.href, {
       method: "DELETE",

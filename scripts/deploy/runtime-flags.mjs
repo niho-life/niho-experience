@@ -301,6 +301,14 @@ export const FLAGS = Object.freeze([
     secrets: [{ env: "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", variable: "STRIPE_PLATFORM_SECRET_KEY_REF", stg: "STRIPE_CONNECT_PLATFORM_SECRET_KEY" }],
     settings: [{ env: "EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION", variable: "PAYOUT_ACCOUNT_CONSENT_VERSION", shape: "consentVersion" }],
   },
+  // ホストの NIHO アカウントでのログイン (Epic #591, #594): 「NIHO アカウントでログイン」 1 ボタン。NIHO は本人確認だけ（接続はすぐ解除し、
+  // NIHO のトークンは持たない）、セッションと結び付け（0083）は Experience の DB。メールのリンクは画面から外れ、route は残る。
+  // NIHO 側（niho-coliving/niho-app#20305・#20306）の本番配備と stg の受入が済むまで ON にしない。
+  {
+    env: "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED",
+    variable: "HOST_NIHO_LOGIN_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
+  },
   // Experience-native COHOST teams. This is independent from (and does not open) the legacy provider-operations consumer.
   {
     env: "EXPERIENCE_HOST_TEAM_ENABLED",

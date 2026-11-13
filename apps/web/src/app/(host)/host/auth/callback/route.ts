@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { exchangeCode } from "@/lib/host/niho-auth";
+import { completeNihoLogin } from "@/lib/host/niho-login";
 import { loginStatesMatch } from "@/lib/host/pkce";
 import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostInvitationPath, hostPreparationPath, hostReturnPathOrNull, withProvider, withQuery, type LoginErrorReason } from "@/lib/host/routes";
 import { clearLoginCookie, hostNotFound, loginSealer, nihoAuthDeps, seeOther, setSessionCookie } from "@/lib/host/server";
@@ -19,8 +20,9 @@ function failed(reason: LoginErrorReason, preparationCaseId: string | null = nul
  * are never logged; failures only carry a fixed reason to the error page.
  */
 export async function GET(request: NextRequest) {
-  // No NIHO login with Experience host accounts (ADR 0003).
-  if (!config.hostConsoleEnabled || config.hostAccountsEnabled) return hostNotFound();
+  if (!config.hostConsoleEnabled) return hostNotFound();
+  // With Experience host accounts NIHO only proves who the host is (Epic #591); without that flag there is no NIHO login (ADR 0003).
+  if (config.hostAccountsEnabled) return config.hostNihoLoginEnabled ? completeNihoLogin(request) : hostNotFound();
   const params = request.nextUrl.searchParams;
   const login = decodeLoginState(loginSealer(), request.cookies.get(LOGIN_COOKIE)?.value, Date.now());
   if (!login) return failed("expired");

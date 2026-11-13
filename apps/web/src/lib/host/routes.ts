@@ -201,7 +201,9 @@ export function hostLandingPath(providerId: string | null, connect: unknown): st
 
 /**
  * Why the login did not finish; each has its own message on /host/auth/error. `link`: an emailed sign-in link that is
- * expired, used, or opened in another browser than the one that asked for it (Experience host accounts).
+ * expired, used, or opened in another browser than the one that asked for it (Experience host accounts). With the NIHO
+ * account login (Epic #591): `unregistered` is a NIHO account no host account is bound to (usually another method than
+ * the one the host was registered with), `suspended` a bound host account that is suspended.
  */
-export const LOGIN_ERROR_REASONS = ["expired", "state", "denied", "rejected", "unavailable", "link"] as const;
+export const LOGIN_ERROR_REASONS = ["expired", "state", "denied", "rejected", "unavailable", "link", "unregistered", "suspended"] as const;
 export type LoginErrorReason = (typeof LOGIN_ERROR_REASONS)[number];
