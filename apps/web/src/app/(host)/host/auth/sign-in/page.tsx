@@ -53,7 +53,8 @@ export default async function HostEmailSignInPage({ searchParams }: { searchPara
   // or the form needs fixing); otherwise a signed-in host goes on to the page it came for.
   if (!reauth && !sent && !error && await readHostSession()) redirect(next ?? HOST_HOME_PATH);
   /** This form again, with the page it returns to and why a sign-in was asked for. */
-  const again = withQuery(HOST_EMAIL_SIGN_IN_PATH, { reauth: reauth ? "1" : null, next });
+  // With the NIHO account login the email form is behind `method=email`: "send it again" must stay on the form, not fall to the entrance.
+  const again = withQuery(HOST_EMAIL_SIGN_IN_PATH, { method: config.hostNihoLoginEnabled ? "email" : null, reauth: reauth ? "1" : null, next });
   const minutes = HOST_ACCOUNT_LIMITS.linkTtlMinutes;
 
   if (sent) {
