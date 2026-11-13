@@ -36,8 +36,10 @@ export function sitemapEntries({ siteUrl, experiences, guides, japanese }: Sitem
   }));
   const experiencePairs = experiences.flatMap((item) => {
     const link = japanese?.experiences.get(item.slug);
-    return link ? [link] : [];
+    return link && !link.japaneseOnly ? [link] : [];
   });
+  // 日本語のみの商品（#59）：英語のページが無いので日本語の URL だけを載せ、hreflang の組は付けない。
+  const japaneseOnlyLinks = [...(japanese?.experiences.values() ?? [])].filter((link) => link.japaneseOnly);
   const guideEntries: MetadataRoute.Sitemap = guides.length
     ? [{ url: url("/guides"), lastModified: guides[0]!.updatedAt }, ...guides.map((guide) => ({ url: url(`/guides/${guide.slug}`), lastModified: guide.updatedAt }))]
     : [];
@@ -47,5 +49,6 @@ export function sitemapEntries({ siteUrl, experiences, guides, japanese }: Sitem
     ...guideEntries,
     ...(japanese?.pages ?? []).filter(isIndexableJapanesePage).map((page) => paired({ url: url(page.route.path) }, staticPair(page))),
     ...experiencePairs.map((link) => paired({ url: url(link.japanesePath) }, link)),
+    ...japaneseOnlyLinks.map((link) => ({ url: url(link.japanesePath) })),
   ];
 }

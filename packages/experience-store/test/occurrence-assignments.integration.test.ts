@@ -159,12 +159,18 @@ describe("occurrence assignee (#535 v0)", { skip: databaseUrl === undefined ? "T
       // Only the assignee steps down; the loser cannot, and nothing changes for the guests.
       assert.equal((await repository.release(actor(loser), { occurrenceId: "occ-open", commandId: cmd() })).outcome, "TAKEN");
       // The fee is typed by the office for the current assignee; others never see it.
-      assert.deepEqual(await repository.adminSetAgreedFee(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-open", commandId: cmd(), agreedFeeYen: 5000 }), { outcome: "FEE_SET", repeated: false });
-      await assert.rejects(repository.adminSetAgreedFee(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-open", commandId: cmd(), agreedFeeYen: -1 }), StoreValidationError);
-      await assert.rejects(repository.adminSetAgreedFee(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-open", commandId: cmd(), agreedFeeYen: 1.5 }), StoreValidationError);
+      // The amount names the term the office saw (adminList), so a hand-over after the screen was read cannot receive it.
+      const seen = (await repository.adminList(ADMIN)).find((row) => row.occurrenceId === "occ-open")?.assignee?.assignmentId;
+      assert.ok(seen);
+      assert.deepEqual(await repository.adminSetAgreedFee(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-open", commandId: cmd(), assignmentId: seen, agreedFeeYen: 5000 }), { outcome: "FEE_SET", repeated: false });
+      await assert.rejects(repository.adminSetAgreedFee(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-open", commandId: cmd(), assignmentId: seen, agreedFeeYen: -1 }), StoreValidationError);
+      await assert.rejects(repository.adminSetAgreedFee(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-open", commandId: cmd(), assignmentId: seen, agreedFeeYen: 1.5 }), StoreValidationError);
+      await assert.rejects(repository.adminSetAgreedFee(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-open", commandId: cmd(), assignmentId: "not-a-uuid", agreedFeeYen: 100 }), StoreValidationError);
+      // Another term (the screen was of someone who has since left): refused, and the current assignee's amount stays.
+      await assert.rejects(repository.adminSetAgreedFee(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-open", commandId: cmd(), assignmentId: randomUUID(), agreedFeeYen: 9999 }), StoreConflictError);
       assert.equal((await repository.list(actor(winner))).mine[0]?.agreedFeeYen, 5000);
       assert.equal((await repository.adminList(ADMIN)).find((row) => row.occurrenceId === "occ-open")?.assignee?.agreedFeeYen, 5000);
-      await assert.rejects(repository.adminSetAgreedFee(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-quiet", commandId: cmd(), agreedFeeYen: 100 }), StoreConflictError);
+      await assert.rejects(repository.adminSetAgreedFee(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-quiet", commandId: cmd(), assignmentId: seen, agreedFeeYen: 100 }), StoreConflictError);
 
       const release = cmd();
       assert.deepEqual(await repository.release(actor(winner), { occurrenceId: "occ-open", commandId: release, reason: "体調不良" }), { outcome: "RELEASED", repeated: false });
@@ -235,6 +241,28 @@ describe("occurrence assignee (#535 v0)", { skip: databaseUrl === undefined ? "T
       assert.equal((await repository.adminRecord(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-office", commandId: cmd(), action: "RELEASE", reason: "連絡が取れない" })).outcome, "RELEASED");
       assert.equal((await repository.adminList(ADMIN)).find((item) => item.occurrenceId === "occ-office")?.status, "OPEN");
       assert.deepEqual((await repository.adminHistory(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-office" })).map((item) => `${item.action}:${item.recordedBy}`), ["DECLINE:ADMIN", "CLAIM:ADMIN", "RELEASE:ADMIN"]);
+
+      // A command that changed nothing keeps its first result: sent again after the state moved on, it is answered the same
+      // and acts on nothing (a release for an open occurrence must not release whoever claimed it in between).
+      const release = (commandId: string) => repository.adminRecord(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-office", commandId, action: "RELEASE" });
+      const stale = cmd();
+      assert.deepEqual(await release(stale), { outcome: "ALREADY_OPEN", repeated: false });
+      assert.equal((await repository.adminRecord(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-office", commandId: cmd(), action: "CLAIM", subjectNihoUserId: OWNER })).outcome, "ASSIGNED");
+      assert.deepEqual(await release(stale), { outcome: "ALREADY_OPEN", repeated: true });
+      assert.equal((await repository.adminList(ADMIN)).find((item) => item.occurrenceId === "occ-office")?.assignee?.nihoUserId, OWNER);
+      // The same holds for a claim that lost: TAKEN stays TAKEN after the assignee stepped down, and nobody is assigned by the resend.
+      const lost = cmd();
+      const claimAsOperator = (commandId: string) => repository.adminRecord(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-office", commandId, action: "CLAIM", subjectNihoUserId: OPERATOR });
+      assert.deepEqual(await claimAsOperator(lost), { outcome: "TAKEN", repeated: false });
+      assert.equal((await release(cmd())).outcome, "RELEASED");
+      assert.deepEqual(await claimAsOperator(lost), { outcome: "TAKEN", repeated: true });
+      assert.equal((await repository.adminList(ADMIN)).find((item) => item.occurrenceId === "occ-office")?.status, "OPEN");
+      // The command ID still belongs to one request only, and results that changed nothing are not history.
+      await assert.rejects(repository.adminRecord(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-office", commandId: stale, action: "CLAIM", subjectNihoUserId: OWNER }), StoreConflictError);
+      assert.deepEqual((await repository.adminHistory(ADMIN, { providerId: PROVIDER, occurrenceId: "occ-office" })).map((item) => `${item.action}:${item.recordedBy}`), ["DECLINE:ADMIN", "CLAIM:ADMIN", "RELEASE:ADMIN", "CLAIM:ADMIN", "RELEASE:ADMIN"]);
+      // The record of commands is append-only too.
+      await assert.rejects(pool.query("UPDATE occurrence_assignment_commands SET outcome='TAKEN' WHERE command_id=$1::uuid", [stale]), /append-only/);
+      await assert.rejects(pool.query("DELETE FROM occurrence_assignment_commands WHERE command_id=$1::uuid", [stale]), /append-only/);
 
       // A revoked operator grant no longer serves the occurrence.
       await pool.query("UPDATE product_operator_grants SET active=false,revoked_at=clock_timestamp() WHERE niho_user_id=$1", [OPERATOR]);

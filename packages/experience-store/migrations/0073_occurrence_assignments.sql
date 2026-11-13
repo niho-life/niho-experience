@@ -99,4 +99,30 @@ CREATE TRIGGER occurrence_assignment_events_no_truncate
 BEFORE TRUNCATE ON occurrence_assignment_events
 FOR EACH STATEMENT EXECUTE FUNCTION reject_occurrence_assignment_event_change();
 
+-- The first result of every command, also of one that changed nothing (TAKEN, ALREADY_YOURS, ALREADY_OPEN ...): a request
+-- sent again after a lost answer returns it instead of acting on a state that moved on in between (a release sent for
+-- an open occurrence must not release the person who claimed it a moment later). Append-only, like the history.
+CREATE TABLE occurrence_assignment_commands (
+  provider_id text NOT NULL,
+  command_id uuid NOT NULL,
+  occurrence_id text NOT NULL,
+  action text NOT NULL CHECK (action IN ('CLAIM', 'DECLINE', 'RELEASE', 'SET_FEE')),
+  actor_niho_user_id text NOT NULL CHECK (length(actor_niho_user_id) BETWEEN 1 AND 256),
+  -- The person the command is about; empty when the office releases whoever is assigned or sets the amount.
+  subject_niho_user_id text CHECK (subject_niho_user_id IS NULL OR length(subject_niho_user_id) BETWEEN 1 AND 256),
+  outcome text NOT NULL CHECK (outcome IN ('ASSIGNED', 'ALREADY_YOURS', 'TAKEN', 'DECLINED', 'ALREADY_DECLINED', 'RELEASED', 'ALREADY_OPEN', 'FEE_SET')),
+  recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (provider_id, command_id),
+  FOREIGN KEY (provider_id, occurrence_id)
+    REFERENCES schedule_occurrences(provider_id, occurrence_id) ON DELETE RESTRICT
+);
+
+CREATE TRIGGER occurrence_assignment_commands_append_only
+BEFORE UPDATE OR DELETE ON occurrence_assignment_commands
+FOR EACH ROW EXECUTE FUNCTION reject_occurrence_assignment_event_change();
+
+CREATE TRIGGER occurrence_assignment_commands_no_truncate
+BEFORE TRUNCATE ON occurrence_assignment_commands
+FOR EACH STATEMENT EXECUTE FUNCTION reject_occurrence_assignment_event_change();
+
 COMMIT;

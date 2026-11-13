@@ -371,6 +371,7 @@ test("unsaved row, nav, logout, history and reload navigation require an explici
   await expect(notifications).toBeFocused();
   await expect(memo).toHaveValue("protected draft");
 
+  await page.locator("summary:visible", { hasText: "のアカウントメニュー" }).click();
   await page.getByRole("button", { name: "ログアウト" }).click();
   dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();

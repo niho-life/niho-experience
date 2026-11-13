@@ -1,8 +1,9 @@
 import "server-only";
-import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type BookingRecord, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GuestReviewRepository, type HostAccounts, type HostMailOutbox, type HostNotificationAddresses, type HostNotificationOutbox } from "@niho-experience/experience-store";
+import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type BookingRecord, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GroupInquiryRepository, type GuestReviewRepository, type HostAccounts, type HostMailOutbox, type HostNotificationAddresses, type HostNotificationOutbox } from "@niho-experience/experience-store";
 import type { RetrievedPlatformCheckout } from "@niho-experience/experience-payments";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { cleanupProviderMedia, type ProviderMediaCleanupCounts, type ProviderMediaCleanupDeps } from "@/lib/experience/provider-media-cleanup";
+import { groupInquiryReceiptEmail, groupInquiryStaffEmail } from "@/lib/mail/group-inquiry-templates";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import type { HostPushKind } from "@/lib/host/push/payload";
 import { hostAddressConfirmationEmail, hostBookingEmail, hostLoginLinkEmail, hostNotificationEmail } from "@/lib/mail/host-templates";
@@ -74,6 +75,9 @@ export const EXPERIENCE_JOB_LIMITS = {
   hostAddressesPurgedPerStep: 200,
   /** Revoked, unselected provider identity images physically removed per run. */
   providerMediaCleanup: 20,
+  /** 団体・個別の相談 (#532): the office's notices and the senders' receipts a run sends, one claimed at a time. */
+  groupInquiryMails: 20,
+  groupInquiryMailLeaseSeconds: 120,
   /** ホストのアカウント (ADR 0003): sign-in link emails a run sends (first, as the host is waiting for one). */
   hostLoginLinks: 20,
   /** Old sign-in requests and ended host sessions deleted per run (each kind). */
@@ -162,6 +166,18 @@ export interface HostLoginLinkCounts {
   readonly failed: number;
 }
 
+/**
+ * 団体・個別の相談 (#532): the office's notices and the receipts to the people who wrote. Claimed: an email the store
+ * handed over; retried: put back for 2, 4, 8 or 16 minutes; failed: the server refused it for good or the attempts ran
+ * out (the Admin list shows a notice that did not go). Counts only: never an address, a name or a word of the inquiry.
+ */
+export interface GroupInquiryMailCounts {
+  readonly claimed: number;
+  readonly sent: number;
+  readonly retried: number;
+  readonly failed: number;
+}
+
 /** A step that threw: what it did before is not reported, and the next step still runs. */
 export interface FailedStep {
   readonly error: "unavailable";
@@ -193,6 +209,8 @@ export interface ExperienceJobCounts {
   readonly settlementReconciliation?: SettlementReconciliationCounts | StepOff | FailedStep;
   /** Only with Experience host accounts (EXPERIENCE_HOST_ACCOUNTS_ENABLED): their sign-in links, then the purge. */
   readonly hostLoginLinks?: HostLoginLinkCounts | FailedStep;
+  /** Only with 団体・個別の相談 (EXPERIENCE_GROUP_INQUIRY_ENABLED, #532). */
+  readonly groupInquiryMails?: GroupInquiryMailCounts | FailedStep;
   readonly hostAccountPurge?: PurgeCounts | FailedStep;
   /** Only with the Admin's Google login (EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED): ended admin sessions. */
   readonly adminSessionPurge?: PurgeCounts | FailedStep;
@@ -265,6 +283,11 @@ export interface ExperienceJobDeps {
    * send and the old requests and ended sessions to delete.
    */
   readonly hostLogins?: Pick<HostAccounts, "listPendingLoginRequests" | "issueLoginLink" | "purgeExpired"> | null;
+  /**
+   * 団体・個別の相談 (#532), present only while EXPERIENCE_GROUP_INQUIRY_ENABLED is on. `officeRecipient` is the office's
+   * own address (the one the guests' replies reach), where each inquiry's notice goes.
+   */
+  readonly groupInquiries?: { readonly mails: Pick<GroupInquiryRepository, "claimMails" | "recordMail">; readonly officeRecipient: string } | null;
   /** The Admin's Google login (ADR 0003), present only while EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED is on: ended sessions to delete. */
   readonly adminSessions?: Pick<AdminSessions, "purgeExpired"> | null;
   /** Called once per failed step with the error's class name only (a database message can quote row values). */
@@ -792,10 +815,42 @@ async function sendHostLoginLinks(deps: ExperienceJobDeps, hostLogins: NonNullab
   return counts;
 }
 
+/**
+ * 団体・個別の相談 (#532): the office's notice of each inquiry first, then the receipt to the person who wrote, one email
+ * claimed at a time. A transient failure ends the step (the rest wait for the next run); a refusal for good is final.
+ */
+async function sendGroupInquiryMails(deps: ExperienceJobDeps, source: NonNullable<ExperienceJobDeps["groupInquiries"]>): Promise<GroupInquiryMailCounts> {
+  const startedAt = deps.now().getTime();
+  const counts = { claimed: 0, sent: 0, retried: 0, failed: 0 };
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.groupInquiryMails)) {
+    const [inquiry] = await source.mails.claimMails({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.groupInquiryMailLeaseSeconds });
+    if (!inquiry) break;
+    counts.claimed += 1;
+    const staff = inquiry.recipient === "STAFF";
+    const email = staff ? groupInquiryStaffEmail(inquiry, { siteUrl: deps.siteUrl }) : groupInquiryReceiptEmail(inquiry);
+    const result = await deps.mailer.sendMail({ to: staff ? source.officeRecipient : inquiry.contactEmail, ...email });
+    if (result.ok) {
+      await source.mails.recordMail(inquiry.inquiryId, inquiry.recipient, "SENT");
+      counts.sent += 1;
+    } else if (result.failure === "permanent") {
+      await source.mails.recordMail(inquiry.inquiryId, inquiry.recipient, "FAILED");
+      counts.failed += 1;
+    } else {
+      if (await source.mails.recordMail(inquiry.inquiryId, inquiry.recipient, "RETRY") === "FAILED") counts.failed += 1;
+      else counts.retried += 1;
+      break;
+    }
+  }
+  return counts;
+}
+
 export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<ExperienceJobCounts> {
   const hostLogins = deps.hostLogins ?? null;
   // First: a host is waiting for this email.
   const hostLoginLinks = hostLogins ? await step(deps, "hostLoginLinks", () => sendHostLoginLinks(deps, hostLogins)) : undefined;
+  // 団体・個別の相談 (#532): a person asking the office is waiting too, and the office should hear at once.
+  const groupInquiries = deps.groupInquiries ?? null;
+  const groupInquiryMails = groupInquiries ? await step(deps, "groupInquiryMails", () => sendGroupInquiryMails(deps, groupInquiries)) : undefined;
   const questionReplies = await step(deps, "questionReplies", () => sendQuestionReplies(deps));
   const bookingConfirmations = await step(deps, "bookingConfirmations", () => sendBookingConfirmations(deps));
   const meetingGuides = deps.meetingGuides
@@ -885,6 +940,7 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
     ...(meetingGuides ? { meetingGuides } : {}),
     ...(managedBookingMails ? { managedBookingMails } : {}),
     ...(hostLoginLinks ? { hostLoginLinks } : {}),
+    ...(groupInquiryMails ? { groupInquiryMails } : {}),
     ...(hostAccountPurge ? { hostAccountPurge } : {}),
     ...(adminSessionPurge ? { adminSessionPurge } : {}),
   };

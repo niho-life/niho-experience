@@ -60,6 +60,10 @@ OWNERはAI翻訳の生成履歴がなくても、現在の日英原稿を照合�
 
 Admin代理公開では、手入力の日英原稿をAdmin reviewとして別のimmutable行に記録する。OWNER本人が確認した表示やdraft内のOWNER確認fingerprintは作らない。公開transactionは現在revisionと日英fingerprintに一致する同じAdmin actorのreviewを要求し、原稿再編集後は再reviewが必要になる。
 
+## 日本語のみで公開する（#59）
+
+地域の担い手が日本語で書く商品のため、OWNER・事務局は原稿の節で「日本語のみで公開する」を選べる（`content.japaneseOnly`。`EXPERIENCE_JAPANESE_SITE_ENABLED` が `true` の環境でだけ保存できる）。英語の原稿と「英語原稿を確認」は要らず、日本語原稿が揃えば公開できる（事務局の代理公開は「日本語原稿を確認」）。公開上の商品名は日本語の商品名と同じ。公開すると日本語のページ（`/ja/experiences/{slug}`）にだけ載り、英語のページ・一覧・sitemap には出ない。詳しい境界は [localization-consumer.md](localization-consumer.md)「日本語を原文にした商品」。
+
 ## よくある質問（FAQ・任意）
 
 ホストは日本語原稿（`content.ja.faq`）と英語原稿（`content.faq`）に、予約前によくある質問を「質問・答え」の組で書ける（#146）。書式なしの文で、最大30件、質問200文字・答え1200文字まで（`EXPERIENCE_FAQ_LIMITS` と同じ値）。保存時はサーバーが厳格に検証し、空の質問・答え、上限超過、30件超、同じ質問の重複（前後の空白を除き大文字小文字を区別しない）、`question`/`answer` 以外のキーを含む行を `INVALID_INPUT` で拒否する。黙って落とさず、Host画面も保存前に該当行を示す。

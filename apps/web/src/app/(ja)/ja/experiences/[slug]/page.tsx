@@ -14,7 +14,7 @@ export async function generateMetadata(props: Props): Promise<Metadata> {
   if (config.apiMode === "http") {
     try { await getPreparedJapaneseStaticRelease(); }
     catch { return { title: "日本語版を表示できません", robots: { index: false, follow: false } }; }
-    const local = await getSitePublicExperience((await props.params).slug);
+    const local = await getSitePublicExperience((await props.params).slug, "ja");
     if (local?.kind !== "published" || !local.item.publication.japanese) return { title: "体験は公開されていません", robots: { index: false, follow: false } };
     return sitePublicationMetadata(local.item, "ja");
   }
@@ -27,7 +27,7 @@ export async function generateMetadata(props: Props): Promise<Metadata> {
 
 export default async function JapaneseExperiencePage(props: Props) {
   if (config.apiMode === "http") {
-    const local = await getSitePublicExperience((await props.params).slug);
+    const local = await getSitePublicExperience((await props.params).slug, "ja");
     if (local?.kind !== "published" || !local.item.publication.japanese) notFound();
     return <SitePublicationPage item={local.item} cancelled={(await props.searchParams).checkout === "cancelled"} locale="ja" />;
   }

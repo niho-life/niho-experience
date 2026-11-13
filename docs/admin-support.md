@@ -28,7 +28,11 @@ read flagをONにしたHTTP画面は、予約一覧・deep link詳細・通知�
 
 `ADMIN_OPERATIONS_PREVIEW_ENABLED=true` もmock専用の合成UI受入flagである。ブラウザ要求を契約形fixtureでstubし、二重送信、snapshot競合、POST時409、許可だけの変更、結果不明・404からの同ID照合、再送不可時のGET回復、401全消去と遅延応答破棄、caseとoperationsの離脱guard合成、UUID queryからGETだけの復帰を検証する。mock BFF、実決済、実返金、実メールへ接続しない。
 
-`ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED=true` もmock専用で、新Experience予約の「サイト予約」（`/admin/site-bookings`）を合成fixtureで描く。サポートONの予約一覧・予約番号で開く入口を含み、根拠は予約時snapshotだけである（`docs/guest-booking.md`「取消と返金（第7段）」）。
+`ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED=true` もmock専用で、新Experience予約の「予約」（`/admin/site-bookings`）を合成fixtureで描く。サポートONの予約一覧・予約番号で開く入口を含み、根拠は予約時snapshotだけである（`docs/guest-booking.md`「取消と返金（第7段）」）。
+
+`ADMIN_PRODUCT_OPERATORS_PREVIEW_ENABLED=true` もmock専用（HTTPでは無視）で、運営者（`/admin/operators`・#542）を合成データで描く。ブラウザの `/admin/api/operators` 要求はPlaywrightがstubで答え、招待リンクの作成・取り消し・解除・結果不明からの同じ `commandId` での照合を検証する。
+
+`ADMIN_PRODUCT_WORKSPACES_PREVIEW_ENABLED=true` もmock専用（HTTPでは無視）で、提供者（`/admin/products`・#542 S2）のメニューとページを開く。ページは合成データを持たず、ブラウザの `/admin/api/product-workspaces…` 要求をPlaywrightがstubで答える。
 
 `EXPERIENCE_FEE_SUMMARY_PREVIEW_ENABLED=true` もmock専用である。Admin read previewとHost予約プレビューのパネルだけを開き、Playwrightが契約形responseをbrowser requestへ返す。HTTPでは無視し、mock BFF・決済・返金・Transfer・台帳へ接続しない。
 

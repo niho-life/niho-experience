@@ -1,7 +1,7 @@
 import "server-only";
 import type { Pool } from "pg";
 import { retrievePlatformCheckout } from "@niho-experience/experience-payments";
-import { AdminSessions, BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostAccounts, HostMailOutbox, HostNotificationAddresses, HostNotificationOutbox, ProviderMediaCleanupRepository, isHostEmail } from "@niho-experience/experience-store";
+import { AdminSessions, BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GroupInquiryRepository, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostAccounts, HostMailOutbox, HostNotificationAddresses, HostNotificationOutbox, ProviderMediaCleanupRepository, isHostEmail } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
@@ -37,6 +37,8 @@ export interface ExperienceJobDependencies {
   readonly hostMail?: boolean;
   /** Whether hosts sign in with Experience accounts (ADR 0003, EXPERIENCE_HOST_ACCOUNTS_ENABLED): their sign-in links. */
   readonly hostAccounts?: boolean;
+  /** Whether 団体・個別の相談 is on (#532, EXPERIENCE_GROUP_INQUIRY_ENABLED): its two emails. */
+  readonly groupInquiry?: boolean;
   /** Whether /admin signs in with Google (ADR 0003, EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED): its ended sessions. */
   readonly adminGoogleLogin?: boolean;
   readonly settlementReconciliation?: (pool: Pool) => SettlementReconciliationDeps | null;
@@ -148,6 +150,7 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       otaGuests: new ExternalReservationGuests(pool),
       hostMail: (dependencies.hostMail ?? config.hostMailEnabled) ? { outbox: new HostMailOutbox(pool), summaries: new HostNotificationOutbox(pool), allowed: (providerId, kind) => hostNotificationAllowed(providerId, kind) } : null,
       hostAddresses: new HostNotificationAddresses(pool),
+      groupInquiries: (dependencies.groupInquiry ?? config.groupInquiryEnabled) ? { mails: new GroupInquiryRepository(pool), officeRecipient } : null,
       hostLogins: (dependencies.hostAccounts ?? config.hostAccountsEnabled) ? new HostAccounts(pool) : null,
       adminSessions: (dependencies.adminGoogleLogin ?? config.adminGoogleLoginEnabled) ? new AdminSessions(pool) : null,
       providerMediaCleanup: mediaStorage ? {

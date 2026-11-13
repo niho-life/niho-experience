@@ -9,6 +9,8 @@ import { NextDateBand } from "@/components/NextDateBand";
 import { Photo } from "@/components/Photo";
 import { ReviewsSection } from "@/components/ReviewsSection";
 import { config } from "@/lib/config";
+import { inquiryHref } from "@/lib/group-inquiry-entry";
+import { buttonClass } from "@/components/ui";
 import { detailFromTokyoLine, detailGuideHeading } from "@/lib/detail-page";
 import { siteNextDates } from "@/lib/guest-booking-source";
 import { guidesAboutExperience } from "@/lib/guide-registry";
@@ -36,7 +38,10 @@ export function sitePublicationMetadata(item: SitePublicExperience, locale: "en"
     title: !ja && publication.slug === "community-dinner-with-locals"
       ? "Kamakura Cooking & Dinner with Locals"
       : base.title,
-    alternates: { canonical, languages: publication.japanese && config.japaneseSiteEnabled ? { en: english, ja: japanese, "x-default": english } : { en: english, "x-default": english } },
+    // 日本語のみの商品には英語のページが無いので、hreflang の組を作らず canonical だけにする。
+    alternates: publication.japaneseOnly
+      ? { canonical }
+      : { canonical, languages: publication.japanese && config.japaneseSiteEnabled ? { en: english, ja: japanese, "x-default": english } : { en: english, "x-default": english } },
     openGraph: { ...base.openGraph, locale: ja ? "ja_JP" : "en_US" },
     robots: config.indexingAllowed ? undefined : { index: false, follow: false },
   };
@@ -173,6 +178,11 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 {providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt={providerIdentityPhoto.alt} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" /> : null}
                 <div><p className="font-extrabold">{providerName ?? publication.sellerDisplayName}</p>{hostBioText ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{hostBioText}</p> : null}</div>
               </div>
+            </section> : null}
+            {config.groupInquiryEnabled ? <section id="inquiry" aria-labelledby="inquiry-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
+              <h2 id="inquiry-heading" className="text-2xl">{ja ? "相談してみる" : "Planning something bigger?"}</h2>
+              <p className="mt-3 text-ink-soft">{ja ? "学校や会社、グループでの参加など、予約の前に相談したいことがあれば、お気軽にどうぞ。はじめの相談は無料です。" : "For a school, a company or a group, or if you'd like to talk before booking, get in touch. The first conversation is free."}</p>
+              <a href={inquiryHref(locale, { from: "EXPERIENCE", experienceSlug: publication.slug, experienceTitle: title, hostName: providerName })} className={buttonClass("secondary", "mt-4 w-full sm:w-auto")}>{ja ? (providerName ? `${providerName}さんに相談する` : "この体験について相談する") : "Ask about this experience"}</a>
             </section> : null}
             {reviews ? <section id="reviews" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 className="text-2xl">{ja ? "レビュー" : "Reviews"}</h2>

@@ -319,6 +319,11 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     expect(log).toHaveBeenCalledWith("Experience guest checkout rate limited", { reason: "checkout-ip-10m" });
   });
 
+  it("passes the provider link's mark (#531) to the booking as sent, and nothing the link did not carry", async () => {
+    await checkout(post({ ...CHECKOUT, utmSource: "provider", utmMedium: "qr" }), slugParams());
+    expect(state.repository?.startGuestBooking).toHaveBeenLastCalledWith(expect.objectContaining({ utm: { utmSource: "provider", utmMedium: "qr" } }));
+  });
+
   it("drops the UTM fields under Do Not Track, and leaves out what the guest did not send", async () => {
     const plain: Record<string, unknown> = { ...CHECKOUT };
     for (const key of ["utmSource", "guestPhone", "conditionsConsent", "note", "answers"]) delete plain[key];

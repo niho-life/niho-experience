@@ -9,11 +9,11 @@ NIHO販売（完全代行・承認後決済 #515）の開催回に、社内の�
 - **担当は開催回に1人**（予約ごとではない）。同じ回に後から入った予約は、決まっている担当がそのまま受ける。受付の担当と当日の担当は分けない。
 - **対象の回**：NIHO販売の承認後決済（`salesPlan=MANAGED_20`・`acceptanceMode=APPROVAL`・`chargeMode=PLATFORM`）で、まだ生きている申込（承認待ち・承認済みで在庫を押さえている）か確定した予約があり、開始がこれから。期限切れ・辞退・取消・即時決済の予約だけの回は対象外（引受を拒否する）。
 - **担当できる人**：新しいチームのモデルは作らない。`provider_memberships` の現役の OWNER・COHOST（NIHOの役割の上限を超えない）と、`product_operator_grants` の有効・期限内の商品限定運営者（#196）。EDITOR・VIEWER・解除済み・他の提供者・他商品は拒否する。権限表・招待は #528。
-- **対応する**：先に有効に受理した1人だけが担当になる（`occurrence_assignments` の「開いた期間は回ごとに1行」の部分一意索引が最後の砦）。後から押した人には「担当済み（`TAKEN`）」を返し、既存の担当を奪わない。同じ人の二重クリック・再送は `ALREADY_YOURS` で何も足さない。操作ごとの `commandId`（UUID）は最初の結果を返し、別の内容での再利用は 409。
+- **対応する**：先に有効に受理した1人だけが担当になる（`occurrence_assignments` の「開いた期間は回ごとに1行」の部分一意索引が最後の砦）。後から押した人には「担当済み（`TAKEN`）」を返し、既存の担当を奪わない。同じ人の二重クリック・再送は `ALREADY_YOURS` で何も足さない。操作ごとの `commandId`（UUID）は最初の結果を返し、別の内容での再利用は 409。何も変えなかった結果（`TAKEN`・`ALREADY_OPEN` など）も `occurrence_assignment_commands`（追記のみ）に残し、結果が届かず送り直しても、その間に状態が変わっていても最初の結果を返す（担当のいない回への「外す」の再送が、後から担当になった人を外さない）。
 - **行けません**：任意の入力。押さなくても進む。1人の「行けません」で申込み全体は取り消さず、予約の状態も変えない。担当本人は「行けません」ではなく「担当を外れる」を使う。
 - **担当を外れる**：担当本人（または事務局）が外すと募集中に戻る。予約者の予約・承認・支払いの状態は変えない。
 - **履歴は追記だけ**（`occurrence_assignment_events`。更新・削除・TRUNCATEをDBのtriggerで拒否）：いつ／だれが／何をした（対応する・行けません・担当を外れた・合意した額の記録）／理由（任意）。事務局が代わりに記録したものは `recorded_by=ADMIN`。担当の期間（`occurrence_assignments`）も削除せず、外れた期間は読み取り専用になる。
-- **報酬**：開催回の担当期間ごとに「合意した額（円）」を事務局が手で入れる欄を1つ（空＝未設定）。計算・分配・送金・支払済みの管理はしない。提供者への精算（#509）の数字・予約時のsnapshotは変えない。担当が代わると次の人の期間は未設定から始まり、前の期間の額は履歴に残る。担当本人には本人の額だけを見せ、他の人の額・履歴上の額は見せない。
+- **報酬**：開催回の担当期間ごとに「合意した額（円）」を事務局が手で入れる欄を1つ（空＝未設定）。計算・分配・送金・支払済みの管理はしない。提供者への精算（#509）の数字・予約時のsnapshotは変えない。担当が代わると次の人の期間は未設定から始まり、前の期間の額は履歴に残る。担当本人には本人の額だけを見せ、他の人の額・履歴上の額は見せない。額を記録するときは、画面で見た担当期間の `assignmentId` を送り、現在の担当期間と違えば 409 で拒否する（画面を開いたあとに担当が代わっても、前の人と決めた額が次の人の期間に入らない）。
 - **予約者には出さない**：予約者向けの画面・メール・通知は、内部の担当や割当を一切読まない。担当の確定は、承認・支払い・予約の確定・報酬の確定のどれでもない（`bookings`・`booking_guests.approval_status`・精算を書かない）。
 
 ## 画面
@@ -29,7 +29,7 @@ NIHO販売（完全代行・承認後決済 #515）の開催回に、社内の�
 | 状態を変える・読む | `packages/experience-store/src/occurrence-assignments.ts`（`OccurrenceAssignmentRepository`） |
 | ホストの画面・Server Action | `apps/web/src/host/assignments-server.ts`・`apps/web/src/host/actions.ts`・`apps/web/src/components/host/HostAssignments.tsx` |
 | 事務局のAPI・画面 | `apps/web/src/app/(admin)/admin/api/occurrence-assignments/route.ts`・`apps/web/src/components/admin/AdminOccurrenceAssignments.tsx` |
-| runtime roleの権限 | `scripts/gcp/experience-db-grants.mjs`（events は INSERT のみ、assignments は INSERT と released_at・agreed_fee_yen・agreed_fee_set_at の UPDATE のみ） |
+| runtime roleの権限 | `scripts/gcp/experience-db-grants.mjs`（commands・events は INSERT のみ、assignments は INSERT と released_at・agreed_fee_yen・agreed_fee_set_at の UPDATE のみ） |
 
 ## 通知（②）
 

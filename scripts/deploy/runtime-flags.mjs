@@ -218,6 +218,12 @@ export const FLAGS = Object.freeze([
     needs: ["HOST_CONSOLE", "DATABASE"],
   },
   {
+    env: "EXPERIENCE_GROUP_INQUIRY_ENABLED",
+    variable: "GROUP_INQUIRY_ENABLED",
+    // The two emails of an inquiry go with the mail job (guest mail); the Admin inbox needs the Admin sign-in as ever.
+    needs: ["DATABASE", "EXPERIENCE_GUEST_MAIL_ENABLED"],
+  },
+  {
     env: "EXPERIENCE_TRANSLATION_ENABLED",
     variable: "TRANSLATION_ENABLED",
     // It translates the questions and messages the mail job or メッセージ handle; alone it does nothing.

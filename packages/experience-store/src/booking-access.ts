@@ -82,6 +82,8 @@ export interface GuestBookingView {
   /** The seller's name fixed at booking. */
   readonly hostDisplayName: string;
   readonly guestName: string;
+  /** The display language chosen at checkout (#59). The page is English only in v0; a "JA" booking gets a Japanese notice. */
+  readonly guestLanguage: "EN" | "JA";
   readonly bookedAtUtc: string;
   readonly cancelledAtUtc: string | null;
   /** Who cancelled (取消と返金, #285 slice 7); null while it is not cancelled. */
@@ -183,6 +185,7 @@ function viewFromRow(row: DbRow): GuestBookingView {
     freeCancellationUntilUtc,
     hostDisplayName: text(seller.displayName, "seller_snapshot.displayName"),
     guestName: text(row.guest_name, "guest_name"),
+    guestLanguage: row.guest_language === "JA" ? "JA" : "EN",
     bookedAtUtc: isoValue(row, "created_at"),
     cancelledAtUtc: row.cancelled_at === null || row.cancelled_at === undefined ? null : isoValue(row, "cancelled_at"),
     cancelledBy: CANCELLED_BY.has(String(row.cancelled_by)) ? row.cancelled_by as GuestCancelledBy : null,
@@ -346,7 +349,7 @@ export class GuestBookingAccess {
     if (!isSecret(sessionId) || !isBookingId(publicBookingId)) return null;
     const found = await this.#pool.query<DbRow>(
       `SELECT b.public_booking_id::text AS public_booking_id, b.status, b.occurrence_snapshot, b.pricing_snapshot, b.seller_snapshot,
-              b.created_at, b.cancelled_at, b.cancelled_by, b.cancellation_reason, g.guest_name, g.adult_count, g.child_count, p.public_title, p.slug,
+              b.created_at, b.cancelled_at, b.cancelled_by, b.cancellation_reason, g.guest_name, g.guest_language, g.adult_count, g.child_count, p.public_title, p.slug,
               s.last_seen_at <= clock_timestamp() - make_interval(secs => $4) AS stale,
               clock_timestamp() AS db_now, ${END} <= clock_timestamp() AS ended,
               guide_snapshot.guide AS meeting_guide,

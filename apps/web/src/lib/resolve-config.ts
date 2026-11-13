@@ -722,6 +722,10 @@ export function resolveConfig(env: Env) {
   // サイト予約 (#121/#128): synthetic /admin/site-bookings for Playwright only. Mock mode only, so an HTTP deployment
   // ignores it; the page renders fixtures and the browser's API calls are stubbed (its BFF stays closed in mock mode).
   const adminSiteBookingsPreviewEnabled = apiMode === "mock" && env.ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED === "true";
+  // 運営者 (#542): synthetic /admin/operators for Playwright only, the same way. Mock mode only; the browser's API calls are stubbed.
+  // 提供者 (#542 S2): the same for /admin/products, whose API calls the browser stubs answer.
+  const adminProductWorkspacesPreviewEnabled = apiMode === "mock" && env.ADMIN_PRODUCT_WORKSPACES_PREVIEW_ENABLED === "true";
+  const adminProductOperatorsPreviewEnabled = apiMode === "mock" && env.ADMIN_PRODUCT_OPERATORS_PREVIEW_ENABLED === "true";
   // Host history is read-only, but its selected endpoint is also agreed-not-deployed.
   const hostSupportHistoryApiEnabled = apiMode === "http" && env.HOST_SUPPORT_HISTORY_API_ENABLED === "true";
   // Host本人の支援設定は独立契約。配備・受入まではHTTP BFFを閉じる。
@@ -756,6 +760,12 @@ export function resolveConfig(env: Env) {
   // after migration 0022 is applied and accepted. A question is taken only where the OWNER can read it: the host
   // console is on. Provider membership operations are independent of Experience reservations and questions.
   const guestQuestionsEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_GUEST_QUESTIONS_ENABLED === "true";
+  // 団体・個別の相談 (#532, docs/group-inquiry.md): the public form, the office's inbox in /admin and the two emails of an
+  // inquiry (the mail job, which needs EXPERIENCE_GUEST_MAIL_ENABLED). Kept in the experience DB (migration 0074), so
+  // only http mode opens it; the mock has no such inbox. Off by default; the Admin list needs the Admin sign-in too.
+  const groupInquiryEnabled = apiMode === "http" && env.EXPERIENCE_GROUP_INQUIRY_ENABLED === "true";
+  // Mock mode only: the form itself, for the browser tests, which stub the POST. It stores nothing and opens no route.
+  const groupInquiryPreviewEnabled = apiMode === "mock" && env.EXPERIENCE_GROUP_INQUIRY_PREVIEW_ENABLED === "true";
   // 予約者のレビュー (#104/#108) and attendance-gated invitations live in the experience DB. Public reads and
   // writes use this flag; invitations also require guest booking, attendance and mail to be enabled. The mock keeps
   // its own synthetic reviews; http opens per environment after migrations 0027 and 0033 are accepted.
@@ -902,6 +912,8 @@ export function resolveConfig(env: Env) {
     adminOperationsApiEnabled,
     adminOperationsPreviewEnabled,
     adminSiteBookingsPreviewEnabled,
+    adminProductOperatorsPreviewEnabled,
+    adminProductWorkspacesPreviewEnabled,
     hostSupportHistoryApiEnabled,
     hostSupportSettingsApiEnabled,
     hostSupportSettingsPreviewEnabled,
@@ -918,6 +930,8 @@ export function resolveConfig(env: Env) {
     hostSalesLedgerEnabled,
     hostSalesPayoutsEnabled,
     guestQuestionsEnabled,
+    groupInquiryEnabled,
+    groupInquiryPreviewEnabled,
     guestReviewsEnabled,
     guestBookingEnabled: guestBooking.enabled,
     managedSalesEnabled: apiMode === "http" && env.EXPERIENCE_MANAGED_SALES_ENABLED === "true",

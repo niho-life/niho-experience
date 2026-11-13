@@ -24,6 +24,8 @@ export type JapaneseExperienceLink = LocalizedPair & Readonly<{
   slug: string;
   /** Japanese booking is known to be open. The catalog does not say, so only a detail of the release sets it. */
   bookingReady: boolean;
+  /** 日本語を原文にした商品（#59）。英語のページが無いので、言語切替・hreflang の組にならず、sitemap には日本語だけが載る。 */
+  japaneseOnly: boolean;
 }>;
 export type JapaneseExperienceMapping = ReadonlyMap<string, JapaneseExperienceLink>;
 
@@ -50,7 +52,7 @@ export function mapJapaneseExperiences(releaseId: string, catalog: CatalogInput 
   const links = new Map<string, JapaneseExperienceLink>();
   if (!catalog || catalog.releaseId !== releaseId) return links;
   for (const { slug } of catalog.experiences) {
-    if (SLUG.test(slug)) links.set(slug, { slug, englishPath: `/experiences/${slug}`, japanesePath: `/ja/experiences/${slug}`, bookingReady: false });
+    if (SLUG.test(slug)) links.set(slug, { slug, englishPath: `/experiences/${slug}`, japanesePath: `/ja/experiences/${slug}`, bookingReady: false, japaneseOnly: false });
   }
   for (const detail of details) {
     const link = links.get(detail.experience.slug);
@@ -61,20 +63,26 @@ export function mapJapaneseExperiences(releaseId: string, catalog: CatalogInput 
   return links;
 }
 
-/** Published native Japanese manuscripts pair independently of the former NIHO product catalog. */
+/**
+ * Published native Japanese manuscripts pair independently of the former NIHO product catalog. 日本語のみの商品（#59）は
+ * 英語のページが無いので組にせず `japaneseOnly` の印を付ける。sitemap に載せるので、売れる状態（販売条件がある）のものだけ。
+ */
 export function mapPublicationJapaneseExperiences(
-  items: readonly { readonly publication: { readonly slug: string; readonly japanese: unknown }; readonly saleTerms: { readonly offers: readonly unknown[] } | null }[],
+  items: readonly { readonly publication: { readonly slug: string; readonly japanese: unknown; readonly japaneseOnly?: boolean }; readonly saleTerms: { readonly offers: readonly unknown[] } | null }[],
   bookingsEnabled: boolean,
 ): JapaneseExperienceMapping {
   const links = new Map<string, JapaneseExperienceLink>();
   for (const { publication, saleTerms } of items) {
     const { slug } = publication;
     if (!SLUG.test(slug) || publication.japanese == null) continue;
+    const japaneseOnly = publication.japaneseOnly === true;
+    if (japaneseOnly && !saleTerms?.offers.length) continue;
     links.set(slug, {
       slug,
       englishPath: `/experiences/${slug}`,
       japanesePath: `/ja/experiences/${slug}`,
       bookingReady: bookingsEnabled && Boolean(saleTerms?.offers.length),
+      japaneseOnly,
     });
   }
   return links;
@@ -84,6 +92,7 @@ export function mapPublicationJapaneseExperiences(
 export function experienceCounterparts(mapping: JapaneseExperienceMapping): Record<string, string> {
   const rows: Record<string, string> = {};
   for (const link of mapping.values()) {
+    if (link.japaneseOnly) continue;
     rows[link.englishPath] = link.japanesePath;
     if (link.bookingReady) rows[`${link.englishPath}/book`] = `${link.japanesePath}/book`;
   }

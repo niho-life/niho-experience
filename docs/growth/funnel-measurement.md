@@ -95,6 +95,32 @@ NIHOは受け取った値を予約行に保存し、既存の予約データ保�
 | `utm_campaign` | `pilot_2026q4` | 検証の期間単位 |
 | `utm_content` | `table_card`、`entrance_poster`、`story_1103` | 置き場所・投稿の区別 |
 
+### 提供者経由のリンク（#531 v0）
+
+提供者が自分のサイト・SNS・店頭の QR から、NIHO の予約ページへお客さまを送るときの印の決まり。新しい記録の仕組みは無く、上の「承認済みの予約流入元」（4項目のUTM）に載せる。
+
+| 項目 | 決まり |
+| --- | --- |
+| `utm_source` | 固定で `provider`。どの提供者かは、リンク先の体験（slug）がすでに示す。提供者名・ID・連絡先は URL に入れない |
+| `utm_medium` | 置き場所で使い分ける：`referral`（自分のサイトやメール）、`social`（SNS）、`qr`（店頭のQR・印刷物） |
+| `utm_campaign`・`utm_content` | 提供者のリンクには付けない（運営が配る個別の施策で使う語と混ざらないようにする） |
+
+- **作り方**：ホスト画面 › 体験 で、公開中の体験の「予約リンクをコピー」を押す（置く場所を選ぶ）。コピーされるのは `https://<公開サイト>/experiences/<slug>?utm_source=provider&utm_medium=<置き場所>` だけ。発行の記録は残さない。QR が要るときは、そのリンクを一般の QR ツールで画像にする（`qr` を選ぶ）。
+- **記録のされ方**：既存のままで、最初の流入だけをメモリに持ち、サイト内の移動や決済復帰で別の経路に上書きしない。Do Not Track のブラウザや印の無い訪問は「流入元不明」で、予約・相談は通常どおりできる。
+- **数え方**（月に一度、運営が確定した予約だけを数える。Umami の訪問とは突き合わせない）：
+
+```sql
+SELECT p.slug, g.utm->>'utmMedium' AS medium, count(*) AS confirmed
+  FROM bookings b
+  JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
+  JOIN experience_products p ON p.provider_id = b.provider_id AND p.id = b.product_id
+ WHERE b.status = 'CONFIRMED' AND g.utm->>'utmSource' = 'provider'
+   AND b.confirmed_at >= :from AND b.confirmed_at < :to
+ GROUP BY p.slug, medium ORDER BY p.slug, medium;
+```
+
+- **v0 でしないこと**：リンクの発行・管理画面、QR の生成、提供者別の集計画面、埋め込み部品。日本語だけの商品の `/ja` のリンクは、日本語を原文にした商品の公開（#544）の後に足す。
+
 OTA経由の予約はOTAの管理画面で数える。OTAからこのサイトへの誘導は行わない（[pilot-30day-plan.md](pilot-30day-plan.md)）。
 NIHO運営の内部アクセスは、計測ツールの「自分の訪問を除外」の機能で除く。IPアドレスによる除外は使わない。
 

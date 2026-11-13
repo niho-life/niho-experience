@@ -100,6 +100,11 @@ function validContentFaq(content: RecordValue): boolean {
   return !isRecord(content.ja) || content.ja.faq === undefined || publicationFaqIssue(content.ja.faq) === null;
 }
 
+/** 日本語のみで公開する商品（#59）は、日本語サイト（EXPERIENCE_JAPANESE_SITE_ENABLED）が有効な環境でだけ保存できる。 */
+function japaneseOnlyAllowed(content: RecordValue): boolean {
+  return content.japaneseOnly === undefined || content.japaneseOnly === false || (content.japaneseOnly === true && config.japaneseSiteEnabled);
+}
+
 function validDraft(value: unknown): value is ProductDraftBody {
   return isRecord(value)
     && exactKeys(value, ["slug", "publicTitle", "content", "currency", "unitAmount"])
@@ -107,6 +112,7 @@ function validDraft(value: unknown): value is ProductDraftBody {
     && typeof value.publicTitle === "string" && value.publicTitle.length >= 1 && value.publicTitle.length <= 300
     && isRecord(value.content)
     && validContentFaq(value.content)
+    && japaneseOnlyAllowed(value.content)
     && value.currency === "JPY"
     && typeof value.unitAmount === "number" && Number.isSafeInteger(value.unitAmount)
     && (value.unitAmount === 0 || value.unitAmount >= 50);
