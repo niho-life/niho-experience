@@ -199,12 +199,12 @@ async function completeInvite(request: NextRequest, login: HostLoginState, code:
   const binding = request.cookies.get(INVITE_BINDING_COOKIE)?.value;
   if (!isOpaqueSecret(binding)) return failed("invite-invalid");
 
-  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId) => {
+  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeUtc) => {
     const now = Date.now();
     try {
       const accepted = await invitations.acceptInvitation({ browserBindingHash: linkBindingHash(binding), nihoUserId, nowUtc: nowUtc(now) });
       if (accepted.kind !== "accepted") return { accepted, opened: null, now };
-      return { accepted, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: nowUtc(now), nowUtc: nowUtc(now) }), now };
+      return { accepted, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeUtc, now), nowUtc: nowUtc(now) }), now };
     } catch (error) {
       console.error(`[host-auth] invitation not accepted: ${error instanceof Error ? error.name : "unknown error"}`);
       return null;

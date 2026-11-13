@@ -200,6 +200,19 @@ describe("the NIHO sign-in of an invitation", () => {
     expect([location(response), ...response.headers.getSetCookie()].join("\n")).not.toMatch(new RegExp(`${NIHO_USER}|${ACCESS}|${CONNECTION}`));
   });
 
+  it("opens the session with the time the person signed in at NIHO (authTime)", async () => {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      calls.push({ url, init });
+      if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: "refresh-invite", connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成", iconImage: null }, authTime: tenMinutesAgo });
+      if (url.pathname === "/api/experience-host/identity") return json(200, { nihoUserId: NIHO_USER, accountStatus: "ACTIVE" });
+      return new Response(null, { status: 204 });
+    }));
+    await comeBack();
+    expect(state.identities!.startSessionForNihoIdentity).toHaveBeenCalledWith(expect.objectContaining({ nihoUserId: NIHO_USER, authenticatedAtUtc: tenMinutesAgo }));
+  });
+
   it("tells each refusal in its own words, keeps the invitation, and ends the connection", async () => {
     const cases: [AcceptHostInvitationResult, string][] = [
       [{ kind: "invalid" }, "invite-invalid"],
