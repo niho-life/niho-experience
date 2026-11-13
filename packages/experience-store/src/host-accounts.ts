@@ -327,18 +327,7 @@ export class HostAccounts {
           WHERE id = $1`,
         [accountId, at],
       );
-      const sessionToken = newSecret();
-      const sessionRef = randomUUID();
-      const opened = await client.query<DbRow>(
-        `INSERT INTO host_sessions
-           (session_hash, session_ref, host_account_id, session_version, created_at, authenticated_at, last_seen_at, idle_expires_at, absolute_expires_at)
-         VALUES ($1, $2::uuid, $3, $4, $5::timestamptz, $5::timestamptz, $5::timestamptz,
-                 LEAST($5::timestamptz + make_interval(days => $6), $5::timestamptz + make_interval(days => $7)),
-                 $5::timestamptz + make_interval(days => $7))
-         RETURNING absolute_expires_at`,
-        [digest(sessionToken), sessionRef, accountId, request.session_version, at, HOST_ACCOUNT_LIMITS.sessionIdleDays, HOST_ACCOUNT_LIMITS.sessionAbsoluteDays],
-      );
-      return { kind: "ok", sessionToken, sessionRef, hostAccountId: accountId, absoluteExpiresAtUtc: isoValue(opened.rows[0]!, "absolute_expires_at") };
+      return openHostSessionIn(client, { hostAccountId: accountId, sessionVersion: Number(request.session_version), createdAtUtc: at, authenticatedAtUtc: at });
     });
   }
 
@@ -549,6 +538,30 @@ export class HostAccounts {
     const at = now(input.nowUtc);
     return withTransaction(this.#pool, (client) => grantProviderOwnerIn(client, { providerId: input.providerId, hostAccountId: account, nowUtc: at }));
   }
+}
+
+/**
+ * Opens a session of an ACTIVE account at `sessionVersion` (14 idle days, 30 at most), inside the caller's transaction:
+ * the one place a session row is written, for an emailed link (`consumeLogin`) and a NIHO sign-in
+ * (HostAccountIdentities.startSessionForNihoIdentity). `authenticatedAtUtc` is when the person last proved who they are:
+ * the link's use for an email, NIHO's `auth_time` for NIHO; never after the session opened. Inputs are already validated.
+ */
+export async function openHostSessionIn(
+  client: PoolClient,
+  input: { readonly hostAccountId: string; readonly sessionVersion: number; readonly createdAtUtc: string; readonly authenticatedAtUtc: string },
+): Promise<Extract<HostLoginResult, { readonly kind: "ok" }>> {
+  const sessionToken = newSecret();
+  const sessionRef = randomUUID();
+  const opened = await client.query<DbRow>(
+    `INSERT INTO host_sessions
+       (session_hash, session_ref, host_account_id, session_version, created_at, authenticated_at, last_seen_at, idle_expires_at, absolute_expires_at)
+     VALUES ($1, $2::uuid, $3, $4, $5::timestamptz, $8::timestamptz, $5::timestamptz,
+             LEAST($5::timestamptz + make_interval(days => $6), $5::timestamptz + make_interval(days => $7)),
+             $5::timestamptz + make_interval(days => $7))
+     RETURNING absolute_expires_at`,
+    [digest(sessionToken), sessionRef, input.hostAccountId, input.sessionVersion, input.createdAtUtc, HOST_ACCOUNT_LIMITS.sessionIdleDays, HOST_ACCOUNT_LIMITS.sessionAbsoluteDays, input.authenticatedAtUtc],
+  );
+  return { kind: "ok", sessionToken, sessionRef, hostAccountId: input.hostAccountId, absoluteExpiresAtUtc: isoValue(opened.rows[0]!, "absolute_expires_at") };
 }
 
 /**

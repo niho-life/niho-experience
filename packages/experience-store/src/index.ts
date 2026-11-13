@@ -246,6 +246,16 @@ export type {
   OpenedBookingSession,
 } from "./booking-access.ts";
 export { HOST_ACCOUNT_LIMITS, HostAccounts, isHostAccountId, normalizeHostEmail } from "./host-accounts.ts";
+export { HostAccountIdentities } from "./host-account-identities.ts";
+export type {
+  LinkNihoIdentityResult,
+  NihoIdentityLinkProof,
+  NihoIdentityRoute,
+  NihoIdentityStatus,
+  NihoIdentityUnlinkProof,
+  NihoSessionResult,
+  UnlinkNihoIdentityResult,
+} from "./host-account-identities.ts";
 export { PEOPLE_LISTING_EXPERIENCES_MAX, PEOPLE_LISTING_LIMITS, PeopleListingRepository, validatePeopleListingInput } from "./people-listings.ts";
 export type { AdminPeopleListingRow, PeopleListingExperienceRef, PeopleListingInput, PublicPerson } from "./people-listings.ts";
 export { GROUP_INQUIRY_MAIL_LIMITS, GROUP_INQUIRY_MAIL_RECIPIENTS, GroupInquiryRepository } from "./group-inquiries.ts";

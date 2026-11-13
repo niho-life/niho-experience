@@ -142,6 +142,10 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // ホストのアカウント (ADR 0003, 0064): an account is suspended, never deleted. Sign-in link requests (their own mail
   // queue) and sessions are deleted by the mail job once they can no longer open or read anything.
   host_accounts: { write: IU },
+  // NIHO アカウントとの結び付け (#593, 0083): a binding is added, then its last sign-in and its unlinking are marked; never deleted.
+  // The audit trail of bindings is append-only.
+  host_account_identities: { write: I, updateColumns: ["last_login_at", "unlinked_at"] },
+  host_account_identity_events: { write: I },
   host_login_requests: { write: IUD },
   // ホストへのメールの宛先 (#194, 0038): the sign-in's copy and the host's choice; DELETE when access ends (the mail job).
   host_notification_address_confirmations: { write: IUD },
