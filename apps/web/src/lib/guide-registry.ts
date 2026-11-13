@@ -43,7 +43,8 @@ export const guideCatalog = cache(async (): Promise<GuideCatalog> => {
     const articles = await repository.listPublicArticles();
     return {
       source: "database",
-      guides: sortGuides(articles.map(publicGuideArticleToGuide)),
+      // A guide written in Japanese (#154) is the Japanese site's 読みもの: the English site never lists it.
+      guides: sortGuides(articles.filter((article) => article.content.language !== "ja").map(publicGuideArticleToGuide)),
       draftSlugs: [],
       draftProblems: [],
     };
@@ -77,7 +78,7 @@ const databaseGuide = cache(async (slug: string): Promise<Guide | null> => {
   const repository = guideRepository();
   if (repository === null) throw new Error("Guide database source is enabled without a database connection.");
   const article = await repository.getPublicArticleBySlug(slug);
-  return article === null ? null : publicGuideArticleToGuide(article);
+  return article === null || article.content.language === "ja" ? null : publicGuideArticleToGuide(article);
 });
 
 /** /guides exists while it has a guide to list or (preview only) a draft problem to show; the footer links to it then. */
@@ -105,4 +106,33 @@ export async function guidesAboutExperience(experienceSlug: string): Promise<{ g
 export async function indexableGuides(): Promise<Guide[]> {
   if (config.guidePublicSource === "database") return [...(await guideCatalog()).guides];
   return sortGuides(guideRegistry(isPreview));
+}
+
+/**
+ * The Japanese site's 読みもの (#154): the published guides written in Japanese, newest first. Database source only (a
+ * guide is written in /write); an unavailable database shows an empty shelf rather than an error.
+ */
+export const japaneseGuides = cache(async (): Promise<readonly Guide[]> => {
+  if (config.guidePublicSource !== "database") return [];
+  try {
+    const repository = guideRepository();
+    if (repository === null) return [];
+    const articles = await repository.listPublicArticles();
+    return sortGuides(articles.filter((article) => article.content.language === "ja" && article.indexable).map(publicGuideArticleToGuide));
+  } catch {
+    return [];
+  }
+});
+
+/** One 読みもの article by slug (a direct link to an unlisted one still opens, with noindex), or null. */
+export async function findJapaneseGuide(slug: string): Promise<Guide | null> {
+  if (config.guidePublicSource !== "database" || !GUIDE_SLUG.test(slug) || slug.length > 160) return null;
+  try {
+    const repository = guideRepository();
+    if (repository === null) return null;
+    const article = await repository.getPublicArticleBySlug(slug);
+    return article !== null && article.content.language === "ja" ? publicGuideArticleToGuide(article) : null;
+  } catch {
+    return null;
+  }
 }
