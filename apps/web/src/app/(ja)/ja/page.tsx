@@ -6,8 +6,8 @@ import { JapaneseHero } from "@/components/ja-home/JapaneseHero";
 import { CategoryNav, ConsultBand, FeatureBand, GuidesBand, HomeFinder, HostBand, JapaneseHeroCopy, OccasionStrips, PeopleBand, PicksHeading } from "@/components/ja-home/JapaneseHomeSections";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
 import {
-  JA_HOME_FACES_LIMIT, JA_HOME_FEATURE, JA_HOME_GUIDES_LIMIT, JA_HOME_HAND, JA_HOME_HERO_PHOTOS, JA_HOME_LEAD, JA_HOME_TITLE,
-  categoriesWithExperiences, occasionsWithExperiences, pickFeaturedPerson, pickHomeExperiences,
+  JA_HOME_FACES_LIMIT, JA_HOME_GUIDES_LIMIT, JA_HOME_HAND, JA_HOME_HERO_PHOTOS, JA_HOME_LEAD, JA_HOME_TITLE,
+  categoriesWithExperiences, occasionsWithExperiences, pickFeaturedPerson, pickHomeExperiences, pickHomeFeature,
 } from "@/lib/ja-home";
 import { loadJaCards } from "@/lib/ja-catalog-server";
 import { loadJapaneseGuides } from "@/lib/ja-guides";
@@ -37,6 +37,7 @@ export default async function JapaneseHome() {
   const categories = categoriesWithExperiences(EXPERIENCE_CATEGORIES, cards);
   const occasions = occasionsWithExperiences(cards);
   const featured = pickFeaturedPerson(people);
+  const feature = pickHomeFeature(cards);
   const guides = allGuides.slice(0, JA_HOME_GUIDES_LIMIT);
   return <>
     <JapaneseHero photos={JA_HOME_HERO_PHOTOS}><JapaneseHeroCopy title={JA_HOME_TITLE} hand={JA_HOME_HAND} lead={JA_HOME_LEAD} /></JapaneseHero>
@@ -48,7 +49,7 @@ export default async function JapaneseHome() {
         {picks.map((card, index) => <JaExperienceCard key={card.slug} card={card} priority={index < 3} />)}
       </div>
     </section> : null}
-    {categories.some((category) => category.id === JA_HOME_FEATURE.categoryId) ? <FeatureBand /> : null}
+    {feature ? <FeatureBand feature={feature} /> : null}
     {occasions.length ? <OccasionStrips items={occasions} /> : null}
     {featured ? <PeopleBand featured={featured} people={people} facesLimit={JA_HOME_FACES_LIMIT} /> : null}
     {groupInquiryOpen() ? <ConsultBand /> : null}
