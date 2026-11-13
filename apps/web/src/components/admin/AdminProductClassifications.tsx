@@ -89,6 +89,8 @@ export function AdminProductClassifications() {
     <p className="mb-3 text-sm text-ink-soft">日本語サイトの一覧で探すための、カテゴリー（1つ）・エリア（1つ）・だれと・こんな日に。公開中の商品が先に並びます。決めなくても掲載できます。</p>
     {error ? <div className="mb-3"><HostNoticeLine notice={{ tone: "error", message: error }} /></div> : null}
     {notice ? <p role="status" className="mb-3 rounded-xl bg-leaf-pale p-3 text-sm font-bold text-moss">{notice}</p> : null}
+    {/* While a save is in flight nothing can be edited: the list is read again after it, which would drop a later edit. */}
+    <fieldset disabled={busy} className="min-w-0 border-0 p-0">
     <section className={`${HOST_SURFACE} mb-3 flex flex-wrap items-end gap-3 p-3`} aria-label="選んだ商品にまとめて入れる">
       <label className="text-xs font-bold">カテゴリー
         <select className={`${SELECT} mt-1 min-w-40`} value={bulk.category} onChange={(event) => setBulk({ ...bulk, category: event.target.value })}><option value="">変えない</option>{EXPERIENCE_CATEGORIES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
@@ -125,5 +127,6 @@ export function AdminProductClassifications() {
         </li>;
       })}
     </ul>
+    </fieldset>
   </HostPageBody>;
 }
