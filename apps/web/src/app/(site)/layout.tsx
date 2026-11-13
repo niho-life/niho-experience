@@ -10,7 +10,7 @@ import { config, isPreview } from "@/lib/config";
 import { attributionEnabled } from "@/lib/attribution-enabled";
 import { SITE_DESCRIPTION } from "@/lib/public-metadata";
 import { SiteLocaleProvider } from "@/components/SiteLocale";
-import { LanguageSwitch } from "@/components/LanguageSwitch";
+import { LanguageButton } from "@/components/site/LanguageButton";
 import { getJapaneseStaticCounterparts } from "@/lib/localized-content";
 import { guideCatalogForSite, hasGuidesPage } from "@/lib/guide-registry";
 import { privacyFooterLink } from "@/lib/privacy-link";
@@ -61,7 +61,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <AnalyticsSetup mode={analyticsMode} websiteId={config.umamiWebsiteId} />
           <ExperienceGa4Analytics measurementId={publicAnalytics?.ga4MeasurementId ?? null} />
           <AttributionCapture enabled={attributionEnabled()} />
-          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageSwitch counterparts={counterparts} /> : undefined} footerLinks={footerLinks}>
+          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageButton counterparts={counterparts} /> : undefined} footerLinks={footerLinks}>
             {children}
           </CodeSiteChrome>
         </SiteLocaleProvider>

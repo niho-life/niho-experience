@@ -1,4 +1,5 @@
 import type { SelectedExperienceDetailResponse } from "@niho-experience/api-client";
+import { NO_LANGUAGE_COUNTERPART } from "./locale-links";
 import { japaneseBookingAllowed } from "./localized-release";
 
 /**
@@ -92,7 +93,12 @@ export function mapPublicationJapaneseExperiences(
 export function experienceCounterparts(mapping: JapaneseExperienceMapping): Record<string, string> {
   const rows: Record<string, string> = {};
   for (const link of mapping.values()) {
-    if (link.japaneseOnly) continue;
+    if (link.japaneseOnly) {
+      // 日本語のみの商品：言語のボタンを出さない（行き先が無く、トップへの代わりも要らない）。
+      rows[link.englishPath] = NO_LANGUAGE_COUNTERPART;
+      rows[`${link.englishPath}/book`] = NO_LANGUAGE_COUNTERPART;
+      continue;
+    }
     rows[link.englishPath] = link.japanesePath;
     if (link.bookingReady) rows[`${link.englishPath}/book`] = `${link.japanesePath}/book`;
   }
