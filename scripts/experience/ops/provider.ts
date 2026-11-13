@@ -10,9 +10,26 @@ const ROOT = "/admin/api/product-workspaces";
 /** The consent wording version the server accepts (apps/web/src/lib/admin/admin-product-http.ts). */
 export const PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION = "provider-public-profile-v1";
 
+/**
+ * The English public name a command carries (#587): `--name-en <text>` sets it, `--clear-name-en` empties it, neither leaves it as it
+ * is (undefined). Same rules as the Japanese name.
+ */
+function englishNameFlag(flags: Record<string, unknown>): string | null | undefined {
+  const value = flags["name-en"];
+  if (flags["clear-name-en"] === true) {
+    if (value !== undefined) throw new OpsError("usage", "--name-en and --clear-name-en cannot be used together.", EXIT.usage);
+    return null;
+  }
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length < 1 || value.length > 300 || value !== value.trim() || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new OpsError("usage", "--name-en <English public name> must be 1-300 characters with no spaces at the ends.", EXIT.usage);
+  }
+  return value;
+}
+
 const list: Action = {
   tier: "read",
-  summary: "Lists the providers (public name, kind) and the seller workspaces.",
+  summary: "Lists the providers (public name, English public name, kind) and the seller workspaces.",
   async run(context) {
     const response = await context.api.get(ROOT);
     if (response.status !== 200) throw failureOf(response, "provider list");
@@ -23,20 +40,22 @@ const list: Action = {
 
 const create: Action = {
   tier: "edit",
-  summary: "Registers a provider with a public profile (--name <public display name>, --kind PERSON|BUSINESS, --consent-confirmed: the provider agreed to a public profile). Run `provider list` first: a name that already exists is reported, not duplicated.",
+  summary: "Registers a provider with a public profile (--name <public display name>, --name-en <English public name, optional: the English site shows it>, --kind PERSON|BUSINESS, --consent-confirmed: the provider agreed to a public profile). Run `provider list` first: a name that already exists is reported, not duplicated.",
   async run(context) {
     const name = context.args.flags.name;
     const kind = context.args.flags.kind;
     if (typeof name !== "string" || name.length < 1 || name.length > 300 || name !== name.trim()) throw new OpsError("usage", "--name <public display name> is required (no spaces at the ends).", EXIT.usage);
     if (kind !== "PERSON" && kind !== "BUSINESS") throw new OpsError("usage", "--kind PERSON|BUSINESS is required.", EXIT.usage);
     if (context.args.flags["consent-confirmed"] !== true) throw new OpsError("usage", "--consent-confirmed is required: a person confirmed the provider agreed to a public profile.", EXIT.usage);
+    const nameEn = englishNameFlag(context.args.flags);
+    if (nameEn === null) throw new OpsError("usage", "--clear-name-en is for `provider profile`: a new provider has no English name to clear.", EXIT.usage);
     const listed = await context.api.get(ROOT);
     if (listed.status !== 200) throw failureOf(listed, "provider create");
     const providers = (listed.body as { providers?: Array<{ providerId: string; publicDisplayName: string | null }> } | null)?.providers ?? [];
     const found = providers.find((provider) => provider.publicDisplayName === name);
     if (found) return { status: "unchanged", providerId: found.providerId, note: "A provider with this public name already exists." };
-    const body = { publicDisplayName: name, providerKind: kind, consentVersion: PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION, consentConfirmed: true };
-    if (!context.apply) return { status: "dry_run", create: { publicDisplayName: name, providerKind: kind } };
+    const body = { publicDisplayName: name, ...(nameEn === undefined ? {} : { publicDisplayNameEn: nameEn }), providerKind: kind, consentVersion: PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION, consentConfirmed: true };
+    if (!context.apply) return { status: "dry_run", create: { publicDisplayName: name, ...(nameEn === undefined ? {} : { publicDisplayNameEn: nameEn }), providerKind: kind } };
     const sent = await sendOnce(context, ["provider-create", name], (operationId) => context.api.send("POST", ROOT, body, operationId), async () => {
       const again = await context.api.get(ROOT);
       const found = ((again.body as { providers?: Array<{ providerId: string; publicDisplayName: string | null }> } | null)?.providers ?? []).find((provider) => provider.publicDisplayName === name);
@@ -48,11 +67,11 @@ const create: Action = {
   },
 };
 
-interface ProfileState { readonly publicDisplayName: string | null; readonly providerKind: string | null }
+interface ProfileState { readonly publicDisplayName: string | null; readonly publicDisplayNameEn: string | null; readonly providerKind: string | null }
 
 const profile: Action = {
   tier: "edit",
-  summary: "Sets the public profile (public name and kind) of an existing provider (--provider, --name, --kind PERSON|BUSINESS, --consent-confirmed). A provider needs one before its products can be listed or published (a seller workspace made by an operations script has none).",
+  summary: "Sets the public profile (public name and kind) of an existing provider (--provider, --name, --kind PERSON|BUSINESS, --consent-confirmed; --name-en <English public name> sets the English site's name, --clear-name-en empties it, and without either it stays as it is). A provider needs one before its products can be listed or published (a seller workspace made by an operations script has none).",
   async run(context) {
     const providerId = context.args.flags.provider;
     const name = context.args.flags.name;
@@ -61,20 +80,22 @@ const profile: Action = {
     if (typeof name !== "string" || name.length < 1 || name.length > 300 || name !== name.trim()) throw new OpsError("usage", "--name <public display name> is required (no spaces at the ends).", EXIT.usage);
     if (kind !== "PERSON" && kind !== "BUSINESS") throw new OpsError("usage", "--kind PERSON|BUSINESS is required.", EXIT.usage);
     if (context.args.flags["consent-confirmed"] !== true) throw new OpsError("usage", "--consent-confirmed is required: a person confirmed the provider agreed to a public profile.", EXIT.usage);
+    const nameEn = englishNameFlag(context.args.flags);
     let version: number | null = null;
     const url = `${ROOT}/${encodeURIComponent(providerId)}/profile`;
-    const result = await writeOne<ProfileState>(context, ["provider-profile", providerId, name, kind], {
+    const result = await writeOne<ProfileState>(context, ["provider-profile", providerId, name, kind, nameEn === undefined ? "-" : nameEn ?? "clear"], {
       key: providerId,
       read: async () => {
         const listed = await context.api.get(ROOT);
         if (listed.status !== 200) throw failureOf(listed, "provider profile");
-        const found = ((listed.body as { providers?: Array<{ providerId: string; publicDisplayName: string | null; providerKind: string | null; profileVersion: number | null }> } | null)?.providers ?? []).find((item) => item.providerId === providerId);
+        const found = ((listed.body as { providers?: Array<{ providerId: string; publicDisplayName: string | null; providerKind: string | null; profileVersion: number | null; publicDisplayNameEn?: string | null }> } | null)?.providers ?? []).find((item) => item.providerId === providerId);
         if (!found) throw new OpsError("not_found", `No provider ${providerId}.`, EXIT.failed);
         version = found.profileVersion;
-        return { publicDisplayName: found.publicDisplayName, providerKind: found.providerKind };
+        return { publicDisplayName: found.publicDisplayName, publicDisplayNameEn: found.publicDisplayNameEn ?? null, providerKind: found.providerKind };
       },
-      desired: () => ({ publicDisplayName: name, providerKind: kind }),
-      send: async (_current, desired, operationId) => context.api.send("PUT", url, { expectedVersion: version, profile: { publicDisplayName: desired.publicDisplayName, providerKind: desired.providerKind, consentVersion: PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION, consentConfirmed: true } }, operationId),
+      // Without --name-en / --clear-name-en the English name stays as it is (and is not sent).
+      desired: (current) => ({ publicDisplayName: name, publicDisplayNameEn: nameEn === undefined ? current.publicDisplayNameEn : nameEn, providerKind: kind }),
+      send: async (_current, desired, operationId) => context.api.send("PUT", url, { expectedVersion: version, profile: { publicDisplayName: desired.publicDisplayName, ...(nameEn === undefined ? {} : { publicDisplayNameEn: desired.publicDisplayNameEn }), providerKind: desired.providerKind, consentVersion: PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION, consentConfirmed: true } }, operationId),
     });
     if (result.status === "failed") throw new OpsError(result.error ?? "failed", "The profile was not saved.", result.error === "version_conflict" ? EXIT.conflict : EXIT.failed, { result });
     return result;

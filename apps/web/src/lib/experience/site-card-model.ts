@@ -1,3 +1,4 @@
+import { providerNameFor } from "./provider-name";
 import type { SitePublicExperience, SitePublicOffer } from "./site-publications";
 import type { CardModel } from "@/lib/card-model";
 import { formatDuration, formatYen } from "@/lib/format";
@@ -14,7 +15,8 @@ export function sitePublicationCard(item: SitePublicExperience): CardModel {
   const firstPhoto = publication.photos[0];
   const prices = offers.map((offer) => offer.pricing.adultPriceYen);
   const image = firstPhoto ? { url: firstPhoto.src, alt: firstPhoto.alt } : null;
-  const providerName = publication.providerPublicName ?? publication.sellerDisplayName;
+  // The English card (the Japanese list has its own): the English public name when the provider has one (#587).
+  const providerName = providerNameFor(publication, "en") ?? publication.sellerDisplayName;
   const legacyFaceMedia = sellerDisclosure?.sellerKind === "BUSINESS"
     ? publication.businessLogo
     : sellerDisclosure?.sellerKind === "PERSON" ? publication.providerPhoto : publication.providerPhoto ?? publication.businessLogo;

@@ -35,6 +35,7 @@ function RegisterDialog({ consentVersion, onClose }: { consentVersion: string; o
   const titleId = useId();
   const input = useRef<HTMLInputElement>(null);
   const [publicDisplayName, setPublicDisplayName] = useState("");
+  const [publicDisplayNameEn, setPublicDisplayNameEn] = useState("");
   const [providerKind, setProviderKind] = useState<ProviderKindValue>("");
   const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -48,7 +49,7 @@ function RegisterDialog({ consentVersion, onClose }: { consentVersion: string; o
       const response = await fetch("/admin/api/product-workspaces", {
         method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          publicDisplayName: publicDisplayName.trim(), providerKind: providerKind || null,
+          publicDisplayName: publicDisplayName.trim(), ...(publicDisplayNameEn.trim() === "" ? {} : { publicDisplayNameEn: publicDisplayNameEn.trim() }), providerKind: providerKind || null,
           consentVersion, consentConfirmed: true,
         }),
       });
@@ -66,6 +67,7 @@ function RegisterDialog({ consentVersion, onClose }: { consentVersion: string; o
         <div className={DIALOG_BODY}>
           <h2 id={titleId} className={DIALOG_TITLE}>提供者を登録</h2>
           <input ref={input} value={publicDisplayName} maxLength={300} disabled={busy} onChange={(event) => setPublicDisplayName(event.target.value)} aria-label="旅行者へ公開する提供者名" placeholder="公開名" className={`${INPUT} mt-3`} />
+          <input value={publicDisplayNameEn} maxLength={300} disabled={busy} onChange={(event) => setPublicDisplayNameEn(event.target.value)} aria-label="英語のサイトで公開する提供者名（任意）" placeholder="英語の公開名（任意。例：Shiryu）" className={`${INPUT} mt-3`} />
           <p className={`${PROVIDER_FIELD_LABEL} mt-3 mb-1`}>種別</p>
           <ProviderKindToggle value={providerKind} disabled={busy} onChange={setProviderKind} />
           <div className="mt-3">

@@ -106,8 +106,8 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 | `classification` | `apply --file 変更.json` | edit |
 | `people` | `list`（`--listed`・`--unlisted`・`--provider`） | read |
 | `people` | `apply --file 変更.json`、`withdraw --provider <providerId>` | publish |
-| `provider` | `list` | read |
-| `provider` | `create --name … --kind PERSON\|BUSINESS --consent-confirmed`・`profile --provider …`（既存の提供者の公開プロフィール）・`photo-add --provider … --file …`（提供者の写真・ロゴ） | edit |
+| `provider` | `list`（`publicDisplayNameEn` に英語の公開名も出る） | read |
+| `provider` | `create --name … [--name-en …] --kind PERSON\|BUSINESS --consent-confirmed`・`profile --provider … [--name-en … \| --clear-name-en]`（既存の提供者の公開プロフィール）・`photo-add --provider … --file …`（提供者の写真・ロゴ） | edit |
 | `product` | `list`・`show`・`calendar` | read |
 | `product` | `create`・`draft`・`review`・`calendar-add`・`photo-add` | edit |
 | `product` | `terms`（価格・販売条件） | terms |
@@ -246,3 +246,17 @@ stg に残したもの（CLI では消せない）：
 - 合成の商品 `cli-check-20261114`（運営停止。持ち主の再開が要る状態のまま。販売条件・日程の枠・写真・分類も残る）。
 - 合成の記事 `cli-check-guide-20261114`（停止済みの下書き）と、その表紙の写真。
 - 合成の相談 1 件（`DONE`。送り手は `example.test` のアドレス。受付のメールは stg の通常の経路で送られる）。
+
+## 提供者の英語の公開名（#587）
+
+英語のサイトは、提供者の名前（「Hosted by」「Ask …」・一覧のカード・予約メール・構造化データ）に**英語の公開名**を使います。`/ja` は日本語の公開名のままです。
+
+```bash
+node scripts/experience/ops.mjs provider profile --provider <providerId> --name-en "Shiryu" --yes   # 英語名だけ足す・変える（ほかは今のまま）
+node scripts/experience/ops.mjs provider profile --provider <providerId> --clear-name-en --yes      # 外す（英語のサイトは日本語の名前に戻る）
+node scripts/experience/ops.mjs provider create --name 志龍 --name-en "Shiryu" --kind PERSON --consent-confirmed --yes
+```
+
+- `--name-en` は 1〜300 文字、前後の空白・制御文字なし。**付けたときだけ**変わります（付けなければ今の値のまま）。`--name-en` と `--clear-name-en` は一緒に使えません。
+- 英語名が無い（空・未設定）提供者は、英語のサイトでも日本語の公開名が出ます。英語のサイトに漢字を出さないために、公開する提供者には入れてください。
+- 管理画面の提供者の「公開プロフィール」にも「英語の公開名（任意）」の欄があります。

@@ -110,6 +110,46 @@ describe("provider profile", () => {
   });
 });
 
+describe("provider --name-en (#587)", () => {
+  it("sets, keeps and clears the English public name; create takes it too; list shows it", async () => {
+    const providers = [{ providerId: "prv_9", publicDisplayName: "志龍", publicDisplayNameEn: null as string | null, providerKind: "PERSON", profileVersion: 1 }];
+    const sent: Array<{ method: string; body: { expectedVersion?: number | null; publicDisplayNameEn?: unknown; profile?: Record<string, unknown> } }> = [];
+    const api: Api = {
+      env: "stg", aiKind: "claude-code",
+      async get() { return { status: 200, body: { providers } }; },
+      async send(method, _path, body): Promise<ApiResponse> {
+        sent.push({ method, body: body as never });
+        const profile = (body as { profile?: { publicDisplayNameEn?: string | null } }).profile;
+        if (profile && profile.publicDisplayNameEn !== undefined) providers[0]!.publicDisplayNameEn = profile.publicDisplayNameEn;
+        return { status: method === "POST" ? 201 : 200, body: {} };
+      },
+    };
+    const go = (area: string, argv: string[]) => run(["provider", area, ...argv], { environment: {}, api, now: () => NOW });
+    const base = ["--provider", "prv_9", "--name", "志龍", "--kind", "PERSON", "--consent-confirmed"];
+    // The English name is shown as a difference, then sent with --yes; a repeat changes nothing.
+    expect((await go("profile", [...base, "--name-en", "Shiryu"])).output).toMatchObject({ result: { status: "dry_run", changes: [{ path: "publicDisplayNameEn", before: null, after: "Shiryu" }] } });
+    expect(sent).toEqual([]);
+    expect((await go("profile", [...base, "--name-en", "Shiryu", "--yes"])).output).toMatchObject({ result: { status: "applied" } });
+    expect(sent[0]!.body.profile).toMatchObject({ publicDisplayName: "志龍", publicDisplayNameEn: "Shiryu" });
+    expect((await go("profile", [...base, "--name-en", "Shiryu", "--yes"])).output).toMatchObject({ result: { status: "unchanged" } });
+    // Without the flag the English name stays and is not sent; the Japanese name can change on its own.
+    expect((await go("profile", ["--provider", "prv_9", "--name", "志龍 書道", "--kind", "PERSON", "--consent-confirmed", "--yes"])).output).toMatchObject({ result: { status: "applied" } });
+    expect(sent[1]!.body.profile).not.toHaveProperty("publicDisplayNameEn");
+    expect(providers[0]!.publicDisplayNameEn).toBe("Shiryu");
+    // --clear-name-en empties it; both together, or a bad value, is a usage error.
+    expect((await go("profile", ["--provider", "prv_9", "--name", "志龍 書道", "--kind", "PERSON", "--consent-confirmed", "--clear-name-en", "--yes"])).output).toMatchObject({ result: { status: "applied" } });
+    expect(sent[2]!.body.profile).toMatchObject({ publicDisplayNameEn: null });
+    expect((await go("profile", [...base, "--name-en", "X", "--clear-name-en"])).exit).toBe(2);
+    expect((await go("profile", [...base, "--name-en", " X"])).exit).toBe(2);
+    expect((await go("profile", [...base, "--name-en"])).exit).toBe(2);
+    // A new provider can have it from the start.
+    expect((await go("create", ["--name", "New", "--name-en", "Nyu", "--kind", "PERSON", "--consent-confirmed", "--yes"])).output).toMatchObject({ result: { status: "applied" } });
+    expect(sent.at(-1)!.body).toMatchObject({ publicDisplayName: "New", publicDisplayNameEn: "Nyu" });
+    expect((await go("create", ["--name", "New2", "--clear-name-en", "--kind", "PERSON", "--consent-confirmed"])).exit).toBe(2);
+    expect(((await go("list", [])).output as { result: { providers: Array<{ publicDisplayNameEn: unknown }> } }).result.providers[0]!.publicDisplayNameEn).toBeNull();
+  });
+});
+
 describe("provider photo-add", () => {
   it("sends the photo with the consent version, the placement and the media version it read, and refuses a missing alt text", async () => {
     const sent: Array<{ path: string; headers: Record<string, string> }> = [];

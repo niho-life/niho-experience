@@ -21,7 +21,7 @@ type Provider = {
   sellerProviderDisplayName: string | null;
   sellerDisplayName: string | null;
 };
-type Profile = { providerId: string; publicDisplayName: string; providerKind: "PERSON" | "BUSINESS" | null; consentVersion: string; consentedAtUtc: string; version: number };
+type Profile = { providerId: string; publicDisplayName: string; publicDisplayNameEn?: string | null; providerKind: "PERSON" | "BUSINESS" | null; consentVersion: string; consentedAtUtc: string; version: number };
 type MediaAsset = { id: string; placement: "PROVIDER_PHOTO" | "BUSINESS_LOGO"; altText: string; altTextJa: string; publicCredit: string | null; previewUrl: string };
 type Body = { provider: Provider; profile: Profile | null; providerMedia: { version: number; assets: MediaAsset[] }; consentVersion: string; managedSalesAvailable: boolean };
 
@@ -48,6 +48,7 @@ export function AdminProviderWorkspace({ providerId }: { providerId: string }) {
   const endpoint = `/admin/api/product-workspaces/${encoded}/profile`;
   const [body, setBody] = useState<Body | null>(null);
   const [publicDisplayName, setPublicDisplayName] = useState("");
+  const [publicDisplayNameEn, setPublicDisplayNameEn] = useState("");
   const [providerKind, setProviderKind] = useState<"PERSON" | "BUSINESS" | "">("");
   const [nameConsent, setNameConsent] = useState(false);
   const [placement, setPlacement] = useState<"PROVIDER_PHOTO" | "BUSINESS_LOGO">("PROVIDER_PHOTO");
@@ -66,6 +67,7 @@ export function AdminProviderWorkspace({ providerId }: { providerId: string }) {
   const applyBody = useCallback((next: Body) => {
     setBody(next);
     setPublicDisplayName(next.profile?.publicDisplayName ?? "");
+    setPublicDisplayNameEn(next.profile?.publicDisplayNameEn ?? "");
     setProviderKind(next.profile?.providerKind ?? "");
     setNameConsent(false);
   }, []);
@@ -90,7 +92,7 @@ export function AdminProviderWorkspace({ providerId }: { providerId: string }) {
       const response = await fetch(endpoint, {
         method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
         body: JSON.stringify({ expectedVersion: body.profile?.version ?? null, profile: {
-          publicDisplayName: publicDisplayName.trim(), providerKind: providerKind || null,
+          publicDisplayName: publicDisplayName.trim(), publicDisplayNameEn: publicDisplayNameEn.trim() === "" ? null : publicDisplayNameEn.trim(), providerKind: providerKind || null,
           consentVersion: body.consentVersion, consentConfirmed: true,
         } }),
       });
@@ -154,6 +156,9 @@ export function AdminProviderWorkspace({ providerId }: { providerId: string }) {
           <form onSubmit={saveProfile}>
             <FieldRow label="公開名" htmlFor="provider-public-name">
               <input id="provider-public-name" aria-label="旅行者へ公開する提供者名" value={publicDisplayName} maxLength={300} disabled={busy} onChange={(event) => { setPublicDisplayName(event.target.value); setNameConsent(false); }} className={INPUT} />
+            </FieldRow>
+            <FieldRow label="英語の公開名（任意）" htmlFor="provider-public-name-en">
+              <input id="provider-public-name-en" aria-label="英語のサイトで公開する提供者名" value={publicDisplayNameEn} maxLength={300} disabled={busy} placeholder="例：Shiryu（空なら英語のサイトも上の公開名）" onChange={(event) => { setPublicDisplayNameEn(event.target.value); setNameConsent(false); }} className={INPUT} />
             </FieldRow>
             <FieldRow label="種別" labelId="provider-kind-label">
               <ProviderKindToggle value={providerKind} disabled={busy} onChange={(value) => { setProviderKind(value); setNameConsent(false); }} />

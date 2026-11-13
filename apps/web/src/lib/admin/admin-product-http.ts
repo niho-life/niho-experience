@@ -130,9 +130,12 @@ function validDraft(value: unknown): value is ProductDraftBody {
 
 function validProviderProfile(value: unknown): value is ExperienceAdminProviderPublicProfileInput & { readonly consentConfirmed: true } {
   return isRecord(value)
-    && exactKeys(value, ["publicDisplayName", "providerKind", "consentVersion", "consentConfirmed"])
+    && exactKeys(value, ["publicDisplayName", "publicDisplayNameEn", "providerKind", "consentVersion", "consentConfirmed"], ["publicDisplayName", "providerKind", "consentVersion", "consentConfirmed"])
     && typeof value.publicDisplayName === "string" && value.publicDisplayName.length >= 1 && value.publicDisplayName.length <= 300
     && value.publicDisplayName === value.publicDisplayName.trim() && !/[\u0000-\u001f\u007f]/.test(value.publicDisplayName)
+    // The English public name (#587): absent leaves it as it is; null or an empty string clears it; same rules as the name.
+    && (value.publicDisplayNameEn === undefined || value.publicDisplayNameEn === null || (typeof value.publicDisplayNameEn === "string"
+      && value.publicDisplayNameEn.length <= 300 && value.publicDisplayNameEn === value.publicDisplayNameEn.trim() && !/[\u0000-\u001f\u007f]/.test(value.publicDisplayNameEn)))
     && (value.providerKind === null || value.providerKind === "PERSON" || value.providerKind === "BUSINESS")
     && value.consentVersion === PROVIDER_PUBLIC_PROFILE_CONSENT_VERSION
     && value.consentConfirmed === true;
@@ -293,6 +296,7 @@ export async function adminDraftSellerCollection(request: Request): Promise<Resp
     if (body instanceof Response || !validProviderProfile(body)) return body instanceof Response ? body : adminJson({ error: { code: "INVALID_INPUT" } }, 400);
     const profile = await repository.createAdminProvider(auth.actor, {
       publicDisplayName: body.publicDisplayName,
+      ...(body.publicDisplayNameEn === undefined ? {} : { publicDisplayNameEn: body.publicDisplayNameEn }),
       providerKind: body.providerKind,
       consentVersion: body.consentVersion,
     });
@@ -320,6 +324,7 @@ export async function adminProviderProfileRequest(request: Request, context: Pro
     const validated = body.profile as ExperienceAdminProviderPublicProfileInput & { readonly consentConfirmed: true };
     await repository.saveAdminProviderPublicProfile(auth.actor, providerId, body.expectedVersion as number | null, {
       publicDisplayName: validated.publicDisplayName,
+      ...(validated.publicDisplayNameEn === undefined ? {} : { publicDisplayNameEn: validated.publicDisplayNameEn }),
       providerKind: validated.providerKind,
       consentVersion: validated.consentVersion,
     });

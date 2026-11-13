@@ -41,8 +41,8 @@ export interface Args {
   readonly flags: Readonly<Record<string, string | true>>;
 }
 
-const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified", "listed", "unlisted", "photo-rights-confirmed", "consent-confirmed", "rights-confirmed", "again", "cover", "logo"]);
-const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "status", "provider", "product", "seller-confirmation", "visibility", "id", "occurrence", "subject", "assignee", "due", "note", "kind", "name", "from", "to", "alt", "alt-ja", "photographer", "permission", "credit", "reason"]);
+const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified", "listed", "unlisted", "photo-rights-confirmed", "consent-confirmed", "rights-confirmed", "again", "cover", "logo", "clear-name-en"]);
+const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "status", "provider", "product", "seller-confirmation", "visibility", "id", "occurrence", "subject", "assignee", "due", "note", "kind", "name", "from", "to", "alt", "alt-ja", "photographer", "permission", "credit", "reason", "name-en"]);
 
 /** `--name value`, `--name=value` and the boolean flags `--dry-run`, `--yes`; everything else is positional. */
 export function parseArgs(argv: readonly string[], valueFlags: ReadonlySet<string> = VALUE_FLAGS): Args {
