@@ -86,6 +86,8 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 | `body_sha256` | 本文の SHA-256（本文は残さない） |
 | `recorded_at` | 記録の時刻 |
 
+記録は実行の前なので、route が入力を断った（400 など）操作も残る。残るのは「何を試みたか」で、「何が変わったか」は次の既存の監査が示す。
+
 実際に何がどう変わったかは、各対象の既存の監査（`*_niho_user_id` 列の操作者 ID など）に、管理画面と同じ形で残る。`operator_cli_requests` と突き合わせると「CLI 経由・どの AI・どの操作 ID」が分かる。
 
 ## 有効にする（配備）
