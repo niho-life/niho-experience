@@ -185,11 +185,6 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
               <p className="mt-3 text-ink-soft">{ja ? "学校や会社、グループでの参加など、予約の前に相談したいことがあれば、お気軽にどうぞ。はじめの相談は無料です。" : "For a school, a company or a group, or if you'd like to talk before booking, get in touch. The first conversation is free."}</p>
               <a href={inquiryHref(locale, { from: "EXPERIENCE", experienceSlug: publication.slug, experienceTitle: title, hostName: providerName })} className={buttonClass("secondary", "mt-4 w-full sm:w-auto")}>{ja ? "この体験について相談する" : "Ask about this experience"}</a>
             </section> : null}
-            {config.groupInquiryEnabled ? <section id="inquiry" aria-labelledby="inquiry-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
-              <h2 id="inquiry-heading" className="text-2xl">{ja ? "相談してみる" : "Planning something bigger?"}</h2>
-              <p className="mt-3 text-ink-soft">{ja ? "学校や会社、グループでの参加など、予約の前に相談したいことがあれば、お気軽にどうぞ。はじめの相談は無料です。" : "For a school, a company or a group, or if you'd like to talk before booking, get in touch. The first conversation is free."}</p>
-              <a href={inquiryHref(locale, { from: "EXPERIENCE", experienceSlug: publication.slug, experienceTitle: title, hostName: providerName })} className={buttonClass("secondary", "mt-4 w-full sm:w-auto")}>{ja ? (providerName ? `${providerName}さんに相談する` : "この体験について相談する") : "Ask about this experience"}</a>
-            </section> : null}
             {reviews ? <section id="reviews" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 className="text-2xl">{ja ? "レビュー" : "Reviews"}</h2>
               <div className="mt-4"><ReviewsSection slug={publication.slug} reviews={reviews} locale={locale} preview={false} nihoWebOrigin={config.nihoWebOrigin} /></div>
