@@ -97,12 +97,12 @@ describe("filterJaCards", () => {
     expect(slugs({ area: "zai", with: "date", occasion: "anniv" })).toEqual(["b"]);
   });
 
-  it("keeps cards that have an offer for the party and, with a day, one held on that weekday", () => {
+  it("keeps cards that have an offer for the party, and leaves a day to the booking store's availability (not the weekday)", () => {
     expect(slugs({ guests: "1" })).toEqual(["a", "b", "c"]);
     expect(slugs({ guests: "20" })).toEqual([]);
-    // 2026-11-15 is a Sunday: a and c offer Sundays, b only Mondays.
-    expect(slugs({ date: "2026-11-15" })).toEqual(["a", "c"]);
-    expect(slugs({ date: "2026-11-16" })).toEqual(["b"]);
+    // A rescheduled occurrence can fall on a weekday the offer does not repeat on: no card is dropped here for its weekday.
+    expect(slugs({ date: "2026-11-15" })).toEqual(["a", "b", "c"]);
+    expect(slugs({ date: "2026-11-16", guests: "1" })).toEqual(["a", "b", "c"]);
   });
 
   it("counts a category only for classified cards", () => {

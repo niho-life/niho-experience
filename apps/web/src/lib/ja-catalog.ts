@@ -23,7 +23,7 @@ export type JaCard = {
   readonly capacity: { readonly min: number; readonly max: number } | null;
   readonly priceFromYen: number | null;
   readonly classification: ExperienceClassification;
-  /** What the offers are sold for: the date filter's fast path and the guests filter. */
+  /** What the offers are sold for: the party-size filter. */
   readonly offers: readonly { readonly minimumParticipants: number; readonly maxPartySize: number; readonly weekdays: readonly number[] }[];
 };
 
@@ -111,7 +111,7 @@ export function jaListHref(query: JaListQuery, override: Partial<{ [K in keyof J
 /** Whether any condition besides the category is set (such a list is not for search engines). */
 export const jaQueryHasFilter = (query: JaListQuery): boolean => Boolean(query.area || query.companion || query.occasion || query.guests || query.date);
 
-/** The cards that meet every condition but the date (the date is decided by availability, or by weekday as a fast pre-check). */
+/** The cards that meet every condition but the date: a day is decided only by the booking store's own availability (a rescheduled or closed occurrence moves it), never by the weekday. */
 export function filterJaCards(cards: readonly JaCard[], query: JaListQuery): JaCard[] {
   return cards.filter((card) => {
     const c = card.classification;
@@ -120,11 +120,6 @@ export function filterJaCards(cards: readonly JaCard[], query: JaListQuery): JaC
     if (query.companion && !c.companions.includes(query.companion)) return false;
     if (query.occasion && !c.occasions.includes(query.occasion)) return false;
     if (query.guests && !card.offers.some((offer) => offer.minimumParticipants <= query.guests! && query.guests! <= offer.maxPartySize)) return false;
-    if (query.date) {
-      const [y, m, d] = query.date.split("-").map(Number) as [number, number, number];
-      const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-      if (!card.offers.some((offer) => offer.weekdays.includes(weekday))) return false;
-    }
     return true;
   });
 }
