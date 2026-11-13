@@ -1,6 +1,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { PublicPerson } from "@niho-experience/experience-store";
+import type { Guide } from "@/content/guides";
+import { guideLinkHref } from "@/lib/guide-markdown";
 import { Photo } from "../Photo";
 import { buttonClass } from "../ui";
 import { inquiryHref } from "@/lib/group-inquiry-entry";
@@ -84,5 +86,25 @@ export function PeopleBand({ featured, people, facesLimit }: { featured: PublicP
         </div>
       </div>
     </div>
+  </section>;
+}
+
+/** 読みもの（#154・#563）：公開中の日本語の記事を数本。記事が無いときは、呼ぶ側が出さない。 */
+export function GuidesBand({ guides }: { guides: readonly Guide[] }) {
+  return <section aria-labelledby="guides-band" className="container-page my-14 sm:my-16">
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div><span className="hand text-[1.5rem] text-moss">field notes</span><h2 id="guides-band" className="text-[1.75rem] sm:text-[2rem]">読みもの</h2></div>
+      <Link href="/ja/guides" className="font-extrabold underline underline-offset-4">すべて見る</Link>
+    </div>
+    <ul className="mt-6 grid gap-x-5 gap-y-9 sm:grid-cols-2 lg:grid-cols-3">
+      {guides.map((guide) => <li key={guide.slug}>
+        <Link href={`/ja/guides/${guide.slug}`} className="group block">
+          <Photo image={guide.hero ? { url: guideLinkHref(guide.hero.src)?.href ?? guide.hero.src, alt: guide.hero.alt } : null} alt={guide.hero?.alt ?? ""} sizes="(min-width: 1024px) 320px, (min-width: 640px) 45vw, 90vw" aspect="aspect-[3/2]" rounded="rounded-[18px]" />
+          {guide.category ? <span className="mt-3 block text-[0.8125rem] font-extrabold text-moss">{guide.category.labelJa ?? guide.category.label}</span> : null}
+          <span className="mt-1 block text-[1.125rem] leading-snug font-extrabold group-hover:underline">{guide.title}</span>
+          {guide.description ? <span className="mt-1 block text-[0.9375rem] text-ink-soft">{guide.description}</span> : null}
+        </Link>
+      </li>)}
+    </ul>
   </section>;
 }

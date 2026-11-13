@@ -7,7 +7,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/ja", useSearchParams: (
 
 import { JA_HOME_HAND, JA_HOME_HERO_PHOTOS, JA_HOME_LEAD, JA_HOME_TITLE } from "@/lib/ja-home";
 import { JapaneseHero } from "./JapaneseHero";
-import { ConsultBand, HostBand, JapaneseHeroCopy, PeopleBand, PicksHeading } from "./JapaneseHomeSections";
+import { ConsultBand, GuidesBand, HostBand, JapaneseHeroCopy, PeopleBand, PicksHeading } from "./JapaneseHomeSections";
 
 describe("日本語トップ（#563）", () => {
   it("題・手書き風の英語・説明が指定どおりで、写真の点がある", () => {
@@ -61,5 +61,16 @@ describe("日本語トップ（#563）", () => {
     expect(html).not.toContain('href="/ja/people/c"');
     expect(html).toContain("街の人 3人");
     expect(html).toContain('href="/ja/people"');
+  });
+
+  it("読みもの：数本の記事と、一覧への入口", () => {
+    const guide = (slug: string, title: string) => ({ slug, title, description: `${title}のはなし`, hero: null, category: { label: "Walk", labelJa: "歩く" } }) as never;
+    const html = renderToStaticMarkup(createElement(GuidesBand, { guides: [guide("a", "切通しの歩き方"), guide("b", "雨の日の鎌倉")] } as never));
+    expect(html).toContain("読みもの");
+    expect(html).toContain("切通しの歩き方");
+    expect(html).toContain("歩く");
+    expect(html).toContain('href="/ja/guides/a"');
+    expect(html).toContain('href="/ja/guides/b"');
+    expect(html).toContain('href="/ja/guides"');
   });
 });

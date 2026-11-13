@@ -28,6 +28,8 @@ export const HERO_ROTATE_MS = 5000;
  */
 export const JA_HOME_FEATURED_PERSON_SLUG: string | null = null;
 export const JA_HOME_FACES_LIMIT = 7;
+/** トップに並べる読みもの（新しい順の先頭から）。公開中の記事が無いときは、読みもののまとまりを出さない。 */
+export const JA_HOME_GUIDES_LIMIT = 3;
 
 export function pickFeaturedPerson<T extends { slug: string }>(people: readonly T[], slug: string | null = JA_HOME_FEATURED_PERSON_SLUG): T | null {
   return people.find((person) => person.slug === slug) ?? people[0] ?? null;

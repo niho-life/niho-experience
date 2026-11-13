@@ -3,7 +3,7 @@ import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import type { CardDatesSource } from "@/components/CardDates";
 import { ExperienceCard } from "@/components/ExperienceCard";
 import { JapaneseHero } from "@/components/ja-home/JapaneseHero";
-import { ConsultBand, HostBand, JapaneseHeroCopy, PeopleBand, PicksHeading } from "@/components/ja-home/JapaneseHomeSections";
+import { ConsultBand, GuidesBand, HostBand, JapaneseHeroCopy, PeopleBand, PicksHeading } from "@/components/ja-home/JapaneseHomeSections";
 import { guestBookingSources } from "@/lib/guest-booking-source";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
 import { getApi } from "@/lib/api";
@@ -11,7 +11,8 @@ import { config } from "@/lib/config";
 import { listPublicationSummaries } from "@/lib/experience/publication-site";
 import { buildCardModels } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
-import { JA_HOME_FACES_LIMIT, JA_HOME_HAND, JA_HOME_HERO_PHOTOS, JA_HOME_LEAD, JA_HOME_TITLE, pickFeaturedPerson, pickHomeExperiences } from "@/lib/ja-home";
+import { JA_HOME_FACES_LIMIT, JA_HOME_GUIDES_LIMIT, JA_HOME_HAND, JA_HOME_HERO_PHOTOS, JA_HOME_LEAD, JA_HOME_TITLE, pickFeaturedPerson, pickHomeExperiences } from "@/lib/ja-home";
+import { loadJapaneseGuides } from "@/lib/ja-guides";
 import { loadPeople } from "@/lib/ja-people";
 import { assertSameJapaneseRelease, getJapaneseCatalog, getJapaneseCopy } from "@/lib/localized-content";
 import { japaneseStaticMetadata } from "@/lib/locale-metadata";
@@ -46,6 +47,8 @@ export default async function JapaneseHome() {
   // 街の人：載っている人が0人なら、まとまりごと出さない。
   const people = await loadPeople();
   const featured = pickFeaturedPerson(people);
+  // 読みもの：公開中の日本語の記事が無いときは、まとまりごと出さない。
+  const guides = (await loadJapaneseGuides()).slice(0, JA_HOME_GUIDES_LIMIT);
   return <>
     <JapaneseHero photos={JA_HOME_HERO_PHOTOS}><JapaneseHeroCopy title={JA_HOME_TITLE} hand={JA_HOME_HAND} lead={JA_HOME_LEAD} /></JapaneseHero>
     {cards.length ? <section aria-labelledby="picks" className="container-page mt-14 sm:mt-16">
@@ -56,6 +59,7 @@ export default async function JapaneseHome() {
     </section> : null}
     {featured ? <PeopleBand featured={featured} people={people} facesLimit={JA_HOME_FACES_LIMIT} /> : null}
     {groupInquiryOpen() ? <ConsultBand /> : null}
+    {guides.length ? <GuidesBand guides={guides} /> : null}
     <HostBand />
   </>;
 }
