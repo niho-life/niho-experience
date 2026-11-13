@@ -617,6 +617,15 @@ describe("admin support console settings", () => {
     expect(() => resolveConfig({ EXPERIENCE_TERMS_URL: "not a url" })).toThrow("EXPERIENCE_TERMS_URL must be an absolute https URL");
   });
 
+  it("offers LINE on the traveler entrance only with its own flag, which needs the traveler accounts (NIHO's LINE provider moves 2027-01)", () => {
+    const preview = { EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "true" };
+    expect(resolveConfig({}).travelerLineEnabled).toBe(false);
+    expect(resolveConfig(preview).travelerLineEnabled).toBe(false);
+    expect(resolveConfig({ ...preview, EXPERIENCE_TRAVELER_LINE_ENABLED: "1" }).travelerLineEnabled).toBe(false);
+    expect(resolveConfig({ ...preview, EXPERIENCE_TRAVELER_LINE_ENABLED: "true" }).travelerLineEnabled).toBe(true);
+    expect(() => resolveConfig({ EXPERIENCE_TRAVELER_LINE_ENABLED: "true" })).toThrow("EXPERIENCE_TRAVELER_LINE_ENABLED=true needs EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED=true");
+  });
+
   it("opens the host publication API with host accounts from Stripe and the payout consent version, without NIHO (ADR 0003 slice 3)", () => {
     const on = {
       EXPERIENCE_API_MODE: "http", SITE_URL: "https://experience.example", EXPERIENCE_GUEST_MAIL_ENABLED: "true",

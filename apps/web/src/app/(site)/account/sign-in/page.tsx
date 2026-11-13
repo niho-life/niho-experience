@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { config } from "@/lib/config";
 import { PRIVACY_PATH } from "@/lib/privacy-link";
-import { TRAVELER_HOME_PATH, TRAVELER_OFFERED_METHODS, TRAVELER_START_PATH, travelerLoginErrorOrNull, type TravelerLoginError } from "@/lib/traveler/paths";
+import { TRAVELER_HOME_PATH, TRAVELER_START_PATH, travelerLoginErrorOrNull, travelerMethodsOffered, type TravelerLoginError } from "@/lib/traveler/paths";
 import { readTravelerSession } from "@/lib/traveler/server";
 
 export const metadata: Metadata = { title: "Log in or sign up", robots: { index: false, follow: false } };
@@ -35,7 +35,7 @@ export default async function TravelerSignInPage({ searchParams }: { searchParam
       {error ? <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-warn">{ERRORS[error]}</p> : null}
       {/* A plain form: the route answers with a redirect to the provider's own screen. */}
       <form method="post" action={TRAVELER_START_PATH} className="mt-6 grid gap-3">
-        {TRAVELER_OFFERED_METHODS.map((method) => (
+        {travelerMethodsOffered(config.travelerLineEnabled).map((method) => (
           <button key={method} type="submit" name="method" value={method} className={BUTTON}>{METHOD_LABELS[method]}</button>
         ))}
       </form>

@@ -111,6 +111,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_HOST_ACCOUNTS_ENABLED: "hostAccountsEnabled",
   EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "hostNihoLoginEnabled",
   EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "travelerAccountsEnabled",
+  EXPERIENCE_TRAVELER_LINE_ENABLED: "travelerLineEnabled",
   EXPERIENCE_HOST_TEAM_ENABLED: "hostTeamEnabled",
   EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED: "occurrenceAssignmentEnabled",
   EXPERIENCE_JAPANESE_SITE_ENABLED: "japaneseSiteEnabled",
@@ -418,11 +419,14 @@ describe("the deploy workflows' feature flags", () => {
 
     it(`${target}: every compatible flag starts the server and turns on in resolve-config`, () => {
       // Experience host accounts refuse the NIHO-token flags (its own test below), so it is left out here.
-      const compatibleIds = new Set(FLAGS.filter((flag) => (flag.conflicts ?? []).length === 0).map(flagId));
-      const compatible = FLAGS.filter((flag) =>
-        (flag.conflicts ?? []).length === 0
-        && (flag.needs ?? []).every((need) => need.split("|").some((dependency) => compatibleIds.has(dependency) || CAPABILITIES.includes(dependency)))
-      );
+      // A flag that needs one that was left out (the travelers' LINE needs the travelers' accounts, which need host accounts) is left out too.
+      let compatible = FLAGS.filter((flag) => (flag.conflicts ?? []).length === 0);
+      for (;;) {
+        const compatibleIds = new Set(compatible.map(flagId));
+        const next = compatible.filter((flag) => (flag.needs ?? []).every((need) => need.split("|").some((dependency) => compatibleIds.has(dependency) || CAPABILITIES.includes(dependency))));
+        if (next.length === compatible.length) break;
+        compatible = next;
+      }
       const vars = Object.assign({}, ...compatible.map((flag) => varsOf(target, flag))) as Vars;
       const resolved = resolve(target, vars);
       expect(resolved.problems).toEqual([]);
