@@ -72,7 +72,9 @@ describe("diffValues and operationId", () => {
     expect(id).toMatch(/^op-20261114-[0-9a-f]{12}$/);
     expect(operationId(["file-hash", "p1/x1"], 1, NOW)).toBe(id);
     expect(operationId(["file-hash", "p1/x2"], 1, NOW)).not.toBe(id);
-    expect(operationId(["file-hash", "p1/x1"], 2, NOW)).toBe(`${id}-r2`);
+    expect(operationId(["file-hash", "p1/x1"], 2, NOW, () => "abc123")).toBe(`${id}-rabc123`);
+    expect(operationId(["file-hash", "p1/x1"], 2, NOW)).toMatch(new RegExp(`^${id}-r[0-9a-f]{6}$`));
+    expect(operationId(["file-hash", "p1/x1"], 2, NOW)).not.toBe(operationId(["file-hash", "p1/x1"], 2, NOW));
   });
 });
 
@@ -102,7 +104,7 @@ describe("writeOne", () => {
     const ids2: string[] = [];
     const send2 = async (op: string) => { ids2.push(op); return ids2.length === 1 ? { status: 409, body: { error: "operation_already_recorded" } } : { status: 200, body: {} }; };
     expect(await writeOne(context(true), ["seed"], spec(state2, send2))).toMatchObject({ status: "applied" });
-    expect(ids2[1]).toBe(`${ids2[0]}-r2`);
+    expect(ids2[1]).toMatch(new RegExp(`^${ids2[0]}-r[0-9a-f]{6}$`));
   });
   it("reports another refusal as failed with the server's code", async () => {
     expect(await writeOne(context(true), ["seed"], spec({ value: 1 }, async () => ({ status: 400, body: { error: "invalid_input" } })))).toMatchObject({ status: "failed", error: "invalid_input" });

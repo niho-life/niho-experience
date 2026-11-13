@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import { EMPTY_EXPERIENCE_CLASSIFICATION, parseExperienceClassification, type ExperienceClassification } from "@niho-experience/experience-domain";
-import { StoreAccessDeniedError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
+import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { VISIBLE_PUBLICATIONS_CTE } from "./public-publication-scope.ts";
 import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import type { DbRow } from "./rows.ts";
@@ -73,6 +73,7 @@ export class ProductClassificationRepository {
     const classification = checked(value);
     return withTransaction(this.#pool, async (client) => {
       if (await calendarMembershipRole(client, actor, ["OWNER"]) !== "OWNER") throw new StoreAccessDeniedError();
+      await this.#lock(client, actor.providerId, productId);
       await this.#upsert(client, actor.providerId, productId, classification, actor.nihoUserId, false);
       return classification;
     });
@@ -111,8 +112,12 @@ export class ProductClassificationRepository {
     return fromRow(found.rows[0]);
   }
 
-  /** The office sets many products at once, all or none. */
-  async adminSave(actor: { readonly nihoUserId: string }, items: readonly { readonly providerId: string; readonly productId: string; readonly classification: unknown }[]): Promise<number> {
+  /**
+   * The office sets many products at once, all or none. An item may carry `expected`: the value the caller read (運営の CLI,
+   * #576). The product's current value must still be that, or nothing is saved (StoreConflictError): somebody changed it
+   * meanwhile. Without `expected` the value is simply set, as the Admin screens do.
+   */
+  async adminSave(actor: { readonly nihoUserId: string }, items: readonly { readonly providerId: string; readonly productId: string; readonly classification: unknown; readonly expected?: unknown }[]): Promise<number> {
     assertStoreIdentifier(actor?.nihoUserId, "actor.nihoUserId");
     if (!Array.isArray(items) || items.length === 0 || items.length > BULK_LIMIT) throw new StoreValidationError(`items must hold 1-${BULK_LIMIT} products.`);
     const seen = new Set<string>();
@@ -122,16 +127,30 @@ export class ProductClassificationRepository {
       const key = `${item.providerId}\u0000${item.productId}`;
       if (seen.has(key)) throw new StoreValidationError("a product appears twice.");
       seen.add(key);
-      return { providerId: item.providerId, productId: item.productId, classification: checked(item.classification) };
-    });
+      return { providerId: item.providerId, productId: item.productId, classification: checked(item.classification), expected: item.expected === undefined ? undefined : checked(item.expected) };
+    // The same order every time, so two saves that share products cannot wait for each other.
+    }).sort((a, b) => (a.providerId + "\u0000" + a.productId < b.providerId + "\u0000" + b.productId ? -1 : 1));
     return withTransaction(this.#pool, async (client) => {
       for (const item of prepared) {
-        const exists = await client.query("SELECT 1 FROM experience_products WHERE provider_id = $1 AND id = $2 AND status <> 'ARCHIVED'", [item.providerId, item.productId]);
-        if (!exists.rows[0]) throw new StoreNotFoundError("product");
+        await this.#lock(client, item.providerId, item.productId);
+        const found = await client.query<DbRow>(
+          `SELECT p.id, c.category, c.area, c.companions, c.occasions
+             FROM experience_products p
+             LEFT JOIN experience_product_classifications c ON c.provider_id = p.provider_id AND c.product_id = p.id
+            WHERE p.provider_id = $1 AND p.id = $2 AND p.status <> 'ARCHIVED'`,
+          [item.providerId, item.productId],
+        );
+        if (!found.rows[0]) throw new StoreNotFoundError("product");
+        if (item.expected !== undefined && JSON.stringify(fromRow(found.rows[0])) !== JSON.stringify(item.expected)) throw new StoreConflictError("The classification changed after it was read.");
         await this.#upsert(client, item.providerId, item.productId, item.classification, actor.nihoUserId, true);
       }
       return prepared.length;
     });
+  }
+
+  /** Serializes the writers of one product's classification for the transaction (a compare-and-set must not interleave with another save). */
+  async #lock(client: { query: Pool["query"] }, providerId: string, productId: string): Promise<void> {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`product-classification|${providerId}|${productId}`]);
   }
 
   async #upsert(client: { query: Pool["query"] }, providerId: string, productId: string, value: ExperienceClassification, by: string, admin: boolean): Promise<void> {

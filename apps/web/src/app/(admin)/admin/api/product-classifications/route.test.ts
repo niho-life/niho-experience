@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { StoreNotFoundError, StoreValidationError } from "@niho-experience/experience-store";
+import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "@niho-experience/experience-store";
 
 const state = vi.hoisted(() => ({
   http: true,
@@ -50,6 +50,18 @@ describe("Admin product classifications (#529)", () => {
     expect((await GET(new Request(`${URL}?providerId=p1`))).status).toBe(400);
     state.repository.adminRead.mockRejectedValueOnce(new StoreNotFoundError("product"));
     expect((await GET(new Request(`${URL}?providerId=p1&productId=nope`))).status).toBe(404);
+  });
+
+  it("takes the value the caller read (expected) and answers 409 when the product changed meanwhile (#576)", async () => {
+    const items = [{ providerId: "p1", productId: "a", classification: value, expected: { category: null, area: null, companions: [], occasions: [] } }];
+    state.repository.adminSave.mockResolvedValue(1);
+    expect(await (await PUT(put({ items }))).json()).toEqual({ saved: 1 });
+    expect(state.repository.adminSave).toHaveBeenCalledWith({ nihoUserId: "admin-synthetic" }, items);
+    state.repository.adminSave.mockRejectedValue(new StoreConflictError("changed"));
+    const refused = await PUT(put({ items }));
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: "conflict" });
+    expect((await PUT(put({ items: [{ ...items[0], extra: 1 }] }))).status).toBe(400);
   });
 
   it("saves many at once as the office, and refuses a forged, malformed or cross-site request", async () => {

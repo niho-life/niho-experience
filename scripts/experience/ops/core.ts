@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 /*
@@ -41,8 +41,8 @@ export interface Args {
   readonly flags: Readonly<Record<string, string | true>>;
 }
 
-const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help"]);
-const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "json"]);
+const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified"]);
+const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "status"]);
 
 /** `--name value`, `--name=value` and the boolean flags `--dry-run`, `--yes`; everything else is positional. */
 export function parseArgs(argv: readonly string[], valueFlags: ReadonlySet<string> = VALUE_FLAGS): Args {
@@ -212,11 +212,15 @@ export function diffValues(before: unknown, after: unknown, path = ""): Change[]
   return JSON.stringify(before ?? null) === JSON.stringify(after ?? null) ? [] : [{ path: path || "(value)", before: before ?? null, after: after ?? null }];
 }
 
-/** A stable operation ID for one change: the same file and item give the same ID, a retry after a refusal adds `-r<n>`. */
-export function operationId(parts: readonly string[], attempt: number, now: number): string {
+/**
+ * An operation ID for one change. The first attempt's is stable (the same file and item give the same ID), so a run whose
+ * answer was lost, started again, is recognised by the server as the same operation; a retry after that adds `-r<random>`,
+ * so a try that failed (and used up its ID) never blocks the next one.
+ */
+export function operationId(parts: readonly string[], attempt: number, now: number, random: () => string = () => randomBytes(3).toString("hex")): string {
   const date = new Date(now).toISOString().slice(0, 10).replaceAll("-", "");
   const digest = createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 12);
-  return `op-${date}-${digest}${attempt > 1 ? `-r${attempt}` : ""}`;
+  return `op-${date}-${digest}${attempt > 1 ? `-r${random()}` : ""}`;
 }
 
 export type WriteStatus = "unchanged" | "dry_run" | "applied" | "failed";
