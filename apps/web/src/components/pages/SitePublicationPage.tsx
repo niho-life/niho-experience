@@ -19,6 +19,7 @@ import { iconForText } from "@/lib/themes";
 import { publicMetadata } from "@/lib/public-metadata";
 import { seoDescription } from "@/lib/seo-description";
 import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-card-model";
+import { providerNameFor } from "@/lib/experience/provider-name";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import { relatedSiteExperienceCards } from "@/lib/experience/site-related";
 import { siteSellerDisplayName, siteSellerInformationHref } from "@/lib/experience/site-seller-information";
@@ -75,7 +76,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   const faq = content ? content.faq : publication.content.faq;
   // The host's own bio (#146) in the page's language only: English needs the host's confirmed English. No filler.
   const hostBioText = (ja ? hostBio?.ja : hostBio?.en) ?? null;
-  const providerName = publication.providerPublicName ?? null;
+  const providerName = providerNameFor(publication, locale);
   const providerIdentityMedia = providerName
     ? publication.providerPhoto ?? (publication.providerKind === "BUSINESS" ? publication.businessLogo : null)
     : null;

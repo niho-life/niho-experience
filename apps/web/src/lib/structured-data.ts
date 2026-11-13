@@ -2,6 +2,7 @@ import type { JourneyReviews } from "@niho-experience/api-client";
 import type { Guide } from "@/content/guides/types";
 import type { ExperienceDetailForSite } from "./experience-types";
 import type { SitePublicExperience } from "./experience/site-publications";
+import { providerNameFor } from "./experience/provider-name";
 import { guidePillarDetails, guideSummary, shareableGuideImage } from "./guides";
 import { reviewDisplay } from "./reviews-ui";
 import { safeHttpsUrl } from "./safe-url";
@@ -146,7 +147,7 @@ export function sitePublicationJsonLd(item: SitePublicExperience, siteUrl: strin
   };
   const provider = {
     "@type": publication.providerKind === "PERSON" ? "Person" : "Organization",
-    name: publication.providerPublicName ?? publication.sellerDisplayName,
+    name: providerNameFor(publication, locale) ?? publication.sellerDisplayName,
   };
   return {
     touristTrip: { "@context": "https://schema.org", "@type": "TouristTrip", ...facts, inLanguage: locale, provider },

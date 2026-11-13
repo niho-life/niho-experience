@@ -3,6 +3,7 @@ import type { ExperienceDetailV11, ExperienceSummaryV11 } from "@niho-experience
 import type { PublicBookingTerms, PublicExperiencePublication, PublicSellerDisclosure } from "@niho-experience/experience-store";
 import { experiencePublicationRepository, guestBookingRepository, providerSellerDisclosureRepository } from "./store-server";
 import { config } from "@/lib/config";
+import { providerNameFor } from "./provider-name";
 
 type Locale = "en" | "ja";
 
@@ -19,7 +20,7 @@ function summaryOf(publication: PublicExperiencePublication, terms: PublicBookin
     priceFrom: { amountYen: prices.length ? Math.min(...prices) : publication.unitAmount, taxIncluded: true, unit: "PER_ADULT" },
     provider: {
       kind: (publication.providerPublicName ? publication.providerKind : disclosure?.sellerKind) === "PERSON" ? "INDIVIDUAL" : "BUSINESS",
-      name: publication.providerPublicName ?? publication.sellerDisplayName,
+      name: providerNameFor(publication, locale) ?? publication.sellerDisplayName,
     },
     region: { key: "kamakura", name: "Kamakura" },
     slug: publication.slug,
@@ -85,7 +86,7 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
   const photos = publication.photos.map(localizedPhoto);
   const providerPhoto = publication.providerPhoto ? localizedPhoto(publication.providerPhoto) : null;
   const businessLogo = publication.businessLogo ? localizedPhoto(publication.businessLogo) : null;
-  const providerName = publication.providerPublicName ?? publication.sellerDisplayName;
+  const providerName = providerNameFor(publication, locale) ?? publication.sellerDisplayName;
   const providerKind = publication.providerPublicName ? publication.providerKind : disclosure?.sellerKind;
   const hostAvatar = providerPhoto ?? (publication.providerPublicName && providerKind === "BUSINESS" ? businessLogo : null);
   const canonicalUrl = `${config.siteUrl}${locale === "ja" ? "/ja" : ""}/experiences/${encodeURIComponent(publication.slug)}`;

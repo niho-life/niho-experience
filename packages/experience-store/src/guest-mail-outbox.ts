@@ -422,7 +422,8 @@ function emailFromRow(row: DbRow): BookingConfirmationEmail | null {
     ...(seller.chargeMode === "PLATFORM" && seller.salesPlan === "MANAGED_20" ? {
       managedSeller: {
         displayName: sellerName,
-        providerDisplayName: typeof row.provider_public_name === "string" ? row.provider_public_name : null,
+        // The provider as the guest's language names them: an English guest reads the English public name when there is one (#587).
+        providerDisplayName: row.guest_language !== "JA" && typeof row.provider_public_name_en === "string" ? row.provider_public_name_en : typeof row.provider_public_name === "string" ? row.provider_public_name : null,
       },
     } : {}),
   };
@@ -999,7 +1000,7 @@ export class GuestMailOutbox {
                 g.adult_count, g.child_count, p.public_title, p.slug,
                 CASE WHEN g.guest_language='JA' THEN NULLIF(btrim(pub.content->'ja'->>'title'),'') END AS public_title_ja,
                 pub.content->>'japaneseOnly' = 'true' AS japanese_only,
-                provider.public_display_name AS provider_public_name,
+                provider.public_display_name AS provider_public_name,provider.public_display_name_en AS provider_public_name_en,
                 guide_snapshot.guide AS meeting_guide,
                 (SELECT COALESCE(sum(x.amount), 0)::text FROM booking_refunds x
                   WHERE x.provider_id = b.provider_id AND x.booking_id = b.id AND x.status <> 'FAILED') AS refunding_amount,

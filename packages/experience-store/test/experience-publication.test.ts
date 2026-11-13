@@ -65,7 +65,7 @@ describe("experience publication public projection", () => {
     const projected = projectPublicExperiencePublication(row("PUBLIC"));
     assert.deepEqual(Object.keys(projected ?? {}), [
       "slug", "publicTitle", "content", "meetingOverview", "meetingPointDisclosure", "meetingPoint",
-      "currency", "unitAmount", "sellerDisplayName", "providerPublicName", "providerKind",
+      "currency", "unitAmount", "sellerDisplayName", "providerPublicName", "providerPublicNameEn", "providerKind",
       "photos", "providerPhoto", "businessLogo", "japanese", "japaneseOnly", "publishedAtUtc",
     ]);
     assert.deepEqual(projected?.meetingPoint, { name: "Synthetic meeting area", exteriorPhotoIndex: 0 });
@@ -118,6 +118,8 @@ describe("experience publication public projection", () => {
     });
     assert.equal(consented?.providerPublicName, "Synthetic Actual Host");
     assert.equal(consented?.providerKind, "PERSON");
+    assert.equal(consented?.providerPublicNameEn, null);
+    assert.equal(projectPublicExperiencePublication({ ...row("AFTER_BOOKING"), provider_public_name: "Synthetic Actual Host", provider_kind: "PERSON", provider_public_name_en: "Synthetic Host" })?.providerPublicNameEn, "Synthetic Host");
     assert.equal(consented?.sellerDisplayName, "Synthetic Legal Seller");
     assert.equal(projectPublicExperiencePublication({ ...row("AFTER_BOOKING"), provider_kind: "UNKNOWN" }), null);
   });

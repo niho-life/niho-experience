@@ -245,6 +245,8 @@ export type ExperienceProviderPublicKind = "PERSON" | "BUSINESS";
 export interface ExperienceAdminProviderSummary {
   readonly providerId: string;
   readonly publicDisplayName: string | null;
+  /** The English public name (#587), or null: the English site then shows `publicDisplayName`. */
+  readonly publicDisplayNameEn: string | null;
   readonly providerKind: ExperienceProviderPublicKind | null;
   readonly profileVersion: number | null;
   /** Existing operational label only; it is never substituted into the public DTO. */
@@ -255,6 +257,7 @@ export interface ExperienceAdminProviderSummary {
 export interface ExperienceAdminProviderPublicProfile {
   readonly providerId: string;
   readonly publicDisplayName: string;
+  readonly publicDisplayNameEn: string | null;
   readonly providerKind: ExperienceProviderPublicKind | null;
   readonly consentVersion: string;
   readonly consentedAtUtc: string;
@@ -263,6 +266,11 @@ export interface ExperienceAdminProviderPublicProfile {
 
 export interface ExperienceAdminProviderPublicProfileInput {
   readonly publicDisplayName: string;
+  /**
+   * The English public name (#587). Left out (undefined): a new profile has none and a saved one keeps its own. null or an empty
+   * string clears it. Same rules as `publicDisplayName`.
+   */
+  readonly publicDisplayNameEn?: string | null;
   readonly providerKind: ExperienceProviderPublicKind | null;
   readonly consentVersion: string;
 }
@@ -381,6 +389,8 @@ const PUBLIC_READER_COLUMNS = `
   slug,public_title,content,currency,unit_amount,seller_display_name,published_at,
   (SELECT profile.public_display_name FROM experience_provider_public_profiles profile
     WHERE profile.provider_id=visible_publications.provider_id) AS provider_public_name,
+  (SELECT profile.public_display_name_en FROM experience_provider_public_profiles profile
+    WHERE profile.provider_id=visible_publications.provider_id) AS provider_public_name_en,
   (SELECT profile.provider_kind FROM experience_provider_public_profiles profile
     WHERE profile.provider_id=visible_publications.provider_id) AS provider_kind,
   COALESCE((
@@ -568,8 +578,17 @@ function validateAdminProviderProfileInput(
     || (input.providerKind !== null && input.providerKind !== "PERSON" && input.providerKind !== "BUSINESS")) {
     throw new StoreValidationError("Provider public profile is invalid.");
   }
+  if (input.publicDisplayNameEn !== undefined && input.publicDisplayNameEn !== null && input.publicDisplayNameEn !== "") {
+    const english = input.publicDisplayNameEn;
+    if (typeof english !== "string" || english.length > 300 || english !== english.trim() || /[\u0000-\u001f\u007f]/.test(english)) {
+      throw new StoreValidationError("publicDisplayNameEn is invalid.");
+    }
+  }
   return input;
 }
+
+/** The value to store: a name, or null for none (null and an empty string both mean none). */
+const englishNameOf = (input: ExperienceAdminProviderPublicProfileInput): string | null => (input.publicDisplayNameEn === undefined || input.publicDisplayNameEn === "" ? null : input.publicDisplayNameEn);
 
 function adminProviderSummaryFromRow(row: DbRow): ExperienceAdminProviderSummary {
   const kind = row.provider_kind === null ? null : String(row.provider_kind);
@@ -579,6 +598,7 @@ function adminProviderSummaryFromRow(row: DbRow): ExperienceAdminProviderSummary
   return {
     providerId: String(row.provider_id),
     publicDisplayName: row.public_display_name === null ? null : String(row.public_display_name),
+    publicDisplayNameEn: typeof row.public_display_name_en === "string" ? row.public_display_name_en : null,
     providerKind: kind,
     profileVersion: row.profile_version === null ? null : safeInteger(row.profile_version, "provider profile version"),
     sellerProviderDisplayName: row.seller_provider_display_name === null ? null : String(row.seller_provider_display_name),
@@ -594,6 +614,7 @@ function adminProviderProfileFromRow(row: DbRow): ExperienceAdminProviderPublicP
   return {
     providerId: String(row.provider_id),
     publicDisplayName: String(row.public_display_name),
+    publicDisplayNameEn: typeof row.public_display_name_en === "string" ? row.public_display_name_en : null,
     providerKind: kind,
     consentVersion: String(row.consent_version),
     consentedAtUtc: iso(row.consented_at, "provider profile consented_at"),
@@ -1120,7 +1141,7 @@ export class ExperiencePublicationRepository {
   async listAdminProviders(actor: PublicationAdminDraftActor): Promise<readonly ExperienceAdminProviderSummary[]> {
     validateAdminDraftActor(actor);
     const result = await this.#pool.query<DbRow>(
-      `SELECT provider.id AS provider_id,profile.public_display_name,profile.provider_kind,
+      `SELECT provider.id AS provider_id,profile.public_display_name,profile.public_display_name_en,profile.provider_kind,
               profile.version AS profile_version,seller.provider_display_name AS seller_provider_display_name,
               seller.seller_display_name
          FROM experience_providers provider
@@ -1144,10 +1165,10 @@ export class ExperiencePublicationRepository {
       await client.query("INSERT INTO experience_provider_media_state (provider_id) VALUES ($1)", [providerId]);
       const result = await client.query<DbRow>(
         `INSERT INTO experience_provider_public_profiles
-           (provider_id,public_display_name,provider_kind,consent_version,consented_at,consented_by_admin_niho_user_id)
-         VALUES ($1,$2,$3,$4,clock_timestamp(),$5)
-         RETURNING provider_id,public_display_name,provider_kind,consent_version,consented_at,version`,
-        [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId],
+           (provider_id,public_display_name,provider_kind,consent_version,consented_at,consented_by_admin_niho_user_id,public_display_name_en)
+         VALUES ($1,$2,$3,$4,clock_timestamp(),$5,$6)
+         RETURNING provider_id,public_display_name,public_display_name_en,provider_kind,consent_version,consented_at,version`,
+        [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId, englishNameOf(input)],
       );
       return adminProviderProfileFromRow(result.rows[0]!);
     });
@@ -1160,7 +1181,7 @@ export class ExperiencePublicationRepository {
     validateAdminDraftActor(actor);
     assertStoreIdentifier(providerId, "providerId");
     const result = await this.#pool.query<DbRow>(
-      `SELECT provider.id AS provider_id,profile.public_display_name,profile.provider_kind,
+      `SELECT provider.id AS provider_id,profile.public_display_name,profile.public_display_name_en,profile.provider_kind,
               profile.version AS profile_version,profile.consent_version,profile.consented_at,
               seller.provider_display_name AS seller_provider_display_name,seller.seller_display_name,
               profile.version
@@ -1194,19 +1215,20 @@ export class ExperiencePublicationRepository {
       const result = expectedVersion === null
         ? await client.query<DbRow>(
           `INSERT INTO experience_provider_public_profiles
-             (provider_id,public_display_name,provider_kind,consent_version,consented_at,consented_by_admin_niho_user_id)
-           VALUES ($1,$2,$3,$4,clock_timestamp(),$5)
+             (provider_id,public_display_name,provider_kind,consent_version,consented_at,consented_by_admin_niho_user_id,public_display_name_en)
+           VALUES ($1,$2,$3,$4,clock_timestamp(),$5,$6)
            ON CONFLICT DO NOTHING
-           RETURNING provider_id,public_display_name,provider_kind,consent_version,consented_at,version`,
-          [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId],
+           RETURNING provider_id,public_display_name,public_display_name_en,provider_kind,consent_version,consented_at,version`,
+          [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId, englishNameOf(input)],
         )
         : await client.query<DbRow>(
           `UPDATE experience_provider_public_profiles
               SET public_display_name=$2,provider_kind=$3,consent_version=$4,consented_at=clock_timestamp(),
-                  consented_by_admin_niho_user_id=$5,version=version+1,updated_at=clock_timestamp()
+                  consented_by_admin_niho_user_id=$5,version=version+1,updated_at=clock_timestamp(),
+                  public_display_name_en=CASE WHEN $7::boolean THEN $8 ELSE public_display_name_en END
             WHERE provider_id=$1 AND version=$6
-            RETURNING provider_id,public_display_name,provider_kind,consent_version,consented_at,version`,
-          [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId, expectedVersion],
+            RETURNING provider_id,public_display_name,public_display_name_en,provider_kind,consent_version,consented_at,version`,
+          [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId, expectedVersion, input.publicDisplayNameEn !== undefined, englishNameOf(input)],
         );
       if (!result.rows[0]) throw new StoreConflictError("Provider public profile version mismatch.");
       return adminProviderProfileFromRow(result.rows[0]);

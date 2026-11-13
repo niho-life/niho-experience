@@ -48,3 +48,25 @@ describe("the experience page's inquiry links", () => {
     expect(hrefs(renderToStaticMarkup(await SitePublicationPage({ item, locale: "ja" })))).toEqual([]);
   });
 });
+
+describe("the provider's English public name (#587)", () => {
+  const named = (english: string | null) => ({ ...item, publication: { ...item.publication, providerPublicName: "志龍", providerPublicNameEn: english, providerKind: "PERSON" } }) as unknown as SitePublicExperience;
+
+  it("is the name on the English page (host line, 「Ask …」 and the form's link), and no kanji of the provider is left", async () => {
+    const html = renderToStaticMarkup(await SitePublicationPage({ item: named("Shiryu"), locale: "en" }));
+    expect(html).toContain("Ask Shiryu");
+    expect(html).toContain("Shiryu");
+    expect(html).not.toContain("志龍");
+    expect(hrefs(html).some((href) => href.includes("host=Shiryu"))).toBe(true);
+    // The JSON-LD says the same.
+    expect(html).toContain('"provider":{"@type":"Person","name":"Shiryu"}');
+  });
+
+  it("falls back to the Japanese public name when there is no English one, and the Japanese page never uses it", async () => {
+    expect(renderToStaticMarkup(await SitePublicationPage({ item: named(null), locale: "en" }))).toContain("志龍");
+    expect(renderToStaticMarkup(await SitePublicationPage({ item: named(""), locale: "en" }))).toContain("志龍");
+    const ja = renderToStaticMarkup(await SitePublicationPage({ item: named("Shiryu"), locale: "ja" }));
+    expect(ja).toContain("志龍");
+    expect(ja).not.toContain("Shiryu");
+  });
+});
