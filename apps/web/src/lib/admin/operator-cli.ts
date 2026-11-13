@@ -29,7 +29,7 @@ const API_PREFIX = "/admin/api/";
  * The /admin/api areas open to the CLI (the first path segment after /admin/api/). Everything else answers 403, so a
  * refund, a payout or a payout account (#576: never from a CLI) cannot be reached by adding a route. A stage adds its own area here.
  */
-export const OPERATOR_API_AREAS: readonly string[] = Object.freeze(["product-classifications", "people", "product-workspaces", "experience-publications"]);
+export const OPERATOR_API_AREAS: readonly string[] = Object.freeze(["product-classifications", "people", "product-workspaces", "experience-publications", "inquiries", "occurrence-assignments"]);
 
 export const operatorApiPath = (pathname: string): boolean => pathname.startsWith(API_PREFIX);
 export const operatorApiAllowed = (pathname: string): boolean => operatorApiPath(pathname) && OPERATOR_API_AREAS.includes(pathname.slice(API_PREFIX.length).split("/", 1)[0]!);
@@ -122,6 +122,15 @@ export function openOperatorAssertion(raw: string | null | undefined, now: numbe
   return { actorId: wire.a, email: wire.e, aiKind: wire.ai as OperatorAiKind, operationId: wire.op, method: wire.m, path: wire.p, expiresAt: wire.x };
 }
 
+function feeAction(body: Buffer): boolean {
+  try {
+    const value: unknown = JSON.parse(body.toString("utf8"));
+    return typeof value === "object" && value !== null && !Array.isArray(value) && (value as { action?: unknown }).action === "SET_FEE";
+  } catch {
+    return false;
+  }
+}
+
 export type OperatorGate =
   | { readonly kind: "refuse"; readonly status: number; readonly error: string }
   | { readonly kind: "forward"; readonly assertion: string };
@@ -149,6 +158,8 @@ export async function gateOperatorRequest(request: Request, now = Date.now()): P
     if (!Number.isFinite(declared) || declared > limit) return { kind: "refuse", status: 413, error: "invalid_input" };
     const body = Buffer.from(await request.clone().arrayBuffer());
     if (body.length > limit) return { kind: "refuse", status: 413, error: "invalid_input" };
+    // The agreed fee (報酬) of an occurrence is money: a person records it on the screen, never from the CLI.
+    if (pathname === "/admin/api/occurrence-assignments" && feeAction(body)) return { kind: "refuse", status: 403, error: "not_available_from_cli" };
     const requests = operatorCliRequests();
     if (!requests) return { kind: "refuse", status: 503, error: "unavailable" };
     try {

@@ -4,6 +4,8 @@ import { authTarget } from "./auth.ts";
 import { classificationTarget } from "./classification.ts";
 import { peopleTarget } from "./people.ts";
 import { productTarget } from "./product.ts";
+import { inquiryTarget } from "./inquiry.ts";
+import { assignmentTarget } from "./assignment.ts";
 import { providerTarget } from "./provider.ts";
 
 /**
@@ -16,6 +18,8 @@ export const TARGETS: Readonly<Record<string, Target>> = Object.freeze({
   people: peopleTarget,
   provider: providerTarget,
   product: productTarget,
+  inquiry: inquiryTarget,
+  assignment: assignmentTarget,
 });
 
 export interface Runtime {
