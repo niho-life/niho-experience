@@ -58,7 +58,7 @@ describe("JaExperiencePage", () => {
 
   it("has no English in the page's own words: the gallery says it in Japanese, and there is no next-date band", async () => {
     const value = item();
-    (value.publication as { photos: unknown[] }).photos = [...value.publication.photos, ...value.publication.photos];
+    (value.publication as unknown as { photos: unknown[] }).photos = [...value.publication.photos, ...value.publication.photos];
     const html = await render(value, [{ ...card, slug: "other", title: "もうひとつの体験" }]);
     const english = visibleText(html).match(/[A-Za-z]{3,}/g) ?? [];
     // The category's handwritten accent ("take a walk") is the design's own English; nothing else is.
