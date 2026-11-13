@@ -17,8 +17,8 @@ const person = (slug: string, over: Partial<PublicPerson> = {}): PublicPerson =>
   experienceSlugs: [], sortOrder: 100, ...over,
 });
 const experience = (slug: string, title: string): SitePublicExperience => ({
-  publication: { slug, publicTitle: title, unitAmount: 4000, japanese: { title }, photos: [{ src: `/p/${slug}.jpg`, alt: "alt", altJa: `${title}の写真`, publicCredit: null }] },
-  saleTerms: { offers: [{ durationMinutes: 90 }] },
+  publication: { slug, publicTitle: title, unitAmount: 3000, japanese: { title }, photos: [{ src: `/p/${slug}.jpg`, alt: "alt", altJa: `${title}の写真`, publicCredit: null }] },
+  saleTerms: { offers: [{ pricing: { adultPriceYen: 4000 }, durationMinutes: 90 }] },
   sellerDisclosure: null, hostBio: null,
 } as unknown as SitePublicExperience);
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((match) => match[1]!.replaceAll("&amp;", "&"));

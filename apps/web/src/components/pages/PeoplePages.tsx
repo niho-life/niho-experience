@@ -5,8 +5,7 @@ import { buttonClass } from "@/components/ui";
 import { config } from "@/lib/config";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import { inquiryHref } from "@/lib/group-inquiry-entry";
-
-const yen = (amount: number) => `${new Intl.NumberFormat("ja-JP").format(amount)}円`;
+import { japaneseTileFacts } from "@/lib/ja-experience-tile";
 
 /** 街の人 (#564): everyone the office shows, with a way in for the person who is not here. Japanese site only. */
 export function PeopleListPage({ people }: { people: readonly PublicPerson[] }) {
@@ -81,17 +80,13 @@ export function PersonPage({ person, experiences }: { person: PublicPerson; expe
 }
 
 function ExperienceTile({ item }: { item: SitePublicExperience }) {
-  const { publication, saleTerms } = item;
-  const title = publication.japanese?.title ?? publication.publicTitle;
-  const cover = publication.photos[0];
-  const minutes = saleTerms?.offers[0]?.durationMinutes ?? null;
-  const duration = minutes === null ? null : minutes % 60 === 0 ? `${minutes / 60}時間` : minutes > 60 ? `${Math.floor(minutes / 60)}時間${minutes % 60}分` : `${minutes}分`;
+  const tile = japaneseTileFacts(item);
   return (
     <li>
-      <Link href={`/ja/experiences/${publication.slug}`} className="group block">
-        <Photo image={cover ? { url: cover.src, alt: cover.altJa } : null} alt={cover?.altJa ?? ""} sizes="(min-width: 1024px) 320px, (min-width: 640px) 45vw, 90vw" aspect="aspect-[4/3]" rounded="rounded-[18px]" />
-        <span className="mt-3 block text-[1.0625rem] font-extrabold group-hover:underline">{title}</span>
-        <small className="block text-ink-soft">{[duration, `1名 ${yen(publication.unitAmount)}`].filter(Boolean).join("・")}</small>
+      <Link href={`/ja/experiences/${tile.slug}`} className="group block">
+        <Photo image={tile.cover} alt={tile.cover?.alt ?? ""} sizes="(min-width: 1024px) 320px, (min-width: 640px) 45vw, 90vw" aspect="aspect-[4/3]" rounded="rounded-[18px]" />
+        <span className="mt-3 block text-[1.0625rem] font-extrabold group-hover:underline">{tile.title}</span>
+        <small className="block text-ink-soft">{[tile.duration, tile.price].filter(Boolean).join("・")}</small>
       </Link>
     </li>
   );
