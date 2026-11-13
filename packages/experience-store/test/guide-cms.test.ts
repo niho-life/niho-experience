@@ -138,7 +138,8 @@ describe("guide content boundary", () => {
     assert.throws(() => parseGuideContent({ markdown: "safe", checkedOn: "29/10/2026" }), StoreValidationError);
     assert.throws(() => parseGuideContent({ markdown: "safe", checkedOn: "2026-02-30" }), StoreValidationError);
     assert.throws(() => parseGuideContent({ markdown: "safe", author: { name: "A", role: "B" } }), StoreValidationError);
-    assert.throws(() => parseGuideContent({ markdown: "safe", language: "ja" }), StoreValidationError);
+    assert.deepEqual(parseGuideContent({ markdown: "safe", language: "ja" }), { markdown: "safe", language: "ja" });
+    assert.throws(() => parseGuideContent({ markdown: "safe", language: "fr" }), StoreValidationError);
   });
 
   it("rejects unsafe or malformed Markdown before opening a database transaction", async () => {

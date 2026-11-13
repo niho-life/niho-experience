@@ -12,7 +12,7 @@ export type WriteGuide = {
   readonly title: string;
   readonly description: string;
   readonly categorySlug?: string;
-  readonly content: { readonly markdown: string; readonly language?: "en"; readonly author?: WriteAuthor; readonly checkedOn?: string };
+  readonly content: { readonly markdown: string; readonly language?: "en" | "ja"; readonly author?: WriteAuthor; readonly checkedOn?: string };
   readonly cover?: WriteCover;
   readonly draftProductLinks: readonly WriteProductLink[];
   readonly status: WriteGuideStatus;
@@ -35,7 +35,7 @@ export type WriteDraft = {
   readonly title: string;
   readonly description: string;
   readonly categorySlug?: string;
-  readonly content: { readonly markdown: string; readonly language: "en"; readonly author?: WriteAuthor; readonly checkedOn?: string };
+  readonly content: { readonly markdown: string; readonly language: "en" | "ja"; readonly author?: WriteAuthor; readonly checkedOn?: string };
   readonly cover: WriteCover | null;
   readonly draftProductLinks: readonly WriteProductLink[];
 };

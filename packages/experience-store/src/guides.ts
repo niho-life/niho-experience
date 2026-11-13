@@ -29,8 +29,11 @@ export interface GuideAuthor {
 /** Markdown is stored and returned as Markdown. This store never accepts or returns rendered HTML. */
 export interface GuideContent {
   readonly markdown: string;
-  /** New Experience-owned drafts declare their publication language explicitly. */
-  readonly language?: "en";
+  /**
+   * New Experience-owned drafts declare their publication language explicitly. "en" is the English site's guide;
+   * "ja" is a guide written in Japanese for the Japanese site's 読みもの (#154), which the English site never shows.
+   */
+  readonly language?: "en" | "ja";
   readonly author?: GuideAuthor;
   readonly checkedOn?: string;
 }
@@ -283,6 +286,14 @@ function assertDraftText(value: unknown, field: string, maxLength: number): asse
   }
 }
 
+/** A guide declared Japanese (#154) is written in Japanese: its title and body have kana or kanji. */
+function assertPublicationUsesJapaneseScript(title: string, markdown: string): void {
+  const japanese = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
+  if (!japanese.test(title) || !japanese.test(markdown)) {
+    throw new StoreValidationError("Guide publication declared Japanese (ja) must have a Japanese title and body.");
+  }
+}
+
 function assertPublicationUsesLatinScript(title: string, markdown: string): void {
   const nonLatinLetter = /(?!\p{Script=Latin})\p{Letter}/u;
   if (nonLatinLetter.test(title) || nonLatinLetter.test(markdown)) {
@@ -329,8 +340,8 @@ export function parseGuideContent(value: unknown): GuideContent {
   }
   const author = content.author === undefined ? undefined : validateAuthor(content.author);
   const language = content.language;
-  if (language !== undefined && language !== "en") {
-    throw new StoreValidationError("guide.content.language must be en.");
+  if (language !== undefined && language !== "en" && language !== "ja") {
+    throw new StoreValidationError("guide.content.language must be en or ja.");
   }
   const checkedOn = content.checkedOn;
   if (checkedOn !== undefined && (typeof checkedOn !== "string" || !isCanonicalIsoDate(checkedOn))) {
@@ -1188,10 +1199,13 @@ export class GuideRepository {
         }
         throw new StoreConflictError("Guide draft revision mismatch.");
       }
-      if (article.content.language !== "en") throw new StoreValidationError("Guide publication content must declare English (en).");
+      if (article.content.language !== "en" && article.content.language !== "ja") {
+        throw new StoreValidationError("Guide publication content must declare its language: English (en) or Japanese (ja).");
+      }
       if (article.content.author === undefined) throw new StoreValidationError("A public author is required before guide publication.");
       assertNonEmptyText(article.title, "guide.title", 110);
-      assertPublicationUsesLatinScript(article.title, article.content.markdown);
+      if (article.content.language === "ja") assertPublicationUsesJapaneseScript(article.title, article.content.markdown);
+      else assertPublicationUsesLatinScript(article.title, article.content.markdown);
       const review = reviewGuideMarkdown(article.content.markdown);
       if (!review.hasLevelTwoHeading) throw new StoreValidationError("Guide publication Markdown needs at least one ## heading.");
       if (/\[CONFIRM/i.test([article.title, article.description, JSON.stringify(article.content)].join("\n"))) {

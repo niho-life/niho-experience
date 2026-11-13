@@ -53,12 +53,14 @@ export function publicGuideArticleToGuide(article: PublicGuideArticle): Guide {
   const mediaUrl = (assetId: string) => `/api/public/guides/media/${encodeURIComponent(assetId)}`;
   return {
     slug: article.slug,
+    ...(article.content.language === undefined ? {} : { language: article.content.language }),
     ...(article.indexable ? {} : { unlisted: true }),
     title: article.title,
     description: article.description,
     category: {
       slug: article.category.slug,
       label: article.category.labelEn,
+      labelJa: article.category.labelJa,
       displayOrder: article.category.displayOrder,
     },
     author: article.content.author,
