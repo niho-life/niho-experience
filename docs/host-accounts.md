@@ -4,6 +4,23 @@
 
 [ADR 0003](adr/0003-experience-independence.md) の 2・3 段目（[#456](https://github.com/niho-life/niho-experience/issues/456)）。`/host` に、NIHO アカウントの代わりに Experience 自前のホストアカウントでログインし（2 段目）、受取口座の判定を Stripe への直接照会と Experience での利用同意で行う（3 段目）。フラグ `EXPERIENCE_HOST_ACCOUNTS_ENABLED`（既定 OFF）。OFF の間は今までの「NIHO でログイン」と NIHO の Connect projection のまま変わらない。Store は migration `0064`（`HostAccounts`）と `0065`（ホストアカウントの販売者・`ProviderPayoutAccountConsents`）。
 
+## NIHO アカウントでのログイン（Epic #591、#593・#594）
+
+フラグ `EXPERIENCE_HOST_NIHO_LOGIN_ENABLED`（既定 OFF）。`EXPERIENCE_HOST_ACCOUNTS_ENABLED`・DB（migration `0083`）・`NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE` が前提（http）。ON の間、`/host/auth/sign-in` は見出し「ホストのログイン」とボタン 1 つ「NIHO アカウントでログイン」だけになり、メールのフォームは `?method=email`（と、再ログインを求める `reauth=1`）に残る。メールの route（`/host/auth/email`・`/host/auth/open`）はそのまま動く。
+
+1. `GET /host/auth/login`：すでにログイン済みなら NIHO へ行かず、戻り先（招待・許可した `returnTo`・ホーム）へ。そうでなければ PKCE の verifier・state・戻り先を暗号化した 10 分の cookie（`__Secure-niho_host_login`、Path=/host/auth）に置き、NIHO の `/connect/niho-experience`（`v`・`challenge`・`state`・`origin`・対象 `audience=host`）へ送る。対象のパラメータ名は NIHO の契約（niho-coliving/niho-app#20306）に合わせる（`niho-auth.ts` の `NIHO_CONNECT_AUDIENCE_PARAM` の 1 箇所）。戻り先は `/write` 系・招待・設定 › 受取口座だけ（`hostReturnPathOrNull`）。
+2. NIHO から `/host/auth/callback?code&state`：state を照合 → code を交換（`exchange`）→ Host v1 `identity` で NIHO user ID（Experience のサービス ID トークンを添える）→ `HostAccountIdentities.startSessionForNihoIdentity`（結び付け済みで `ACTIVE` の `hst_` のときだけ、Experience のセッションを開く）→ **結果にかかわらず**、NIHO の接続をすぐ解除（`DELETE /api/auth/app-connections/{id}`、理由なし）。NIHO のトークンは cookie にも DB にもログにも残さない（`niho-login.ts`）。
+3. セッションは上の「cookie」の表と同じ（`__Host-niho_host_account_session`・Path=/）。`/host` と `/write` の両方に届く。このブラウザの前のセッションは失効させる。`authenticated_at` は、いまは code を交換した時刻（NIHO の `identity` の答えに `auth_time` が無い。再認証の指定が入ったら #595 で NIHO の値に切り替える）。
+
+失敗は `/host/auth/error?reason=` の固定の理由だけを運ぶ。`expired`（10 分の cookie が切れた）・`state`・`denied`（NIHO で取り消した）・`rejected`（code が無効・期限切れ、`identity` が 4xx）・`unavailable`（NIHO や DB に届かない、`identity` の形が違う）。NIHO の障害は「権限がない」と断定しない。
+
+- `unregistered`：NIHO には入れたが、その NIHO アカウントに結び付いたホストアカウントが無い（運営が登録した人と別の方法で入ったときが多い。NIHO は LINE・Google・Apple をメールの一致で統合しない）。「このアカウントは、ホストに登録されていません」と、原因の見当（別の方法でログインしていませんか？）、「別の方法でやり直す」（ログインをやり直す。NIHO の確認画面の「別のアカウントで続ける」から選び直す）、運営への連絡（`info@niho.life`）を出す。Experience のデータには触れず、ほかのアカウントの有無も示さない。拒否は監査に書かない（`hst_` が決まらず、誰でも書き込めてしまうため）。
+- `suspended`：結び付いたホストアカウントが停止中。運営への問い合わせを案内する。
+
+preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock-login → ホーム。`?mock=unregistered` は未登録の案内で終わる。
+
+結び付けの Store（`HostAccountIdentities`、migration `0083`）は `packages/experience-store/README.md`。1 つの `hst_` に有効な NIHO user ID は 1 つ、同じ NIHO user ID は 1 つの `hst_` だけ。結び付け・解除・拒否は `host_account_identity_events` に残る。設定での結び付け・解除と再ログインは #595、招待リンクと既存 OWNER の移行は #596。
+
 ## 流れ
 
 1. 「メールでログイン」（`/host/auth/login` は `/host/auth/sign-in` へ送る）でメールアドレスを入れる。
@@ -157,5 +174,5 @@ NIHO ログインの時期に登録した販売者（NIHO の key を持つも�
 
 ## 注意
 
-- iOS のホーム画面アプリは Safari と cookie を共有しない（追加した時点の複製だけ）。メールのリンクは Safari で開くので、アプリの中でリクエストしたリンクはアプリで使えない。今は Safari でログインしてから追加する。期限が切れたら追加し直す。アプリの中で完結させるには、コードを入力する方法などを別に足す必要がある。
+- iOS のホーム画面アプリは Safari と cookie を共有しない（追加した時点の複製だけ）。NIHO アカウントでのログイン（上）は、NIHO の往復がアプリの中で完結するかを実機で確かめる（stg の受入。2026-11-14 時点では未確認）。メールのリンクは Safari で開くので、アプリの中でリクエストしたリンクはアプリで使えない。今は Safari でログインしてから追加する。期限が切れたら追加し直す。アプリの中で完結させるには、コードを入力する方法などを別に足す必要がある。
 - メールのアプリが自分のブラウザでリンクを開くと、別のブラウザ扱いで使えない。メールに「リンクをコピーしてリクエストしたブラウザに貼り付けてください」と書いている。
