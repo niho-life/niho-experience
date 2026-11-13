@@ -133,14 +133,34 @@ const apply: Action = {
           let current = chunk;
           let done = false;
           for (let attempt = 1; attempt <= 3 && !done; attempt += 1) {
-            const response = await sendChunk(context, seed, current, attempt);
+            let response: ApiResponse;
+            try {
+              response = await sendChunk(context, seed, current, attempt);
+            } catch (error) {
+              // No answer (a dropped connection, a timeout, an expired token): whether this chunk was saved is not known, and what
+              // was applied before it must still be reported. The run stops; running it again reads the state and skips what is in place.
+              const code = error instanceof OpsError ? error.code : "failed";
+              for (const item of current) results.push({ key: item.key, status: "failed", changes: item.changes, error: `${code}_result_unconfirmed` });
+              stopped = true;
+              done = true;
+              continue;
+            }
             if (response.status === 200) { for (const item of current) results.push({ key: item.key, status: "applied", changes: item.changes }); done = true; continue; }
             const error = failureOf(response, "classification apply");
             if (error.code === "operation_already_recorded") {
               // The server saw this operation before: read again; what is already in place is done, the rest is retried under a new ID.
               plan = planChanges(items, await listProducts(context));
               const byKey = new Map(plan.map((item) => [item.key, item]));
-              const again = current.map((item) => byKey.get(item.key)!).filter((item) => !item.error && item.changes.length > 0);
+              const unresolved = current.filter((item) => byKey.get(item.key)!.error);
+              if (unresolved.length > 0) {
+                // A product that can no longer be resolved (archived, an ambiguous slug) is a failure, not "already done".
+                for (const item of unresolved) results.push({ key: item.key, status: "failed", error: byKey.get(item.key)!.error });
+                for (const item of current.filter((candidate) => !unresolved.includes(candidate))) results.push({ key: item.key, status: "not_attempted" });
+                stopped = true;
+                done = true;
+                continue;
+              }
+              const again = current.map((item) => byKey.get(item.key)!).filter((item) => item.changes.length > 0);
               for (const item of current) if (!again.some((candidate) => candidate.key === item.key)) results.push({ key: item.key, status: "unchanged" });
               if (again.length === 0) { done = true; continue; }
               current = again;
