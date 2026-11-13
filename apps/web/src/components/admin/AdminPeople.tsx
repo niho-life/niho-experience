@@ -107,6 +107,11 @@ function PersonCard({ row, products, onChanged }: { row: AdminPeopleListingRow; 
         {!listed ? <span className="rounded-full border border-line-strong px-2.5 py-0.5 text-sm font-bold">未登録</span> : null}
         <span className="ml-auto text-sm text-ink-soft">公開中の体験 {row.publicExperienceCount} 件</span>
       </div>
+      {!row.hasOwner ? (
+        <p className={`mt-1 text-sm ${listed ? "font-bold text-danger" : "text-ink-soft"}`}>
+          本人のアカウントが無いため、{listed ? "街の人には表示されません" : "載せても街の人には表示されません"}。本人を提供者のオーナーとして招待し、アカウントが結び付くと表示されます。
+        </p>
+      ) : null}
       <p className={`mt-1 text-sm ${row.photoReady ? "text-ink-soft" : "font-bold text-danger"}`}>
         {row.photoReady ? "写真：公開してよい写真があります" : "写真：公開してよい提供者写真がありません。「提供者」の画面で、許可を確認した写真を登録してください。登録するまで街の人には表示されません。"}
         {"　"}紹介文：{row.hasHostBio ? "本人が書いた紹介文があります" : "本人の紹介文はありません"}

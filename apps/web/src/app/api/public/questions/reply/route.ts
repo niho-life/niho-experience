@@ -1,7 +1,7 @@
 import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "@niho-experience/experience-store";
 import { REPLY_PAGE_MESSAGE_MAX_LENGTH } from "@/lib/guest-reply";
 import { config } from "@/lib/config";
-import { guestQuestionRepository } from "@/lib/experience/store-server";
+import { guestReplyRepository } from "@/lib/experience/store-server";
 import { fromThisSite } from "@/lib/experience/public-http";
 import { clientRequestKey, guestQuestionEmpty, guestQuestionError, guestQuestionJson, readGuestQuestionBody, replyToken } from "@/lib/experience/guest-questions-http";
 
@@ -14,9 +14,9 @@ export const dynamic = "force-dynamic";
  * expired; 409 LINK_USED once the link has answered something else.
  */
 export async function POST(request: Request): Promise<Response> {
-  if (!config.guestQuestionsEnabled) return guestQuestionEmpty(404);
+  if (!config.guestQuestionsEnabled && !config.personMessagesEnabled) return guestQuestionEmpty(404);
   if (!fromThisSite(request)) return guestQuestionEmpty(403);
-  const questions = guestQuestionRepository();
+  const questions = guestReplyRepository();
   if (!questions) return guestQuestionError("SEND_FAILED");
   const body = await readGuestQuestionBody(request);
   if (!body.ok) return body.response;

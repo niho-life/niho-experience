@@ -206,6 +206,23 @@ export function guestQuestionRepository(): GuestQuestionRepository | null {
   return pool ? new GuestQuestionRepository(pool) : null;
 }
 
+/** 人物ページから本人へのメッセージ (#589): null until its flag is on and the experience DB is configured. */
+export function personMessageRepository(): GuestQuestionRepository | null {
+  if (!config.personMessagesEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestQuestionRepository(pool) : null;
+}
+
+/**
+ * The reply page's store (#105, #589): the answer to a question and the answer to a message to a person are both read and
+ * answered there, so it opens with either flag. null while neither is on or without the experience DB.
+ */
+export function guestReplyRepository(): GuestQuestionRepository | null {
+  if (!config.guestQuestionsEnabled && !config.personMessagesEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new GuestQuestionRepository(pool) : null;
+}
+
 /** 団体・個別の相談 (#532): null until its flag is on and the experience DB is configured. */
 /** 街の人 (#564): the Japanese site's people pages and their Admin list. The photos are served by the publications media route, so it needs the same flag. */
 export function peopleListingRepository(): PeopleListingRepository | null {
@@ -291,7 +308,8 @@ export function guestBookingMessages(): GuestBookingMessages | null {
  * only one is; null when both are. null while neither is open or without the experience DB.
  */
 export function siteThreadRepository(): { repository: GuestQuestionRepository; kind: GuestThreadKind | null } | null {
-  const questions = config.guestQuestionsEnabled;
+  // A message sent from a person's page (#589) is a thread like a question, so either flag opens that kind.
+  const questions = config.guestQuestionsEnabled || config.personMessagesEnabled;
   const bookings = config.guestBookingEnabled && config.guestMailEnabled;
   if (!questions && !bookings) return null;
   const pool = experiencePool();

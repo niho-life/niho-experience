@@ -7,8 +7,9 @@ import { assertStoreIdentifier } from "./validation.ts";
 /*
  * 街の人 (#564, docs/people.md): who the Japanese site shows on 街の人 and on a page of their own. The Admin decides
  * (a row per provider, reusing the provider's public profile and photo), the public readers add the conditions that
- * keep a person off the page by themselves: the public profile must exist and the provider photo must be READY with
- * its rights confirmed. Nothing else about the provider is read here (no seller, payout, member or booking data).
+ * keep a person off the page by themselves: the public profile must exist, the provider photo must be READY with its
+ * rights confirmed, and the provider must have a current OWNER (#589: whoever is shown can be written to, and the message
+ * reaches that account). Nothing else about the provider is read here (no seller, payout or booking data).
  */
 
 type DbRow = Record<string, unknown>;
@@ -43,6 +44,8 @@ export interface AdminPeopleListingRow {
   readonly publicDisplayName: string;
   /** A READY, rights-confirmed provider photo is selected: without it nobody is shown. */
   readonly photoReady: boolean;
+  /** The provider has a current OWNER account (#589): without one nobody can be written to, so nobody is shown. */
+  readonly hasOwner: boolean;
   readonly hasHostBio: boolean;
   /** Public experiences this provider has now (any language). */
   readonly publicExperienceCount: number;
@@ -128,6 +131,13 @@ export function validatePeopleListingInput(raw: PeopleListingInput): PeopleListi
   };
 }
 
+/**
+ * SQL: the provider `listing.provider_id` has a current OWNER account (#589). A person is shown on the public pages only
+ * with one, so a message sent from their page always reaches someone who can read and answer it.
+ */
+export const PEOPLE_OWNER_CONDITION = `EXISTS (SELECT 1 FROM provider_memberships owner_member
+   WHERE owner_member.provider_id=listing.provider_id AND owner_member.role='OWNER' AND owner_member.active)`;
+
 const iso = (value: unknown): string => (value instanceof Date ? value : new Date(String(value))).toISOString();
 
 /** A READY provider photo whose rights were confirmed and which is the provider's current PROVIDER_PHOTO selection. */
@@ -148,10 +158,14 @@ const PUBLIC_COLUMNS = `
                             WHERE link.listing_provider_id=listing.provider_id
                               AND link.product_provider_id=visible.provider_id AND link.product_id=visible.product_id)),'[]'::jsonb) AS experience_slugs`;
 
+/** The listing's public profile and photo: what a person needs to be shown (before the OWNER condition). */
+export const PEOPLE_PUBLIC_JOINS = `
+  JOIN experience_provider_public_profiles profile ON profile.provider_id=listing.provider_id
+  ${PHOTO_JOIN}`;
+
 const PUBLIC_FROM = `
   FROM experience_people_listings listing
-  JOIN experience_provider_public_profiles profile ON profile.provider_id=listing.provider_id
-  ${PHOTO_JOIN}
+  ${PEOPLE_PUBLIC_JOINS}
   LEFT JOIN provider_host_bios bio ON bio.provider_id=listing.provider_id`;
 
 function publicPerson(row: DbRow): PublicPerson {
@@ -204,6 +218,8 @@ export class PeopleListingRepository {
                         JOIN experience_provider_media_assets asset
                           ON asset.id=photo.asset_id AND asset.provider_id=photo.provider_id AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL
                        WHERE photo.provider_id=profile.provider_id AND photo.placement='PROVIDER_PHOTO') AS photo_ready,
+              EXISTS (SELECT 1 FROM provider_memberships owner_member
+                       WHERE owner_member.provider_id=profile.provider_id AND owner_member.role='OWNER' AND owner_member.active) AS has_owner,
               EXISTS (SELECT 1 FROM provider_host_bios bio WHERE bio.provider_id=profile.provider_id) AS has_bio,
               (SELECT count(*)::int FROM visible_publications visible WHERE visible.provider_id=profile.provider_id) AS experience_count,
               listing.slug,listing.role_ja,listing.area_ja,listing.quote_ja,listing.intro_ja,listing.sort_order,listing.version,listing.updated_at,
@@ -223,6 +239,7 @@ export class PeopleListingRepository {
         providerId: String(row.provider_id),
         publicDisplayName: String(row.public_display_name),
         photoReady: row.photo_ready === true,
+        hasOwner: row.has_owner === true,
         hasHostBio: row.has_bio === true,
         publicExperienceCount: Number(row.experience_count),
         listing: listed ? {
@@ -235,7 +252,7 @@ export class PeopleListingRepository {
             status: link.status as "DRAFT" | "PUBLISHED" | "ARCHIVED",
           })),
         } : null,
-        visible: listed && row.photo_ready === true,
+        visible: listed && row.photo_ready === true && row.has_owner === true,
       };
     });
   }
@@ -286,6 +303,7 @@ export class PeopleListingRepository {
     const result = await this.#pool.query<DbRow>(
       `WITH ${VISIBLE_PUBLICATIONS_CTE}
        SELECT ${PUBLIC_COLUMNS} ${PUBLIC_FROM}
+        WHERE ${PEOPLE_OWNER_CONDITION}
         ORDER BY listing.sort_order,listing.slug COLLATE "C" LIMIT 200`,
     );
     return result.rows.map(publicPerson);
@@ -295,7 +313,7 @@ export class PeopleListingRepository {
     if (!SLUG.test(slug) || slug.length > PEOPLE_LISTING_LIMITS.slugMax) return null;
     const result = await this.#pool.query<DbRow>(
       `WITH ${VISIBLE_PUBLICATIONS_CTE}
-       SELECT ${PUBLIC_COLUMNS} ${PUBLIC_FROM} WHERE listing.slug=$1`, [slug],
+       SELECT ${PUBLIC_COLUMNS} ${PUBLIC_FROM} WHERE listing.slug=$1 AND ${PEOPLE_OWNER_CONDITION}`, [slug],
     );
     return result.rows[0] ? publicPerson(result.rows[0]) : null;
   }
@@ -318,7 +336,7 @@ export class PeopleListingRepository {
                        WHERE link.listing_provider_id=listing.provider_id AND link.product_provider_id=visible.provider_id AND link.product_id=visible.product_id)
          JOIN experience_provider_public_profiles profile ON profile.provider_id=listing.provider_id
          ${PHOTO_JOIN}
-        WHERE visible.slug = ANY($1::text[])
+        WHERE visible.slug = ANY($1::text[]) AND ${PEOPLE_OWNER_CONDITION}
         ORDER BY listing.sort_order,listing.slug COLLATE "C"`, [unique],
     );
     const map = new Map<string, { slug: string; name: string }[]>();

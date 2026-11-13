@@ -32,14 +32,20 @@ const hrefs = (html: string) => [...html.matchAll(/href="(\/(?:ja\/)?inquiry[^"]
 beforeEach(() => { state.config = { ...state.config, groupInquiryEnabled: true }; });
 
 describe("the experience page's inquiry links", () => {
-  it("offer a question about the experience and one to its host, in Japanese, with the context in the link", async () => {
-    const links = hrefs(renderToStaticMarkup(await SitePublicationPage({ item, locale: "ja" })));
-    expect(links).toHaveLength(2);
-    expect(links.some((href) => href.includes("from=experience") && href.includes("experience=synthetic-tea") && href.includes("title=合成茶道体験") && href.includes("host=Sample Sato"))).toBe(true);
-    expect(links.some((href) => href.includes("from=provider") && href.includes("host=Sample Sato") && !href.includes("experience="))).toBe(true);
+  it("offer a question about the experience in Japanese, with the context in the link, and none to the host: a person is written to from their own page (#589)", async () => {
     const html = renderToStaticMarkup(await SitePublicationPage({ item, locale: "ja" }));
-    expect(html).toContain("Sample Satoさんに相談する");
+    const links = hrefs(html);
+    expect(links).toHaveLength(1);
+    expect(links.some((href) => href.includes("from=experience") && href.includes("experience=synthetic-tea") && href.includes("title=合成茶道体験") && href.includes("host=Sample Sato"))).toBe(true);
+    expect(links.some((href) => href.includes("from=provider"))).toBe(false);
+    expect(html).not.toContain("Sample Satoさんに相談する");
     expect(html).toContain("この体験について相談する");
+  });
+
+  it("keeps the English page's question to the host as it was", async () => {
+    const links = hrefs(renderToStaticMarkup(await SitePublicationPage({ item, locale: "en" })));
+    expect(links).toHaveLength(2);
+    expect(links.some((href) => href.includes("from=provider") && href.includes("host=Sample Sato") && !href.includes("experience="))).toBe(true);
   });
 
   it("go to the English form on the English page, and show nothing while the feature is off", async () => {

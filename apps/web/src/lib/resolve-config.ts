@@ -787,6 +787,11 @@ export function resolveConfig(env: Env) {
   // after migration 0022 is applied and accepted. A question is taken only where the OWNER can read it: the host
   // console is on. Provider membership operations are independent of Experience reservations and questions.
   const guestQuestionsEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_GUEST_QUESTIONS_ENABLED === "true";
+  // 人物ページから本人へのメッセージ (#589, docs/guest-questions.md「人物ページから」): the Japanese site's 街の人 page offers
+  // "send a message", kept as a thread of the person's provider in the same tables as the questions. It opens its own
+  // public route, the reply page the answer's email links to and the OWNER's メッセージ, but not "Ask the host" on the
+  // English experience pages (that is guestQuestionsEnabled). The answer goes out with the mail job (guest mail).
+  const personMessagesEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_PERSON_MESSAGES_ENABLED === "true";
   // 団体・個別の相談 (#532, docs/group-inquiry.md): the public form, the office's inbox in /admin and the two emails of an
   // inquiry (the mail job, which needs EXPERIENCE_GUEST_MAIL_ENABLED). Kept in the experience DB (migration 0074), so
   // only http mode opens it; the mock has no such inbox. Off by default; the Admin list needs the Admin sign-in too.
@@ -961,6 +966,7 @@ export function resolveConfig(env: Env) {
     hostSalesLedgerEnabled,
     hostSalesPayoutsEnabled,
     guestQuestionsEnabled,
+    personMessagesEnabled,
     groupInquiryEnabled,
     groupInquiryPreviewEnabled,
     guestReviewsEnabled,

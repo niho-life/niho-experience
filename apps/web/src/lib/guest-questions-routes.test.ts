@@ -8,7 +8,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
-vi.mock("@/lib/experience/store-server", () => ({ guestQuestionRepository: () => state.repository }));
+vi.mock("@/lib/experience/store-server", () => ({ guestQuestionRepository: () => state.repository, guestReplyRepository: () => state.repository, personMessageRepository: () => state.repository }));
 
 import { POST as ask } from "@/app/api/public/experiences/[slug]/questions/route";
 import { POST as reply } from "@/app/api/public/questions/reply/route";

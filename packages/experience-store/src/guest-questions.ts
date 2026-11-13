@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { BookingMessagesClosedError, StoreAccessDeniedError, StoreConflictError, StoreError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "./errors.ts";
 import { enqueueBookingMessageNotification, enqueueGuestQuestionNotification } from "./host-notification-outbox.ts";
+import { PEOPLE_OWNER_CONDITION, PEOPLE_PUBLIC_JOINS } from "./people-listings.ts";
 import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -18,6 +19,12 @@ export type GuestQuestionDeliveryStatus = "PENDING" | "SENDING" | "SENT" | "FAIL
  * (#285 slice 6b) or the host console.
  */
 export type GuestQuestionMessageSource = "SITE_FORM" | "REPLY_PAGE" | "BOOKING_PAGE" | "HOST_CONSOLE" | "SUPPORT_CONSOLE";
+/**
+ * What メッセージ and a push call a thread that is about no experience: a message sent from a person's page (#589). The
+ * push carries it where a question carries its experience's title.
+ */
+export const PERSON_THREAD_LABEL = "人物ページから";
+
 /** A question before booking, or the messages of one booking made on this site (#285 slice 6b). */
 export type GuestThreadKind = "QUESTION" | "BOOKING";
 /** What the mail worker reports for one claimed reply. RETRY puts it back with a backoff while attempts remain. */
@@ -37,6 +44,10 @@ export const GUEST_QUESTION_LIMITS = {
   newThreadsPerProductPerHour: 30,
   deliveryAttempts: 5,
   linkTtlDaysMax: 30,
+  /** A person's page (#589): new threads per guest address and per person in an hour, and the shortest message. */
+  newPersonThreadsPerGuestPerHour: 3,
+  newPersonThreadsPerPersonPerHour: 30,
+  personMessageMinLength: 2,
   /** A booking's messages (#285 slice 6b): a guest's messages per booking in an hour. */
   bookingMessagesPerHour: 10,
   /** A booking's messages stay open until this many days after the experience (as its page and sessions). */
@@ -52,6 +63,19 @@ export interface SubmitGuestQuestionInput {
   /** The language the guest wrote in; EN when not given. */
   readonly language?: GuestQuestionLanguage;
   /** The browser's key for this question: the same key again is the same question. */
+  readonly clientRequestKey: string;
+}
+
+/** A message to a person listed on 街の人 (#589), written on their page. */
+export interface SubmitPersonMessageInput {
+  /** The person's slug on 街の人 (`/ja/people/<slug>`). */
+  readonly personSlug: string;
+  readonly message: string;
+  readonly guestName: string;
+  readonly guestEmail: string;
+  /** The language the guest wrote in; JA when not given (the Japanese site is the only place that offers it). */
+  readonly language?: GuestQuestionLanguage;
+  /** The browser's key for this message: the same key again is the same message. */
   readonly clientRequestKey: string;
 }
 
@@ -88,8 +112,9 @@ export interface GuestQuestionThreadBooking {
 /** One row of メッセージ's list. Never the guest's email address. */
 export interface GuestQuestionThreadSummary {
   readonly id: string;
-  readonly productId: string;
-  readonly productTitle: string;
+  /** The experience a question or a booking is about; null for a message from a person's page (#589). */
+  readonly productId: string | null;
+  readonly productTitle: string | null;
   /** The guest's name: the question's, or the booking's (from its guest record). */
   readonly guestName: string;
   /** What a question is about; null for a booking's thread. */
@@ -124,7 +149,6 @@ interface ClaimedHostMessage {
   readonly guestEmail: string;
   readonly guestName: string;
   readonly guestLanguage: GuestQuestionLanguage;
-  readonly experienceTitle: string;
   readonly hostDisplayName: string;
   readonly english: string;
   /** The Japanese the host wrote, or null when they wrote English directly. A Japanese-language guest reads it (#59). */
@@ -136,6 +160,8 @@ interface ClaimedHostMessage {
 /** A host reply to a question the mail worker now sends. The raw token exists only here and in the email it builds. */
 export interface ClaimedQuestionReply extends ClaimedHostMessage {
   readonly kind: "QUESTION";
+  /** The experience asked about; null for a message from a person's page (#589), which is about none. */
+  readonly experienceTitle: string | null;
   /** For `/questions/reply#t=<token>`: in the URL fragment only, never in a query, a log or the outbox. */
   readonly replyToken: string;
   readonly replyLinkExpiresAtUtc: string;
@@ -147,6 +173,7 @@ export interface ClaimedQuestionReply extends ClaimedHostMessage {
  */
 export interface ClaimedBookingMessage extends ClaimedHostMessage {
   readonly kind: "BOOKING";
+  readonly experienceTitle: string;
   readonly publicBookingId: string;
   /**
    * The opaque single-recipient reference for NIHO's post-accept bounce feedback (`X-NIHO-Mail-Ref`), stamped on
@@ -162,6 +189,7 @@ export interface ClaimedBookingMessage extends ClaimedHostMessage {
 /** An explicit NIHO support message in a booking thread, sent through the existing durable mail outbox. */
 export interface ClaimedSupportBookingMessage extends ClaimedHostMessage {
   readonly kind: "BOOKING_SUPPORT";
+  readonly experienceTitle: string;
   readonly publicBookingId: string;
   /** As ClaimedBookingMessage.deliveryRef. */
   readonly deliveryRef: string;
@@ -186,9 +214,12 @@ export interface GuestBookingThreadStart {
 
 /** What the reply page shows to whoever holds the link: the guest's words and the host's English, never the Japanese. */
 export interface GuestQuestionReplyLink {
-  readonly experienceTitle: string;
+  /** The experience asked about; null for a message from a person's page (#589). */
+  readonly experienceTitle: string | null;
   readonly hostDisplayName: string;
   readonly guestName: string;
+  /** The language the guest wrote in: a Japanese guest reads the page, and the host's words, in Japanese. */
+  readonly language: GuestQuestionLanguage;
   readonly messages: readonly { readonly from: "guest" | "host"; readonly atUtc: string; readonly body: string }[];
   readonly expiresAtUtc: string;
 }
@@ -253,6 +284,33 @@ function validQuestion(input: SubmitGuestQuestionInput): ValidQuestion {
     productSlug: input.productSlug,
     topic: input.topic,
     message: text(input.message, "message", GUEST_QUESTION_LIMITS.questionMinLength, GUEST_QUESTION_LIMITS.guestMessageMaxLength),
+    guestName: text(name, "guestName", 1, GUEST_QUESTION_LIMITS.guestNameMaxLength),
+    guestEmail: email,
+    language,
+    clientRequestKey: requestKey(input.clientRequestKey, "clientRequestKey"),
+  };
+}
+
+interface ValidPersonMessage {
+  personSlug: string;
+  message: string;
+  guestName: string;
+  guestEmail: string;
+  language: GuestQuestionLanguage;
+  clientRequestKey: string;
+}
+
+function validPersonMessage(input: SubmitPersonMessageInput): ValidPersonMessage {
+  if (input === null || typeof input !== "object") throw new StoreValidationError("message must be an object.");
+  if (typeof input.personSlug !== "string" || input.personSlug.length < 1 || input.personSlug.length > 60) throw new StoreValidationError("personSlug is invalid.");
+  const language = input.language ?? "JA";
+  if (language !== "EN" && language !== "JA") throw new StoreValidationError("language must be EN or JA.");
+  const name = typeof input.guestName === "string" ? input.guestName.replace(/\s+/g, " ") : input.guestName;
+  const email = text(input.guestEmail, "guestEmail", 3, GUEST_QUESTION_LIMITS.guestEmailMaxLength);
+  if (!EMAIL.test(email)) throw new StoreValidationError("guestEmail must be an email address.");
+  return {
+    personSlug: input.personSlug,
+    message: text(input.message, "message", GUEST_QUESTION_LIMITS.personMessageMinLength, GUEST_QUESTION_LIMITS.guestMessageMaxLength),
     guestName: text(name, "guestName", 1, GUEST_QUESTION_LIMITS.guestNameMaxLength),
     guestEmail: email,
     language,
@@ -365,7 +423,7 @@ export async function enqueueBookingGuestMessage(
 const MESSAGE_COLUMNS = "id, author, source, body, body_ja, created_at, delivery_status";
 /** A thread with its experience and, for a booking's thread, the booking and its guest record (never the address). */
 const THREAD_FROM = `guest_question_threads t
-  JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
+  LEFT JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
   LEFT JOIN bookings b ON b.provider_id = t.provider_id AND b.id = t.booking_id
   LEFT JOIN booking_guests g ON g.provider_id = t.provider_id AND g.booking_id = t.booking_id`;
 const BOOKING_COLUMNS = `b.public_booking_id::text AS booking_public_id, b.status AS booking_status,
@@ -409,8 +467,8 @@ function threadBooking(row: DbRow): GuestQuestionThreadBooking | null {
 function threadFields(row: DbRow): Omit<GuestQuestionThreadSummary, "lastMessage"> {
   return {
     id: String(row.id),
-    productId: String(row.product_id),
-    productTitle: String(row.public_title),
+    productId: row.product_id === null || row.product_id === undefined ? null : String(row.product_id),
+    productTitle: row.public_title === null || row.public_title === undefined ? null : String(row.public_title),
     guestName: String(row.guest_name ?? ""),
     topic: row.topic === null || row.topic === undefined ? null : String(row.topic) as GuestQuestionTopic,
     language: String(row.guest_language) as GuestQuestionLanguage,
@@ -607,6 +665,67 @@ export class GuestQuestionRepository {
         [messageId, providerId, threadId, question.message],
       );
       await enqueueGuestMessage(client, providerId, threadId, messageId, String(product.public_title));
+      return RECEIVED;
+    });
+  }
+
+  /**
+   * A message to a person listed on 街の人 (#589), from their page: a thread of the person's provider that is about no
+   * experience, the guest's message and the outbox events (translation and the host's push) in one transaction, so it
+   * reaches the OWNER as a question does and is answered the same way. The same clientRequestKey for the person again
+   * answers `received` without a second thread. Throws StoreNotFoundError unless the person is shown on 街の人 now
+   * (listed, with a public profile, a rights-confirmed photo and a current OWNER), StoreRateLimitedError past the hourly limits.
+   */
+  async submitPersonMessage(input: SubmitPersonMessageInput): Promise<{ status: "received" }> {
+    const message = validPersonMessage(input);
+    return withTransaction(this.#pool, async (client) => {
+      const person = await client.query<DbRow>(
+        `SELECT listing.provider_id
+           FROM experience_people_listings listing
+           ${PEOPLE_PUBLIC_JOINS}
+          WHERE listing.slug = $1 AND ${PEOPLE_OWNER_CONDITION}
+          FOR SHARE OF listing`,
+        [message.personSlug],
+      );
+      if (!person.rows[0]) throw new StoreNotFoundError("person");
+      const providerId = String(person.rows[0].provider_id);
+      // One message at a time per person, so the counts below hold until this one is in.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 53))", [`person-messages:${providerId}`]);
+      const repeated = await client.query(
+        "SELECT 1 FROM guest_question_threads WHERE provider_id = $1 AND product_id IS NULL AND booking_id IS NULL AND client_request_key = $2",
+        [providerId, message.clientRequestKey],
+      );
+      if (repeated.rows[0]) return RECEIVED;
+
+      const counts = await client.query<DbRow>(
+        `SELECT count(*) FILTER (WHERE guest_email_key = lower($2))::int AS by_guest,
+                count(*)::int AS by_person,
+                GREATEST(1, ceil(extract(epoch FROM min(created_at) FILTER (WHERE guest_email_key = lower($2)) + interval '60 minutes' - clock_timestamp())))::int AS guest_retry,
+                GREATEST(1, ceil(extract(epoch FROM min(created_at) + interval '60 minutes' - clock_timestamp())))::int AS person_retry
+           FROM guest_question_threads
+          WHERE provider_id = $1 AND product_id IS NULL AND booking_id IS NULL AND created_at > clock_timestamp() - interval '60 minutes'`,
+        [providerId, message.guestEmail],
+      );
+      const count = counts.rows[0]!;
+      if (Number(count.by_guest) >= GUEST_QUESTION_LIMITS.newPersonThreadsPerGuestPerHour) throw new StoreRateLimitedError(Number(count.guest_retry));
+      if (Number(count.by_person) >= GUEST_QUESTION_LIMITS.newPersonThreadsPerPersonPerHour) throw new StoreRateLimitedError(Number(count.person_retry));
+
+      const threadId = randomUUID();
+      const messageId = randomUUID();
+      await client.query(
+        `WITH now AS (SELECT clock_timestamp() AS at)
+         INSERT INTO guest_question_threads
+           (id, provider_id, guest_name, guest_email, guest_email_key, guest_language, client_request_key, last_message_at, created_at)
+         SELECT $1::uuid, $2, $3, $4, lower($4), $5, $6, now.at, now.at FROM now`,
+        [threadId, providerId, message.guestName, message.guestEmail, message.language, message.clientRequestKey],
+      );
+      await client.query(
+        `INSERT INTO guest_question_messages (id, provider_id, thread_id, author, source, body, created_at)
+         SELECT $1::uuid, $2, $3::uuid, 'GUEST', 'SITE_FORM', $4, last_message_at
+           FROM guest_question_threads WHERE provider_id = $2 AND id = $3::uuid`,
+        [messageId, providerId, threadId, message.message],
+      );
+      await enqueueGuestMessage(client, providerId, threadId, messageId, PERSON_THREAD_LABEL);
       return RECEIVED;
     });
   }
@@ -829,8 +948,10 @@ export class GuestQuestionRepository {
         const details = await client.query<DbRow>(
           `SELECT COALESCE(t.guest_email, g.guest_email) AS guest_email, COALESCE(t.guest_name, g.guest_name) AS guest_name,
                   t.guest_language, t.booking_id IS NOT NULL AS for_booking, b.public_booking_id::text AS public_booking_id,
-                  b.occurrence_snapshot, p.public_title, COALESCE(b.seller_snapshot->>'displayName', p.seller_display_name) AS seller_display_name
+                  b.occurrence_snapshot, p.public_title,
+                  COALESCE(b.seller_snapshot->>'displayName', p.seller_display_name, person.public_display_name) AS seller_display_name
              FROM ${THREAD_FROM}
+             LEFT JOIN experience_provider_public_profiles person ON person.provider_id = t.provider_id
             WHERE t.provider_id = $1 AND t.id = $2::uuid`,
           [row.provider_id, row.thread_id],
         );
@@ -842,7 +963,6 @@ export class GuestQuestionRepository {
           guestEmail: String(detail.guest_email),
           guestName: String(detail.guest_name),
           guestLanguage: String(detail.guest_language) as GuestQuestionLanguage,
-          experienceTitle: String(detail.public_title),
           hostDisplayName: String(detail.seller_display_name),
           english: String(row.body),
           japanese: typeof row.body_ja === "string" && row.body_ja !== "" ? row.body_ja : null,
@@ -859,6 +979,7 @@ export class GuestQuestionRepository {
           const occurrence = (detail.occurrence_snapshot ?? {}) as Record<string, unknown>;
           const bookingFields = {
             ...base,
+            experienceTitle: String(detail.public_title),
             publicBookingId: String(detail.public_booking_id),
             deliveryRef: row.mail_delivery_ref,
             localDate: String(occurrence.localDate),
@@ -878,7 +999,13 @@ export class GuestQuestionRepository {
            RETURNING expires_at`,
           [tokenDigest(replyToken), row.provider_id, row.thread_id, row.id, linkTtlDays],
         );
-        deliveries.push({ ...base, kind: "QUESTION", replyToken, replyLinkExpiresAtUtc: isoValue(link.rows[0]!, "expires_at") });
+        deliveries.push({
+          ...base,
+          kind: "QUESTION",
+          experienceTitle: detail.public_title === null || detail.public_title === undefined ? null : String(detail.public_title),
+          replyToken,
+          replyLinkExpiresAtUtc: isoValue(link.rows[0]!, "expires_at"),
+        });
       }
       return deliveries;
     });
@@ -945,25 +1072,33 @@ export class GuestQuestionRepository {
     if (typeof token !== "string" || !TOKEN.test(token)) return null;
     const found = await this.#pool.query<DbRow>(
       `SELECT r.provider_id, r.thread_id, r.expires_at, r.used_at, r.expires_at > clock_timestamp() AS open,
-              t.guest_name, p.public_title, p.seller_display_name
+              t.guest_name, t.guest_language, p.public_title, COALESCE(p.seller_display_name, person.public_display_name) AS seller_display_name
          FROM guest_question_reply_tokens r
          JOIN guest_question_threads t ON t.provider_id = r.provider_id AND t.id = r.thread_id
-         JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
+         LEFT JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
+         LEFT JOIN experience_provider_public_profiles person ON person.provider_id = t.provider_id
         WHERE r.token_hash = $1`,
       [tokenDigest(token)],
     );
     const row = found.rows[0];
     if (!row || row.used_at !== null || row.open !== true) return null;
     const messages = await this.#pool.query<DbRow>(
-      "SELECT author, body, created_at FROM guest_question_messages WHERE provider_id = $1 AND thread_id = $2 ORDER BY created_at, id",
+      "SELECT author, body, body_ja, created_at FROM guest_question_messages WHERE provider_id = $1 AND thread_id = $2 ORDER BY created_at, id",
       [row.provider_id, row.thread_id],
     );
+    const japanese = row.guest_language === "JA";
     return {
-      experienceTitle: String(row.public_title),
+      experienceTitle: row.public_title === null || row.public_title === undefined ? null : String(row.public_title),
       hostDisplayName: String(row.seller_display_name),
       guestName: String(row.guest_name),
-      // The host's English only: the Japanese they wrote is for the host console.
-      messages: messages.rows.map((message) => ({ from: message.author === "HOST" ? "host" : "guest", atUtc: isoValue(message, "created_at"), body: String(message.body) })),
+      language: japanese ? "JA" : "EN",
+      // The host's English, or for a guest who wrote in Japanese the Japanese the host wrote (the English when they wrote
+      // none), as the email did. The Japanese of an English-writing guest's thread is for the host console.
+      messages: messages.rows.map((message) => ({
+        from: message.author === "HOST" ? "host" : "guest",
+        atUtc: isoValue(message, "created_at"),
+        body: japanese && message.author === "HOST" && typeof message.body_ja === "string" && message.body_ja !== "" ? message.body_ja : String(message.body),
+      })),
       expiresAtUtc: isoValue(row, "expires_at"),
     };
   }
@@ -994,7 +1129,7 @@ export class GuestQuestionRepository {
         const threadId = String(link.thread_id);
         const thread = await client.query<DbRow>(
           `SELECT p.public_title FROM guest_question_threads t
-             JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
+             LEFT JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id
             WHERE t.provider_id = $1 AND t.id = $2::uuid FOR NO KEY UPDATE OF t`,
           [providerId, threadId],
         );
@@ -1017,7 +1152,7 @@ export class GuestQuestionRepository {
             WHERE t.provider_id = $1 AND t.id = $2::uuid AND m.provider_id = $1 AND m.id = $3::uuid`,
           [providerId, threadId, created.id],
         );
-        await enqueueGuestMessage(client, providerId, threadId, String(created.id), String(thread.rows[0]!.public_title));
+        await enqueueGuestMessage(client, providerId, threadId, String(created.id), String(thread.rows[0]!.public_title ?? PERSON_THREAD_LABEL));
         return RECEIVED;
       });
     } catch (error) {

@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import { PERSON_THREAD_LABEL } from "@niho-experience/experience-store";
 import { shortDateWithWeekdayJa, todayInJapan } from "@/host/format";
 import { otaSiteLabel } from "@/host/ota-sites";
 import type { HostNotificationKey } from "@/host/types";
@@ -121,6 +122,8 @@ export const HOST_PUSH_TITLES: Record<HostPushKind, string> = {
 export const HOST_PUSH_ASSIGNMENT_TITLE = "担当を募集中の申込";
 
 export const HOST_PUSH_QUESTION_TITLE = "予約前の質問が届きました";
+/** A message sent from a person's page (#589): about no experience, so it is not a question before booking. */
+export const HOST_PUSH_PERSON_MESSAGE_TITLE = "メッセージが届きました";
 
 /** A clearing of an operations stop: the listing stays off until the OWNER resumes it (owner_resume_required). */
 export const HOST_PUSH_LISTING_CLEARED_TITLE = "運営による停止が解除されました";
@@ -182,7 +185,7 @@ export function hostPushLines(event: HostPushEvent): { title: string; experience
     title: event.ota ? hostPushOtaTitle(event.ota)
       : event.assignment ? HOST_PUSH_ASSIGNMENT_TITLE
       : event.listing?.change === "CLEARED" ? HOST_PUSH_LISTING_CLEARED_TITLE
-      : event.kind === "GUEST_MESSAGE" && event.question === true ? HOST_PUSH_QUESTION_TITLE : HOST_PUSH_TITLES[event.kind],
+      : event.kind === "GUEST_MESSAGE" && event.question === true ? (event.experienceTitle === PERSON_THREAD_LABEL ? HOST_PUSH_PERSON_MESSAGE_TITLE : HOST_PUSH_QUESTION_TITLE) : HOST_PUSH_TITLES[event.kind],
     experience: titleLine(event.experienceTitle),
     when: whenLine(event),
     guest: event.ota ? titleLine(event.guestName) : null,

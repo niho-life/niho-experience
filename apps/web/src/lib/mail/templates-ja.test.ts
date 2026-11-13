@@ -136,12 +136,21 @@ describe("日本語のゲストへのメール（#59）", () => {
     expect(support.text).toContain("門の前でお会いしましょう。");
   });
 
-  it("質問への返事のメール：日本語の枠、返信ページが英語であることを事務局の案内とともに言う", () => {
+  it("質問への返事のメール：日本語の枠と、メールへの返信は事務局に届くという案内", () => {
     const mail = questionReplyEmail({ siteUrl: SITE, guestName: "合成 花子", guestLanguage: "JA", hostName: "合成ホスト", experienceTitle: "合成の茶道体験", reply: "Yes, we can.", japanese: "はい、できます。", replyToken: "t".repeat(43), linkTtlDays: 14 });
     expect(mail.subject).toBe("合成ホストからご質問への返信が届きました：合成の茶道体験");
     expect(mail.text).toContain("はい、できます。");
     expect(mail.text).toContain("期限は14日です");
-    expect(mail.text).toContain("返信ページは現在、英語の表示のみです");
+    expect(mail.text).toContain("NIHO事務局が日本語でご案内します");
+    expect(links(mail)).toEqual([`${SITE}/questions/reply#t=${"t".repeat(43)}`]);
+  });
+
+  it("人物ページへのメッセージの返事のメール（#589）：体験の名前が無くても読める", () => {
+    const mail = questionReplyEmail({ siteUrl: SITE, guestName: "合成 花子", guestLanguage: "JA", hostName: "合成", experienceTitle: null, reply: "Hello.", japanese: "こんにちは。", replyToken: "t".repeat(43), linkTtlDays: 14 });
+    expect(mail.subject).toBe("合成さんからメッセージの返信が届きました");
+    expect(mail.text).toContain("あなたのメッセージに、合成さんが返信しました。");
+    expect(mail.text).toContain("こんにちは。");
+    expect(mail.text).not.toContain("null");
     expect(links(mail)).toEqual([`${SITE}/questions/reply#t=${"t".repeat(43)}`]);
   });
 });

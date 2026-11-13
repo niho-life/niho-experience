@@ -179,7 +179,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 {providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt={providerIdentityPhoto.alt} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" /> : null}
                 <div><p className="font-extrabold">{providerName ?? publication.sellerDisplayName}</p>{hostBioText ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{hostBioText}</p> : null}</div>
               </div>
-              {config.groupInquiryEnabled && providerName ? <a href={inquiryHref(locale, { from: "PROVIDER", hostName: providerName })} className={buttonClass("secondary", "mt-5 w-full sm:w-auto")}>{ja ? `${providerName}さんに相談する` : `Ask ${providerName} about a group visit`}</a> : null}
+              {config.groupInquiryEnabled && providerName && !ja ? <a href={inquiryHref(locale, { from: "PROVIDER", hostName: providerName })} className={buttonClass("secondary", "mt-5 w-full sm:w-auto")}>{ja ? `${providerName}さんに相談する` : `Ask ${providerName} about a group visit`}</a> : null}
             </section> : null}
             {config.groupInquiryEnabled ? <section id="inquiry" aria-labelledby="inquiry-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 id="inquiry-heading" className="text-2xl">{ja ? "相談してみる" : "Planning something bigger?"}</h2>

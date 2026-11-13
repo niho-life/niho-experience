@@ -46,7 +46,7 @@ Issue #532（受付の一覧の最小は #533 の一部）。親は #527。オ�
 | 法人・団体の方へ | `/ja/business`（日本語のみ） | 「相談する」→ `/ja/inquiry?type=corporate&from=corporate` |
 | 学校の方へ | `/ja/schools`（日本語のみ） | 「資料と見積を相談する」→ `/ja/inquiry?type=school&from=school` |
 | 体験ページ | 「相談してみる」の節（`SitePublicationPage`、日英） | 体験の slug・タイトル・ホスト名つき（`from=experience`） |
-| 人物（提供者）のページ | 体験ページの「ホストについて」にある「◯◯さんに相談する」（人物だけの公開ページはまだ無い） | ホスト名つき（`from=provider`） |
+| 人物（提供者）のページ | 日本語は `/ja/people/<slug>` の「◯◯さんにメッセージを送る」（**この相談フォームではなく**、本人あてのメッセージ。[guest-questions.md](guest-questions.md)「人物ページから本人へ」、#589）。英語は体験ページの「ホストについて」にある「Ask ◯◯ about a group visit」 | 英語：ホスト名つき（`from=provider`）。日本語：古いリンクの `from=provider`・`host=`（体験なし）は文脈なしで開く |
 | `/ja` のトップ | 下部の帯（`InquiryBand`） | `/ja/inquiry`、法人・学校のページへ |
 | `/ja` のフッター | 「相談する」「法人・団体の方へ」「学校の方へ」（`inquiryFooterLinks()`） | 同上 |
 

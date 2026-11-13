@@ -45,7 +45,7 @@ import {
   replyToGuestQuestion,
   REPLY_DRAFT_TIMEOUT_MS,
 } from "./guest-questions-server";
-import { BOOKING_THREAD_CLOSED_TEXT, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
+import { BOOKING_THREAD_CLOSED_TEXT, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT, threadContext, threadHeading, threadKind, threadWhen } from "./messages";
 
 const THREAD_ID = "00000000-0000-4000-8000-000000000106";
 const COMMAND_ID = "00000000-0000-4000-8000-0000000c0106";
@@ -96,6 +96,36 @@ describe("hostThread", () => {
     const statuses = (["PENDING", "SENDING", "SENT", "FAILED"] as const).map((deliveryStatus) => hostThread(STORED, [{ ...REPLY, bodyJa: null, deliveryStatus }]).messages[0]);
     expect(statuses).toEqual(["pending", "pending", "sent", "failed"].map((status) => expect.objectContaining({ from: "host", japanese: "", status })));
     expect(hostThread({ ...STORED, language: "JA" }, [QUESTION]).messages[0]).toMatchObject({ language: "ja" });
+  });
+});
+
+describe("a message sent from a person's page (#589)", () => {
+  const PERSON: Omit<GuestQuestionThreadSummary, "lastMessage"> = { ...STORED, productId: null, productTitle: null, topic: null, language: "JA", guestName: "山田 花子" };
+  const WRITTEN: GuestQuestionMessage = { ...QUESTION, body: "はじめまして。お話を聞かせてください。" };
+
+  it("is filed under 人物ページから, reads as a message and not as a question before booking, and a Japanese guest gets the Japanese", () => {
+    const thread = hostThread(PERSON, [WRITTEN]);
+    expect(thread).toMatchObject({ experienceId: "person-page", guest: "山田 花子", topic: null, booking: null, guestLanguage: "ja" });
+    expect(threadHeading(thread)).toBe("山田 花子 さんからのメッセージ");
+    expect(threadKind(thread)).toBe("人物ページからのメッセージ");
+    expect(threadWhen(thread)).toBe("");
+    expect(threadContext(thread)).toBe("");
+    // A question before booking and a booking's thread read as they did.
+    const question = hostThread(STORED, [QUESTION]);
+    expect([threadHeading(question), threadKind(question), threadWhen(question), threadContext(question)]).toEqual(["Sample Guest さんの質問", "予約前の質問", "予約前", "予約前 · 食べもの"]);
+  });
+
+  it("lists it beside the experiences, with a title of its own, and opens it in full", async () => {
+    state.store!.listThreads!.mockResolvedValueOnce({ threads: [{ ...PERSON, lastMessage: WRITTEN }, SUMMARY], nextCursor: null });
+    const list = await loadGuestQuestions(OWNER, null);
+    expect(list).toMatchObject({ status: "live", experiences: [{ id: "person-page", title: "人物ページから" }, { id: "tea", title: "Synthetic tea" }] });
+    expect(list.status === "live" && list.threads.map((thread) => thread.experienceId)).toEqual(["person-page", "tea"]);
+
+    state.store!.getThread!.mockResolvedValueOnce({ ...PERSON, messages: [WRITTEN] });
+    const opened = await loadGuestQuestions(OWNER, THREAD_ID);
+    expect(opened).toMatchObject({ status: "live", loaded: [THREAD_ID] });
+    expect(opened.status === "live" && opened.experiences).toContainEqual({ id: "person-page", title: "人物ページから" });
+    expect(JSON.stringify(opened)).not.toMatch(/@/);
   });
 });
 

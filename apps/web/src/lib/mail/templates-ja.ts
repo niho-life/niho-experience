@@ -227,13 +227,13 @@ export function supportBookingMessageEmailJa(
 
 export function questionReplyEmailJa(input: QuestionReplyMailInput & { readonly japanese?: string | null }): RenderedMail {
   const host = oneLine(input.hostName);
-  const experience = oneLine(input.experienceTitle);
+  const experience = input.experienceTitle === null ? null : oneLine(input.experienceTitle);
   const link = `${absolute(input.siteUrl, "/questions/reply")}#t=${encodeURIComponent(input.replyToken)}`;
-  return japanMail(`${host}からご質問への返信が届きました：${experience}`, [
+  return japanMail(experience === null ? `${host}さんからメッセージの返信が届きました` : `${host}からご質問への返信が届きました：${experience}`, [
     greeting(input.guestName),
-    { kind: "p", text: `${experience}についてのご質問に、${host}が返信しました。` },
+    { kind: "p", text: experience === null ? `あなたのメッセージに、${host}さんが返信しました。` : `${experience}についてのご質問に、${host}が返信しました。` },
     { kind: "quote", text: body(input.japanese ?? input.reply) },
     { kind: "link", lead: `${host}へ返信するには、このリンクを開いてください。このリンクで返信できるのは1回で、期限は${input.linkTtlDays}日です。`, label: `${host}に返信する`, href: link },
-    { kind: "p", text: "返信ページは現在、英語の表示のみです。このメールへの返信は、" + host + "ではなく NIHO事務局に届き、NIHO事務局が日本語でご案内します。" },
+    { kind: "p", text: "このメールへの返信は、" + host + "ではなく NIHO事務局に届き、NIHO事務局が日本語でご案内します。" },
   ]);
 }

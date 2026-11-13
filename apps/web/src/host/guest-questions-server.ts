@@ -1,6 +1,7 @@
 import "server-only";
 import {
   BookingMessagesClosedError,
+  PERSON_THREAD_LABEL,
   StoreAccessDeniedError,
   StoreNotFoundError,
   StoreValidationError,
@@ -23,7 +24,7 @@ import { hostReplyToEnglish } from "@/lib/translation/prompts";
 import { actionTime } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { todayInJapan } from "./format";
-import { BOOKING_THREAD_CLOSED_TEXT, bookingOfNewThread, emptyThreadFor, newBookingThreadId, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
+import { BOOKING_THREAD_CLOSED_TEXT, bookingOfNewThread, emptyThreadFor, newBookingThreadId, PERSON_EXPERIENCE_ID, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { mockExperienceBookings, mockExperienceThreads } from "./mock/experience-reservations";
 import { MOCK_NOW, MOCK_TODAY } from "./mock/bookings";
 import { siteBooking, siteBookingExperiences } from "./site-bookings";
@@ -51,6 +52,11 @@ export const GUEST_QUESTION_REPLY_FAILED_TEXT = "返信を送れませんでし�
 const LIST_LIMIT = 50;
 /** 英語にする waits this long for the Claude API; after that the host writes the English. */
 export const REPLY_DRAFT_TIMEOUT_MS = 15_000;
+
+/** The experience (id and title) a stored thread is filed under; a message from a person's page has none of its own. */
+function experienceOf(thread: { productId: string | null; productTitle: string | null }): { id: string; title: string } {
+  return thread.productId === null || thread.productTitle === null ? { id: PERSON_EXPERIENCE_ID, title: PERSON_THREAD_LABEL } : { id: thread.productId, title: thread.productTitle };
+}
 
 /** What a question is about, as the host reads it; "Other" names nothing. */
 const TOPIC_JA: Record<GuestQuestionTopic, string | null> = { CHILDREN: "子ども", FOOD: "食べもの", ACCESS: "アクセス", LANGUAGE: "言葉", OTHER: null };
@@ -94,7 +100,7 @@ export function hostThreadBooking(booking: GuestQuestionThreadBooking): HostThre
 export function hostThread(thread: Pick<StoredThread, "id" | "productId" | "guestName" | "topic" | "language" | "booking">, messages: readonly GuestQuestionMessage[]): HostThread {
   return {
     id: thread.id,
-    experienceId: thread.productId,
+    experienceId: thread.productId ?? PERSON_EXPERIENCE_ID,
     guest: thread.guestName,
     topic: thread.topic ? (TOPIC_JA[thread.topic] ?? null) : null,
     booking: thread.booking ? hostThreadBooking(thread.booking) : null,
@@ -118,7 +124,7 @@ export interface HostGuestQuestionPage {
 function listPage(page: GuestQuestionThreadPage): HostGuestQuestionPage {
   return {
     threads: page.threads.map((summary) => hostThread(summary, [summary.lastMessage])),
-    experiences: [...new Map(page.threads.map((summary) => [summary.productId, summary.productTitle]))].map(([id, title]) => ({ id, title })),
+    experiences: [...new Map(page.threads.map((summary) => experienceOf(summary)).map((experience) => [experience.id, experience.title]))].map(([id, title]) => ({ id, title })),
     nextCursor: page.nextCursor,
   };
 }
@@ -133,7 +139,7 @@ async function openThread(questions: GuestQuestionRepository, actor: HostActor, 
   const stored = await questions.getThread(actor, threadId);
   if (!ofKind(stored, kind)) throw new StoreNotFoundError("guest question");
   await questions.markThreadRead(actor, threadId);
-  return { thread: hostThread(stored, stored.messages), experience: { id: stored.productId, title: stored.productTitle } };
+  return { thread: hostThread(stored, stored.messages), experience: experienceOf(stored) };
 }
 
 export type HostGuestQuestionsLoad =
@@ -184,7 +190,7 @@ export async function loadGuestQuestions(provider: HostProvider, requestedThread
   try {
     const page = await questions.listThreads(actor, { limit: LIST_LIMIT, kind });
     const { threads } = listPage(page);
-    const experiences = new Map(page.threads.map((summary) => [summary.productId, summary.productTitle]));
+    const experiences = new Map(page.threads.map((summary) => experienceOf(summary)).map((experience) => [experience.id, experience.title]));
     const loaded: string[] = [];
     let requestedMissing = false;
     let newThread: HostThread | null = null;

@@ -67,11 +67,23 @@ Epic #103 の「予約前の質問」（旅行者 #105、ホスト #106）の現
 - 返信メールと消去は `EXPERIENCE_GUEST_MAIL_ENABLED`（[guest-booking.md](guest-booking.md) の「予約者へのメール」）。質問の flag とは独立で、off の間は返信が「送信待ち」のまま残る。
 - 翻訳は `EXPERIENCE_TRANSLATION_ENABLED`（http mode だけ、既定 `false`）。`true` で `EXPERIENCE_ANTHROPIC_API_KEY`（Secret Manager）が無いとサーバーは起動しない（誤りのメッセージは設定の名前だけ）。key は使う場所で読み、`config` に置かない。日本語訳はメール job の段なので `EXPERIENCE_GUEST_MAIL_ENABLED` も要る。off の間、`guest_question.received` の行は処理されずに残り、on にすると古いものから訳す。
 - ホストへの push は通知 job（`HOST_PUSH_ENABLED` と Scheduler の配線、[host-pwa.md](host-pwa.md)）と設定 › 通知（`HOST_NOTIFICATION_SETTINGS_ENABLED`）が要る。設定を読めない間は送らない。
-- migration は無い。runtime role の権限も増えない（`outbox_messages` と `guest_question_messages` の INSERT・UPDATE は既にある）。
+- migration は無い（人物ページからのメッセージの `0082` は上の節）。runtime role の権限も増えない（`outbox_messages` と `guest_question_messages` の INSERT・UPDATE は既にある）。
 - **配備時の作業（この PR では行わない）**：Anthropic Console で experience 専用の workspace と API key を作り、Secret Manager に `EXPERIENCE_ANTHROPIC_API_KEY` として置いて実行環境へ数値 version で配線する（ほかの秘密と同じ）。workspace に利用上限を設ける。旅行者向けのプライバシー（`/privacy`）の文言をオーナーが確認する（Anthropic への送信を書いてある）。
 - mock mode は今までどおり合成の質問と画面だけを使い、DB に触れない。
 - `/host/messages` はExperienceの質問とExperience予約のメッセージを同じ一覧で扱う。NIHO旧予約APIへの切替やfallbackは行わない（[guest-booking.md](guest-booking.md)）。
 - 予約のスレッド（6b）は予約ページ（`EXPERIENCE_GUEST_BOOKING_ENABLED` と `EXPERIENCE_GUEST_MAIL_ENABLED`）が開いているときに出る。質問の flag と片方だけが開いているときは、`/host/messages` はその種類のスレッドだけを出す。
+
+## 人物ページから本人へ（#589）
+
+日本語サイトの `/ja/people/<slug>`（街の人、[people.md](people.md)）の「◯◯さんにメッセージを送る」。オーナー決定（2026-11-13）：Airbnb のホストへのメッセージに近い形にし、載せるのは本人のホストアカウントがある人だけ。画面に「事務局が見ます」「NIHO から返信します」のような仲介の説明は出さない（メールの定型の注意書きは別）。
+
+- **持ち方**：`guest_question_threads` に足した（migration `0082`）。`product_id` を空にでき、体験に結び付かない「人あて」のスレッド（`product_id IS NULL AND booking_id IS NULL`、名前・アドレス・リクエスト key を持ち、話題は持たない）を持てる。スレッドの `provider_id` は、その人の提供者。同じ送信を2回しても1件（`(provider_id, client_request_key)` の部分 unique）。上限は同じアドレスで1時間に3件、その人あて全体で30件。本文は 2〜1000 文字。
+- **受付**：`POST /api/public/people/{slug}/messages`（`GuestQuestionRepository.submitPersonMessage`）。slug が街の人に**いま表示されている**人（登録済み・公開プロフィール・許可のある写真・現役の OWNER）でなければ、理由を言わずに 404。言語は `JA`。
+- **本人が読む・返す**：`/host/messages` に「人物ページから」として、予約前の質問と同じ一覧・スレッド・既読・返信で出る（体験名の代わりに「人物ページから」）。日本語で書いた返信がそのまま日本語の旅行者に届く（英語は記録用。予約の日本語の旅行者と同じ）。push の題は「メッセージが届きました」（`host.notify.guest_question`、`experienceTitle` に「人物ページから」）。
+- **返事・返信ページ**：返事のメール（日本語）と `/questions/reply` は予約前の質問と同じ。返信ページは、日本語で書いた人には日本語で出る（`GuestQuestionReplyLink.language`）。メールのリンクは1回・14日。
+- **データの境界・保持期間**：旅行者のアドレスはホストの画面・outbox・ログに出ない。最後のメッセージから1年でスレッドごと消す（`eraseInactiveThreads`、予約前の質問と同じ）。
+- **flag**：`EXPERIENCE_PERSON_MESSAGES_ENABLED`（`PERSON_MESSAGES_ENABLED`。http mode で `HOST_CONSOLE_ENABLED=true`、ゲストメール、日本語サイトが前提。Provider API とは併用不可）。公開の route・返信ページ・OWNER の `/host/messages` を開くが、**英語の体験ページの「Ask the host」は開かない**（それは `EXPERIENCE_GUEST_QUESTIONS_ENABLED`）。flag が off の間は、人のページにボタンも出ず、route は 404。
+- **配備の順**：migration `0082` を先に（runtime role の権限は増えない）。0082 は加えるだけで、いまの revision の書き込みも読みもそのまま通る。
 
 ## 次のスライスで足すもの
 

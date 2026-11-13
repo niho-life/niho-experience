@@ -25,9 +25,12 @@ export interface ReplyLinkMessage {
 
 /** The conversation behind a link: the guest's own words and the host's English. */
 export interface ReplyLinkView {
-  experienceTitle: string;
+  /** The experience asked about; null for a message sent from a person's page (#589). */
+  experienceTitle: string | null;
   hostDisplayName: string;
   guestName: string;
+  /** The language the guest wrote in: a Japanese guest gets the page, and the host's words, in Japanese. */
+  language: "EN" | "JA";
   messages: ReplyLinkMessage[];
   expiresAtUtc: string;
 }
@@ -44,13 +47,15 @@ function isMessage(value: unknown): value is ReplyLinkMessage {
 export function parseReplyLink(body: unknown): ReplyLinkView | null {
   const link = isObject(body) ? body.link : undefined;
   if (!isObject(link)) return null;
-  const { experienceTitle, hostDisplayName, guestName, messages, expiresAtUtc } = link;
-  if (!isText(experienceTitle, 300) || !isText(hostDisplayName, 300) || !isText(guestName, 100) || !isInstant(expiresAtUtc)) return null;
+  const { experienceTitle, hostDisplayName, guestName, language, messages, expiresAtUtc } = link;
+  if ((experienceTitle !== null && !isText(experienceTitle, 300)) || !isText(hostDisplayName, 300) || !isText(guestName, 100) || !isInstant(expiresAtUtc)) return null;
+  if (language !== "EN" && language !== "JA") return null;
   if (!Array.isArray(messages) || messages.length > 500 || !messages.every(isMessage)) return null;
   return {
-    experienceTitle,
+    experienceTitle: experienceTitle as string | null,
     hostDisplayName,
     guestName,
+    language,
     messages: messages.map(({ from, atUtc, body: text }) => ({ from, atUtc, body: text })),
     expiresAtUtc,
   };

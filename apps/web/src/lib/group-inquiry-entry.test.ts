@@ -24,6 +24,21 @@ describe("inquiryContextFromSearch", () => {
     expect(inquiryContextFromSearch({ from: "provider", host: "Sato" })).toMatchObject({ entry: "PROVIDER" });
   });
 
+  it("opens an old person link on the Japanese site with no context (#589): a person is written to from their own page", () => {
+    const none = { kind: "PERSONAL", entry: "DIRECT", experienceSlug: null, experienceTitle: null, hostName: null };
+    expect(inquiryContextFromSearch({ from: "provider", host: "佐藤" }, "ja")).toEqual(none);
+    expect(inquiryContextFromSearch({ host: "佐藤" }, "ja")).toEqual(none);
+    // The experience's own entry keeps its experience (and the host's name recorded with it).
+    expect(inquiryContextFromSearch({ from: "provider", experience: "tea", host: "佐藤" }, "ja")).toMatchObject({ entry: "EXPERIENCE", experienceSlug: "tea", hostName: "佐藤" });
+    // The English page is as it was.
+    expect(inquiryContextFromSearch({ from: "provider", host: "Sato" }, "en")).toMatchObject({ entry: "PROVIDER", hostName: "Sato" });
+  });
+
+  it("does not build a Japanese link for a person any more", () => {
+    expect(inquiryHref("ja", { from: "PROVIDER", hostName: "佐藤" })).toBe("/ja/inquiry");
+    expect(inquiryHref("en", { from: "PROVIDER", hostName: "Sato" })).toBe("/inquiry?from=provider&host=Sato");
+  });
+
   it("ignores what does not fit instead of refusing the page", () => {
     expect(inquiryContextFromSearch({ type: "enterprise", from: "elsewhere", experience: "has space", title: "x", host: "a".repeat(101) })).toEqual({
       kind: "PERSONAL", entry: "DIRECT", experienceSlug: null, experienceTitle: null, hostName: null,

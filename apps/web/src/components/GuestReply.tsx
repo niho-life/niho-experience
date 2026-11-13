@@ -14,23 +14,26 @@ type View =
   | { kind: "closed" }
   | { kind: "failed" }
   | { kind: "open"; link: ReplyLinkView }
-  | { kind: "sent"; host: string };
+  | { kind: "sent"; host: string; ja: boolean };
 
 const TIME = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const TIME_JA = new Intl.DateTimeFormat("ja", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 function Conversation({ link }: { link: ReplyLinkView }) {
+  const ja = link.language === "JA";
   return (
-    <ol aria-label="Your conversation" className="mt-6 flex flex-col gap-3.5">
+    <ol aria-label={ja ? "やりとり" : "Your conversation"} className="mt-6 flex flex-col gap-3.5">
       {link.messages.map((message, index) => {
         const mine = message.from === "guest";
+        const who = mine ? (ja ? "あなた" : "You") : link.hostDisplayName;
         return (
           <li key={`${message.atUtc}-${index}`} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
             <div className={`max-w-[88%] rounded-2xl px-4 py-3 [overflow-wrap:anywhere] ${mine ? "rounded-tr-md bg-leaf-pale" : "rounded-tl-md bg-sand"}`}>
-              <span className="sr-only">{mine ? "You:" : `${link.hostDisplayName}:`}</span>
+              <span className="sr-only">{who}{ja ? "：" : ":"}</span>
               <p className="whitespace-pre-wrap">{message.body}</p>
             </div>
             <p className="mt-1 px-1 text-xs text-muted">
-              {mine ? "You" : link.hostDisplayName} · <time dateTime={message.atUtc}>{TIME.format(new Date(message.atUtc))}</time>
+              {who} · <time dateTime={message.atUtc}>{(ja ? TIME_JA : TIME).format(new Date(message.atUtc))}</time>
             </p>
           </li>
         );
@@ -38,6 +41,9 @@ function Conversation({ link }: { link: ReplyLinkView }) {
     </ol>
   );
 }
+
+/** The words of a Japanese guest's page (a message sent from a person's page on the Japanese site, #589). */
+const TOO_LONG_JA = `返信は${REPLY_PAGE_MESSAGE_MAX_LENGTH}文字までで書いてください。`;
 
 /** What to know before writing the reply: English, where the answer arrives, one reply per link, and (when it applies) the translation notice. */
 export function ReplyWritingNote({ hostDisplayName, translationNotice }: { hostDisplayName: string; translationNotice: boolean }) {
@@ -96,7 +102,7 @@ export function GuestReply({ translationNotice = false }: {
     if (sending || !token.current) return;
     const text = message.trim();
     if (!text || text.length > REPLY_PAGE_MESSAGE_MAX_LENGTH) {
-      setProblem(`Please write your reply in up to ${REPLY_PAGE_MESSAGE_MAX_LENGTH} characters.`);
+      setProblem(link.language === "JA" ? TOO_LONG_JA : `Please write your reply in up to ${REPLY_PAGE_MESSAGE_MAX_LENGTH} characters.`);
       return;
     }
     setProblem(null);
@@ -108,14 +114,14 @@ export function GuestReply({ translationNotice = false }: {
     if (result.kind === "sent") {
       token.current = null;
       setMessage("");
-      setView({ kind: "sent", host: link.hostDisplayName });
+      setView({ kind: "sent", host: link.hostDisplayName, ja: link.language === "JA" });
     } else if (result.kind === "closed" || result.kind === "used") {
       token.current = null;
       setView({ kind: "closed" });
     } else if (result.kind === "invalid") {
-      setProblem(`Please write your reply in up to ${REPLY_PAGE_MESSAGE_MAX_LENGTH} characters.`);
+      setProblem(link.language === "JA" ? TOO_LONG_JA : `Please write your reply in up to ${REPLY_PAGE_MESSAGE_MAX_LENGTH} characters.`);
     } else {
-      setProblem("We couldn't send your reply. Your message is still here. Please try again.");
+      setProblem(link.language === "JA" ? "返信を送れませんでした。内容は残っています。もう一度お試しください。" : "We couldn't send your reply. Your message is still here. Please try again.");
     }
   }
 
@@ -151,6 +157,17 @@ export function GuestReply({ translationNotice = false }: {
   }
 
   if (view.kind === "sent") {
+    if (view.ja) {
+      return (
+        <div lang="ja" className="container-page max-w-2xl py-12">
+          <h1 className="text-3xl">返信を送りました</h1>
+          <p role="status" className="mt-3 text-ink-soft">{view.host}さんからの返事は、メールに届きます。見当たらないときは、迷惑メールのフォルダーもご確認ください。</p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <ButtonLink href="/ja/experiences" variant="secondary">体験を見る</ButtonLink>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="container-page max-w-2xl py-12">
         <p className="hand text-[1.75rem]">on its way</p>
@@ -164,11 +181,47 @@ export function GuestReply({ translationNotice = false }: {
   }
 
   const { link } = view;
+  if (link.language === "JA") {
+    return (
+      <div lang="ja" className="container-page max-w-2xl py-12">
+        <h1 className="text-3xl">{link.hostDisplayName}さんとのやりとり</h1>
+        {link.experienceTitle ? <p className="mt-3 text-ink-soft">{link.experienceTitle}について</p> : null}
+        <Conversation link={link} />
+        <form onSubmit={(event) => void submit(event, link)} noValidate aria-label="返信" className="mt-8 border-t border-line pt-6">
+          {problem ? (
+            <div ref={alertBox} tabIndex={-1} role="alert" className="mb-4 outline-none">
+              <Notice tone="danger" title={problem} />
+            </div>
+          ) : null}
+          <label className={BOOKING_FIELD_LABEL_CLASS_V1}>
+            返信
+            <textarea
+              name="message"
+              required
+              rows={4}
+              maxLength={REPLY_PAGE_MESSAGE_MAX_LENGTH}
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              aria-invalid={problem ? true : undefined}
+              className={`${BOOKING_FIELD_INPUT_CLASS_V1} min-h-[110px] resize-y`}
+            />
+          </label>
+          <p className="mt-3.5 flex items-start gap-2.5 text-[0.875rem] text-ink-soft">
+            <HandIcon name="mail" className="size-6 shrink-0 text-moss" />
+            <span>{link.hostDisplayName}さんからの返事は、メールに届きます。このリンクから返信できるのは1回です。</span>
+          </p>
+          <button type="submit" disabled={sending} aria-busy={sending || undefined} className={buttonClass("primary", "mt-5 w-full sm:w-auto")}>
+            {sending ? "送っています…" : "返信を送る"}
+          </button>
+        </form>
+      </div>
+    );
+  }
   return (
     <div className="container-page max-w-2xl py-12">
       <p className="hand text-[1.75rem]">reply to your host</p>
       <h1 className="mt-1 text-3xl">Your conversation with {link.hostDisplayName}</h1>
-      <p className="mt-3 text-ink-soft">About {link.experienceTitle}</p>
+      {link.experienceTitle ? <p className="mt-3 text-ink-soft">About {link.experienceTitle}</p> : null}
       <Conversation link={link} />
       <form onSubmit={(event) => void submit(event, link)} noValidate className="mt-8 border-t border-line pt-6">
         {problem ? (

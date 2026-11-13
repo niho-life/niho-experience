@@ -14,6 +14,8 @@ const FIELDS = ["slug", "roleJa", "areaJa", "quoteJa", "introJa", "sortOrder"] a
 /** 街の人 → 体験 (#585): the products a person is met through. Names the way a product is named in the classification file. */
 const PRODUCTS_API = "/admin/api/product-classifications";
 const EXPERIENCES_MAX = 50;
+/** 人物ページから本人へ送れるのは、本人のアカウント（現役の OWNER）がある人だけ (#589)。 */
+const NO_OWNER_REASON = "本人のアカウントが無いため非公開";
 export interface ExperienceRef { readonly providerId: string; readonly productId: string }
 interface ProductRef extends ExperienceRef { readonly slug: string }
 
@@ -21,6 +23,8 @@ export interface PersonRow {
   readonly providerId: string;
   readonly publicDisplayName: string;
   readonly photoReady: boolean;
+  /** The provider has a current OWNER account (#589). Without one nobody can be written to, so the person is not shown. */
+  readonly hasOwner?: boolean;
   readonly hasHostBio: boolean;
   readonly publicExperienceCount: number;
   readonly listing: (Record<(typeof FIELDS)[number], unknown> & { readonly version: number; readonly updatedAtUtc: string; readonly experiences?: readonly (ExperienceRef & { readonly slug?: string })[] }) | null;
@@ -194,6 +198,14 @@ const withdraw: Action = {
   },
 };
 
+/** The reasons a listed person is not shown, in the words of the Admin screen. */
+function hiddenBecause(row: PersonRow): readonly string[] {
+  return [
+    ...(row.hasOwner === false ? [NO_OWNER_REASON] : []),
+    ...(row.photoReady === false ? ["公開してよい提供者写真が無いため非公開"] : []),
+  ];
+}
+
 const list: Action = {
   tier: "read",
   summary: "Lists the providers with a public profile and whether each is on 街の人 (--listed, --unlisted; --provider <id> for one).",
@@ -203,7 +215,8 @@ const list: Action = {
     if (context.args.flags.unlisted === true) rows = rows.filter((row) => row.listing === null);
     const provider = context.args.flags.provider;
     if (typeof provider === "string") rows = rows.filter((row) => row.providerId === provider);
-    return { count: rows.length, people: rows };
+    // Why a listed person is not on the public pages (#589): the Admin screen says the same.
+    return { count: rows.length, people: rows.map((row) => (row.listing !== null && !row.visible ? { ...row, hiddenBecause: hiddenBecause(row) } : row)) };
   },
 };
 

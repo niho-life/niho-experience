@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PublicPerson } from "@niho-experience/experience-store";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 
-const state = vi.hoisted(() => ({ config: { groupInquiryEnabled: true } as Record<string, unknown> }));
+const state = vi.hoisted(() => ({ config: { groupInquiryEnabled: true, personMessagesEnabled: true } as Record<string, unknown> }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
 
@@ -24,7 +24,7 @@ const experience = (slug: string, title: string): SitePublicExperience => ({
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((match) => match[1]!.replaceAll("&amp;", "&"));
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 
-beforeEach(() => { state.config = { groupInquiryEnabled: true }; });
+beforeEach(() => { state.config = { groupInquiryEnabled: true, personMessagesEnabled: true }; });
 
 describe("街の人 list", () => {
   it("shows each person with a photo, name, role and area, links to their page, and offers a way in for someone who is not here", () => {
@@ -45,7 +45,7 @@ describe("街の人 list", () => {
 });
 
 describe("a person's page", () => {
-  it("shows who they are, the inquiry button with the person chosen, and their experiences", () => {
+  it("shows who they are, a button to write to them directly (#589), and their experiences", () => {
     const html = renderToStaticMarkup(createElement(PersonPage, { person: person("a-san", { experienceSlugs: ["tea"] }), experiences: [experience("tea", "合成のお茶の体験")] }));
     const words = text(html);
     expect(words).toContain("街の人 / 合成 a-san");
@@ -53,21 +53,28 @@ describe("a person's page", () => {
     expect(words).toContain("「合成のひとこと」");
     expect(words).toContain("一行目 二行目");
     expect(words).toContain("写真：合成の撮影者");
-    expect(words).toContain("合成 a-sanさんに相談する");
+    expect(words).toContain("合成 a-sanさんにメッセージを送る");
     const links = hrefs(html);
-    expect(links.some((href) => href.startsWith("/ja/inquiry?") && href.includes("from=provider") && decodeURIComponent(href.replaceAll("+", " ")).includes("host=合成 a-san"))).toBe(true);
+    // The old way (the office's inquiry form with the name typed in) is gone from the page.
+    expect(links.some((href) => href.startsWith("/ja/inquiry"))).toBe(false);
+    expect(words).not.toContain("に相談する");
     expect(links).toContain("/ja/experiences/tea");
     expect(words).toContain("合成のお茶の体験");
     expect(words).toContain("1時間30分・1名 4,000円");
   });
 
-  it("leaves out what is not there: no experiences section, no quote, no introduction, no inquiry button while the feature is off", () => {
-    state.config = { groupInquiryEnabled: false };
+  it("says nothing about the office or a go-between on the page or in the form", () => {
+    const html = renderToStaticMarkup(createElement(PersonPage, { person: person("a-san"), experiences: [] }));
+    for (const word of ["事務局", "NIHO が", "NIHOが", "中継", "仲介"]) expect(text(html), word).not.toContain(word);
+  });
+
+  it("leaves out what is not there: no experiences section, no quote, no introduction, no message button while the feature is off", () => {
+    state.config = { groupInquiryEnabled: false, personMessagesEnabled: false };
     const html = renderToStaticMarkup(createElement(PersonPage, { person: person("c-san", { quoteJa: null, introJa: null, photo: { src: "/x", altJa: "写真", credit: null } }), experiences: [] }));
     const words = text(html);
     expect(words).not.toContain("と過ごす");
     expect(words).not.toContain("「");
     expect(words).not.toContain("写真：");
-    expect(words).not.toContain("に相談する");
+    expect(words).not.toContain("メッセージを送る");
   });
 });
