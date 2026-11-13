@@ -29,7 +29,7 @@ function draftOf(guide: WriteGuide): WriteDraft {
     title: guide.title,
     description: guide.description,
     ...(guide.categorySlug === undefined ? {} : { categorySlug: guide.categorySlug }),
-    content: { ...guide.content, language: "en" },
+    content: { ...guide.content, language: guide.content.language ?? "en" },
     cover: guide.cover ?? null,
     draftProductLinks: guide.draftProductLinks,
   };
@@ -54,6 +54,7 @@ function saveLabel(state: AutosaveState): string {
 
 type Requirement = { readonly id: "title" | "slug" | "category" | "description" | "author" | "body" | "cover"; readonly label: string; readonly ok: boolean };
 const NON_LATIN_LETTER = /(?!\p{Script=Latin})\p{Letter}/u;
+const JAPANESE_LETTER = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
 
 export function WriteEditor({ guide: initialGuide, categories, products, assets, initialDocument, chrome, categoriesAvailable = true, assetsAvailable = true, productsAvailable = true }: {
   readonly guide: WriteGuide;
@@ -180,17 +181,18 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
       target?.scrollIntoView({ block: "center" }); target?.focus();
     });
   };
+  const japanese = draft.content.language === "ja";
   const requirements = useMemo<Requirement[]>(() => {
     return [
-      { id: "title", label: "英語の記事タイトル", ok: Boolean(draft.title.trim() && /[A-Za-z]/.test(draft.title) && !NON_LATIN_LETTER.test(draft.title)) },
+      { id: "title", label: japanese ? "日本語の記事タイトル" : "英語の記事タイトル", ok: Boolean(draft.title.trim() && (japanese ? JAPANESE_LETTER.test(draft.title) : /[A-Za-z]/.test(draft.title) && !NON_LATIN_LETTER.test(draft.title))) },
       { id: "slug", label: "半角英数字とハイフンのURL", ok: /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(draft.slug) },
       { id: "category", label: "カテゴリ", ok: Boolean(draft.categorySlug) },
-      { id: "description", label: "英語の短い紹介（または空欄）", ok: !draft.description || !NON_LATIN_LETTER.test(draft.description) },
+      { id: "description", label: japanese ? "短い紹介（または空欄）" : "英語の短い紹介（または空欄）", ok: japanese || !draft.description || !NON_LATIN_LETTER.test(draft.description) },
       { id: "author", label: "公開する著者名・肩書き・紹介", ok: Boolean(authorFields.name.trim() && authorFields.role.trim() && authorFields.bio.trim()) },
-      { id: "body", label: "英語本文とH2見出し", ok: Boolean(!bodyInvalid && /^##\s+\S/m.test(draft.content.markdown) && /[A-Za-z]/.test(draft.content.markdown) && !NON_LATIN_LETTER.test(draft.content.markdown)) },
+      { id: "body", label: japanese ? "日本語本文とH2見出し" : "英語本文とH2見出し", ok: Boolean(!bodyInvalid && /^##\s+\S/m.test(draft.content.markdown) && (japanese ? JAPANESE_LETTER.test(draft.content.markdown) : /[A-Za-z]/.test(draft.content.markdown) && !NON_LATIN_LETTER.test(draft.content.markdown))) },
       { id: "cover", label: "カバー写真のalt・クレジット・掲載許諾", ok: !draft.cover || Boolean(draft.cover.alt.trim() && draft.cover.credit.trim() && draft.cover.webConfirmed) },
     ];
-  }, [authorFields, bodyInvalid, draft]);
+  }, [authorFields, bodyInvalid, draft, japanese]);
   const missingRequirements = requirements.filter((requirement) => !requirement.ok);
   const fixRequirement = (id: Requirement["id"]) => {
     if (id === "title" || id === "body" || id === "cover") setMobileTab("body");
@@ -271,7 +273,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
     const values = [next.name.trim(), next.role.trim(), next.bio.trim()];
     if (values.every((item) => item === "")) {
       const current = draftRef.current.content;
-      const content = { markdown: current.markdown, language: "en" as const, ...(current.checkedOn === undefined ? {} : { checkedOn: current.checkedOn }) };
+      const content = { markdown: current.markdown, language: current.language ?? ("en" as const), ...(current.checkedOn === undefined ? {} : { checkedOn: current.checkedOn }) };
       setAuthorInvalid(false); patchDraft({ content }); return;
     }
     if (values.some((item) => item === "")) { setAuthorInvalid(true); return; }
@@ -304,7 +306,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
       <nav className="write-mobile-tabs" aria-label="記事編集の表示"><button type="button" aria-current={mobileTab === "body" ? "page" : undefined} onClick={() => setMobileTab("body")}>本文</button><button type="button" aria-current={mobileTab === "settings" ? "page" : undefined} onClick={() => setMobileTab("settings")}>設定</button><button type="button" aria-current={mobileTab === "checks" ? "page" : undefined} onClick={() => setMobileTab("checks")}>チェック</button></nav>
       <div className="write-editor-grid">
         <article className={`write-rail write-mobile-pane ${mobileTab === "body" ? "write-mobile-pane-active" : ""}`}>
-          <p className="write-language-note">公開する記事は英語で書きます。日本語のメモは下書きのまま保存できます。</p>
+          <p className="write-language-note">{japanese ? "この記事は日本語で書きます。日本語サイトの「読みもの」に出て、英語サイトには出ません。" : "公開する記事は英語で書きます。日本語のメモは下書きのまま保存できます。"}</p>
           <label className="write-title-label" htmlFor="write-title">タイトル</label>
           <textarea ref={titleRef} id="write-title" className="write-title-input" rows={2} maxLength={110} disabled={actionBusy} value={draft.title} placeholder="A story worth sharing" onCompositionStart={() => composition(true)} onCompositionEnd={() => composition(false)} onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) event.preventDefault(); }} onChange={(event) => patchDraft({ title: event.target.value.replace(/\s*[\r\n]+\s*/g, " ") })} />
           <section className="write-cover-section" aria-label="カバー写真">

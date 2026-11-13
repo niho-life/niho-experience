@@ -48,6 +48,8 @@ export type GuideHero = Readonly<{
 export type GuideTranslation = Readonly<{ title: string; description: string; body: string; faq: readonly GuideFaqItem[] }>;
 
 export type Guide = Readonly<{
+  /** Database publications only: the language the article is written in. "ja" is the Japanese site's 読みもの (#154), never shown on the English site. */
+  language?: "en" | "ja";
   /** URL segment: `/guides/{slug}`. Lower-case letters, digits and hyphens. Never changed once published. */
   slug: string;
   /** A public, direct-link editorial preview. Keep it out of navigation and sitemap, and always emit noindex. */

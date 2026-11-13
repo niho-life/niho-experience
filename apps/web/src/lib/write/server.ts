@@ -155,7 +155,7 @@ function parseAuthor(value: unknown): GuideAuthor | null {
 
 function parseContent(value: unknown): GuideContent | null {
   const content = objectWithOnly(value, ["markdown", "language", "author", "checkedOn"]);
-  if (!content || typeof content.markdown !== "string" || (content.language !== undefined && content.language !== "en")) return null;
+  if (!content || typeof content.markdown !== "string" || (content.language !== undefined && content.language !== "en" && content.language !== "ja")) return null;
   let author: GuideAuthor | undefined;
   if (content.author !== undefined) {
     const parsed = parseAuthor(content.author);
@@ -165,7 +165,7 @@ function parseContent(value: unknown): GuideContent | null {
   if (content.checkedOn !== undefined && typeof content.checkedOn !== "string") return null;
   return {
     markdown: content.markdown,
-    ...(content.language === undefined ? {} : { language: "en" as const }),
+    ...(content.language === undefined ? {} : { language: content.language as "en" | "ja" }),
     ...(author === undefined ? {} : { author }),
     ...(content.checkedOn === undefined ? {} : { checkedOn: content.checkedOn as string }),
   };
