@@ -5,12 +5,16 @@ import type { Api, ApiResponse } from "../../../../scripts/experience/ops/core.t
 
 /* 運営の CLI (#576) ⑤: the article target against an in-memory copy of the /write/api/guides routes. No network. */
 
+// Fake-API JSON has no fixed shape in these tests, so `any` is allowed for this one alias.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = Record<string, any>;
+
 const NOW = Date.parse("2026-11-14T00:00:00.000Z");
 const ROOT = "/write/api/guides";
 
 function fakeApi() {
   const guides = new Map<string, GuideDto & { cover?: Record<string, unknown> }>();
-  const sent: Array<{ method: string; path: string; body: Record<string, any> | undefined; operationId: string; raw?: unknown }> = [];
+  const sent: Array<{ method: string; path: string; body: Loose | undefined; operationId: string; raw?: unknown }> = [];
   const seen = new Set<string>();
   const hooks = { rejectNext: null as null | ApiResponse };
   const api: Api = {
@@ -27,7 +31,7 @@ function fakeApi() {
       if (seen.has(operationId)) return { status: 409, body: { error: "operation_already_recorded" } };
       seen.add(operationId);
       if (hooks.rejectNext) { const r = hooks.rejectNext; hooks.rejectNext = null; return r; }
-      const b = (body ?? {}) as Record<string, any>;
+      const b = (body ?? {}) as Loose;
       if (method === "POST" && path === ROOT) {
         if (guides.has(b.id)) return { status: 200, body: { guide: guides.get(b.id), created: false } };
         const guide = { id: b.id, slug: b.slug, subject: { kind: "PROVIDER", providerId: b.providerId }, title: b.title, description: b.description, categorySlug: b.categorySlug, content: b.content, status: "DRAFT", revision: 1 } as GuideDto;
@@ -60,7 +64,7 @@ function fakeApi() {
 }
 
 const exec = (api: Api, argv: string[], file?: string, bytes?: Uint8Array) => run(["guide", ...argv], { environment: {}, api, now: () => NOW, readFile: () => file ?? "", readBytes: () => bytes ?? new Uint8Array() });
-const out = (o: Awaited<ReturnType<typeof run>>) => o.output as Record<string, any>;
+const out = (o: Awaited<ReturnType<typeof run>>) => o.output as Loose;
 const file = JSON.stringify({ slug: "rainy", title: "雨の日の鎌倉", description: "雨の日。", categorySlug: "walks", content: { markdown: "## 見出し\n\n本文です。" } });
 
 describe("guide create", () => {
