@@ -67,7 +67,11 @@ describe("日本語の戻りページ（#59）", () => {
     expect(paid).toContain('href="/ja/experiences"');
     expect(page({ type: "instant", freeBooking: true })).toContain("お支払いは不要です");
     expect(page({ type: "approval" })).toContain("ホストが内容を確認します");
-    expect(page({ type: "managed-request" })).toContain("NIHO事務局が内容を確認します");
+    // 申込みの終わりの画面 (#530): not a booking yet, who answers, and when.
+    const requested = page({ type: "managed-request" });
+    expect(requested).toContain("お申込みを受け付けました");
+    expect(requested).toContain("まだ予約は確定していません");
+    expect(requested).toContain("24時間以内にメールでお返事します");
     expect(page({ type: null })).toContain("メールをご確認ください");
     expect(paid).not.toContain("Check your email");
     expect(page({ type: "instant", locale: "en" })).toContain("Check your email for your booking");

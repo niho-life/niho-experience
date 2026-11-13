@@ -152,7 +152,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
         <p className="-mt-3 text-sm text-ink-soft">{scheduleDescription(offer, locale)} · {formatDurationLabel(offer.durationMinutes, locale)}</p>
         <p className="-mt-4 text-sm text-ink-soft">{cancellationSummary(offer, locale)}{offer.minimumChargeableParticipants > 1 ? ja ? ` · 最低請求人数は${offer.minimumChargeableParticipants}名` : ` · Minimum charge is ${offer.minimumChargeableParticipants} guests` : ""}</p>
       </> : null}
-      <label className={FIELD_LABEL}>{ja ? "日時" : "Date"}
+      <label className={FIELD_LABEL}>{ja ? "日にち" : "Date"}
         <select required value={date} disabled={loading || loadError} onChange={(event) => setDate(event.target.value)} className={`${FIELD_SELECT} disabled:opacity-50`}>
           <option value="">{loading ? ja ? "日時を読み込み中…" : "Loading dates…" : loadError ? ja ? "日時を確認できません" : "Dates unavailable" : ja ? "日時を選択" : "Choose a date"}</option>
           {occurrences.map((occurrence) => <option key={`${occurrence.offerId}-${occurrence.date}`} value={occurrence.date} disabled={!occurrence.bookable}>{new Intl.DateTimeFormat(ja ? "ja-JP" : "en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric", timeZoneName: undefined }).format(new Date(`${occurrence.date}T12:00:00Z`))}{occurrence.bookable ? ` · ${new Intl.DateTimeFormat(ja ? "ja-JP" : "en-US", { timeZone: "Asia/Tokyo", hour: "numeric", minute: "2-digit" }).format(new Date(occurrence.startAt))} JST · ${occurrence.seatsLeft}${ja ? "席" : " places"}` : ja ? " · 予約不可" : " · Unavailable"}</option>)}
@@ -160,21 +160,21 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       </label>
       {loadError ? <p role="alert" className="text-sm text-red-700">{ja ? "空き状況を確認できませんでした。ページを再読み込みしてください。" : "Dates couldn’t be checked. Retry the page or contact us before paying."}</p> : null}
       <div className="grid grid-cols-2 gap-4">
-        <label className={FIELD_LABEL}>{ja ? "大人" : "Adults"}
+        <label className={FIELD_LABEL}>{ja ? "大人の人数" : "Adults"}
           <input type="number" min={0} max={offer?.maxPartySize ?? 1} value={adults} onChange={(event) => setAdults(Number(event.target.value))} className={FIELD_INPUT} />
         </label>
-        {offer?.pricing.child ? <label className={FIELD_LABEL}>{ja ? "子ども" : "Children"} ({offer.pricing.child.minAge}–{offer.pricing.child.maxAge}{ja ? "歳" : ""})
+        {offer?.pricing.child ? <label className={FIELD_LABEL}>{ja ? "子どもの人数" : "Children"} ({offer.pricing.child.minAge}–{offer.pricing.child.maxAge}{ja ? "歳" : ""})
           <input type="number" min={0} max={offer.maxPartySize} value={children} onChange={(event) => setChildren(Number(event.target.value))} className={FIELD_INPUT} />
         </label> : null}
       </div>
       {offer?.bookingQuestions.map((question) => <QuestionField key={question.id} question={question} value={answers[question.id]} onChange={(value) => updateAnswer(question.id, value)} locale={locale} />)}
-      <label className={FIELD_LABEL}>{ja ? "氏名" : "Full name"}
+      <label className={FIELD_LABEL}>{ja ? "お名前" : "Full name"}
         <input required autoComplete="name" maxLength={200} value={name} onChange={(event) => setName(event.target.value)} className={FIELD_INPUT} />
       </label>
       <label className={FIELD_LABEL}>{ja ? "メールアドレス" : "Email"}
         <input type="email" required autoComplete="email" maxLength={320} value={email} onChange={(event) => setEmail(event.target.value)} className={FIELD_INPUT} />
       </label>
-      <label className={FIELD_LABEL}>{ja ? "備考" : "Note"} <span className="font-normal text-muted">{ja ? "任意" : "Optional"}</span>
+      <label className={FIELD_LABEL}>{ja ? "担い手に伝えておきたいこと" : "Note"} <span className="font-normal text-muted">{ja ? "（任意）" : "Optional"}</span>
         <textarea maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} className={FIELD_TEXTAREA} />
       </label>
       <div className="rounded-xl bg-sand p-4 text-sm">
