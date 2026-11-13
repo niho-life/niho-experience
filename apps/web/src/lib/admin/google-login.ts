@@ -134,6 +134,10 @@ export interface ExperienceAdminSession {
   readonly authenticatedAt: number;
   readonly idleExpiresAt: number;
   readonly absoluteExpiresAt: number;
+  /** 運営の CLI (#576): this "session" is one request's assertion (`sessionRef` is "operator-cli"), not a cookie session. */
+  readonly via?: "cli";
+  readonly aiKind?: string;
+  readonly operationId?: string | null;
 }
 
 export type ExperienceAdminSessionLoad =

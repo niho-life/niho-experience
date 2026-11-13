@@ -321,6 +321,33 @@ function adminGoogleLoginSettings(apiMode: "mock" | "http", env: Env, adminSuppo
   return { enabled: true, allowedEmails };
 }
 
+const OPERATOR_CLI_AUDIENCE = /^[0-9A-Za-z-]{6,80}\.apps\.googleusercontent\.com$/;
+
+/**
+ * EXPERIENCE_OPERATOR_CLI_AUDIENCES: Google OAuth client IDs separated by semicolons. null for an empty list, an empty
+ * entry or anything that is not a client ID.
+ */
+export function parseOperatorCliAudiences(value: string | undefined): readonly string[] | null {
+  const entries = (value ?? "").split(";").map((entry) => entry.trim());
+  if (entries.some((entry) => !OPERATOR_CLI_AUDIENCE.test(entry))) return null;
+  return Object.freeze([...new Set(entries)]);
+}
+
+/**
+ * 運営の CLI (#576, docs/operator-cli.md): the /admin APIs also take a signed-in admin's Google ID token (a niho.life account
+ * on the Admin allowlist) from a command line, through the same server code as the Admin screens. A token's audience
+ * is the OAuth client it was issued to, so the clients whose tokens are accepted are named here (`gcloud auth
+ * print-identity-token` is issued to gcloud's own client). HTTP only, off by default, and only with the Google admin login.
+ */
+function operatorCliSettings(apiMode: "mock" | "http", env: Env, adminGoogleLoginEnabled: boolean): { enabled: boolean; audiences: readonly string[] } {
+  const name = "EXPERIENCE_OPERATOR_CLI_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return { enabled: false, audiences: Object.freeze([]) };
+  if (!adminGoogleLoginEnabled) throw new Error(`${name}=true needs EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED=true in http mode`);
+  const audiences = parseOperatorCliAudiences(env.EXPERIENCE_OPERATOR_CLI_AUDIENCES);
+  if (!audiences) throw new Error(`${name}=true needs EXPERIENCE_OPERATOR_CLI_AUDIENCES (one or more Google OAuth client IDs separated by semicolons) in http mode`);
+  return { enabled: true, audiences };
+}
+
 /*
  * OTA の枠管理 (docs/ota-runtime.md, docs/ota-google-channel-flow.md). These settings are the start-up gate and the deploy
  * table's counterpart (scripts/deploy/runtime-flags.mjs): a flag turned on without what it needs stops the server, naming
@@ -815,6 +842,7 @@ export function resolveConfig(env: Env) {
   const channelManagerEnabled = channelManagerSetting(apiMode, env, adminSupportConsoleEnabled);
   // Admin のログイン (ADR 0003): /admin signs in with Google and Experience's allowlist instead of NIHO; see adminGoogleLoginSettings.
   const adminGoogleLogin = adminGoogleLoginSettings(apiMode, env, adminSupportConsoleEnabled);
+  const operatorCli = operatorCliSettings(apiMode, env, adminGoogleLogin.enabled);
   const channelRuntimeEnabled = channelRuntimeSetting(apiMode, env, channelManagerEnabled, channelWatchdogEnabled);
   const resourceGoogle = resourceGoogleSettings(apiMode, env, hostConsoleEnabled);
   const airbnbGoogle = airbnbGoogleSettings(apiMode, env, hostConsoleEnabled, channelRuntimeEnabled);
@@ -905,6 +933,9 @@ export function resolveConfig(env: Env) {
     adminGoogleLoginEnabled: adminGoogleLogin.enabled,
     // The lower-case @niho.life addresses that may sign in to /admin (empty while off). Never logged.
     adminAllowedEmails: adminGoogleLogin.allowedEmails,
+    // 運営の CLI (#576): the Google OAuth client IDs whose ID tokens /admin/api accepts as a Bearer token (empty while off).
+    operatorCliEnabled: operatorCli.enabled,
+    operatorCliAudiences: operatorCli.audiences,
     adminSupportReadApiEnabled,
     adminSupportReadPreviewEnabled,
     adminSupportCaseApiEnabled,

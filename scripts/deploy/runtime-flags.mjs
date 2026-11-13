@@ -55,6 +55,8 @@ export const SHAPES = Object.freeze({
   serviceAccountEmail: { pattern: new RegExp(`^${SERVICE_ACCOUNT}$`), words: "a single service account email" },
   // The Admin allowlist (ADR 0003): the runtime compares them in lower case and refuses any other domain.
   adminAllowedEmails: { pattern: new RegExp(`^${ADMIN_EMAIL}(;${ADMIN_EMAIL})*$`), words: "@niho.life addresses separated by semicolons, without spaces" },
+  // 運営の CLI (#576): the Google OAuth client IDs whose ID tokens /admin/api accepts (gcloud's own client for `gcloud auth print-identity-token`).
+  googleClientIdList: { pattern: /^[0-9A-Za-z-]{6,80}\.apps\.googleusercontent\.com(;[0-9A-Za-z-]{6,80}\.apps\.googleusercontent\.com)*$/, words: "Google OAuth client IDs (…apps.googleusercontent.com) separated by semicolons, without spaces" },
   vapidPublicKey: { pattern: /^B[A-Za-z0-9_-]{86}$/, words: "an uncompressed P-256 public key in base64url" },
   vapidSubject: { pattern: new RegExp(`^(mailto:${ADDRESS}|${HTTPS_URL})$`), words: "mailto: an address, or an https URL" },
   // The OTA adapters' short form (apps/web/src/lib/experience/channel-adapters.ts): only its shape; the runtime refuses
@@ -329,6 +331,15 @@ export const FLAGS = Object.freeze([
     variable: "ADMIN_GOOGLE_LOGIN_ENABLED",
     needs: ["ADMIN_SUPPORT_CONSOLE_ENABLED", "HOST_CONSOLE", "DATABASE"],
     settings: [{ env: "EXPERIENCE_ADMIN_ALLOWED_EMAILS", variable: "ADMIN_ALLOWED_EMAILS", shape: "adminAllowedEmails" }],
+  },
+  // 運営の CLI (#576, docs/operator-cli.md): the same /admin APIs from a command line, with the signed-in admin's own Google
+  // ID token (a niho.life account on the Admin allowlist). Only with the Google admin login; writes are recorded in
+  // operator_cli_requests (migration 0078).
+  {
+    env: "EXPERIENCE_OPERATOR_CLI_ENABLED",
+    variable: "OPERATOR_CLI_ENABLED",
+    needs: ["EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED"],
+    settings: [{ env: "EXPERIENCE_OPERATOR_CLI_AUDIENCES", variable: "OPERATOR_CLI_AUDIENCES", shape: "googleClientIdList" }],
   },
   {
     env: "EXPERIENCE_CHANNEL_RUNTIME_ENABLED",

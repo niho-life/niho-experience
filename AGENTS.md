@@ -13,6 +13,7 @@
 - 公式配備はレビュー済みの固定SHAを対象にする。ビルド工程と配備権限を分ける。アプリ入力・予約tokenをログ、計測、録画、公開cacheへ流さない。
 - 体験業務 API の型はこのリポが正本。初期モック契約は仮契約と明記し、互換変更は API を先に配備する。
 - 販売・ホスト・Admin の機能は niho-experience の中で完結させ、NIHO 本体（niho-app）の変更・配備を前提にしない。niho-app の非公開リポは、セキュリティ上どうしても必要な場合だけ使う。通訳ルーム・記事連携など NIHO の機能との連携は、任意の flag の裏に置く。必要な安全性検証は省略しない。
+- 商品の分類・街の人・記事・商品の原稿などの日々の編集は、DB へ直接書かず、運営の CLI（`node scripts/experience/ops.mjs`、[docs/operator-cli.md](docs/operator-cli.md)、手引き `.claude/skills/operator-cli/SKILL.md`）で行う（#576、オーナー決定 2026-11-14）。既定は stg。本番（`--env prd`）の公開・停止・料金や販売条件の変更は、依頼した人の了承を取ってから `--yes` を付ける。返金・精算・受取口座は CLI で扱わない。
 - `main` へは PR だけ。必須チェック `premerge-gate` と未解決スレッドの解決は ruleset が強制する。PR を作ったら自己確認のあと `ghN pr merge <PR> --auto --squash` を設定してよい。CI のトリガーに `paths` / `paths-ignore` を足さない（`docs/development.md`「PR とマージ」）。
 - GitHub操作は `ghN`。秘密・個人情報を公開Issueへ貼らない。1 Issue 1 PRを機械的な必須条件にせず、レビュー可能な単位で関連Issueをまとめられる。
 - 本番コードを変更する際は利用環境の `implementation-routing` 方針を確認する。変更に応じた検証を行い、未実施項目は理由を記録する。
