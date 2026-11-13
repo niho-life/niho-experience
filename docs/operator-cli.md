@@ -91,7 +91,7 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 ## 有効にする（配備）
 
 - GitHub variable：`STG_`／`PROD_` ＋ `OPERATOR_CLI_ENABLED=true`、`OPERATOR_CLI_AUDIENCES=32555940559.apps.googleusercontent.com`（Google OAuth クライアント ID を `;` で区切る。空白なし）。`ADMIN_GOOGLE_LOGIN_ENABLED=true` と `ADMIN_ALLOWED_EMAILS` が前提（Admin の Google ログインと同じ許可リストを使う）。
-- migration `0078` を先に適用する（runtime に `operator_cli_requests` の INSERT。監査の表なので UPDATE・DELETE は要らない）。
+- migration `0078` を先に適用する（runtime role は `operator_cli_requests` の INSERT だけ。`scripts/gcp/experience-db-grants.mjs` に宣言済み。監査の表なので UPDATE・DELETE は付けない）。
 - 配備の表は `scripts/deploy/runtime-flags.mjs`（`EXPERIENCE_OPERATOR_CLI_ENABLED`）。flag が OFF の間は、Bearer 付きの要求は何も変わらず（cookie のセッションだけが有効）、CLI は `cli_not_open` を返す。
 - **`gcloud` のクライアントを受け入れるときの注意**：このクライアントは公開されているので、Google の同意画面を出せる別のアプリが、本人の同意のうえで同じ `aud` のトークンを取り、この API に送ることは技術的には可能（フィッシングと同じ形）。許可リストにある人しか通らず、期限は1時間、返金・精算・口座は届かない、本番の変更は操作ごとに記録される、という範囲で受け入れている。より絞るなら、Desktop 型の専用 OAuth クライアントをつくって `OPERATOR_CLI_AUDIENCES` を差し替える（コードの変更は要らない）。
 

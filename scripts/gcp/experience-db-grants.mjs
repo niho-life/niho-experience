@@ -157,6 +157,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   occurrence_assignment_commands: { write: I },
   occurrence_assignment_events: { write: I },
   occurrence_assignments: { write: I, updateColumns: ["released_at", "agreed_fee_yen", "agreed_fee_set_at"] },
+  // 運営の CLI (#576): the audit trail of changes an admin made from the command line; written once, never changed.
+  operator_cli_requests: { write: I },
   // Read by the host notification and guest mail jobs, which also mark rows done and move their lease.
   outbox_messages: { write: IU },
   // Append-only; the ledger trigger also rejects mutation.
