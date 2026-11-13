@@ -115,6 +115,7 @@ function PersonCard({ row, products, onChanged }: { row: AdminPeopleListingRow; 
       ) : (
         <p className="mt-1 text-sm text-ink-soft">メンバー：{row.memberRole === "OWNER" ? "オーナー" : "共同ホスト"}（メッセージは {row.providerName} の受信箱に届きます）</p>
       )}
+      {row.memberId ? <p className="mt-1 text-sm text-ink-soft [overflow-wrap:anywhere]">アカウント ID：<code>{row.memberId}</code>（同じ提供者に何人かいるときは、この ID で見分けます）</p> : null}
       <p className={`mt-1 text-sm ${row.photoReady ? "text-ink-soft" : "font-bold text-danger"}`}>
         {row.photoReady ? "写真：公開してよい写真があります" : "写真：公開してよい写真がありません。許可を確認した写真を登録するまで街の人には表示されません。"}
       </p>
