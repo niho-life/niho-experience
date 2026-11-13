@@ -40,7 +40,7 @@ export function managedBookingApprovalRepository(): ManagedBookingApprovalReposi
 /** 開催回の担当 (#535 v0): the people who can serve and NIHO's office. Callers check EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED first. */
 export function occurrenceAssignmentRepository(): OccurrenceAssignmentRepository | null {
   const pool = experiencePool();
-  return pool ? new OccurrenceAssignmentRepository(pool) : null;
+  return pool ? new OccurrenceAssignmentRepository(pool, { notifications: config.occurrenceAssignmentEnabled }) : null;
 }
 
 /** OWNER-entered, public-only seller disclosure. It never reads NIHO profile or KYC fields. */
@@ -207,7 +207,7 @@ export function guestReviewRatings(): GuestReviewRatings | null {
 export function guestBookingRepository(): GuestBookingRepository | null {
   if (!config.guestBookingEnabled) return null;
   const pool = experiencePool();
-  return pool ? new GuestBookingRepository(pool) : null;
+  return pool ? new GuestBookingRepository(pool, { assignmentNotifications: config.occurrenceAssignmentEnabled }) : null;
 }
 
 /** Existing site bookings for the host's interpreter flow; exposes only reads while guest sales are closed. */

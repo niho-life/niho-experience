@@ -186,6 +186,24 @@ describe("hostPushEventFromOutbox", () => {
     expect(outbox.complete.mock.calls).toEqual([["1", 1]]);
   });
 
+  it("turns a request that needs an assignee into a NEW_BOOKING push for the people who can take its occurrence (#535)", () => {
+    const payload = { v: 1, bookingId: BOOKING, occurrenceId: "occ-1", productId: "tea", experienceTitle: "Synthetic Tea Ceremony", startsAt: "2026-11-20T01:00:00.000Z", seats: 2 };
+    const parsed = hostPushEventFromOutbox(row("host.notify.assignment_request", payload), NOW);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.event).toMatchObject({
+      providerId: "provider-a", kind: "NEW_BOOKING", assignment: { occurrenceId: "occ-1" }, productId: "tea",
+      url: `/host/bookings?booking=${BOOKING}&providerId=provider-a`,
+    });
+    expect(parsed.event.tag).toMatch(/^assign-[0-9a-f]{32}$/);
+    // Words that name the ask and never a guest, an amount or who else was asked.
+    expect(JSON.parse(hostPushPayload(parsed.event))).toMatchObject({ title: "担当を募集中の申込", body: "Synthetic Tea Ceremony · 11/20（金）10:00 · 2名" });
+    // A row of another shape, or one a day old, is not sent.
+    expect(hostPushEventFromOutbox(row("host.notify.assignment_request", { ...payload, guestName: "x" }), NOW)).toEqual({ ok: false, reason: "invalid" });
+    expect(hostPushEventFromOutbox(row("host.notify.assignment_request", { ...payload, occurrenceId: undefined }), NOW)).toEqual({ ok: false, reason: "invalid" });
+    expect(hostPushEventFromOutbox(row("host.notify.assignment_request", payload, { createdAt: new Date(NOW - 25 * 60 * MINUTE).toISOString() }), NOW).ok).toBe(false);
+  });
+
   it("turns a guest booking confirmed on this site into a NEW_BOOKING push that opens it among this site's bookings", () => {
     const parsed = hostPushEventFromOutbox(row(NEW_BOOKING, newBookingPayload), NOW);
     expect(parsed).toEqual({

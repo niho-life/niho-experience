@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import {
   HOST_NOTIFICATION_TOPICS,
+  parseAssignmentRequestPayload,
   parseBookingMessagePayload,
   parseCancellationPayload,
   parseDayBeforeSummaryPayload,
@@ -135,6 +136,29 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         // The bookings made on this site (#285 slice 8), with this one opened.
         url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, providerId }),
         tag: `booking-${payload.bookingId}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.assignmentRequest) {
+    const payload = parseAssignmentRequestPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        // The same notification a new request or booking is: 設定 › 通知's 新しい予約・申込, which cannot be turned off.
+        kind: "NEW_BOOKING",
+        assignment: { occurrenceId: payload.occurrenceId },
+        productId: payload.productId,
+        experienceTitle: payload.experienceTitle,
+        startsAt: payload.startsAt,
+        seats: payload.seats,
+        // The bookings made on this site, with the request opened: 担当 stands above them (対応する).
+        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, providerId }),
+        // One notification per occurrence: a later request in it replaces the earlier one.
+        tag: `assign-${createHash("sha256").update(`${payload.occurrenceId}`).digest("hex").slice(0, 32)}`,
       },
     };
   }

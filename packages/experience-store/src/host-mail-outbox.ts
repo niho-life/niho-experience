@@ -18,6 +18,7 @@ export const HOST_MAIL_NOTIFICATION_TOPICS: Readonly<Record<HostBookingMailTopic
   [HOST_MAIL_TOPICS.newBooking]: HOST_NOTIFICATION_TOPICS.newBooking,
   [HOST_MAIL_TOPICS.cancellation]: HOST_NOTIFICATION_TOPICS.cancellation,
   [HOST_MAIL_TOPICS.otaBooking]: HOST_NOTIFICATION_TOPICS.otaBooking,
+  [HOST_MAIL_TOPICS.assignmentRequest]: HOST_NOTIFICATION_TOPICS.assignmentRequest,
   [HOST_MAIL_TOPICS.guestMessage]: HOST_NOTIFICATION_TOPICS.guestMessage,
   [HOST_MAIL_TOPICS.guestQuestion]: HOST_NOTIFICATION_TOPICS.guestQuestion,
   [HOST_MAIL_TOPICS.bookingMessage]: HOST_NOTIFICATION_TOPICS.bookingMessage,
@@ -113,15 +114,26 @@ const RECIPIENT = (row: string) => `${row}.payload->>'to'`;
 
 /**
  * SQL: the row's person still gets this booking: an active OWNER of its provider, or for an OTA booking an active, unexpired
- * operator of its product.
+ * operator of its product. An assignment request (#535) goes to whoever can still take the occurrence (an active OWNER or
+ * COHOST, or an active, unexpired operator of the product), and once the occurrence has an assignee only to that person.
  */
 const STILL_RECIPIENT = (row: string) =>
-  `(${HOST_ACCOUNT_USABLE(RECIPIENT(row))} AND (EXISTS (SELECT 1 FROM provider_memberships rm
-             WHERE rm.provider_id = ${row}.provider_id AND rm.niho_user_id = ${RECIPIENT(row)} AND rm.active AND rm.role = 'OWNER')
+  `(${HOST_ACCOUNT_USABLE(RECIPIENT(row))} AND (
+    (${row}.topic <> '${HOST_MAIL_TOPICS.assignmentRequest}' AND EXISTS (SELECT 1 FROM provider_memberships rm
+             WHERE rm.provider_id = ${row}.provider_id AND rm.niho_user_id = ${RECIPIENT(row)} AND rm.active AND rm.role = 'OWNER'))
     OR (${row}.topic = '${HOST_MAIL_TOPICS.otaBooking}' AND EXISTS (
           SELECT 1 FROM product_operator_grants rg
            WHERE rg.provider_id = ${row}.provider_id AND rg.product_id = ${row}.payload->>'productId'
-             AND rg.niho_user_id = ${RECIPIENT(row)} AND rg.active AND (rg.expires_at IS NULL OR rg.expires_at > clock_timestamp())))))`;
+             AND rg.niho_user_id = ${RECIPIENT(row)} AND rg.active AND (rg.expires_at IS NULL OR rg.expires_at > clock_timestamp())))
+    OR (${row}.topic = '${HOST_MAIL_TOPICS.assignmentRequest}'
+        AND (EXISTS (SELECT 1 FROM provider_memberships rm
+                      WHERE rm.provider_id = ${row}.provider_id AND rm.niho_user_id = ${RECIPIENT(row)} AND rm.active AND rm.role IN ('OWNER', 'COHOST'))
+             OR EXISTS (SELECT 1 FROM product_operator_grants rg
+                         WHERE rg.provider_id = ${row}.provider_id AND rg.product_id = ${row}.payload->>'productId'
+                           AND rg.niho_user_id = ${RECIPIENT(row)} AND rg.active AND (rg.expires_at IS NULL OR rg.expires_at > clock_timestamp())))
+        AND NOT EXISTS (SELECT 1 FROM occurrence_assignments ra
+                         WHERE ra.provider_id = ${row}.provider_id AND ra.occurrence_id = ${row}.payload->>'occurrenceId'
+                           AND ra.released_at IS NULL AND ra.assignee_niho_user_id <> ${RECIPIENT(row)}))))`;
 
 export class HostMailOutbox {
   readonly #pool: Pool;

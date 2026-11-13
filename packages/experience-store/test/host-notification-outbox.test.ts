@@ -220,7 +220,7 @@ describe("HostNotificationOutbox input checks", () => {
     assert.equal(queries.length, 0);
     assert.deepEqual(await outbox.claimDue(10, 60_000), []);
     assert.deepEqual(queries[0], [[
-      HOST_NOTIFICATION_TOPICS.guestMessage, HOST_NOTIFICATION_TOPICS.guestQuestion, HOST_NOTIFICATION_TOPICS.newBooking,
+      HOST_NOTIFICATION_TOPICS.guestMessage, HOST_NOTIFICATION_TOPICS.guestQuestion, HOST_NOTIFICATION_TOPICS.newBooking, HOST_NOTIFICATION_TOPICS.assignmentRequest,
       HOST_NOTIFICATION_TOPICS.cancellation, HOST_NOTIFICATION_TOPICS.bookingMessage, HOST_NOTIFICATION_TOPICS.googleCalendarAttention,
       HOST_NOTIFICATION_TOPICS.otaBooking, HOST_NOTIFICATION_TOPICS.newReview, HOST_NOTIFICATION_TOPICS.guestEmailDeliveryFailed,
       HOST_NOTIFICATION_TOPICS.dayBeforeSummary, HOST_NOTIFICATION_TOPICS.listingSuspension,

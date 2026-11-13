@@ -50,7 +50,7 @@ import {
 import { salesWindowOf, selectPayoutAccounts, selectSales, type HostSalesWindow, type HostSalesWindowOptions } from "./host-sales.ts";
 import { evaluateStoredInventories, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
-import { enqueueNewBookingNotification } from "./host-notification-outbox.ts";
+import { enqueueAssignmentRequestNotification, enqueueNewBookingNotification } from "./host-notification-outbox.ts";
 import { assertManagedBookingPublicationOpen } from "./managed-booking-approvals.ts";
 import {
   enqueueManagedBookingConfirmed,
@@ -1420,9 +1420,12 @@ async function countCheckoutIpAttempt(client: PoolClient, lock: CheckoutIpWindow
 export class GuestBookingRepository {
   readonly #pool: Pool;
   readonly #defaultHoldSeconds: number;
+  /** 担当を募る (#535): a NIHO-managed approval request tells the people who can take its occurrence. Off unless the flag is on. */
+  readonly #assignmentNotifications: boolean;
 
-  constructor(pool: Pool, options: { readonly defaultHoldSeconds?: number } = {}) {
+  constructor(pool: Pool, options: { readonly defaultHoldSeconds?: number; readonly assignmentNotifications?: boolean } = {}) {
     this.#pool = pool;
+    this.#assignmentNotifications = options.assignmentNotifications === true;
     this.#defaultHoldSeconds = options.defaultHoldSeconds ?? GUEST_BOOKING_LIMITS.defaultHoldSeconds;
     if (!Number.isInteger(this.#defaultHoldSeconds) || this.#defaultHoldSeconds < 60 || this.#defaultHoldSeconds > 3_600) {
       throw new StoreValidationError("defaultHoldSeconds must be between 60 and 3600.");
@@ -2081,6 +2084,9 @@ export class GuestBookingRepository {
           approval: approvalRequest,
           holdExpiresAtUtc: placed.booking.holdExpiresAtUtc,
         });
+        if (approvalRequest && this.#assignmentNotifications) {
+          await enqueueAssignmentRequestNotification(client, { providerId, publicBookingId: placed.booking.publicBookingId });
+        }
       }
       if (totalYen === 0) {
         const confirmed = await client.query<DbRow>(

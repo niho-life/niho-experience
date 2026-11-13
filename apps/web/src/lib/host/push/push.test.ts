@@ -160,6 +160,7 @@ describe("notifyHostDevices", () => {
       recipients: vi.fn(async () => Object.keys(statuses).map(device)),
       ownerRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
       productRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
+      assignmentRecipients: vi.fn(async () => Object.keys(statuses).map(device)),
       recordSent: vi.fn(async (id: string) => { log.push(`sent ${id}`); }),
       recordFailure: vi.fn(async (id: string) => { log.push(`failure ${id}`); }),
       removeById: vi.fn(async (id: string) => { log.push(`removed ${id}`); }),
@@ -192,6 +193,14 @@ describe("notifyHostDevices", () => {
     expect(await notifyHostDevices({ ...event, productId: "tea" }, run.deps)).toMatchObject({ recipients: 1, sent: 1 });
     expect(run.subscriptions.productRecipients).toHaveBeenCalledWith("sample-provider-kitchen", "tea", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
     expect(run.subscriptions.recipients).not.toHaveBeenCalled();
+  });
+
+  it("sends a request that needs an assignee to those who can take the occurrence, not to every member or the product's OWNER list (#535)", async () => {
+    const run = deps({ 1: 201 });
+    expect(await notifyHostDevices({ ...event, productId: "tea", assignment: { occurrenceId: "occ-1" } }, run.deps)).toMatchObject({ recipients: 1, sent: 1 });
+    expect(run.subscriptions.assignmentRecipients).toHaveBeenCalledWith("sample-provider-kitchen", "tea", "occ-1", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
+    expect(run.subscriptions.recipients).not.toHaveBeenCalled();
+    expect(run.subscriptions.productRecipients).not.toHaveBeenCalled();
   });
 
   it("sends an operations suspension to the OWNER's devices only (#109)", async () => {
