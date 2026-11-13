@@ -151,8 +151,11 @@ export function sortThreads<T extends HostThread>(threads: readonly T[]): T[] {
  */
 export const PERSON_EXPERIENCE_ID = "person-page";
 
+/** The filing id of the messages addressed to one person (#589): a provider with several people keeps each person's apart. */
+export const personExperienceId = (personName: string | null | undefined): string => (personName ? `${PERSON_EXPERIENCE_ID}:${personName}` : PERSON_EXPERIENCE_ID);
+
 /** A message sent from a person's page, to the host directly. */
-const fromPersonPage = (thread: Pick<HostThread, "booking" | "experienceId">): boolean => thread.booking === null && thread.experienceId === PERSON_EXPERIENCE_ID;
+const fromPersonPage = (thread: Pick<HostThread, "booking" | "experienceId">): boolean => thread.booking === null && (thread.experienceId === PERSON_EXPERIENCE_ID || thread.experienceId.startsWith(`${PERSON_EXPERIENCE_ID}:`));
 
 /** The thread's title: a question before booking, a message from a person's page, or the messages with someone who booked. */
 export function threadHeading(thread: Pick<HostThread, "guest" | "booking" | "experienceId">): string {

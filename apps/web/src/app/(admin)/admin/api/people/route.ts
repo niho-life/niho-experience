@@ -7,9 +7,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * 街の人 (#564, docs/people.md): the Admin lists a provider on the Japanese site's 街の人 and edits how they appear.
- * A signed-in Admin only; every request re-checks the session and a change also the same-origin check. Nothing here
- * reads seller, payout, member or booking data: the public profile, the photo and the bio are reused as they are.
+ * 街の人 (#564, #589, docs/people.md): the Admin lists a person (a member of a provider) on the Japanese site's 街の人 and
+ * edits how they appear. A signed-in Admin only; every request re-checks the session and a change also the same-origin
+ * check. Nothing here reads seller, payout or booking data; members are read as provider id, account id and role only.
  */
 const enabled = () => isAdminHttp() && config.experiencePublicationsEnabled;
 
@@ -42,7 +42,6 @@ async function mutation(request: Request, run: (actorId: string, body: Record<st
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not an object");
     body = value as Record<string, unknown>;
   } catch { return adminJson({ error: "invalid_input" }, 400); }
-  if (typeof body.providerId !== "string") return adminJson({ error: "invalid_input" }, 400);
   const repository = peopleListingRepository();
   if (!repository) return adminJson({ error: "unavailable" }, 503);
   try {
@@ -51,7 +50,7 @@ async function mutation(request: Request, run: (actorId: string, body: Record<st
   } catch (error) { return failure(error); }
 }
 
-/** List a provider (expectedVersion null) or change their row. */
+/** List a person (listingId and expectedVersion null) or change a listing (its id and the version seen), also moving it to another provider or member. */
 export async function PUT(request: Request) {
   return mutation(request, async (actorId, body) => {
     const listing = body.listing;
@@ -59,19 +58,26 @@ export async function PUT(request: Request) {
     const value = listing as Record<string, unknown>;
     const expected = body.expectedVersion;
     if (expected !== null && typeof expected !== "number") throw new StoreValidationError("expectedVersion must be null or a number.");
-    await peopleListingRepository()!.adminSave(actorId, body.providerId as string, expected as number | null, {
-      slug: value.slug as string, roleJa: value.roleJa as string, areaJa: value.areaJa as string,
+    const listingId = body.listingId ?? null;
+    if (listingId !== null && typeof listingId !== "string") throw new StoreValidationError("listingId must be null or text.");
+    if (typeof body.providerId !== "string") throw new StoreValidationError("providerId is required.");
+    const memberId = body.memberId ?? null;
+    if (memberId !== null && typeof memberId !== "string") throw new StoreValidationError("memberId must be null or text.");
+    await peopleListingRepository()!.adminSave(actorId, listingId, expected as number | null, { providerId: body.providerId, memberId }, {
+      slug: value.slug as string, nameJa: value.nameJa as string, roleJa: value.roleJa as string, areaJa: value.areaJa as string,
       quoteJa: (value.quoteJa ?? null) as string | null, introJa: (value.introJa ?? null) as string | null, sortOrder: value.sortOrder as number,
       // 街の人 → 体験 (#585): written only when given; the store checks each product and replaces the links as a whole.
       ...(value.experiences === undefined ? {} : { experiences: value.experiences as never }),
+      // The photo: written only when given (null clears it); a new listing takes the provider's own photo.
+      ...(value.photo === undefined ? {} : { photo: value.photo as never }),
     });
   });
 }
 
-/** Take a provider off 街の人 (the version the Admin saw). */
+/** Take a person off 街の人 (the listing's id and the version the Admin saw). */
 export async function DELETE(request: Request) {
   return mutation(request, async (actorId, body) => {
-    if (typeof body.expectedVersion !== "number") throw new StoreValidationError("expectedVersion is required.");
-    await peopleListingRepository()!.adminWithdraw(actorId, body.providerId as string, body.expectedVersion);
+    if (typeof body.listingId !== "string" || typeof body.expectedVersion !== "number") throw new StoreValidationError("listingId and expectedVersion are required.");
+    await peopleListingRepository()!.adminWithdraw(actorId, body.listingId, body.expectedVersion);
   });
 }

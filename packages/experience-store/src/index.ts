@@ -256,8 +256,8 @@ export type {
   NihoSessionResult,
   UnlinkNihoIdentityResult,
 } from "./host-account-identities.ts";
-export { PEOPLE_LISTING_EXPERIENCES_MAX, PEOPLE_LISTING_LIMITS, PeopleListingRepository, validatePeopleListingInput } from "./people-listings.ts";
-export type { AdminPeopleListingRow, PeopleListingExperienceRef, PeopleListingInput, PublicPerson } from "./people-listings.ts";
+export { PEOPLE_LISTING_EXPERIENCES_MAX, PEOPLE_LISTING_LIMITS, PEOPLE_MEMBER_ROLES, PeopleListingRepository, validatePeopleListingInput } from "./people-listings.ts";
+export type { AdminPeopleListingRow, PeopleListingExperienceRef, PeopleListingInput, PeopleListingPhotoInput, PeopleListingTarget, PeopleMemberRole, PublicPerson } from "./people-listings.ts";
 export { GROUP_INQUIRY_MAIL_LIMITS, GROUP_INQUIRY_MAIL_RECIPIENTS, GroupInquiryRepository } from "./group-inquiries.ts";
 export type {
   GroupInquiryList,

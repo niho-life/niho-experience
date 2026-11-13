@@ -9,27 +9,28 @@ const BUTTON = "min-h-11 rounded-full border border-line-strong px-4 font-extrab
 const PRIMARY = "min-h-11 rounded-full bg-ink px-5 font-extrabold text-white hover:bg-ink/90 disabled:opacity-50";
 const FIELD = "mt-1 block min-h-11 w-full rounded-xl border border-line-strong bg-canvas px-3 font-normal";
 
-type Draft = { slug: string; roleJa: string; areaJa: string; quoteJa: string; introJa: string; sortOrder: string; experiences: { providerId: string; productId: string }[] };
+type Draft = { slug: string; nameJa: string; roleJa: string; areaJa: string; quoteJa: string; introJa: string; sortOrder: string; experiences: { providerId: string; productId: string }[] };
 type Product = Pick<AdminProductClassificationRow, "providerId" | "productId" | "slug" | "title" | "status">;
 const STATUS = { PUBLISHED: "公開中", DRAFT: "下書き", ARCHIVED: "保管" } as const;
 const productKey = (ref: { providerId: string; productId: string }) => `${ref.providerId}\u0000${ref.productId}`;
 
 const draftOf = (row: AdminPeopleListingRow): Draft => ({
-  slug: row.listing?.slug ?? "", roleJa: row.listing?.roleJa ?? "", areaJa: row.listing?.areaJa ?? "",
+  slug: row.listing?.slug ?? "", nameJa: row.listing?.nameJa ?? row.providerName, roleJa: row.listing?.roleJa ?? "", areaJa: row.listing?.areaJa ?? "",
   quoteJa: row.listing?.quoteJa ?? "", introJa: row.listing?.introJa ?? "", sortOrder: String(row.listing?.sortOrder ?? 100),
   experiences: (row.listing?.experiences ?? []).map((link) => ({ providerId: link.providerId, productId: link.productId })),
 });
 
 const ERRORS: Record<number, string> = {
-  400: "入力を確かめてください（スラッグは小文字の英数字とハイフン、肩書は80字まで、エリアは40字まで、ひとこと160字まで）。",
-  404: "この提供者の公開用の情報が見つかりません。",
+  400: "入力を確かめてください（スラッグは小文字の英数字とハイフン、名前は40字まで、肩書は80字まで、エリアは40字まで、ひとこと160字まで）。",
+  404: "この提供者または写真が見つかりません。",
   409: "別の人が先に更新したか、スラッグがほかの人と重なっています。再読み込みして確認してください。",
 };
 
 /**
- * 街の人 (#564): which providers the Japanese site shows on 街の人, and how. A provider is shown only while their public
- * profile stands and a rights-confirmed photo is selected: the card says which of the two is missing. The photo, the name
- * and the bio are edited where they always were (提供者); this page only adds the role, area, line and order.
+ * 街の人 (#564, #589): which people the Japanese site shows on 街の人, and how. A person is a member (the OWNER or a co-host) of a
+ * provider, and is shown only while that membership stands and a rights-confirmed photo is set: the card says which of the
+ * two is missing. A person without an account yet can be kept as a draft (set from the operator CLI). The name, photo,
+ * role, area, line, introduction and experiences are the person's own; the provider keeps the content and the inbox.
  */
 export function AdminPeople({ initial }: { initial: AdminPeopleListingRow[] }) {
   const [rows, setRows] = useState(initial);
@@ -62,15 +63,15 @@ export function AdminPeople({ initial }: { initial: AdminPeopleListingRow[] }) {
       <div>
         <h1 className="font-display text-2xl font-medium">街の人</h1>
         <p className="mt-1 text-ink-soft">
-          日本語サイトの「街の人」に載せる人を決めます（いま {shown} 人が表示中）。名前・写真・紹介文は「提供者」の画面にあるものをそのまま使います。
-          写真の許可を取り下げると、この画面で何もしなくても表示から外れます。運営を手伝う人は、ここで選ばないかぎり載りません。
+          日本語サイトの「街の人」に載せる人を決めます（いま {shown} 人が表示中）。載るのは、提供者のオーナーか共同ホストのアカウントを持つ人です。
+          メッセージは、その人が属する提供者の受信箱に「◯◯さんあて」で届きます。写真の許可を取り下げる、またはメンバーでなくなると、この画面で何もしなくても表示から外れます。
         </p>
       </div>
       <div><button type="button" onClick={() => void reload()} className={BUTTON}>再読み込み</button></div>
       {message ? <p role="alert" className="font-bold text-danger">{message}</p> : null}
       <ul className="space-y-4">
-        {rows.map((row) => <PersonCard key={`${row.providerId}:${row.listing?.version ?? 0}`} row={row} products={products} onChanged={setRows} />)}
-        {rows.length === 0 ? <li className="rounded-2xl border border-line bg-canvas p-8 text-center text-ink-soft">公開用の情報がある提供者はまだいません</li> : null}
+        {rows.map((row) => <PersonCard key={`${row.key}:${row.listing?.version ?? 0}`} row={row} products={products} onChanged={setRows} />)}
+        {rows.length === 0 ? <li className="rounded-2xl border border-line bg-canvas p-8 text-center text-ink-soft">載せられる人（提供者のオーナー・共同ホスト）はまだいません</li> : null}
       </ul>
     </div>
   );
@@ -82,15 +83,15 @@ function PersonCard({ row, products, onChanged }: { row: AdminPeopleListingRow; 
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const listed = row.listing !== null;
   const dirty = JSON.stringify(draft) !== JSON.stringify(draftOf(row));
-  const complete = draft.slug.trim() !== "" && draft.roleJa.trim() !== "" && draft.areaJa.trim() !== "" && /^\d{1,4}$/.test(draft.sortOrder);
+  const complete = draft.slug.trim() !== "" && draft.nameJa.trim() !== "" && draft.roleJa.trim() !== "" && draft.areaJa.trim() !== "" && /^\d{1,4}$/.test(draft.sortOrder);
 
   async function send(method: "PUT" | "DELETE") {
     if (busy) return;
     setBusy(true); setNotice(null);
     try {
       const body = method === "PUT"
-        ? { providerId: row.providerId, expectedVersion: row.listing?.version ?? null, listing: { slug: draft.slug.trim(), roleJa: draft.roleJa.trim(), areaJa: draft.areaJa.trim(), quoteJa: draft.quoteJa.trim() === "" ? null : draft.quoteJa.trim(), introJa: draft.introJa.trim() === "" ? null : draft.introJa, sortOrder: Number(draft.sortOrder), experiences: draft.experiences } }
-        : { providerId: row.providerId, expectedVersion: row.listing?.version };
+        ? { listingId: row.listing?.id ?? null, providerId: row.providerId, memberId: row.memberId, expectedVersion: row.listing?.version ?? null, listing: { slug: draft.slug.trim(), nameJa: draft.nameJa.trim(), roleJa: draft.roleJa.trim(), areaJa: draft.areaJa.trim(), quoteJa: draft.quoteJa.trim() === "" ? null : draft.quoteJa.trim(), introJa: draft.introJa.trim() === "" ? null : draft.introJa, sortOrder: Number(draft.sortOrder), experiences: draft.experiences } }
+        : { listingId: row.listing?.id, expectedVersion: row.listing?.version };
       const response = await fetch(API, { method, cache: "no-store", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       if (!response.ok) { setNotice({ tone: "error", text: ERRORS[response.status] ?? "保存できませんでした。もう一度お試しください。" }); return; }
       onChanged(((await response.json()) as { people: AdminPeopleListingRow[] }).people);
@@ -101,22 +102,26 @@ function PersonCard({ row, products, onChanged }: { row: AdminPeopleListingRow; 
   return (
     <li className="rounded-2xl border border-line bg-canvas p-4 sm:p-5">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-lg font-extrabold">{row.publicDisplayName}</h2>
+        <h2 className="text-lg font-extrabold">{row.listing?.nameJa ?? row.providerName}</h2>
+        <span className="text-sm text-ink-soft">{row.providerName}</span>
         {row.visible ? <span className="rounded-full bg-leaf-pale px-2.5 py-0.5 text-sm font-bold">街の人に表示中</span> : null}
         {listed && !row.visible ? <span className="rounded-full bg-danger px-2.5 py-0.5 text-sm font-bold text-white">登録済みだが表示されていません</span> : null}
         {!listed ? <span className="rounded-full border border-line-strong px-2.5 py-0.5 text-sm font-bold">未登録</span> : null}
-        <span className="ml-auto text-sm text-ink-soft">公開中の体験 {row.publicExperienceCount} 件</span>
       </div>
-      {!row.hasOwner ? (
+      {row.memberRole === null ? (
         <p className={`mt-1 text-sm ${listed ? "font-bold text-danger" : "text-ink-soft"}`}>
-          本人のアカウントが無いため、{listed ? "街の人には表示されません" : "載せても街の人には表示されません"}。本人を提供者のオーナーとして招待し、アカウントが結び付くと表示されます。
+          本人のアカウントが提供者のメンバー（オーナー・共同ホスト）になっていないため、{listed ? "街の人には表示されません" : "載せても街の人には表示されません"}。本人を招待し、メンバーとして結び付くと表示されます。
         </p>
-      ) : null}
+      ) : (
+        <p className="mt-1 text-sm text-ink-soft">メンバー：{row.memberRole === "OWNER" ? "オーナー" : "共同ホスト"}（メッセージは {row.providerName} の受信箱に届きます）</p>
+      )}
       <p className={`mt-1 text-sm ${row.photoReady ? "text-ink-soft" : "font-bold text-danger"}`}>
-        {row.photoReady ? "写真：公開してよい写真があります" : "写真：公開してよい提供者写真がありません。「提供者」の画面で、許可を確認した写真を登録してください。登録するまで街の人には表示されません。"}
-        {"　"}紹介文：{row.hasHostBio ? "本人が書いた紹介文があります" : "本人の紹介文はありません"}
+        {row.photoReady ? "写真：公開してよい写真があります" : "写真：公開してよい写真がありません。許可を確認した写真を登録するまで街の人には表示されません。"}
       </p>
       <form className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (complete && dirty) void send("PUT"); }}>
+        <label className="font-bold">名前（ページに出る名前）
+          <input className={FIELD} value={draft.nameJa} maxLength={PEOPLE_LISTING_LIMITS.nameMax} onChange={(event) => setDraft({ ...draft, nameJa: event.target.value })} />
+        </label>
         <label className="font-bold">スラッグ（URL の一部。英数字とハイフン）
           <input className={FIELD} value={draft.slug} maxLength={PEOPLE_LISTING_LIMITS.slugMax} onChange={(event) => setDraft({ ...draft, slug: event.target.value })} placeholder="例：kintsugi-sato" />
         </label>
@@ -132,7 +137,7 @@ function PersonCard({ row, products, onChanged }: { row: AdminPeopleListingRow; 
         <label className="font-bold sm:col-span-2">本人のひとこと（任意）
           <input className={FIELD} value={draft.quoteJa} maxLength={PEOPLE_LISTING_LIMITS.quoteMax} onChange={(event) => setDraft({ ...draft, quoteJa: event.target.value })} />
         </label>
-        <label className="font-bold sm:col-span-2">紹介文（任意。空のときは、本人が書いた紹介文があればそれを出します）
+        <label className="font-bold sm:col-span-2">紹介文（任意）
           <textarea className={`${FIELD} min-h-32 py-2`} value={draft.introJa} maxLength={PEOPLE_LISTING_LIMITS.introMax} onChange={(event) => setDraft({ ...draft, introJa: event.target.value })} />
         </label>
         <fieldset className="sm:col-span-2">
@@ -151,7 +156,7 @@ function PersonCard({ row, products, onChanged }: { row: AdminPeopleListingRow; 
         </fieldset>
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
           <button type="submit" disabled={busy || !complete || !dirty} className={PRIMARY}>{busy ? "保存しています…" : listed ? "保存する" : "街の人に載せる"}</button>
-          {listed ? <button type="button" disabled={busy} className={BUTTON} onClick={() => { if (window.confirm(`${row.publicDisplayName} さんを街の人から外しますか？（公開用の情報と写真はそのまま残ります）`)) void send("DELETE"); }}>街の人から外す</button> : null}
+          {listed ? <button type="button" disabled={busy} className={BUTTON} onClick={() => { if (window.confirm(`${row.listing?.nameJa ?? row.providerName} さんを街の人から外しますか？（届いたメッセージと写真はそのまま残ります）`)) void send("DELETE"); }}>街の人から外す</button> : null}
           {notice ? <span role={notice.tone === "error" ? "alert" : "status"} className={`font-bold ${notice.tone === "error" ? "text-danger" : "text-moss"}`}>{notice.text}</span> : null}
         </div>
       </form>

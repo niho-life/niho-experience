@@ -75,15 +75,16 @@ Epic #103 の「予約前の質問」（旅行者 #105、ホスト #106）の現
 
 ## 人物ページから本人へ（#589）
 
-日本語サイトの `/ja/people/<slug>`（街の人、[people.md](people.md)）の「◯◯さんにメッセージを送る」。オーナー決定（2026-11-13）：Airbnb のホストへのメッセージに近い形にし、載せるのは本人のホストアカウントがある人だけ。画面に「事務局が見ます」「NIHO から返信します」のような仲介の説明は出さない（メールの定型の注意書きは別）。
+日本語サイトの `/ja/people/<slug>`（街の人、[people.md](people.md)）の「◯◯さんにメッセージを送る」。オーナー決定（2026-11-13、2026-11-14 に「提供者 × メンバー」へ改めた）：Airbnb のホストへのメッセージに近い形にし、載せるのは提供者の現役の OWNER か共同ホストの人だけ。画面に「事務局が見ます」「NIHO から返信します」のような仲介の説明は出さない（メールの定型の注意書きは別）。
 
-- **持ち方**：`guest_question_threads` に足した（migration `0082`）。`product_id` を空にでき、体験に結び付かない「人あて」のスレッド（`product_id IS NULL AND booking_id IS NULL`、名前・アドレス・リクエスト key を持ち、話題は持たない）を持てる。スレッドの `provider_id` は、その人の提供者。同じ送信を2回しても1件（`(provider_id, client_request_key)` の部分 unique）。上限は同じアドレスで1時間に3件、その人あて全体で30件。本文は 2〜1000 文字。
-- **受付**：`POST /api/public/people/{slug}/messages`（`GuestQuestionRepository.submitPersonMessage`）。slug が街の人に**いま表示されている**人（登録済み・公開プロフィール・許可のある写真・現役の OWNER）でなければ、理由を言わずに 404。言語は `JA`。
-- **本人が読む・返す**：`/host/messages` に「人物ページから」として、予約前の質問と同じ一覧・スレッド・既読・返信で出る（体験名の代わりに「人物ページから」）。日本語で書いた返信がそのまま日本語の旅行者に届く（英語は記録用。予約の日本語の旅行者と同じ）。push の題は「メッセージが届きました」（`host.notify.guest_question`、`experienceTitle` に「人物ページから」）。
+- **持ち方**：`guest_question_threads` に足した（migration `0082`）。`product_id` を空にでき、体験に結び付かない「人あて」のスレッド（`product_id IS NULL AND booking_id IS NULL`、名前・アドレス・リクエスト key を持ち、話題は持たない）を持てる。スレッドの `provider_id` は、その人が属する提供者で、宛先の掲載（`person_listing_id`、掲載を外すと null）と、そのときの名前（`person_name`）を持つ（migration `0083`）。同じ送信を2回しても1件（`(provider_id, client_request_key)` の部分 unique）。上限は同じアドレスで1時間に3件（提供者の人あて全体で）、1人あてで30件。本文は 2〜1000 文字。
+- **受付**：`POST /api/public/people/{slug}/messages`（`GuestQuestionRepository.submitPersonMessage`）。slug が街の人に**いま表示されている**人（登録済み・許可のある写真・メンバーが現役の OWNER か共同ホスト）でなければ、理由を言わずに 404。言語は `JA`。
+- **本人が読む・返す**：`/host/messages` に「人物ページから」として、予約前の質問と同じ一覧・スレッド・既読・返信で出る（体験名の代わりに「◯◯さんあて」（提供者に何人かいても、人ごとに分かれる。宛先を持たない古いスレッドは「人物ページから」））。日本語で書いた返信がそのまま日本語の旅行者に届く（英語は記録用。予約の日本語の旅行者と同じ）。push の題は「メッセージが届きました」（`host.notify.guest_question`、`experienceTitle` に「人物ページから」）。
 - **返事・返信ページ**：返事のメール（日本語）と `/questions/reply` は予約前の質問と同じ。返信ページは、日本語で書いた人には日本語で出る（`GuestQuestionReplyLink.language`）。メールのリンクは1回・14日。
 - **データの境界・保持期間**：旅行者のアドレスはホストの画面・outbox・ログに出ない。最後のメッセージから1年でスレッドごと消す（`eraseInactiveThreads`、予約前の質問と同じ）。
-- **flag**：`EXPERIENCE_PERSON_MESSAGES_ENABLED`（`PERSON_MESSAGES_ENABLED`。http mode で `HOST_CONSOLE_ENABLED=true`、ゲストメール、日本語サイトが前提。Provider API とは併用不可）。公開の route・返信ページ・OWNER の `/host/messages` を開くが、**英語の体験ページの「Ask the host」は開かない**（それは `EXPERIENCE_GUEST_QUESTIONS_ENABLED`）。flag が off の間は、人のページにボタンも出ず、route は 404。
-- **配備の順**：migration `0082` を先に（runtime role の権限は増えない）。0082 は加えるだけで、いまの revision の書き込みも読みもそのまま通る。
+- **flag**：`EXPERIENCE_PERSON_MESSAGES_ENABLED`（`PERSON_MESSAGES_ENABLED`。http mode で `HOST_CONSOLE_ENABLED=true`、ゲストメール、日本語サイトが前提。Provider API とは併用不可）。公開の route・返信ページ・OWNER と共同ホストの `/host/messages` を開くが、**英語の体験ページの「Ask the host」は開かない**（それは `EXPERIENCE_GUEST_QUESTIONS_ENABLED`）。flag が off の間は、人のページにボタンも出ず、route は 404。
+- **宛先と通知**：メッセージは提供者の受信箱に届き、読む・返す・既読は OWNER と共同ホスト（`requireGuestResponder`）。EDITOR・VIEWER・商品だけの運営者は読めない。push・メールは、いまのところ予約前の質問と同じく、提供者の通知先（OWNER・共同ホスト）全員に行く（宛先の人と OWNER だけに絞るのは未実装）。
+- **配備の順**：migration `0082`、`0083` を先に（runtime role の権限は増えない）。0082 は加えるだけで、いまの revision の書き込みも読みもそのまま通る。
 
 ## 次のスライスで足すもの
 
