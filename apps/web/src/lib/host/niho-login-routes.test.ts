@@ -78,6 +78,8 @@ afterEach(() => {
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+const exchangeBody = (extra: Record<string, unknown> = {}) => ({ accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: REFRESH, connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成 ホスト", iconImage: null }, ...extra });
+
 /** A NIHO that exchanges the code, answers `identity` for the access token and ends the connection. */
 function niho(overrides: { exchange?: () => Response; identity?: () => Response; remove?: () => Response } = {}): Handler {
   return (url, init) => {
@@ -201,6 +203,23 @@ describe("the callback", () => {
     // No NIHO token or user ID is anywhere in what the browser gets.
     const everything = [response.headers.get("location"), ...response.headers.getSetCookie()].join("\n");
     for (const secret of [ACCESS, REFRESH, CONNECTION, NIHO_USER]) expect(everything).not.toContain(secret);
+  });
+
+  it("takes the time the person signed in at NIHO (authTime) as the session's authenticated_at, never later than now", async () => {
+    const at = async () => (state.identities!.startSessionForNihoIdentity.mock.calls.at(-1)![0] as { authenticatedAtUtc: string; nowUtc: string });
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    handler = niho({ exchange: () => json(200, exchangeBody({ authTime: tenMinutesAgo })) });
+    await signIn();
+    expect((await at()).authenticatedAtUtc).toBe(tenMinutesAgo);
+    // A clock ahead of ours is read as now, a value that is not a time as none.
+    handler = niho({ exchange: () => json(200, exchangeBody({ authTime: new Date(Date.now() + 3_600_000).toISOString() })) });
+    await signIn();
+    const future = await at();
+    expect(Date.parse(future.authenticatedAtUtc)).toBeLessThanOrEqual(Date.parse(future.nowUtc));
+    handler = niho({ exchange: () => json(200, exchangeBody({ authTime: "not a time" })) });
+    await signIn();
+    const missing = await at();
+    expect(missing.authenticatedAtUtc).toBe(missing.nowUtc);
   });
 
   it("returns to the page the sign-in was for: an invitation, /write, or the provider's home", async () => {
