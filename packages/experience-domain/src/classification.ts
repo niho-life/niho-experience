@@ -5,14 +5,14 @@
  */
 
 export const EXPERIENCE_CATEGORIES = [
-  { id: "walk", label: "歩く", lead: "山道、切通し、路地。ガイドや住んでいる人と歩きます。" },
-  { id: "food", label: "つくる・食べる", lead: "市場で買い、台所に立ち、同じ食卓を囲みます。" },
-  { id: "craft", label: "手を動かす", lead: "書く、彫る、繕う、染める。つくり手のそばで。" },
-  { id: "zen", label: "禅と寺", lead: "坐る、点てる、写す。静かな時間の入口。" },
-  { id: "time", label: "朝と夜", lead: "観光客が来る前と、帰ったあとの鎌倉。" },
-  { id: "sea", label: "海", lead: "材木座、逗子、葉山。海のそばで過ごします。" },
-  { id: "people", label: "人に会う", lead: "職人、店主、僧侶、農家。話を聞きに行きます。" },
-  { id: "group", label: "団体・チームで", lead: "会社のチーム、学校、仲間の集まりに。" },
+  { id: "walk", hand: "take a walk", label: "歩く", lead: "山道、切通し、路地。ガイドや住んでいる人と歩きます。" },
+  { id: "food", hand: "cook & eat", label: "つくる・食べる", lead: "市場で買い、台所に立ち、同じ食卓を囲みます。" },
+  { id: "craft", hand: "make by hand", label: "手を動かす", lead: "書く、彫る、繕う、染める。つくり手のそばで。" },
+  { id: "zen", hand: "sit quietly", label: "禅と寺", lead: "坐る、点てる、写す。静かな時間の入口。" },
+  { id: "time", hand: "dawn & dusk", label: "朝と夜", lead: "観光客が来る前と、帰ったあとの鎌倉。" },
+  { id: "sea", hand: "by the sea", label: "海", lead: "材木座、逗子、葉山。海のそばで過ごします。" },
+  { id: "people", hand: "meet someone", label: "人に会う", lead: "職人、店主、僧侶、農家。話を聞きに行きます。" },
+  { id: "group", hand: "all together", label: "団体・チームで", lead: "会社のチーム、学校、仲間の集まりに。" },
 ] as const;
 
 export const EXPERIENCE_AREAS = [
