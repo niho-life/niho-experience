@@ -17,5 +17,5 @@ export function generateMetadata(): Metadata {
 export default async function PrivacyPage() {
   // The visit-count section is shown only while the GA4 tag can load (a measurement ID from NIHO's public settings): it describes what the code does.
   const settings = await getPublicSiteAnalyticsSettings();
-  return <PrivacyNotice policyUrl={config.privacyPolicyUrl} analytics={Boolean(settings?.ga4MeasurementId)} />;
+  return <PrivacyNotice policyUrl={config.privacyPolicyUrl} analytics={Boolean(settings?.ga4MeasurementId)} inquiry={config.groupInquiryEnabled} />;
 }

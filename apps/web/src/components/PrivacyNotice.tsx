@@ -22,7 +22,7 @@ function List({ children }: { children: ReactNode }) {
  * It says what the code does and nothing more (docs/guest-booking.md, docs/guest-questions.md): the wording is for the owner to
  * review before production. `policyUrl` is NIHO's privacy policy (EXPERIENCE_PRIVACY_POLICY_URL); empty leaves the link out.
  */
-export function PrivacyNotice({ policyUrl, analytics = false }: { policyUrl: string; analytics?: boolean }) {
+export function PrivacyNotice({ policyUrl, analytics = false, inquiry = false }: { policyUrl: string; analytics?: boolean; inquiry?: boolean }) {
   return (
     <div className="container-page max-w-2xl py-10 sm:py-16">
       <p className="eyebrow">How we handle your details</p>
@@ -44,6 +44,20 @@ export function PrivacyNotice({ policyUrl, analytics = false }: { policyUrl: str
             for one year after the experience.
           </p>
         </Section>
+        {inquiry ? (
+          <Section id="privacy-inquiry" title="If you send us an inquiry">
+            <p>
+              When you send an inquiry about a school or company visit, a group, or listing an experience (the inquiry form), we keep your name, your email
+              address, your message, anything optional you fill in (such as your organisation, purpose, group size, dates, venue, budget or how it would
+              be paid) and the page you came from. If the link you came from carried campaign tags, we keep those too.
+            </p>
+            <p>
+              We use it only to reply to you and to plan with you. Only the NIHO office sees it: hosts do not, and nothing is sent to analytics. We send
+              you one email to confirm we received it, through our email provider. Sending an inquiry does not book or reserve anything.
+            </p>
+            <p>We delete an inquiry one year after we close it, and sooner if you ask us to.</p>
+          </Section>
+        ) : null}
         <Section id="privacy-why" title="Why we use it">
           <p>To run your booking, to send you booking emails, and to let the host prepare for your visit and reply to you.</p>
         </Section>

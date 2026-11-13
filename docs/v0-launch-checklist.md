@@ -40,10 +40,10 @@ stg の Stripe test 側の準備と、合成の販売者の値の決定が要る
 
 `PROD_GUEST_MAIL_ENABLED`・`PROD_GUEST_BOOKING_ENABLED`・`PROD_MANAGED_SALES_ENABLED`・`PROD_MANAGED_SALES_WEBHOOKS_ENABLED`・`PROD_HOST_ACCOUNTS_ENABLED`・`PROD_HOST_PUBLICATION_API_ENABLED`・`PROD_ADMIN_SUPPORT_CONSOLE_ENABLED` は `true`。`PROD_GROUP_INQUIRY_ENABLED`・`PROD_JAPANESE_SITE_ENABLED`・`PROD_OCCURRENCE_ASSIGNMENT_ENABLED` は未設定（OFF）。
 
-## オーナーの確認が要る項目
+## オーナーの確認（2026-11-13）
 
-- 法人・学校の案内ページの数字（金額・人数・時間・期間）。すべて仮。一覧は PR #550 の本文と `apps/web/src/lib/group-inquiry-guide.ts` の `GROUP_GUIDE_NUMBERS` / `GROUP_GUIDE_FACTS`。会場の説明（二階20人／食堂と合わせて38人）と支払い方法の文面も。
-- `/privacy` に相談の入力内容の扱いを書く。
-- 返信の目安（2営業日、土日のみ除外）。
-- 保持期間（完了から1年、月1回の手動削除）。
-- 担当の報酬の扱いなど `docs/occurrence-assignments.md` の「まだ無いもの」。
+- 法人・学校の案内ページの数字（金額・人数・時間・期間。`GROUP_GUIDE_NUMBERS` / `GROUP_GUIDE_FACTS`）：**いまの値のまま公開してよい**と確認済み。
+- 相談の運用：返信の目安は2営業日（土日を除く）、事務局への通知先は `PROD_MAIL_REPLY_TO` のまま、保持は完了から1年・月1回の手動削除：**確認済み**。`/privacy` に相談の入力内容の扱いを追記した（相談の flag が ON のときだけ出る節）。
+- 担当（#535）：stg を整えずに、本番で flag を開いて確かめる（予約者の画面・メール・決済には出ない内部の機能で、flag を戻せば消える）：**決定済み**。ただし確認のために本番で予約・申込みを作らず、既存のデータも書き換えない。
+- 日本語サイト：stg で日本語の予約を確認中。結果が出るまで本番では開けない。
+- 担当の報酬の扱いなど `docs/occurrence-assignments.md` の「まだ無いもの」は未決のまま。
