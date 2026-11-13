@@ -151,6 +151,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   managed_booking_dispute_events: { write: I },
   managed_provider_compensations: { write: IU },
   managed_provider_compensation_events: { write: I },
+  // 商品の分類 (#529, 0075): the product's OWNER or the office sets the whole row; never deleted.
+  experience_product_classifications: { write: IU },
   // 開催回の担当 (#535, 0073): a term is opened, then released or given an agreed fee; its history is append-only.
   occurrence_assignment_commands: { write: I },
   occurrence_assignment_events: { write: I },

@@ -11,6 +11,7 @@ import { HostAccounts } from "../src/host-accounts.ts";
 import { ManagedExperienceSalesRepository, managedPaymentDueDate } from "../src/managed-sales.ts";
 import { ManagedBookingApprovalRepository } from "../src/managed-booking-approvals.ts";
 import { ProviderPayoutAccountConsents } from "../src/payout-account-consents.ts";
+import { ProductClassificationRepository } from "../src/product-classifications.ts";
 import { ProviderSellerDisclosureRepository } from "../src/provider-seller-disclosures.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { SiteSaleRegistration } from "../src/site-sale-registration.ts";
@@ -247,7 +248,12 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
       assert.equal(secondApprovalPage.requests.length, 1);
       assert.notEqual(firstApprovalPage.requests[0]?.publicBookingId, secondApprovalPage.requests[0]?.publicBookingId);
 
+      // #529: the classification is public only while the product's publication is visible (a stop or suspension removes it).
+      const classifications = new ProductClassificationRepository(pool);
+      await classifications.adminSave(ADMIN, [{ providerId: profile.providerId, productId: approvalDraft.id, classification: { category: "walk", area: "kita", companions: ["solo"], occasions: [] } }]);
+      assert.deepEqual((await classifications.listPublic()).get(approvalDraft.slug), { category: "walk", area: "kita", companions: ["solo"], occasions: [] });
       await publications.suspendByOperations(ADMIN, profile.providerId, approvalDraft.id, "PILOT_STOP", approvalPublication.version);
+      assert.equal((await classifications.listPublic()).has(approvalDraft.slug), false);
       await assert.rejects(approvalRepository.approve(ADMIN, pendingAtStop.publicBookingId), StoreConflictError);
       await assert.rejects(guests.attachCheckoutSession(approvedAtStop.publicBookingId, "cs_test_platform_stopped"), StoreConflictError);
       await approvalRepository.decline(ADMIN, pendingAtStop.publicBookingId);

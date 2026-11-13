@@ -106,6 +106,7 @@ export function AdminProducts() {
   return <HostPageBody>
     <div className="md:max-w-[720px]">
       <PageHead title="提供者">
+        <Link href="/admin/products/classification" className={consoleButtonClass("secondary")}>商品の分類</Link>
         <button type="button" onClick={() => setRegistering(true)} className={consoleButtonClass("primary")}>
           <HostIcon name="plus" className="size-4" />
           登録
