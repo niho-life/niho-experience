@@ -36,7 +36,7 @@ export function jaCancellationLines(offers: readonly SitePublicOffer[]): { label
  * cancellation terms, and experiences of the same category; the booking column holds the price, the next dates, the way to
  * book (or to send a request) and the product's own cancellation deadline. No sales method, seller or guarantee label.
  */
-export async function JaExperiencePage({ item, cancelled = false, card, related }: { item: SitePublicExperience; cancelled?: boolean; card: JaCard | null; related: readonly JaCard[] }) {
+export async function JaExperiencePage({ item, cancelled = false, card, related, person: listed = null }: { item: SitePublicExperience; cancelled?: boolean; card: JaCard | null; related: readonly JaCard[]; person?: { slug: string; name: string; roleJa: string } | null }) {
   const { publication, saleTerms, hostBio } = item;
   const content = publication.japanese!;
   const title = content.title;
@@ -115,7 +115,7 @@ export async function JaExperiencePage({ item, cancelled = false, card, related 
             {providerName || bio ? <section id="host" className={`${SECTION} scroll-mt-24`} aria-labelledby="ja-person"><h2 id="ja-person" className={H2}>{person ? "会いにいく人" : "案内する人"}</h2>
               <div className="mt-5 flex items-start gap-4">
                 {identityPhoto ? <Photo image={identityPhoto} alt={identityPhoto.alt} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" /> : null}
-                <div className="min-w-0"><p className="font-extrabold">{providerName}</p>{bio ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{bio}</p> : null}</div>
+                <div className="min-w-0"><p className="font-extrabold">{providerName}{listed?.roleJa ? <span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{listed.roleJa}</span> : null}</p>{bio ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{bio}</p> : null}{listed ? <Link href={`/ja/people/${encodeURIComponent(listed.slug)}`} className="mt-3 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{listed.name}さんのページ</Link> : null}</div>
               </div>
             </section> : null}
 

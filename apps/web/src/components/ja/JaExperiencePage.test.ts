@@ -30,7 +30,7 @@ function item(offers = [offer()]): SitePublicExperience {
   } as unknown as SitePublicExperience;
 }
 const card: JaCard = { slug: "synthetic-walk", title: "合成の山道を歩く", lead: "山道を歩きます。", cover: { url: "/synthetic.jpg", alt: "山道" }, withLine: "まさとさんと", face: null, durationMinutes: 180, capacity: { min: 2, max: 8 }, priceFromYen: 5500, offers: [], classification: { category: "walk", area: "kita", companions: [], occasions: [] } };
-const render = async (value = item(), related: JaCard[] = []) => renderToStaticMarkup(await JaExperiencePage({ item: value, card, related }));
+const render = async (value = item(), related: JaCard[] = [], person: { slug: string; name: string; roleJa: string } | null = null) => renderToStaticMarkup(await JaExperiencePage({ item: value, card, related, person }));
 
 describe("JaExperiencePage", () => {
   it("is in the order the owner described, from the title to what to know, with the person", async () => {
@@ -42,6 +42,14 @@ describe("JaExperiencePage", () => {
     expect(html).toContain("集合場所は、予約が確定したあとにお伝えします。");
     expect(html).toContain("北鎌倉");
     expect(html).not.toContain("今日の担当");
+  });
+
+  it("links the person's section to their page on 街の人 when they are listed, and not otherwise", async () => {
+    const linked = await render(item(), [], { slug: "masato", name: "まさと", roleJa: "山のガイド" });
+    expect(linked).toContain('href="/ja/people/masato"');
+    expect(linked).toContain("まさとさんのページ");
+    expect(linked).toContain("山のガイド");
+    expect(await render()).not.toContain("/ja/people/");
   });
 
   it("puts the booking column's price, the way to book, the other-day inquiry and the product's own cancellation deadline in one place", async () => {
