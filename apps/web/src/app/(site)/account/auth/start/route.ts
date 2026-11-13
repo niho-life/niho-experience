@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   const form = await readSmallForm(request, ["method"], [], 256);
   if (!form.ok) return noStoreJson({ error: form.status === 413 ? "payload_too_large" : form.status === 415 ? "unsupported_media_type" : "invalid_input" }, form.status);
   const rawMethod = form.values.get("method");
-  const method = rawMethod === undefined || rawMethod === "" ? null : travelerMethodOrNull(rawMethod);
+  const method = rawMethod === undefined || rawMethod === "" ? null : travelerMethodOrNull(rawMethod, config.travelerLineEnabled);
   if (rawMethod && method === null) return noStoreJson({ error: "invalid_input" }, 400);
   if (config.apiMode !== "http") return see(TRAVELER_MOCK_LOGIN_PATH);
   try {

@@ -320,6 +320,14 @@ export const FLAGS = Object.freeze([
     // The terms of service a traveler agrees to by logging in: linked beside the privacy notice while set.
     settings: [{ env: "EXPERIENCE_TERMS_URL", variable: "TERMS_URL", shape: "httpsUrl", optional: true }],
   },
+  // 旅行者の入口の LINE (Epic #591, #597): LINE のボタンと `method=line`。**NIHO の LINE プロバイダーの切替（2027-01）のあとに ON にする。**
+  // 今は LINE の同意画面に切替前のプロバイダー名が出て、LINE の `sub` はプロバイダーごとに違うので、いま作った旅行者のアカウントは
+  // 切替後に別人扱いになりやすい（オーナー決定 2026-11-14、niho-coliving/niho-app#20307）。
+  {
+    env: "EXPERIENCE_TRAVELER_LINE_ENABLED",
+    variable: "TRAVELER_LINE_ENABLED",
+    needs: ["EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED"],
+  },
   // Experience-native COHOST teams. This is independent from (and does not open) the legacy provider-operations consumer.
   {
     env: "EXPERIENCE_HOST_TEAM_ENABLED",

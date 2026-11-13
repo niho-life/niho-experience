@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
     hostAccountsEnabled: true,
     hostNihoLoginEnabled: false,
     travelerAccountsEnabled: true,
+    travelerLineEnabled: false,
     hostPwaEnabled: false,
     hostPushEnabled: false,
     hostSessionSecret: "synthetic-route-test-secret-0123456789abcdef",
@@ -76,7 +77,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 
 beforeEach(() => {
   calls.length = 0;
-  Object.assign(state.config, { apiMode: "http", hostConsoleEnabled: true, hostAccountsEnabled: true, hostNihoLoginEnabled: false, travelerAccountsEnabled: true, termsUrl: "" });
+  Object.assign(state.config, { apiMode: "http", hostConsoleEnabled: true, hostAccountsEnabled: true, hostNihoLoginEnabled: false, travelerAccountsEnabled: true, travelerLineEnabled: false, termsUrl: "" });
   state.cookies = {};
   state.authTime = () => new Date().toISOString();
   state.serviceTokenFails = false;
@@ -123,7 +124,22 @@ describe("a traveler's way in", () => {
     expect(loginStateOf(response)).toMatchObject({ purpose: "traveler", providerId: null });
     // The hint beside it only tells where a return with no state goes.
     expect(setCookies(response).get(TRAVELER_LOGIN_HINT_COOKIE)?.attributes).toMatch(/Path=\/host\/auth/);
-    for (const method of ["line", "apple"]) expect(new URL(location(await start(post("/account/auth/start", `method=${method}`)))).searchParams.get("method")).toBe(method);
+    // Apple is understood (NIHO may offer it later) though the entrance does not offer it.
+    expect(new URL(location(await start(post("/account/auth/start", "method=apple")))).searchParams.get("method")).toBe("apple");
+  });
+
+  it("takes LINE only once its flag is on: until then a post for it is refused like a method nobody offers", async () => {
+    // Off by default (NIHO's LINE provider moves in 2027-01; see EXPERIENCE_TRAVELER_LINE_ENABLED).
+    const refused = await start(post("/account/auth/start", "method=line"));
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "invalid_input" });
+    expect(refused.headers.getSetCookie()).toEqual([]);
+    expect((await start(post("/account/auth/start", "method=facebook"))).status).toBe(400);
+    state.config.travelerLineEnabled = true;
+    const accepted = await start(post("/account/auth/start", "method=line"));
+    expect(accepted.status).toBe(303);
+    expect(new URL(location(accepted)).searchParams.get("method")).toBe("line");
+    expect(loginStateOf(accepted)).toMatchObject({ purpose: "traveler" });
   });
 
   it("is NIHO's own login screen for someone who already has a NIHO account (no method)", async () => {
@@ -284,12 +300,14 @@ describe("logging out", () => {
 describe("the traveler's pages", () => {
   const entrance = async (query: Record<string, string> = {}) => renderToStaticMarkup(await TravelerSignInPage({ searchParams: Promise.resolve(query) }));
 
-  it("is a heading, a button for each way in, one sentence of consent, and last and small the NIHO account's way in", async () => {
+  it("is a heading, a button for each way in (Google; LINE only once its flag is on), one sentence of consent, and last and small the NIHO account's way in", async () => {
     const html = await entrance();
     expect(html).toContain("Log in or sign up");
     expect(html).toContain('action="/account/auth/start"');
     expect(html).toMatch(/<button[^>]*value="google"[^>]*name="method"[^>]*>Continue with Google<\/button>/);
-    expect(html).toMatch(/<button[^>]*value="line"[^>]*name="method"[^>]*>Continue with LINE<\/button>/);
+    // LINE waits for the move of NIHO's LINE provider (EXPERIENCE_TRAVELER_LINE_ENABLED): no button, no value to post.
+    expect(html).not.toContain("LINE");
+    expect(html).not.toContain('value="line"');
     // Apple has no web sign-in at NIHO yet: not offered, so no traveler is dropped into NIHO's usual screen.
     expect(html).not.toContain("Apple");
     expect(html).toContain("By continuing, you agree to our");
@@ -299,10 +317,18 @@ describe("the traveler's pages", () => {
     // NIHO appears only in the last small button; no "connect" anywhere.
     expect(html.match(/NIHO/g)).toHaveLength(1);
     expect(html).toContain("Log in with a NIHO account");
-    expect(html.indexOf("Log in with a NIHO account")).toBeGreaterThan(html.indexOf("Continue with LINE"));
+    expect(html.indexOf("Log in with a NIHO account")).toBeGreaterThan(html.indexOf("Continue with Google"));
     expect(html).not.toMatch(/connect/i);
     state.config.termsUrl = "https://terms.example.test/traveler";
     expect(await entrance()).toContain('<a href="https://terms.example.test/traveler" class="font-bold underline underline-offset-4">Terms of Service</a>');
+    state.config.termsUrl = "";
+    // With the flag on LINE follows Google, above the NIHO account's way in.
+    state.config.travelerLineEnabled = true;
+    const withLine = await entrance();
+    expect(withLine).toMatch(/<button[^>]*value="line"[^>]*name="method"[^>]*>Continue with LINE<\/button>/);
+    expect(withLine.indexOf("Continue with LINE")).toBeGreaterThan(withLine.indexOf("Continue with Google"));
+    expect(withLine.indexOf("Log in with a NIHO account")).toBeGreaterThan(withLine.indexOf("Continue with LINE"));
+    expect(withLine.match(/NIHO/g)).toHaveLength(1);
   });
 
   it("tells why a log in did not finish in words that name nobody and no other service, and nothing for an unknown value", async () => {

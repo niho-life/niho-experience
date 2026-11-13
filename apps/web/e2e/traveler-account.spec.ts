@@ -11,12 +11,13 @@ async function noHorizontalScroll(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 }
 
-test("the log in page is English, offers Google and LINE, one sentence of consent, and names NIHO only in the last small button", async ({ page }) => {
+test("the log in page is English, offers Google (not LINE until NIHO's LINE provider moves), one sentence of consent, and names NIHO only in the last small button", async ({ page }) => {
   await page.goto("/account/sign-in");
   await expect(page.getByRole("heading", { level: 1, name: "Log in or sign up" })).toBeVisible();
   const main = page.getByRole("main");
   await expect(main.getByRole("button", { name: "Continue with Google" })).toBeVisible();
-  await expect(main.getByRole("button", { name: "Continue with LINE" })).toBeVisible();
+  // LINE waits for EXPERIENCE_TRAVELER_LINE_ENABLED (after NIHO's LINE provider moves, 2027-01): this server leaves it off.
+  await expect(main.getByRole("button", { name: /LINE/ })).toHaveCount(0);
   await expect(main.getByRole("button", { name: /Apple/ })).toHaveCount(0);
   await expect(main).toContainText("By continuing, you agree to our");
   await expect(main.getByRole("link", { name: "Privacy Notice" })).toHaveAttribute("href", "/privacy");
@@ -24,7 +25,7 @@ test("the log in page is English, offers Google and LINE, one sentence of consen
   const text = await main.innerText();
   expect(text.match(/NIHO/g)).toHaveLength(1);
   expect(text).not.toMatch(/connect/i);
-  expect(text.indexOf("Log in with a NIHO account")).toBeGreaterThan(text.indexOf("Continue with LINE"));
+  expect(text.indexOf("Log in with a NIHO account")).toBeGreaterThan(text.indexOf("Continue with Google"));
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
   await noHorizontalScroll(page);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

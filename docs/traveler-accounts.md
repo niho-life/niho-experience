@@ -1,18 +1,18 @@
 # 旅行者のアカウント
 
-Epic [#591](https://github.com/niho-life/niho-experience/issues/591)、[#597](https://github.com/niho-life/niho-experience/issues/597)、[ADR 0004](adr/0004-niho-account-login.md) §8。旅行者が、NIHO の名前を見ずに、Google などのボタンから Experience のアカウントを作り、ログイン・ログアウトできる。フラグ `EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED`（既定 OFF）。ゲスト予約と、予約ごとのセッションは変えない。アカウントは任意。
+Epic [#591](https://github.com/niho-life/niho-experience/issues/591)、[#597](https://github.com/niho-life/niho-experience/issues/597)、[ADR 0004](adr/0004-niho-account-login.md) §8。旅行者が、NIHO の名前を見ずに、Google のボタン（LINE は NIHO の LINE プロバイダー切替のあと）から Experience のアカウントを作り、ログイン・ログアウトできる。フラグ `EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED`（既定 OFF）。ゲスト予約と、予約ごとのセッションは変えない。アカウントは任意。
 
 ## 画面（英語）
 
-- `/account/sign-in`：見出し「Log in or sign up」、方法別のボタン、利用規約・プライバシーの同意の一文、「You can still book as a guest without an account.」、一番下に小さく「Log in with a NIHO account」（すでに NIHO アカウントを持つ人向け）。画面に「NIHO アカウント」「接続」の文言を出すのは、その一番下のボタンだけ（サイト名の「NIHO Experience」は別判断）。`?error=expired|denied|unavailable|suspended` が、ログインが終わらなかった理由を言葉で出す（アカウントも NIHO の ID も出さない）。
+- `/account/sign-in`：見出し「Log in or sign up」、方法別のボタン（Google。LINE はフラグが ON のときだけ）、利用規約・プライバシーの同意の一文、「You can still book as a guest without an account.」、一番下に小さく「Log in with a NIHO account」（すでに NIHO アカウントを持つ人向け）。画面に「NIHO アカウント」「接続」の文言を出すのは、その一番下のボタンだけ（サイト名の「NIHO Experience」は別判断）。`?error=expired|denied|unavailable|suspended` が、ログインが終わらなかった理由を言葉で出す（アカウントも NIHO の ID も出さない）。
 - `/account`：ログイン済みの旅行者。「You're logged in.」とログアウトだけ。アカウントには、いまは何も結び付いていない。
 - 英語のサイトに `/en` の接頭辞は無いので、Issue の仮の `/en/account/sign-in` は `/account/sign-in`。日本語サイトの入口は、並び順（LINE を先頭にするか）がオーナーの判断待ちなので作っていない。
-- ボタンは Google と LINE。**Apple は出さない**：NIHO の web に Apple のログインが無く（niho-coliving/niho-app#20307）、押すと NIHO のふつうのログイン画面へ落ちて、入口を作った意味が無くなる。`method=apple` は最後まで通る（`TRAVELER_OFFERED_METHODS` に足せば出る）。
+- ボタンは Google だけ。**LINE は、フラグ `EXPERIENCE_TRAVELER_LINE_ENABLED`（既定 OFF、`EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED` が前提）が ON のときだけ**出し、OFF の間は `/account/auth/start` も `method=line` を受け付けない（知らない method と同じ 400）。**ON にするのは、NIHO の LINE プロバイダーの切替（2027-01）のあと**。理由は 2 つ（オーナー決定 2026-11-14、niho-coliving/niho-app#20307）。①いまの LINE の同意画面には、切替前のプロバイダー名（パナソニックホールディングス）が出て、「NIHO の名前を出さない」入口と合わない。②LINE の `sub` はプロバイダーごとに違うので、いま LINE で作った旅行者のアカウントは、NIHO 株式会社のプロバイダーへ移したあとに別人扱いになりやすい。**Apple は出さない**：NIHO の web に Apple のログインが無く（niho-coliving/niho-app#20307）、押すと NIHO のふつうのログイン画面へ落ちて、入口を作った意味が無くなる。`method=apple` は最後まで通る（`TRAVELER_OFFERED_METHODS` に足せば出る）。
 - 利用規約のリンクは `EXPERIENCE_TERMS_URL`（任意）。無いときは、プライバシー（`/privacy`）だけを同意の一文に出す。
 
 ## 流れ
 
-1. ボタン（`method=google|line`）と「NIHO アカウント」のボタン（method なし）は、JavaScript なしの form で `POST /account/auth/start`（同一 origin だけ）。
+1. ボタン（`method=google`。LINE のフラグが ON のときは `line` も）と「NIHO アカウント」のボタン（method なし）は、JavaScript なしの form で `POST /account/auth/start`（同一 origin だけ）。
 2. NIHO の接続 `/connect/niho-experience` へ、`audience=guest` と `method`（PKCE・state。10 分の暗号化 cookie、`purpose: traveler`）。NIHO が方法の画面へ直行し、戻ったときに NIHO アカウントができている（niho-coliving/niho-app#20330・#20332。NIHO 側の flag `APP_CONNECT_GUEST_DIRECT_MODE` は既定 off で、stg の受入では `login`）。method なしは NIHO のふつうのログイン画面を通る。
 3. 戻りはホストと同じ `/host/auth/callback`（NIHO の登録表が戻り先を固定している）。保存した state の `purpose: traveler` で旅行者の戻りと分かる。code を交換 → Host v1 `identity` で NIHO user ID → `authTime` が無いか読めなければ何も作らない（ホストと同じ fail closed）→ `TravelerAccounts.signInWithNihoIdentity` → NIHO の接続をすぐ解除。
 4. 戻ったあとは `/account`。失敗は `/account/sign-in?error=` の固定の理由だけ。保存した state が切れた戻り（10 分）は、旅行者の印の cookie（`__Secure-niho_traveler_login`。判断には使わない）があるときだけ旅行者の入口へ戻す。
