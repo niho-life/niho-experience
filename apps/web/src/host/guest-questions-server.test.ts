@@ -235,6 +235,13 @@ describe("openGuestQuestion and replyToGuestQuestion", () => {
     expect(state.store?.reply).toHaveBeenLastCalledWith(ACTOR, THREAD_ID, { english: "See you.", japanese: null, commandId: COMMAND_ID });
   });
 
+  it("sends a reply with no English as null (a guest who writes Japanese is answered in Japanese alone, #608); the store decides whom that fits", async () => {
+    await replyToGuestQuestion("sample-provider", THREAD_ID, { japanese: "はい、できます。", english: "  ", commandId: COMMAND_ID });
+    expect(state.store?.reply).toHaveBeenLastCalledWith(ACTOR, THREAD_ID, { english: null, japanese: "はい、できます。", commandId: COMMAND_ID });
+    state.store!.reply!.mockRejectedValueOnce(new StoreValidationError("english is required."));
+    expect(await replyToGuestQuestion("sample-provider", THREAD_ID, { japanese: "はい", english: "", commandId: COMMAND_ID })).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
+  });
+
   it("do nothing unless the session is usable and NIHO says this account is the OWNER", async () => {
     state.session = null;
     expect(await openGuestQuestion("sample-provider", THREAD_ID)).toEqual({ ok: false, message: HOST_SESSION_ENDED_TEXT });

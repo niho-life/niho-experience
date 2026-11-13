@@ -163,8 +163,7 @@ export function questionReplyEmail(input: QuestionReplyMailInput): RenderedMail 
     { kind: "p", text: `Hi ${oneLine(input.guestName)},` },
     { kind: "p", text: `${host} replied to ${about}:` },
     { kind: "quote", text: body(input.reply) },
-    { kind: "link", lead: `To answer ${host}, open this link. You can answer once with it, within ${input.linkTtlDays} days.`, label: `Answer ${host}`, href: link },
-    { kind: "p", text: `Replying to this email reaches NIHO support, not ${host}.` },
+    { kind: "link", lead: `To answer ${host}, use the button below. You can answer once with it, within ${input.linkTtlDays} days.`, label: `Answer ${host}`, href: link },
   ]);
 }
 

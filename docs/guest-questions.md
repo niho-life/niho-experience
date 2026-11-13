@@ -79,11 +79,11 @@ Epic #103 の「予約前の質問」（旅行者 #105、ホスト #106）の現
 
 - **持ち方**：`guest_question_threads` に足した（migration `0082`）。`product_id` を空にでき、体験に結び付かない「人あて」のスレッド（`product_id IS NULL AND booking_id IS NULL`、名前・アドレス・リクエスト key を持ち、話題は持たない）を持てる。スレッドの `provider_id` は、その人が属する提供者で、宛先の掲載（`person_listing_id`、掲載を外すと null）と、そのときの名前（`person_name`）を持つ（migration `0084`）。同じ送信を2回しても1件（`(provider_id, client_request_key)` の部分 unique）。上限は同じアドレスで1時間に3件（提供者の人あて全体で）、1人あてで30件。本文は 2〜1000 文字。
 - **受付**：`POST /api/public/people/{slug}/messages`（`GuestQuestionRepository.submitPersonMessage`）。slug が街の人に**いま表示されている**人（登録済み・許可のある写真・メンバーが現役の OWNER か共同ホスト）でなければ、理由を言わずに 404。言語は `JA`。
-- **本人が読む・返す**：`/host/messages` に「人物ページから」として、予約前の質問と同じ一覧・スレッド・既読・返信で出る（体験名の代わりに「◯◯さんあて」（提供者に何人かいても、人ごとに分かれる。宛先を持たない古いスレッドは「人物ページから」））。日本語で書いた返信がそのまま日本語の旅行者に届く（英語は記録用。予約の日本語の旅行者と同じ）。push の題は「メッセージが届きました」（`host.notify.guest_question`、`experienceTitle` に「人物ページから」）。
-- **返事・返信ページ**：返事のメール（日本語）と `/questions/reply` は予約前の質問と同じ。返信ページは、日本語で書いた人には日本語で出る（`GuestQuestionReplyLink.language`）。メールのリンクは1回・14日。
+- **本人が読む・返す**：`/host/messages` に「人物ページから」として、予約前の質問と同じ一覧・スレッド・既読・返信で出る（体験名の代わりに「◯◯さんあて」（提供者に何人かいても、人ごとに分かれる。宛先を持たない古いスレッドは「人物ページから」））。**日本語の旅行者には日本語だけで返せる**（#608。英語の欄も「英語にする」も出ない。ストアは英語が無いとき、日本語を本文（`body`）にも日本語（`body_ja`）にも入れる。英語の旅行者には今まで通り英語が要る＝`StoreValidationError`）。予約前の質問・人物ページ・予約の日本語の旅行者に同じ。push の題は「メッセージが届きました」（`host.notify.guest_question`、`experienceTitle` に「人物ページから」）。
+- **返事・返信ページ**：返事のメール（日本語）と `/questions/reply` は予約前の質問と同じ。返事のメールの末尾は「返信は、下のボタンから送ってください。このボタンで返信できるのは1回で、期限は14日です。」（返信ページへのボタン。「事務局に届く」とは書かない。予約前の質問の返事も、日英とも同じ。Reply-To は今のまま）。返信ページは、日本語で書いた人には日本語で出る（`GuestQuestionReplyLink.language`）。メールのリンクは1回・14日。
 - **データの境界・保持期間**：旅行者のアドレスはホストの画面・outbox・ログに出ない。最後のメッセージから1年でスレッドごと消す（`eraseInactiveThreads`、予約前の質問と同じ）。
 - **flag**：`EXPERIENCE_PERSON_MESSAGES_ENABLED`（`PERSON_MESSAGES_ENABLED`。http mode で `HOST_CONSOLE_ENABLED=true`、ゲストメール、日本語サイトが前提。Provider API とは併用不可）。公開の route・返信ページ・OWNER と共同ホストの `/host/messages` を開くが、**英語の体験ページの「Ask the host」は開かない**（それは `EXPERIENCE_GUEST_QUESTIONS_ENABLED`）。flag が off の間は、人のページにボタンも出ず、route は 404。
-- **宛先と通知**：メッセージは提供者の受信箱に届き、読む・返す・既読は OWNER と共同ホスト（`requireGuestResponder`）。EDITOR・VIEWER・商品だけの運営者は読めない。push・メールは、いまのところ予約前の質問と同じく、提供者の通知先（OWNER・共同ホスト）全員に行く（宛先の人と OWNER だけに絞るのは未実装）。
+- **宛先と通知（#608）**：メッセージは提供者の受信箱に届き、読む・返す・既読は OWNER と共同ホスト（`requireGuestResponder`）。EDITOR・VIEWER・商品だけの運営者は読めない。**通知（push・メール）は、宛先の人と提供者の OWNER にだけ**行く（宛先の人が OWNER なら1通。ほかの共同ホストには行かない）。payload は `personName`（宛先の名前）と、あれば `toMemberId`（宛先の掲載のメンバーのアカウント。掲載が外れて宛先のアカウントが無いときは名前だけで、push・メールは OWNER だけ）を持ち、push の題・メールの件名は「◯◯さんあてにメッセージが届きました」（体験の行は出さない）。メールは `enqueueHostBookingMails` の `alsoTo`、送る直前に `STILL_RECIPIENT`（host-mail-outbox.ts）が、宛先が今も現役の OWNER か共同ホストかを確かめる。push は `personRecipients`。旅行者が返信ページから答えたときも、同じ宛先に行く（掲載が外れていれば OWNER だけ）。予約前の質問（商品あて）の通知は今まで通り。
 - **配備の順**：migration `0082`、`0084` を先に（runtime role の権限は増えない）。0082 は加えるだけで、いまの revision の書き込みも読みもそのまま通る。
 
 ## 次のスライスで足すもの

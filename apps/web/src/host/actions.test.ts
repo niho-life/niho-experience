@@ -281,7 +281,7 @@ describe("questions to the host kept in the experience DB (#106)", () => {
   const reply = { providerId: KITCHEN, threadId: "00000000-0000-4000-8000-000000000106", japanese: "はい", english: "Yes.", commandId: "00000000-0000-4000-8000-0000000c0106" };
 
   it("checks what the browser sent before anything else", async () => {
-    for (const input of [{}, { ...reply, providerId: "../admin" }, { ...reply, threadId: "x".repeat(201) }, { ...reply, english: "  " }, { ...reply, english: "x".repeat(MESSAGE_TEXT_LIMIT + 1) }, { ...reply, japanese: 1 }, { ...reply, commandId: "retry-1" }]) {
+    for (const input of [{}, { ...reply, providerId: "../admin" }, { ...reply, threadId: "x".repeat(201) }, { ...reply, japanese: "  ", english: "" }, { ...reply, english: 5 }, { ...reply, english: "x".repeat(MESSAGE_TEXT_LIMIT + 1) }, { ...reply, japanese: 1 }, { ...reply, commandId: "retry-1" }]) {
       expect(await sendGuestQuestionReply(input as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });
     }
     expect(await openGuestQuestionThread({ providerId: KITCHEN } as never)).toEqual({ ok: false, message: HOST_INVALID_INPUT_TEXT });

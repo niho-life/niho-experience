@@ -8,7 +8,7 @@ export const HOST_PUSH_SEEN_WITHIN_MS = 30 * 24 * 60 * 60 * 1000;
 const CONCURRENCY = 4;
 
 export interface HostPushDeps {
-  subscriptions: Pick<HostPushSubscriptions, "recipients" | "ownerRecipients" | "productRecipients" | "assignmentRecipients" | "recordSent" | "recordFailure" | "removeById">;
+  subscriptions: Pick<HostPushSubscriptions, "recipients" | "ownerRecipients" | "personRecipients" | "productRecipients" | "assignmentRecipients" | "recordSent" | "recordFailure" | "removeById">;
   vapid: VapidKeys;
   fetch: typeof fetch;
   now: number;
@@ -51,7 +51,8 @@ export async function deliverHostPush(recipient: HostPushRecipient, message: Hos
 /**
  * Sends one event to the devices of the provider's active members seen in the last 30 days, four at
  * a time; an event about one product (an OTA booking, #194) to that product's OWNER and operators only; an operations
- * suspension of a listing (#109, `ownerOnly`) to the provider's OWNER only.
+ * suspension of a listing (#109, `ownerOnly`) to the provider's OWNER only; a message addressed to a person (#608) to the
+ * provider's OWNERs and that person.
  * Push is a second channel next to email, never a replacement. The notification job that
  * consumes `outbox_messages` calls it (outbox.ts, docs/host-pwa.md).
  */
@@ -60,6 +61,8 @@ export async function notifyHostDevices(event: HostPushEvent, deps: HostPushDeps
   const seenAfter = new Date(deps.now - HOST_PUSH_SEEN_WITHIN_MS);
   const recipients = event.ownerOnly === true
     ? await deps.subscriptions.ownerRecipients(event.providerId, seenAfter)
+    : event.person !== undefined
+      ? await deps.subscriptions.personRecipients(event.providerId, event.person.memberId, seenAfter)
     : event.assignment !== undefined && event.productId !== undefined
       ? await deps.subscriptions.assignmentRecipients(event.providerId, event.productId, event.assignment.occurrenceId, seenAfter)
     : event.productId === undefined

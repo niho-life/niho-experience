@@ -54,6 +54,11 @@ export interface HostPushEvent {
    * title; `kind` stays NEW_BOOKING, which cannot be turned off. Needs `productId`.
    */
   assignment?: { occurrenceId: string };
+  /**
+   * A message addressed to a person of the provider (#608): their name sets the title ("◯◯さんあてにメッセージが届きました") and only
+   * the provider's OWNERs and that member (`memberId`; null once their listing is gone: the OWNERs only) get it.
+   */
+  person?: { name: string; memberId: string | null };
   /** Only the provider's OWNER gets it (an operations suspension: only the OWNER can resume the listing). */
   ownerOnly?: true;
   /**
@@ -124,6 +129,8 @@ export const HOST_PUSH_ASSIGNMENT_TITLE = "担当を募集中の申込";
 export const HOST_PUSH_QUESTION_TITLE = "予約前の質問が届きました";
 /** A message sent from a person's page (#589): about no experience, so it is not a question before booking. */
 export const HOST_PUSH_PERSON_MESSAGE_TITLE = "メッセージが届きました";
+/** The same, once it is known whom it is addressed to (#608). */
+export const hostPushPersonMessageTitle = (name: string): string => `${name}さんあてにメッセージが届きました`;
 
 /** A clearing of an operations stop: the listing stays off until the OWNER resumes it (owner_resume_required). */
 export const HOST_PUSH_LISTING_CLEARED_TITLE = "運営による停止が解除されました";
@@ -185,8 +192,9 @@ export function hostPushLines(event: HostPushEvent): { title: string; experience
     title: event.ota ? hostPushOtaTitle(event.ota)
       : event.assignment ? HOST_PUSH_ASSIGNMENT_TITLE
       : event.listing?.change === "CLEARED" ? HOST_PUSH_LISTING_CLEARED_TITLE
-      : event.kind === "GUEST_MESSAGE" && event.question === true ? (event.experienceTitle === PERSON_THREAD_LABEL ? HOST_PUSH_PERSON_MESSAGE_TITLE : HOST_PUSH_QUESTION_TITLE) : HOST_PUSH_TITLES[event.kind],
-    experience: titleLine(event.experienceTitle),
+      : event.kind === "GUEST_MESSAGE" && event.question === true ? (event.person ? hostPushPersonMessageTitle(event.person.name) : event.experienceTitle === PERSON_THREAD_LABEL ? HOST_PUSH_PERSON_MESSAGE_TITLE : HOST_PUSH_QUESTION_TITLE) : HOST_PUSH_TITLES[event.kind],
+    // A message addressed to a person names no experience: the title already says whom it is for.
+    experience: event.person ? null : titleLine(event.experienceTitle),
     when: whenLine(event),
     guest: event.ota ? titleLine(event.guestName) : null,
     seats: Number.isInteger(event.seats) && event.seats! > 0 ? `${event.seats}名` : null,

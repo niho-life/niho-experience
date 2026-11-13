@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { draftReplyEnglish } from "@/host/actions";
 import { bookingsHref, shortDateTime } from "@/host/bookings";
 import { BOOKING_THREAD_CLOSED_TEXT, guestMessageView, MESSAGE_TEXT_LIMIT, REPLY_STATUS, replyDraftState, threadContext, threadHeading } from "@/host/messages";
 import type { HostGuestMessage, HostReplyMessage, HostSupportMessage, HostThread } from "@/host/types";
+import { DISABLED, FIELD_LABEL } from "./editor-parts";
+import { TEXTAREA } from "./fields";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
 import { HostIcon } from "./HostIcon";
 import { ReplyDraftFields, useReplyDraft } from "./ReplyDraftFields";
@@ -68,7 +70,10 @@ function ReplyBubble({ message, providerName }: { message: HostReplyMessage; pro
     <li className="flex flex-col items-end">
       <div className={`${BUBBLE} rounded-tr-md bg-leaf-pale`}>
         <span className="sr-only">{providerName}：</span>
-        {message.japanese ? (
+        {message.japanese && message.japanese === message.english ? (
+          // Answered in Japanese alone (#608): the guest got this, and there is no English to show.
+          <p className="whitespace-pre-wrap">{message.japanese}</p>
+        ) : message.japanese ? (
           <>
             <p className="whitespace-pre-wrap">{message.japanese}</p>
             <details className={`group ${BUBBLE_PART}`}>
@@ -123,6 +128,83 @@ export type SendReply = (reply: ReplyInput) => Promise<string | null>;
  * or when it fails, the Japanese stays as written (ReplyDraftFields); so does a reply that could not be sent.
  */
 function ReplyComposer({ thread, providerId, onSend }: { thread: HostThread; providerId: string; onSend: SendReply }) {
+  // A guest who writes Japanese (booked in Japanese, a question or a message from a person's page on the Japanese site) is answered
+  // in Japanese alone (#608): no English field, no 英語にする. A guest who writes English is answered as before.
+  return thread.guestLanguage === "ja" ? <JapaneseReplyComposer thread={thread} onSend={onSend} /> : <EnglishReplyComposer thread={thread} providerId={providerId} onSend={onSend} />;
+}
+
+/** 送信欄 for a guest who reads Japanese: the Japanese the host writes is what is sent. */
+function JapaneseReplyComposer({ thread, onSend }: { thread: HostThread; onSend: SendReply }) {
+  const [japanese, setJapanese] = useState("");
+  const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const attempt = useRef<{ signature: string; commandId: string } | null>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const id = useId();
+  const canSend = japanese.trim() !== "";
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canSend || sending) return;
+    if (attempt.current?.signature !== japanese) attempt.current = { signature: japanese, commandId: crypto.randomUUID() };
+    setSending(true);
+    setProblem(null);
+    const failed = await onSend({ japanese, english: "", commandId: attempt.current.commandId });
+    setSending(false);
+    if (failed) {
+      setProblem(failed);
+      return;
+    }
+    attempt.current = null;
+    setJapanese("");
+    setSent(true);
+    field.current?.focus();
+  };
+
+  return (
+    <form onSubmit={(event) => void submit(event)} aria-label="返信" aria-busy={sending || undefined} className="sticky bottom-0 z-10 mt-auto rounded-b-2xl border-t border-line bg-canvas px-4 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:px-5">
+      <label htmlFor={id} className={FIELD_LABEL}>
+        {thread.guest} さんに届く返信（日本語）
+      </label>
+      <textarea
+        ref={field}
+        id={id}
+        rows={3}
+        maxLength={MESSAGE_TEXT_LIMIT}
+        value={japanese}
+        readOnly={sending}
+        onChange={(event) => {
+          setJapanese(event.currentTarget.value);
+          setSent(false);
+        }}
+        className={`${TEXTAREA} mt-1.5 min-h-[76px]`}
+      />
+      <div className="mt-2.5 flex items-center gap-2">
+        <button type="submit" disabled={!canSend || sending} className={consoleButtonClass("primary", "md", `ml-auto ${DISABLED}`)}>
+          {sending ? "送っています…" : "この内容で送る"}
+        </button>
+      </div>
+      {problem ? (
+        <p role="alert" className="mt-2 text-[0.78125rem] leading-normal font-extrabold text-danger">
+          {problem}
+        </p>
+      ) : null}
+      <p className="mt-2 text-xs leading-normal text-muted">{thread.guest} さんにはメールで届きます</p>
+      <p role="status" className={sent ? "mt-1 flex items-center gap-1 text-[0.78125rem] leading-normal font-extrabold text-moss" : "sr-only"}>
+        {sent ? (
+          <>
+            <HostIcon name="check" className="size-3.5" />
+            送りました
+          </>
+        ) : null}
+      </p>
+    </form>
+  );
+}
+
+/** 送信欄 for a guest who reads English: 日本語で書く → 英語にする → この英語で送る. */
+function EnglishReplyComposer({ thread, providerId, onSend }: { thread: HostThread; providerId: string; onSend: SendReply }) {
   const [sent, setSent] = useState(false);
   const [sending, setSending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);

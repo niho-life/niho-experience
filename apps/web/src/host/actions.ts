@@ -403,9 +403,10 @@ export async function sendGuestQuestionReply(input: { providerId: string; thread
   const providerId = nihoIdOrNull(input?.providerId);
   const threadId = text(input?.threadId, LIMITS.threadId);
   const japanese = text(input?.japanese, MESSAGE_TEXT_LIMIT);
-  const english = text(input?.english, MESSAGE_TEXT_LIMIT);
+  // The English may be empty (#608): a guest who writes Japanese is answered in Japanese alone; the store refuses an empty English for anyone else.
+  const english = typeof input?.english === "string" && input.english.length <= MESSAGE_TEXT_LIMIT ? input.english : null;
   const commandId = typeof input?.commandId === "string" && COMMAND_ID.test(input.commandId) ? input.commandId : null;
-  if (!providerId || !threadId || japanese === null || !english?.trim() || !commandId) return invalid;
+  if (!providerId || !threadId || japanese === null || english === null || (english.trim() === "" && !japanese.trim()) || !commandId) return invalid;
   return replyToGuestQuestion(providerId, threadId, { japanese, english, commandId });
 }
 

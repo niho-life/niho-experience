@@ -88,10 +88,16 @@ export async function enqueueHostBookingMails(
      * can take the occurrence. The job narrows it again when it sends (host-mail-outbox.ts).
      */
     readonly serves?: boolean;
+    /**
+     * A message addressed to a person (#608): that member (a current OWNER or COHOST of the provider) gets the email too, next to the
+     * provider's OWNERs. The job checks it again when it sends (host-mail-outbox.ts).
+     */
+    readonly alsoTo?: string;
   },
 ): Promise<number> {
   assertStoreIdentifier(input.providerId, "providerId");
   if (input.productId !== undefined) assertStoreIdentifier(input.productId, "productId");
+  if (input.alsoTo !== undefined) assertStoreIdentifier(input.alsoTo, "alsoTo");
   if (input.serves === true && input.productId === undefined) throw new StoreValidationError("An assignment email needs its product.");
   if ("guestName" in input.payload || "to" in input.payload) throw new StoreValidationError("A host email row carries no guest name.");
   const result = await client.query(
@@ -99,6 +105,9 @@ export async function enqueueHostBookingMails(
      SELECT $1, $2, $3, $4, $5 || ':' || md5(r.niho_user_id), $6::jsonb || jsonb_build_object('to', r.niho_user_id)
        FROM (SELECT m.niho_user_id FROM provider_memberships m
               WHERE m.provider_id = $1 AND m.active AND m.role = ANY($8::text[])
+             UNION
+             SELECT m.niho_user_id FROM provider_memberships m
+              WHERE $9::text IS NOT NULL AND m.provider_id = $1 AND m.niho_user_id = $9 AND m.active AND m.role IN ('OWNER', 'COHOST')
              UNION
              SELECT g.niho_user_id FROM product_operator_grants g
               WHERE $7::text IS NOT NULL AND g.provider_id = $1 AND g.product_id = $7 AND g.active
@@ -108,7 +117,7 @@ export async function enqueueHostBookingMails(
       -- One order whatever the collation, so the rows (and their emails) come in the same order every time.
       ORDER BY r.niho_user_id COLLATE "C"
      ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,
-    [input.providerId, input.aggregateType, input.aggregateId, input.topic, `host-mail:${input.deduplicationKey}`, JSON.stringify(input.payload), input.productId ?? null, input.serves === true ? ["OWNER", "COHOST"] : ["OWNER"]],
+    [input.providerId, input.aggregateType, input.aggregateId, input.topic, `host-mail:${input.deduplicationKey}`, JSON.stringify(input.payload), input.productId ?? null, input.serves === true ? ["OWNER", "COHOST"] : ["OWNER"], input.alsoTo ?? null],
   );
   return result.rowCount ?? 0;
 }

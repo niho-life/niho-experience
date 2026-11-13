@@ -125,6 +125,16 @@ describe("hostPushEventFromOutbox", () => {
     });
   });
 
+  it("turns a message addressed to a person into a push that names them and goes to them and the OWNERs (#608)", () => {
+    const parsed = hostPushEventFromOutbox(row(QUESTION, { ...questionPayload, experienceTitle: "人物ページから", personName: "高浜拓也", toMemberId: "hst_0123456789abcdef0123456789abcdef" }), NOW);
+    expect(parsed).toMatchObject({ ok: true, event: { kind: "GUEST_MESSAGE", question: true, person: { name: "高浜拓也", memberId: "hst_0123456789abcdef0123456789abcdef" } } });
+    // A name alone (the listing is gone) addresses the OWNERs only; an account without a name, and anything else, is refused.
+    expect(hostPushEventFromOutbox(row(QUESTION, { ...questionPayload, personName: "高浜拓也" }), NOW)).toMatchObject({ ok: true, event: { person: { name: "高浜拓也", memberId: null } } });
+    for (const bad of [{ toMemberId: "hst_x" }, { personName: "", toMemberId: "hst_x" }, { personName: "あ".repeat(41), toMemberId: "hst_x" }, { personName: "a", toMemberId: "hst_x", extra: 1 }]) {
+      expect(hostPushEventFromOutbox(row(QUESTION, { ...questionPayload, ...bad }), NOW)).toEqual({ ok: false, reason: "invalid" });
+    }
+  });
+
   it("turns a question to the host into a GUEST_MESSAGE push with its own title that opens the thread", () => {
     const parsed = hostPushEventFromOutbox(row(QUESTION, questionPayload), NOW);
     expect(parsed).toEqual({
