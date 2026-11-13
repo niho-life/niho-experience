@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FieldRow, FieldSection } from "@/components/host/fields";
 import { HostAppInstall } from "@/components/host/HostAppInstall";
+import { HostNihoAccountRow, type NihoAccountRowStatus } from "@/components/host/HostNihoAccountRow";
 import { HostNotificationAddress } from "@/components/host/HostNotificationAddress";
 import { HostPushToggle } from "@/components/host/HostPushToggle";
 import { HostIcon } from "@/components/host/HostIcon";
@@ -24,6 +25,8 @@ import { NOTIFICATION_ADDRESS_TEXT, previewNotificationAddress } from "@/host/no
 import { loadNotificationAddress } from "@/host/notification-address-server";
 import { config } from "@/lib/config";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
+import { nihoIdentityOutcomeOrNull, type NihoIdentityOutcome } from "@/lib/host/niho-identity";
+import { loadNihoIdentityStatus } from "@/lib/host/niho-identity-server";
 import { HOST_LOGOUT_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
 import { HOST_SETTINGS_SECTION_TITLES, hostSettingsSectionOrNull } from "@/lib/host/settings-navigation";
 import type { HostSession } from "@/lib/host/session";
@@ -40,10 +43,10 @@ function connectStep(value: string | string[] | undefined): "return" | "refresh"
 }
 
 /**
- * アカウント: the NIHO account (or, with Experience host accounts, the address the host signs in with) and ログアウト
- * (its form cannot sit inside the settings form).
+ * アカウント: the NIHO account (or, with Experience host accounts, the address the host signs in with, and with the NIHO
+ * account login the NIHO account it is bound to, Epic #591) and ログアウト (its form cannot sit inside the settings form).
  */
-function AccountPanel({ session }: { session: Pick<HostSession, "kind" | "displayName" | "iconUrl"> }) {
+function AccountPanel({ session, niho = null }: { session: Pick<HostSession, "kind" | "displayName" | "iconUrl">; niho?: { providerId: string | null; status: NihoAccountRowStatus; outcome: NihoIdentityOutcome | null } | null }) {
   const account = { displayName: session.displayName, iconUrl: session.iconUrl };
   const experience = session.kind === "experience";
   return (
@@ -60,6 +63,7 @@ function AccountPanel({ session }: { session: Pick<HostSession, "kind" | "displa
           )}
         </div>
       </FieldRow>
+      {niho ? <HostNihoAccountRow providerId={niho.providerId} status={niho.status} outcome={niho.outcome} /> : null}
       <div className="border-t border-line pt-3 md:pl-[184px]">
         <form method="post" action={HOST_LOGOUT_PATH} data-niho-navigation-form>
           <button type="submit" className={consoleButtonClass("ghost", "sm")}>
@@ -75,7 +79,7 @@ function AccountPanel({ session }: { session: Pick<HostSession, "kind" | "displa
  * 設定 for a product operator (#194, docs/product-operators.md): no provider settings, only where this site's emails go
  * (the OTA bookings of their products come to them) and the account. Only while this site emails hosts.
  */
-async function OperatorSettings({ providerId, session }: { providerId: string; session: HostSession }) {
+async function OperatorSettings({ providerId, session, niho }: { providerId: string; session: HostSession; niho: Parameters<typeof AccountPanel>[0]["niho"] }) {
   const load = await loadNotificationAddress(providerId);
   return (
     <HostPageBody>
@@ -93,7 +97,7 @@ async function OperatorSettings({ providerId, session }: { providerId: string; s
         </FieldRow>
       </FieldSection>
       <div className="mt-3.5">
-        <AccountPanel session={session} />
+        <AccountPanel session={session} niho={niho} />
       </div>
     </HostPageBody>
   );
@@ -104,6 +108,12 @@ async function loadAccountPayout(session: HostSession, provider: Parameters<type
   if (session.kind !== "experience") return null;
   const experience = await loadExperiencePayout(session, provider);
   return { experience, payout: { load: hostPayoutLoadOf(experience), notice: null, redirectTo: null } };
+}
+
+/** The NIHO account row's data (Epic #591): with the NIHO account login on, for a host account's own session only. */
+async function nihoAccount(session: HostSession, providerId: string | null, query: SearchParams) {
+  if (session.kind !== "experience" || !config.hostNihoLoginEnabled) return null;
+  return { providerId, status: await loadNihoIdentityStatus(session.hostAccountId), outcome: nihoIdentityOutcomeOrNull(Array.isArray(query.niho) ? query.niho[0] : query.niho) };
 }
 
 /**
@@ -121,7 +131,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   if (!provider) {
     // A product operator (#194): their own address for this site's emails, while it sends them.
     const calendar = config.hostMailEnabled ? await resolveCalendarContext(query) : null;
-    if (calendar?.choice?.kind === "OPERATOR") return <OperatorSettings providerId={calendar.choice.id} session={session} />;
+    if (calendar?.choice?.kind === "OPERATOR") return <OperatorSettings providerId={calendar.choice.id} session={session} niho={await nihoAccount(session, null, query)} />;
     return <HostRegisterPrompt title="設定" />;
   }
   // Stripe's way back belongs to the provider it names, never to the one shown in its place.
@@ -169,7 +179,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
     </FieldSection>
   ) : null;
 
-  const accountPanel = <AccountPanel session={session} />;
+  const accountPanel = <AccountPanel session={session} niho={await nihoAccount(session, provider.id, query)} />;
   const payoutPanel = accountPayout
     ? <HostPayoutAccountPanel providerId={provider.id} load={accountPayout.experience} notice={payoutOutcome ? PAYOUT_CONSENT_OUTCOMES[payoutOutcome] : null} />
     : undefined;

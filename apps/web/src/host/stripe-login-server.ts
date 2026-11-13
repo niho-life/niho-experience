@@ -2,6 +2,9 @@ import "server-only";
 import { createConnectedAccountLoginLink } from "@niho-experience/experience-payments";
 import { HOST_ACCOUNT_LIMITS } from "@niho-experience/experience-store";
 import { hostSalesRepository } from "@/lib/experience/store-server";
+import { config } from "@/lib/config";
+import { loadNihoIdentityStatus } from "@/lib/host/niho-identity-server";
+import { hostNihoReauthPath, hostPayoutSettingsPath } from "@/lib/host/routes";
 import { accessTokenUsable, recentlyAuthenticated } from "@/lib/host/session";
 import { loadHostProviders, readHostSession } from "@/lib/host/server";
 import { nihoIdOrNull } from "@/lib/host/providers";
@@ -30,4 +33,17 @@ export async function hostStripeLoginUrl(providerId: unknown): Promise<string | 
   const accounts = await sales.listPayoutAccountsForHost(ownerActor(provider));
   if (accounts.length !== 1) return null;
   return createConnectedAccountLoginLink({ accountId: accounts[0]!, platformStripeKey });
+}
+
+/**
+ * For a host who signs in with a bound NIHO account (Epic #591) and whose last sign-in is older than 30 minutes: where to
+ * sign in again at NIHO before the dashboard opens, back to 受取口座 (the host presses the button again). null for everyone
+ * else, who is sent where they were before: Stripe's own sign-in.
+ */
+export async function hostStripeReauthHref(providerId: string): Promise<string | null> {
+  if (!config.hostNihoLoginEnabled) return null;
+  const session = await readHostSession();
+  if (!session || session.kind !== "experience" || recentlyAuthenticated(session, Date.now(), HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes)) return null;
+  const bound = await loadNihoIdentityStatus(session.hostAccountId);
+  return bound !== null && bound !== "error" ? hostNihoReauthPath(hostPayoutSettingsPath(providerId)) : null;
 }

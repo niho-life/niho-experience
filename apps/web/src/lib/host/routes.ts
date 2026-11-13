@@ -139,6 +139,25 @@ export function hostSupportPath(kind?: "SPOT" | "EXPERIENCE_PROVIDER" | null, id
 export const HOST_PAYOUT_CONSENT_PATH = "/host/api/payout-account-consent";
 export const HOST_SETTINGS_PAYOUT_ANCHOR = "settings-payout";
 
+/**
+ * NIHO アカウントの結び付け (Epic #591, #595): the form of 設定 › ログイン情報 posts here (`action=link` or `unlink`), and the
+ * section's own page, where a sign-in (the emailed link or NIHO's) comes back to and the outcome is told (`?niho=`).
+ */
+export const HOST_NIHO_IDENTITY_PATH = "/host/api/niho-identity";
+
+/** 設定 › ログイン情報 of a provider (the NIHO account's section). */
+export function hostAccountSettingsPath(providerId: string | null): string {
+  return withQuery(HOST_SETTINGS_PATH, { providerId, section: "account" });
+}
+
+/**
+ * The sign-in a sensitive change asks for again, for a host bound to a NIHO account: NIHO's own login, which asks NIHO to
+ * sign the person in again (`reauth=1`), then back to `returnTo` (an allowlisted page, hostReturnPathOrNull).
+ */
+export function hostNihoReauthPath(returnTo: string): string {
+  return withQuery(HOST_LOGIN_PATH, { reauth: "1", returnTo });
+}
+
 /** 設定 › 受取口座 of a provider: where the consent form returns, and where a sign-in for it comes back to. */
 export function hostPayoutSettingsPath(providerId: string | null): string {
   return `${withProvider(HOST_SETTINGS_PATH, providerId)}#${HOST_SETTINGS_PAYOUT_ANCHOR}`;
@@ -150,8 +169,8 @@ const WRITE_EXPERIENCE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
  * A page an emailed or NIHO sign-in may return to: one of the fixed /write
- * routes (with only a validated experience slug), 設定 › 受取口座 with at most
- * its providerId, or a product operator invitation. Anything else is null, so
+ * routes (with only a validated experience slug), 設定 › 受取口座 or 設定 ›
+ * ログイン情報 with at most their providerId, or a product operator invitation. Anything else is null, so
  * the value can never send a host off this site or to an arbitrary local path.
  */
 export function hostReturnPathOrNull(value: unknown): string | null {
@@ -181,6 +200,14 @@ export function hostReturnPathOrNull(value: unknown): string | null {
   if (url.pathname.startsWith(`${HOST_INVITATIONS_PATH}/`)) {
     const invitationId = invitationIdOrNull(url.pathname.slice(HOST_INVITATIONS_PATH.length + 1));
     return invitationId && url.search === "" && url.hash === "" ? hostInvitationPath(invitationId) : null;
+  }
+  // 設定 › ログイン情報 (Epic #591): where a NIHO account's binding and its re-login come back to.
+  if (url.pathname === HOST_SETTINGS_PATH && url.hash === "" && url.searchParams.get("section") === "account") {
+    const keys = [...url.searchParams.keys()].sort();
+    if (keys.some((key) => key !== "providerId" && key !== "section") || keys.length > 2) return null;
+    const providerId = url.searchParams.get("providerId");
+    if (providerId !== null && !RETURN_PROVIDER_ID.test(providerId)) return null;
+    return hostAccountSettingsPath(providerId);
   }
   if (url.pathname !== HOST_SETTINGS_PATH || url.hash !== `#${HOST_SETTINGS_PAYOUT_ANCHOR}`) return null;
   const keys = [...url.searchParams.keys()];

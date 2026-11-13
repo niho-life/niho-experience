@@ -20,7 +20,8 @@ export async function GET(request: NextRequest) {
   const returnPath = hostReturnPathOrNull(request.nextUrl.searchParams.get("returnTo"));
   if (config.hostAccountsEnabled && config.hostNihoLoginEnabled) {
     // Already signed in (an old link, a second tab): straight on to where the sign-in was for, with no trip to NIHO.
-    if (await readHostSession()) return seeOther(invitationId ? hostInvitationPath(invitationId) : returnPath ?? HOST_HOME_PATH);
+    // A re-login (`reauth=1`, a sensitive change asked for a recent sign-in) always goes to NIHO.
+    if (request.nextUrl.searchParams.get("reauth") !== "1" && await readHostSession()) return seeOther(invitationId ? hostInvitationPath(invitationId) : returnPath ?? HOST_HOME_PATH);
     return startNihoLogin(request);
   }
   // The email form keeps an invitation as the page the opened link returns to (hostReturnPathOrNull).

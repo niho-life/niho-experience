@@ -24,6 +24,12 @@ export interface ExchangeResult {
   connectionExpiresAt: number;
   displayName: string;
   iconUrl: string | null;
+  /**
+   * When the person signed in at NIHO to start this connection (`authTime` of the exchange answer, a canonical UTC instant;
+   * niho-coliving/niho-app#20305), or null when NIHO did not say (a NIHO without that field). The judgment of a recent sign-in
+   * is Experience's, made from this and not from the `max_age` that went through the browser in the URL.
+   */
+  authTimeUtc: string | null;
 }
 
 export interface RefreshResult {
@@ -46,6 +52,15 @@ export interface IdTokenResult {
  */
 export const NIHO_CONNECT_AUDIENCE_PARAM = "audience";
 export type NihoConnectAudience = "host";
+
+/**
+ * How recent a sign-in a step-up asks NIHO for (`max_age`, in seconds; NIHO accepts 60 to 86400): a re-login for a sensitive
+ * change, and the binding of a NIHO account. It only makes NIHO ask the person to sign in again when theirs is older: the
+ * judgment of "recent" is Experience's, made from the `authTime` the exchange returns (HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes,
+ * 30 minutes), since a value in a URL can be changed by the browser's owner. Five minutes leaves most of that window to
+ * use once the person is back, where the full 30 would hand them a sign-in that is about to be too old.
+ */
+export const NIHO_REAUTHENTICATION_MAX_AGE_SECONDS = 300;
 
 /**
  * NIHO's confirmation page for this site. `maxAgeSeconds` asks NIHO to sign the person in again when their last sign-in
@@ -100,9 +115,11 @@ export async function exchangeCode(deps: NihoAuthDeps, input: { code: string; co
   const accessTokenExpiresAt = parseTime(body?.expiresAt);
   const connectionExpiresAt = parseTime(body?.connectionExpiresAt);
   if (!isText(body?.accessToken) || !accessTokenExpiresAt || !isText(body?.refreshToken, 1024) || !isText(body?.connectionId, 256) || !connectionExpiresAt) return { ok: false, reason: "unavailable" };
+  const authTime = parseTime(body?.authTime);
   return {
     ok: true,
     value: {
+      authTimeUtc: authTime ? new Date(authTime).toISOString() : null,
       accessToken: body.accessToken,
       accessTokenExpiresAt,
       refreshToken: body.refreshToken,
