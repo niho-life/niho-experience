@@ -47,7 +47,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
  * sends them back here with `?connect=`) and others get "NIHO でログイン". Only a well-formed
  * `providerId` is carried over.
  */
-async function hostConsoleEntry(query: SearchParams): Promise<{ loginHref: string } | null> {
+export async function hostConsoleEntry(query: SearchParams): Promise<{ loginHref: string } | null> {
   if (!config.hostConsoleEnabled) return null;
   const providerId = nihoIdOrNull(query.providerId);
   let signedIn = false;
