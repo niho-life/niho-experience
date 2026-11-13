@@ -16,6 +16,19 @@ const MESSAGES: Record<LoginErrorReason, string> = {
   link: "このログインのリンクは使えません。リンクは送ってから 15 分間、1 回だけ、リンクをリクエストしたブラウザで使えます。期限が切れたか、すでに使われたか、別のブラウザ（メールのアプリの中のブラウザなど）で開いた場合に起こります。リクエストしたブラウザで、新しいリンクを送ってください。",
   unregistered: "このアカウントは、ホストに登録されていません。",
   suspended: "このホストアカウントは停止されています。運営にお問い合わせください。",
+  "invite-expired": "この招待のリンクは、期限が切れたか、新しい招待に置き換えられたため使えません。運営に、新しい招待を依頼してください。",
+  "invite-used": "この招待のリンクは、すでに使われています。NIHO アカウントを結び付け済みなら、「NIHO アカウントでログイン」で入れます。",
+  "invite-browser": "この招待のリンクは、別のブラウザで開かれています。最初にリンクを開いたブラウザで続けてください。メールのアプリの中のブラウザで開いたときは、そのブラウザで NIHO にログインしてください。",
+  "invite-invalid": "この招待は使えません。リンクが正しくないか、期限が切れたか、別のブラウザで開いた場合に起こります。運営に、新しい招待を依頼してください。",
+  "invite-in-use": "このアカウントは、すでに別のホストに結び付いているため、この招待には使えません。招待を受けたホストの NIHO アカウントで、もう一度ログインしてください。",
+  "invite-has-identity": "この招待のホストアカウントには、すでに別の NIHO アカウントが結び付いています。結び付けた NIHO アカウントでログインしてください。",
+};
+
+/** The invitation's reasons (Epic #591, #596): what to press next (nothing for a link that cannot be used any more). */
+const INVITE_RETRY: Partial<Record<LoginErrorReason, { href: string; label: string }>> = {
+  "invite-in-use": { href: withQuery(HOST_LOGIN_PATH, { invite: "1" }), label: "別の NIHO アカウントでやり直す" },
+  "invite-used": { href: HOST_LOGIN_PATH, label: "NIHO アカウントでログイン" },
+  "invite-has-identity": { href: HOST_LOGIN_PATH, label: "NIHO アカウントでログイン" },
 };
 
 /** NIHO's public support address (the help page uses it too). No account or NIHO user ID is put in the link. */
@@ -33,6 +46,19 @@ export default async function HostLoginErrorPage({ searchParams }: { searchParam
   const loginHref = invitationId ? hostInvitationLoginPath(invitationId) : preparationCaseId ? hostPreparationLoginPath(preparationCaseId) : HOST_LOGIN_PATH;
   // An emailed link that did not open (the migration fallback) is asked for again on the email form, not at NIHO.
   const retryHref = known === "link" && config.hostNihoLoginEnabled ? withQuery(HOST_EMAIL_SIGN_IN_PATH, { method: "email" }) : loginHref;
+  if (known.startsWith("invite-")) {
+    const retry = INVITE_RETRY[known];
+    return (
+      <main id="main" className="mx-auto w-full max-w-xl px-4 py-16">
+        <h1 className={`${HOST_HEADING} text-2xl`}>招待を使えませんでした</h1>
+        <p role="alert" className="mt-3 text-ink-soft">{MESSAGES[known]}</p>
+        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
+          {retry ? <HostLoginLink href={retry.href} className={hostButtonClass("primary")}>{retry.label}</HostLoginLink> : null}
+          <a href={SUPPORT_HREF} className="text-[0.875rem] font-bold text-ink-soft underline underline-offset-4 hover:text-ink">運営に問い合わせる</a>
+        </div>
+      </main>
+    );
+  }
   if (known === "unregistered" && config.hostNihoLoginEnabled) {
     // The sign-in worked at NIHO, but no host account is bound to that NIHO account (Epic #591). Nothing of Experience's
     // data was touched. The usual cause is a different method than the one the host was registered with (NIHO does not

@@ -247,6 +247,8 @@ export type {
 } from "./booking-access.ts";
 export { HOST_ACCOUNT_LIMITS, HostAccounts, isHostAccountId, normalizeHostEmail } from "./host-accounts.ts";
 export { HostAccountIdentities } from "./host-account-identities.ts";
+export { HOST_INVITATION_LIMITS, HostInvitations } from "./host-invitations.ts";
+export type { AcceptHostInvitationResult, CreateHostInvitationResult, HostInvitationLinkIssue, OpenHostInvitationResult } from "./host-invitations.ts";
 export type {
   LinkNihoIdentityResult,
   NihoIdentityLinkProof,

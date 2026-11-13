@@ -13,7 +13,14 @@
 // on a version published under the NIHO seller, nothing moves. The account must be the one already registered; it is not
 // checked with Stripe here (it does not change, and every publication checks it), so no Stripe key is needed for this.
 //
-//   node scripts/experience/provision-host-account.mjs [plan|register] <input.json> [--yes]
+//   node scripts/experience/provision-host-account.mjs [plan|register|invite] <input.json> [--yes]
+//
+// Signing in is with the host's NIHO account (Epic #591): a registered host account is invited to bind it. `invite` (input
+// `{ "email": "..." }`, an account that is already registered) and `register` with `"invite": true` create a one-time
+// invitation; the mail job emails the link to the registered address (the link is never printed: no one here holds it). It
+// works for 7 days, once, in the first browser that opens it; the host signs in at NIHO and the NIHO account that comes back
+// is bound to this host account (the same `hst_`, so nothing it owns changes). Inviting again replaces an open invitation.
+// This is also how an existing OWNER (registered for the emailed link) and a COHOST move to NIHO sign-in.
 //
 // input.json (kept outside git; see host-account.example.json):
 //   { "email": "...", "providerId": "...",
@@ -30,11 +37,11 @@
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { retrieveConnectedAccount } from "@niho-experience/experience-payments";
-import { HostAccounts, normalizeHostEmail, StoreError } from "@niho-experience/experience-store";
+import { HostAccounts, HostInvitations, normalizeHostEmail, StoreError } from "@niho-experience/experience-store";
 import { SiteSaleRegistration } from "@niho-experience/experience-store/site-sale-registration";
 
 const EXIT = { ok: 0, failed: 1, unexpected: 2 };
-const USAGE = "Usage: node scripts/experience/provision-host-account.mjs [plan|register] <input.json> [--yes]";
+const USAGE = "Usage: node scripts/experience/provision-host-account.mjs [plan|register|invite] <input.json> [--yes]";
 const ROLE = /^[a-z_][a-z0-9_]{0,62}$/;
 const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const CONNECT_ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,250}$/;
@@ -54,12 +61,13 @@ function parseArguments(argv) {
   const rest = argv.filter((value) => value !== "--yes");
   if (rest.some((value) => value.startsWith("-"))) return { problems: ["unknown option (only --yes is accepted)"] };
   const [first, second, ...extra] = rest;
-  const command = first === "register" || first === "plan" ? first : "plan";
-  const inputPath = first === "register" || first === "plan" ? second : first;
-  const leftover = first === "register" || first === "plan" ? extra : [second, ...extra].filter((value) => value !== undefined);
+  const named = first === "register" || first === "plan" || first === "invite";
+  const command = named ? first : "plan";
+  const inputPath = named ? second : first;
+  const leftover = named ? extra : [second, ...extra].filter((value) => value !== undefined);
   if (!inputPath) return { problems: ["the input file path is missing"] };
   if (leftover.length > 0) return { problems: ["unknown command or extra arguments"] };
-  if (yes && command !== "register") return { problems: ["--yes is only for register"] };
+  if (yes && command !== "register" && command !== "invite") return { problems: ["--yes is only for register and invite"] };
   return { command, inputPath, yes };
 }
 
@@ -94,17 +102,28 @@ function parseSeller(raw, problems) {
   return { providerDisplayName: raw.providerDisplayName, sellerDisplayName: raw.sellerDisplayName, stripeConnectAccountRef: raw.stripeConnectAccountRef };
 }
 
-/** `email`, `providerId` and optionally `seller`. The address is checked by the store's rule and never echoed. */
+/** The invite command's input: the registered host account's address, nothing else. Checked by the store's rule, never echoed. */
+function parseInviteInput(raw) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { problems: ["input must be an object"] };
+  const problems = Object.keys(raw).filter((key) => key !== "email").map((key) => `input.${key} is not a known field`);
+  let emailKey = "";
+  try { emailKey = normalizeHostEmail(raw.email); }
+  catch { problems.push("input.email must be one email address of 3-254 characters"); }
+  return problems.length > 0 ? { problems } : { email: raw.email, emailKey };
+}
+
+/** `email`, `providerId` and optionally `seller` and `invite`. The address is checked by the store's rule and never echoed. */
 function parseInput(raw) {
   const problems = [];
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { problems: ["input must be an object"] };
-  for (const key of Object.keys(raw)) if (key !== "email" && key !== "providerId" && key !== "seller") problems.push(`input.${key} is not a known field`);
+  for (const key of Object.keys(raw)) if (key !== "email" && key !== "providerId" && key !== "seller" && key !== "invite") problems.push(`input.${key} is not a known field`);
+  if (raw.invite !== undefined && typeof raw.invite !== "boolean") problems.push("input.invite must be true or false");
   let emailKey = "";
   try { emailKey = normalizeHostEmail(raw.email); }
   catch { problems.push("input.email must be one email address of 3-254 characters"); }
   if (typeof raw.providerId !== "string" || !PROVIDER_ID.test(raw.providerId)) problems.push("input.providerId must be an Experience provider ID");
   const seller = parseSeller(raw.seller, problems);
-  return problems.length > 0 ? { problems } : { email: raw.email, emailKey, providerId: raw.providerId, seller };
+  return problems.length > 0 ? { problems } : { email: raw.email, emailKey, providerId: raw.providerId, seller, invite: raw.invite === true };
 }
 
 function sellerOutcome(state, seller) {
@@ -139,6 +158,48 @@ async function currentState(pool, input) {
 function membershipOutcome(state) {
   if (!state.membership) return "grant OWNER";
   return state.membership.role === "OWNER" && state.membership.active ? "already OWNER" : "conflict: an existing membership is changed by hand only";
+}
+
+/** Creates the invitation of a host account; the mail job sends the link. Prints no token (nobody here holds it). */
+async function invite(pool, hostAccountId) {
+  const result = await new HostInvitations(pool).createInvitation({ hostAccountId, nowUtc: new Date().toISOString() });
+  if (result.kind === "created") {
+    out(`Invitation created for ${hostAccountId}${result.superseded ? " (it replaced an open one, whose link no longer works)" : ""}: the mail job emails the link to the registered address within a minute. It works until ${result.expiresAtUtc}, once, in the first browser that opens it.`);
+    return EXIT.ok;
+  }
+  out(result.kind === "already-linked"
+    ? `Refused: ${hostAccountId} already has a NIHO account bound (unbind it first to bind another). Nothing was written.`
+    : `Refused: ${hostAccountId} is not an ACTIVE host account. Nothing was written.`);
+  return EXIT.failed;
+}
+
+/** The invite command: for a host account that is already registered. `plan` reads only. */
+async function runInvite(command, input, yes, pool) {
+  try {
+    const account = (await pool.query("SELECT id, status FROM host_accounts WHERE email_key = $1", [input.emailKey])).rows[0];
+    if (!account) {
+      out("Host account: not registered (register it first). Nothing was written.");
+      return EXIT.failed;
+    }
+    const bound = (await pool.query("SELECT 1 FROM host_account_identities WHERE host_account_id = $1 AND provider = 'NIHO' AND unlinked_at IS NULL", [account.id])).rowCount > 0;
+    const open = (await pool.query("SELECT 1 FROM host_account_invitations WHERE host_account_id = $1 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now()", [account.id])).rowCount > 0;
+    out(`Host account: ${account.id} (${account.status})`);
+    out(`NIHO account: ${bound ? "bound (no invitation needed; unbind it first to bind another)" : "not bound"}`);
+    out(`Open invitation: ${open ? "yes (a new one replaces it)" : "none"}`);
+    if (command === "plan") return EXIT.ok;
+    if (!yes) {
+      out("Nothing was written. Run invite again with --yes to write.");
+      return EXIT.failed;
+    }
+    return await invite(pool, String(account.id));
+  } catch (error) {
+    if (error instanceof StoreError) {
+      out(`Refused: ${error.name}: ${error.message}`);
+      return EXIT.failed;
+    }
+    out("Unexpected failure. No credentials, addresses, or driver details were printed.");
+    return EXIT.unexpected;
+  }
 }
 
 async function run(command, input, yes, pool, stripeKey) {
@@ -186,8 +247,8 @@ async function run(command, input, yes, pool, stripeKey) {
           providerId: input.providerId, stripeConnectAccountRef: input.seller.stripeConnectAccountRef, ownerHostAccountId: provisioned.hostAccountId, nowUtc,
         });
         out(`Registered: host account=${provisioned.hostAccountId} (${provisioned.created ? "created" : "existing"}), seller moved from NIHO=${moved.outcome}, products following the new seller reference=${moved.productsUpdated}, OWNER=${moved.owner}.`);
-        out("Next: the OWNER signs in at /host with an emailed link, consents to the payout account in 設定 › 受取口座, then publishes.");
-        return EXIT.ok;
+        out("Next: the OWNER signs in at /host, consents to the payout account in 設定 › 受取口座, then publishes.");
+        return input.invite ? await invite(pool, provisioned.hostAccountId) : EXIT.ok;
       } else if (sellerPlan !== "unchanged") {
         if (!stripeKey) {
           out("Refused: EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY is not set (the Stripe account is verified first). Nothing was written.");
@@ -209,8 +270,9 @@ async function run(command, input, yes, pool, stripeKey) {
     const granted = await accounts.grantProviderOwner({ providerId: input.providerId, hostAccountId: provisioned.hostAccountId, nowUtc });
     out(`Registered: host account=${provisioned.hostAccountId} (${provisioned.created ? "created" : "existing"}), OWNER=${granted.kind}.`);
     if (granted.kind !== "granted" && granted.kind !== "already-owner") return EXIT.failed;
-    out("The host signs in at /host with a link sent to the address (EXPERIENCE_HOST_ACCOUNTS_ENABLED=true).");
     if (input.seller) out("Next: the OWNER signs in, consents to the payout account in 設定 › 受取口座, then publishes.");
+    if (input.invite) return await invite(pool, provisioned.hostAccountId);
+    out("The host signs in at /host with their NIHO account once it is bound (add \"invite\": true, or run invite, to send the invitation); an emailed link is the fallback (EXPERIENCE_HOST_ACCOUNTS_ENABLED=true).");
     return EXIT.ok;
   } catch (error) {
     if (error instanceof StoreError) {
@@ -231,7 +293,8 @@ async function main() {
 
   let input;
   try {
-    input = parseInput(JSON.parse(await readFile(args.inputPath, "utf8")));
+    const raw = JSON.parse(await readFile(args.inputPath, "utf8"));
+    input = args.command === "invite" ? parseInviteInput(raw) : parseInput(raw);
   } catch (error) {
     if (error instanceof SyntaxError) return refuse(["the input file is not JSON"]);
     return refuse(["the input file cannot be read"]);
@@ -251,7 +314,7 @@ async function main() {
       const current = await pool.query("SELECT current_user AS name");
       if (current.rows[0]?.name !== role) return refuse(["EXPERIENCE_DATABASE_ROLE did not apply (remove `options` from EXPERIENCE_DATABASE_URL)"]);
     }
-    return await run(args.command, input, args.yes, pool, stripeKey);
+    return args.command === "invite" ? await runInvite(args.command, input, args.yes, pool) : await run(args.command, input, args.yes, pool, stripeKey);
   } finally {
     await pool.end().catch(() => {});
   }

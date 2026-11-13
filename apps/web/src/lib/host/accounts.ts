@@ -9,6 +9,9 @@ import {
   ACCOUNT_SESSION_COOKIE,
   ACCOUNT_SESSION_COOKIE_PATH,
   hostCookieOptions,
+  INVITE_BINDING_COOKIE,
+  INVITE_BINDING_COOKIE_PATH,
+  INVITE_BINDING_MAX_AGE_SECONDS,
   LINK_BINDING_COOKIE,
   LINK_BINDING_COOKIE_PATH,
   LINK_BINDING_MAX_AGE_SECONDS,
@@ -146,6 +149,15 @@ export function setLinkBindingCookie(response: NextResponse, value: string) {
 
 export function clearLinkBindingCookie(response: NextResponse) {
   response.cookies.set(LINK_BINDING_COOKIE, "", hostCookieOptions(LINK_BINDING_COOKIE_PATH, 0));
+}
+
+/** The invitation link's cookie: the binding value of the browser that opened the link, on /host/auth only, for the invitation's days. */
+export function setInviteBindingCookie(response: NextResponse, value: string) {
+  response.cookies.set(INVITE_BINDING_COOKIE, value, hostCookieOptions(INVITE_BINDING_COOKIE_PATH, INVITE_BINDING_MAX_AGE_SECONDS));
+}
+
+export function clearInviteBindingCookie(response: NextResponse) {
+  response.cookies.set(INVITE_BINDING_COOKIE, "", hostCookieOptions(INVITE_BINDING_COOKIE_PATH, 0));
 }
 
 /** Where the sign-in returns (an allowlisted path only), beside the link cookie for the link's 15 minutes. */
