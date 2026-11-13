@@ -176,13 +176,12 @@ const terms: Action = {
 
 const publish: Action = {
   tier: "publish",
-  summary: "Publishes the draft as it is (--provider, --product, --seller-confirmation VERBAL|WRITTEN, --photo-rights-confirmed). The server refuses while a blocker remains (see `product show`). Only with the seller's confirmation and the photos' rights confirmed by a person.",
+  summary: "Publishes the draft as it is (--provider, --product, --seller-confirmation VERBAL|WRITTEN). The server refuses while a blocker remains (see `product show`). Photos are only ever ones whose rights are cleared (the owner's rule), so the photo rights confirmation is sent as true.",
   async run(context) {
     const providerId = need(context, "provider");
     const productId = need(context, "product");
     const method = context.args.flags["seller-confirmation"];
     if (method !== "VERBAL" && method !== "WRITTEN") throw new OpsError("usage", "--seller-confirmation VERBAL|WRITTEN is required (how the seller confirmed).", EXIT.usage);
-    if (context.args.flags["photo-rights-confirmed"] !== true) throw new OpsError("usage", "--photo-rights-confirmed is required: a person confirmed the right to use every photo.", EXIT.usage);
     const listed = bodyOf(await context.api.get(`${ROOT}/${enc(providerId)}/products`), "product list");
     const consentVersion = typeof listed.publicationConsentVersion === "string" ? listed.publicationConsentVersion : null;
     if (!consentVersion) throw new OpsError("unexpected_response", "The publication consent version was not returned.");
@@ -258,7 +257,7 @@ const b64url = (text: string) => Buffer.from(text, "utf8").toString("base64url")
 
 const photoAdd: Action = {
   tier: "edit",
-  summary: "Uploads a photo to the draft's gallery (--provider, --product, --file image.jpg|png, --alt <English alt text>, --alt-ja <日本語の説明>, --photographer <who took it>, --permission <how use was permitted>, --rights-confirmed; --credit <public credit> optional; --again to upload the same file once more). A person must have confirmed the right to use it: the photographer and permission are printed in the result so they can be recorded in the issue or PR.",
+  summary: "Uploads a photo to the draft's gallery (--provider, --product, --file image.jpg|png, --alt <English alt text>, --alt-ja <日本語の説明>; --credit <public credit> optional; --again to upload the same file once more). Only photos whose rights are already cleared (the owner's rule, 2026-11-14): the upload sends the rights confirmation the server asks for, so no input is needed. The file's sha256 is printed.",
   async run(context) {
     const providerId = need(context, "provider");
     const productId = need(context, "product");
@@ -274,15 +273,12 @@ const photoAdd: Action = {
     };
     const alt = text("alt");
     const altJa = text("alt-ja");
-    const photographer = text("photographer");
-    const permission = text("permission");
-    if (flags["rights-confirmed"] !== true) throw new OpsError("usage", "--rights-confirmed is required: a person confirmed the right to use this photo.", EXIT.usage);
     const credit = typeof flags.credit === "string" ? flags.credit : null;
     if (credit !== null && (credit.trim() === "" || credit.length > 300)) throw new OpsError("usage", "--credit must be 1-300 characters.", EXIT.usage);
     const bytes = context.readBytes(file);
     if (bytes.byteLength === 0 || bytes.byteLength > 10 * 1024 * 1024) throw new OpsError("invalid_file", "The photo must be 1 byte to 10 MB.");
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const evidence = { sha256, photographer, permission, publicCredit: credit };
+    const evidence = { sha256, publicCredit: credit };
     if (!context.apply) return { status: "dry_run", photo: { bytes: bytes.byteLength, contentType: type, alt, altJa }, evidence };
     const headers: Record<string, string> = {
       "x-experience-photo-rights-confirmed": "true", "x-experience-media-placement": "GALLERY",

@@ -55,6 +55,7 @@ describe("api", () => {
   it("calls /admin/api only, refuses an expired token, and never lets the token into an error", async () => {
     const api = make((async () => new Response("{}")) as never);
     await expect(api.get("/admin/bookings")).rejects.toMatchObject({ code: "usage" });
+    await expect(api.get("/host/api/products")).rejects.toMatchObject({ code: "usage" });
     await expect(make((async () => new Response("{}")) as never, jwt(Math.floor(NOW / 1000) - 10)).get("/admin/api/people")).rejects.toMatchObject({ code: "token_expired", exit: EXIT.auth });
     await expect(make((async () => { throw new Error(`boom ${GOOD}`); }) as never).get("/admin/api/people")).rejects.toSatisfy((error: OpsError) => !error.message.includes(GOOD) && error.code === "unreachable");
   });

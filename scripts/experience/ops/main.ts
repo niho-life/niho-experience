@@ -6,6 +6,7 @@ import { peopleTarget } from "./people.ts";
 import { productTarget } from "./product.ts";
 import { inquiryTarget } from "./inquiry.ts";
 import { assignmentTarget } from "./assignment.ts";
+import { guideTarget } from "./guide.ts";
 import { providerTarget } from "./provider.ts";
 
 /**
@@ -20,6 +21,7 @@ export const TARGETS: Readonly<Record<string, Target>> = Object.freeze({
   product: productTarget,
   inquiry: inquiryTarget,
   assignment: assignmentTarget,
+  guide: guideTarget,
 });
 
 export interface Runtime {

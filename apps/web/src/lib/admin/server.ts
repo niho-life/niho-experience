@@ -34,7 +34,7 @@ import {
   type AdminHttpSession,
 } from "./http-session";
 import type { AdminActor } from "./actor";
-import { OPERATOR_ASSERTION_HEADER, openOperatorAssertion } from "./operator-cli";
+import { OPERATOR_ASSERTION_HEADER, openOperatorAssertion, operatorMutationAllowed } from "./operator-cli";
 import { ADMIN_GOOGLE_SESSION_COOKIE, adminEmailAllowed, clearAdminGoogleSessionCookie, loadExperienceAdminSession, type ExperienceAdminSessionLoad } from "./google-login";
 
 export const isAdminPreview = () => config.apiMode === "mock" && config.adminSupportConsoleEnabled;
@@ -247,13 +247,9 @@ export function adminHttpRefreshDue(session: AdminHttpSession, now: number): boo
 }
 
 export function adminMutationAllowed(request: Request): boolean {
-  // 運営の CLI (#576): a change is allowed when the proxy sealed an assertion for exactly this method and path, with the
-  // caller's operation ID (it recorded the request first). There is no cookie to forge, so no Origin check.
-  const sealed = request.headers.get(OPERATOR_ASSERTION_HEADER);
-  if (sealed !== null) {
-    const assertion = config.operatorCliEnabled ? openOperatorAssertion(sealed, Date.now()) : null;
-    return assertion !== null && assertion.operationId !== null && assertion.method === request.method && assertion.path === new URL(request.url).pathname;
-  }
+  // 運営の CLI (#576): a change is allowed when the proxy sealed an assertion for exactly this method and path.
+  const operator = operatorMutationAllowed(request);
+  if (operator !== null) return operator;
   return mutationFromSameOrigin(request.method, request.headers, isAdminHttp() ? config.adminOrigin : new URL(config.siteUrl).origin);
 }
 

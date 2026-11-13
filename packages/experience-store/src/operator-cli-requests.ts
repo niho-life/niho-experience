@@ -17,7 +17,7 @@ export const OPERATOR_WRITE_METHODS = ["POST", "PUT", "PATCH", "DELETE"] as cons
 export type OperatorWriteMethod = (typeof OPERATOR_WRITE_METHODS)[number];
 
 const OPERATION_ID = /^[A-Za-z0-9._:-]{8,64}$/;
-const PATH = /^\/admin\/api\/[\x21-\x7E]{1,500}$/;
+const PATH = /^\/(?:admin|write)\/api\/[\x21-\x7E]{1,500}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export interface OperatorCliRequestInput {
@@ -25,7 +25,7 @@ export interface OperatorCliRequestInput {
   readonly operationId: string;
   readonly aiKind: OperatorAiKind;
   readonly method: OperatorWriteMethod;
-  /** The request path without its query (`/admin/api/...`). */
+  /** The request path without its query (`/admin/api/...`, or `/write/api/...` for articles). */
   readonly path: string;
   /** Lower-case hex SHA-256 of the request body. */
   readonly bodySha256: string;
@@ -48,7 +48,7 @@ export class OperatorCliRequests {
     if (typeof input.operationId !== "string" || !OPERATION_ID.test(input.operationId)) throw new StoreValidationError("operationId must be 8-64 letters, digits or ._:-.");
     if (!(OPERATOR_AI_KINDS as readonly unknown[]).includes(input.aiKind)) throw new StoreValidationError("aiKind is not a known AI kind.");
     if (!(OPERATOR_WRITE_METHODS as readonly unknown[]).includes(input.method)) throw new StoreValidationError("method must be a write method.");
-    if (typeof input.path !== "string" || !PATH.test(input.path)) throw new StoreValidationError("path must be an /admin/api path without a query.");
+    if (typeof input.path !== "string" || !PATH.test(input.path)) throw new StoreValidationError("path must be an /admin/api or /write/api path without a query.");
     if (typeof input.bodySha256 !== "string" || !SHA256.test(input.bodySha256)) throw new StoreValidationError("bodySha256 must be lower-case hex SHA-256.");
     assertCanonicalInstant(input.nowUtc, "nowUtc");
     const requestRef = randomUUID();

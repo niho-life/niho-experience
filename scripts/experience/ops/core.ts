@@ -41,8 +41,8 @@ export interface Args {
   readonly flags: Readonly<Record<string, string | true>>;
 }
 
-const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified", "listed", "unlisted", "photo-rights-confirmed", "consent-confirmed", "rights-confirmed", "again"]);
-const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "status", "provider", "product", "seller-confirmation", "occurrence", "subject", "assignee", "due", "note", "kind", "name", "from", "to", "alt", "alt-ja", "photographer", "permission", "credit", "reason"]);
+const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified", "listed", "unlisted", "photo-rights-confirmed", "consent-confirmed", "rights-confirmed", "again", "cover"]);
+const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "status", "provider", "product", "seller-confirmation", "visibility", "id", "occurrence", "subject", "assignee", "due", "note", "kind", "name", "from", "to", "alt", "alt-ja", "photographer", "permission", "credit", "reason"]);
 
 /** `--name value`, `--name=value` and the boolean flags `--dry-run`, `--yes`; everything else is positional. */
 export function parseArgs(argv: readonly string[], valueFlags: ReadonlySet<string> = VALUE_FLAGS): Args {
@@ -171,7 +171,7 @@ export function createApi(options: ApiOptions): Api {
     return `Bearer ${token}`;
   };
   async function call(method: string, path: string, body: unknown, operationId: string | null, raw?: RawBody): Promise<ApiResponse> {
-    if (!path.startsWith("/admin/api/")) throw new OpsError("usage", "Only /admin/api paths are called.", EXIT.usage);
+    if (!path.startsWith("/admin/api/") && !path.startsWith("/write/api/")) throw new OpsError("usage", "Only /admin/api and /write/api paths are called.", EXIT.usage);
     const headers: Record<string, string> = { authorization: authorization(), "x-niho-operator-ai": options.aiKind, accept: "application/json", "user-agent": "niho-ops-cli/1" };
     if (operationId) headers["x-niho-operation-id"] = operationId;
     if (raw) Object.assign(headers, raw.headers, { "content-type": raw.contentType });

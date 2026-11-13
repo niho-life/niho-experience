@@ -36,7 +36,8 @@ describe("operator CLI requests", { skip: !databaseUrl }, () => {
       assert.equal((await requests.record({ ...base, bodySha256: createHash("sha256").update("other").digest("hex") })).status, "duplicate", "the operation ID decides, not the body");
       assert.equal((await requests.record({ ...base, adminActorId: OTHER })).status, "recorded", "another admin's operation IDs are their own");
       assert.equal((await requests.record({ ...base, operationId: "op-20261114-0002", aiKind: "codex" })).status, "recorded");
-      assert.equal(Number((await db.pool.query("SELECT count(*) AS n FROM operator_cli_requests")).rows[0]!.n), 3);
+      assert.equal((await requests.record({ ...base, operationId: "op-20261114-0003", method: "PATCH", path: "/write/api/guides/abc" })).status, "recorded", "articles are written through /write/api");
+      assert.equal(Number((await db.pool.query("SELECT count(*) AS n FROM operator_cli_requests")).rows[0]!.n), 4);
     } finally {
       await db.dispose();
     }
@@ -48,7 +49,7 @@ describe("operator CLI requests", { skip: !databaseUrl }, () => {
       const requests = new OperatorCliRequests(db.pool);
       const bad: Array<Partial<OperatorCliRequestInput>> = [
         { adminActorId: "adm_x" }, { operationId: "short" }, { operationId: "has space in it" }, { aiKind: "gpt" as never },
-        { method: "GET" as never }, { path: "/admin/bookings" }, { path: "/admin/api/x?y=1 z" }, { bodySha256: "ABC" }, { nowUtc: "2026-11-14" },
+        { method: "GET" as never }, { path: "/admin/bookings" }, { path: "/write/guides" }, { path: "/admin/api/x?y=1 z" }, { bodySha256: "ABC" }, { nowUtc: "2026-11-14" },
       ];
       for (const patch of bad) await assert.rejects(() => requests.record({ ...base, ...patch }), StoreValidationError, JSON.stringify(patch));
       assert.equal(Number((await db.pool.query("SELECT count(*) AS n FROM operator_cli_requests")).rows[0]!.n), 0);
