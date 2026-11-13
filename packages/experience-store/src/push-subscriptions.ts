@@ -178,11 +178,11 @@ export class HostPushSubscriptions {
 
   /**
    * The devices of a message addressed to a person (#589, #608): the provider's active OWNERs and that one member (while still an
-   * active OWNER or COHOST), seen since `seenAfter`. Other co-hosts, EDITORs and VIEWERs get nothing. A device appears once.
+   * active OWNER or COHOST; null, when the person's listing is gone: the OWNERs only), seen since `seenAfter`. Other co-hosts, EDITORs and VIEWERs get nothing. A device appears once.
    */
-  async personRecipients(providerId: string, memberId: string, seenAfter: Date): Promise<HostPushRecipient[]> {
+  async personRecipients(providerId: string, memberId: string | null, seenAfter: Date): Promise<HostPushRecipient[]> {
     assertStoreIdentifier(providerId, "providerId");
-    assertStoreIdentifier(memberId, "memberId");
+    if (memberId !== null) assertStoreIdentifier(memberId, "memberId");
     if (Number.isNaN(seenAfter.getTime())) throw new StoreValidationError("seenAfter must be a valid time.");
     const result = await this.#pool.query<DbRow>(
       `SELECT s.id::text AS id, s.endpoint, s.p256dh, s.auth
@@ -190,7 +190,7 @@ export class HostPushSubscriptions {
         WHERE s.last_seen_at >= $3
           AND EXISTS (SELECT 1 FROM provider_memberships m
                        WHERE m.provider_id = $1 AND m.niho_user_id = s.niho_user_id AND m.active = true
-                         AND (m.role = 'OWNER' OR (m.niho_user_id = $2 AND m.role = 'COHOST')))
+                         AND (m.role = 'OWNER' OR ($2::text IS NOT NULL AND m.niho_user_id = $2 AND m.role = 'COHOST')))
           AND ${ACTIVE_HOST_ACCOUNT}
         ORDER BY s.id`,
       [providerId, memberId, seenAfter.toISOString()],

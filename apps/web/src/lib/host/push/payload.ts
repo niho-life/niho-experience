@@ -56,9 +56,9 @@ export interface HostPushEvent {
   assignment?: { occurrenceId: string };
   /**
    * A message addressed to a person of the provider (#608): their name sets the title ("◯◯さんあてにメッセージが届きました") and only
-   * the provider's OWNERs and that member (`memberId`) get it.
+   * the provider's OWNERs and that member (`memberId`; null once their listing is gone: the OWNERs only) get it.
    */
-  person?: { name: string; memberId: string };
+  person?: { name: string; memberId: string | null };
   /** Only the provider's OWNER gets it (an operations suspension: only the OWNER can resume the listing). */
   ownerOnly?: true;
   /**

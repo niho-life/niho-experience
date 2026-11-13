@@ -250,6 +250,10 @@ describe("PostgreSQL messages to a person (#589)", { skip: databaseUrl === undef
       await pool.query("DELETE FROM outbox_messages WHERE topic LIKE 'host.%'");
       await questions.submitGuestReply((again as ClaimedQuestionReply).replyToken, { message: "ありがとうございます。", clientRequestKey: randomUUID() });
       assert.deepEqual(await recipients(), ["owner-takuya"]);
+      // The notification still says whom it was for, and carries no account: the push goes to the OWNERs only.
+      const push = (await pool.query("SELECT payload FROM outbox_messages WHERE topic = 'host.notify.guest_question'")).rows[0].payload;
+      assert.equal(push.personName, "スタッフ 花");
+      assert.equal("toMemberId" in push, false);
     } finally {
       await db.dispose();
     }

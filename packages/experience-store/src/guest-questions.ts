@@ -408,7 +408,7 @@ async function enqueue(client: PoolClient, providerId: string, threadId: string,
  */
 async function enqueueGuestMessage(
   client: PoolClient, providerId: string, threadId: string, messageId: string, experienceTitle: string,
-  person?: { readonly name: string; readonly memberId: string },
+  person?: { readonly name: string; readonly memberId: string | null },
 ): Promise<void> {
   await enqueue(client, providerId, threadId, messageId, "guest_question.received");
   await enqueueGuestQuestionNotification(client, { providerId, threadId, messageId, experienceTitle, ...(person === undefined ? {} : { person }) });
@@ -1173,9 +1173,9 @@ export class GuestQuestionRepository {
             WHERE t.provider_id = $1 AND t.id = $2::uuid AND m.provider_id = $1 AND m.id = $3::uuid`,
           [providerId, threadId, created.id],
         );
-        // A message addressed to a person goes to them and the OWNERs; one whose listing is gone (or has no member now) goes to the OWNERs.
+        // A message addressed to a person goes to them and the OWNERs; one whose listing is gone (or has no member now) still names them and goes to the OWNERs only.
         const addressed = thread.rows[0]!;
-        const person = typeof addressed.person_name === "string" && typeof addressed.member_id === "string" ? { name: addressed.person_name, memberId: addressed.member_id } : undefined;
+        const person = typeof addressed.person_name === "string" ? { name: addressed.person_name, memberId: typeof addressed.member_id === "string" ? addressed.member_id : null } : undefined;
         await enqueueGuestMessage(client, providerId, threadId, String(created.id), String(addressed.public_title ?? PERSON_THREAD_LABEL), person);
         return RECEIVED;
       });

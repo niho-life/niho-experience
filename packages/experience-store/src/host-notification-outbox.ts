@@ -53,6 +53,7 @@ export interface GuestQuestionPayload {
   readonly experienceTitle: string;
   /** A message addressed to a person of the provider (#589, #608): their name, and their account (it also gets the notification). */
   readonly personName?: string;
+  /** Their account, while they still have one: it gets the notification next to the OWNERs. Without it (the listing is gone) only the OWNERs do. */
   readonly toMemberId?: string;
 }
 
@@ -250,11 +251,11 @@ export function parseGuestQuestionPayload(value: unknown): GuestQuestionPayload 
   if (!QUESTION_KEYS.every((key) => keys.includes(key)) || !keys.every((key) => QUESTION_KEYS.includes(key) || QUESTION_PERSON_KEYS.includes(key))) return null;
   const { threadId, messageId, experienceTitle, personName, toMemberId } = value;
   if (!publicId(threadId) || !publicId(messageId) || !title(experienceTitle)) return null;
-  // The person's name and account come together or not at all.
-  if ((personName === undefined) !== (toMemberId === undefined)) return null;
+  // An account without a name is refused; a name alone (the listing is gone) addresses the OWNERs only.
+  if (toMemberId !== undefined && personName === undefined) return null;
   if (personName !== undefined && (typeof personName !== "string" || personName.trim().length === 0 || personName.length > PERSON_NAME_MAX)) return null;
   if (toMemberId !== undefined && (typeof toMemberId !== "string" || toMemberId.length < 1 || toMemberId.length > 256)) return null;
-  return { v: 1, threadId, messageId, experienceTitle, ...(personName === undefined || toMemberId === undefined ? {} : { personName: personName as string, toMemberId: toMemberId as string }) };
+  return { v: 1, threadId, messageId, experienceTitle, ...(personName === undefined ? {} : { personName: personName as string }), ...(toMemberId === undefined ? {} : { toMemberId: toMemberId as string }) };
 }
 
 /** The booking message's payload, or null for anything else. */
@@ -445,7 +446,7 @@ export async function enqueueGuestQuestionNotification(
   input: {
     readonly providerId: string; readonly threadId: string; readonly messageId: string; readonly experienceTitle: string;
     /** A message addressed to a person (#589, #608): the notification goes to this member and the provider's OWNERs, and names them. */
-    readonly person?: { readonly name: string; readonly memberId: string };
+    readonly person?: { readonly name: string; readonly memberId: string | null };
   },
 ): Promise<number> {
   assertStoreIdentifier(input.providerId, "providerId");
@@ -454,12 +455,12 @@ export async function enqueueGuestQuestionNotification(
   const experienceTitle = typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "";
   if (!title(experienceTitle)) throw new StoreValidationError("experienceTitle must contain text.");
   if (input.person !== undefined) {
-    assertStoreIdentifier(input.person.memberId, "person.memberId");
+    if (input.person.memberId !== null) assertStoreIdentifier(input.person.memberId, "person.memberId");
     if (typeof input.person.name !== "string" || input.person.name.trim().length === 0 || input.person.name.length > PERSON_NAME_MAX) throw new StoreValidationError("person.name must be 1-40 characters.");
   }
   const payload: GuestQuestionPayload = {
     v: 1, threadId: input.threadId, messageId: input.messageId, experienceTitle,
-    ...(input.person === undefined ? {} : { personName: input.person.name, toMemberId: input.person.memberId }),
+    ...(input.person === undefined ? {} : { personName: input.person.name, ...(input.person.memberId === null ? {} : { toMemberId: input.person.memberId }) }),
   };
   const added = await insertRow(client, {
     providerId: input.providerId,
@@ -472,7 +473,7 @@ export async function enqueueGuestQuestionNotification(
   });
   await enqueueHostBookingMails(client, {
     providerId: input.providerId, topic: HOST_MAIL_TOPICS.guestQuestion, aggregateType: QUESTION_AGGREGATE_TYPE, aggregateId: input.threadId,
-    deduplicationKey: `guest-question:${input.messageId}`, payload, ...(input.person === undefined ? {} : { alsoTo: input.person.memberId }),
+    deduplicationKey: `guest-question:${input.messageId}`, payload, ...(input.person?.memberId == null ? {} : { alsoTo: input.person.memberId }),
   });
   return added;
 }

@@ -219,6 +219,10 @@ describe("notifyHostDevices", () => {
     expect(run.subscriptions.personRecipients).toHaveBeenCalledWith("sample-provider-kitchen", "hst_0123456789abcdef0123456789abcdef", new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
     expect(run.subscriptions.recipients).not.toHaveBeenCalled();
     expect(run.subscriptions.ownerRecipients).not.toHaveBeenCalled();
+    // Once the person's listing is gone: the OWNERs only, and still not everyone.
+    await notifyHostDevices({ ...event, question: true, person: { name: "高浜拓也", memberId: null } }, run.deps);
+    expect(run.subscriptions.personRecipients).toHaveBeenLastCalledWith("sample-provider-kitchen", null, new Date(run.deps.now - HOST_PUSH_SEEN_WITHIN_MS));
+    expect(run.subscriptions.recipients).not.toHaveBeenCalled();
   });
 
   it("refuses an event that would leave the app before sending anything", async () => {
