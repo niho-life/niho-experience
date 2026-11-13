@@ -192,6 +192,15 @@ describe("the NIHO round trip of a binding", () => {
     state.authTime = () => new Date().toISOString();
   });
 
+  it("fails closed without NIHO's sign-in time: nothing is bound", async () => {
+    state.authTime = () => undefined as unknown as string;
+    expect(location(await comeBack())).toBe(`${SETTINGS}&niho=unverified`);
+    state.authTime = () => "not a time";
+    expect(location(await comeBack())).toBe(`${SETTINGS}&niho=unverified`);
+    expect(state.identities!.linkNihoIdentity).not.toHaveBeenCalled();
+    state.authTime = () => new Date().toISOString();
+  });
+
   it("tells what the store said, and never a NIHO user ID", async () => {
     const cases: [LinkNihoIdentityResult, string][] = [
       [{ kind: "already-linked" }, "already-linked"],

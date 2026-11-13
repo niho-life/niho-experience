@@ -76,7 +76,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = new URL(String(input));
     calls.push({ url, init });
-    if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: "refresh-invite", connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成", iconImage: null } });
+    if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: "refresh-invite", connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成", iconImage: null }, authTime: new Date().toISOString() });
     if (url.pathname === "/api/experience-host/identity") return json(200, { nihoUserId: NIHO_USER, accountStatus: "ACTIVE" });
     if (init.method === "DELETE") return new Response(null, { status: 204 });
     return json(404, {});
@@ -212,6 +212,21 @@ describe("the NIHO sign-in of an invitation", () => {
     expect([location(response), ...response.headers.getSetCookie()].join("\n")).not.toMatch(new RegExp(`${NIHO_USER}|${ACCESS}|${CONNECTION}`));
   });
 
+  it("fails closed without NIHO's sign-in time: the invitation is not used up and no session opens", async () => {
+    for (const authTime of [undefined, "not a time"]) {
+      state.invitations!.acceptInvitation.mockClear();
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const url = new URL(String(input));
+        calls.push({ url, init });
+        if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: "refresh-invite", connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成", iconImage: null }, authTime });
+        return new Response(null, { status: 204 });
+      }));
+      expect(location(await comeBack()), String(authTime)).toBe("/host/auth/error?reason=invite-unavailable");
+      expect(state.invitations!.acceptInvitation).not.toHaveBeenCalled();
+      expect(state.identities!.startSessionForNihoIdentity).not.toHaveBeenCalled();
+    }
+  });
+
   it("opens the session with the time the person signed in at NIHO (authTime)", async () => {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -249,10 +264,12 @@ describe("the NIHO sign-in of an invitation", () => {
     expect(location(await comeBack(null))).toBe("/host/auth/error?reason=invite-invalid");
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
     state.invitations!.acceptInvitation.mockRejectedValueOnce(new Error(`database said ${NIHO_USER} ${ACCESS}`));
-    expect(location(await comeBack())).toBe("/host/auth/error?reason=unavailable");
+    expect(location(await comeBack())).toBe("/host/auth/error?reason=invite-unavailable");
     expect(errors.mock.calls.flat().join(" ")).not.toMatch(new RegExp(`${NIHO_USER}|${ACCESS}`));
-    // The binding is kept when only the session fails to open.
+    // Used up and bound, but the session did not open: the invitation is gone, so the retry is the ordinary NIHO login.
     state.identities!.startSessionForNihoIdentity.mockResolvedValueOnce({ kind: "not-linked" });
+    expect(location(await comeBack())).toBe("/host/auth/error?reason=unavailable");
+    state.identities!.startSessionForNihoIdentity.mockRejectedValueOnce(new Error("boom"));
     expect(location(await comeBack())).toBe("/host/auth/error?reason=unavailable");
     expect(location(await comeBack(undefined, "&error=access_denied"))).toBe("/host/auth/error?reason=denied");
   });

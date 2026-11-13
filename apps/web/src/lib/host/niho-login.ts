@@ -96,28 +96,34 @@ function nihoRoundTrip(intent: Pick<HostLoginState, "providerId" | "invitationId
 
 /**
  * When the person signed in at NIHO, as the store takes it: NIHO's `authTime`, never later than `now` (clock skew), so that
- * the recent-sign-in rule reads what NIHO says. A NIHO that does not return it yet (niho-coliving/niho-app#20305 not deployed)
- * leaves the time of the return: the NIHO login stays off in production until it is deployed (ADR 0004 §6).
+ * the recent-sign-in rule reads what NIHO says.
  */
-function signedInAt(authTimeUtc: string | null, now: number): string {
-  return nowUtc(authTimeUtc === null ? now : Math.min(now, Date.parse(authTimeUtc)));
+function signedInAt(authTimeMs: number, now: number): string {
+  return nowUtc(Math.min(now, authTimeMs));
 }
 
-type Verified<T> = { ok: true; value: T } | { ok: false; reason: "rejected" | "unavailable" };
+type Verified<T> = { ok: true; value: T } | { ok: false; reason: "rejected" | "unavailable" | "unverified" };
 
 /**
  * The NIHO round trip's proof and nothing else: the code is exchanged, Host v1 `identity` names the NIHO user ID, `run` runs
- * with it and with when the person signed in at NIHO, and the connection ends whatever happened. No token is passed on or kept.
+ * with it and with when the person signed in at NIHO (`authTime`, epoch ms), and the connection ends whatever happened. No
+ * token is passed on or kept.
+ *
+ * Fails closed: an exchange answer without a readable `authTime` (a NIHO without niho-coliving/niho-app#20305, or an answer
+ * that is not NIHO's) runs nothing: no session, no binding, no invitation used up. Without NIHO's sign-in time the
+ * recent-sign-in rule (and a step-up asked for through `max_age`, which the browser can drop from the URL) cannot be judged.
  */
-async function withNihoIdentity<T>(code: string, verifier: string, run: (nihoUserId: string, authTimeUtc: string | null) => Promise<T>): Promise<Verified<T>> {
+async function withNihoIdentity<T>(code: string, verifier: string, run: (nihoUserId: string, authTimeMs: number) => Promise<T>): Promise<Verified<T>> {
   const deps = nihoAuthDeps();
   const exchanged = await exchangeCode(deps, { code, codeVerifier: verifier });
   if (!exchanged.ok) return exchanged;
   const { accessToken, connectionId, authTimeUtc } = exchanged.value;
   try {
+    const authTimeMs = authTimeUtc === null ? Number.NaN : Date.parse(authTimeUtc);
+    if (!Number.isFinite(authTimeMs)) return { ok: false, reason: "unverified" };
     const identity = await lookupNihoIdentity(accessToken);
     if (!identity.ok) return identity;
-    return { ok: true, value: await run(identity.nihoUserId, authTimeUtc) };
+    return { ok: true, value: await run(identity.nihoUserId, authTimeMs) };
   } finally {
     // The connection only proved who the person is: end it now (best effort; NIHO's own expiry is the backstop).
     await deleteConnection(deps, connectionId, accessToken, { reason: null });
@@ -143,12 +149,12 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
   const accounts = hostAccounts();
   if (!identities || !accounts) return failed("unavailable", login);
 
-  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeUtc) => {
+  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeMs) => {
     const now = Date.now();
     try {
       // The session's `authenticated_at` is when the person signed in at NIHO (`authTime`), so the sensitive changes that
       // ask for a recent sign-in read NIHO's time, not the time of this return.
-      return { now, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeUtc, now), nowUtc: nowUtc(now) }) };
+      return { now, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) }) };
     } catch (error) {
       console.error(`[host-auth] NIHO sign-in not opened: ${error instanceof Error ? error.name : "unknown error"}`);
       return null;
@@ -200,19 +206,27 @@ async function completeInvite(request: NextRequest, login: HostLoginState, code:
   const binding = request.cookies.get(INVITE_BINDING_COOKIE)?.value;
   if (!isOpaqueSecret(binding)) return failed("invite-invalid");
 
-  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeUtc) => {
+  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeMs) => {
     const now = Date.now();
+    let accepted;
     try {
-      const accepted = await invitations.acceptInvitation({ browserBindingHash: linkBindingHash(binding), nihoUserId, nowUtc: nowUtc(now) });
-      if (accepted.kind !== "accepted") return { accepted, opened: null, now };
-      return { accepted, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeUtc, now), nowUtc: nowUtc(now) }), now };
+      accepted = await invitations.acceptInvitation({ browserBindingHash: linkBindingHash(binding), nihoUserId, nowUtc: nowUtc(now) });
     } catch (error) {
+      // The transaction rolled back: the invitation is still open.
       console.error(`[host-auth] invitation not accepted: ${error instanceof Error ? error.name : "unknown error"}`);
       return null;
     }
+    if (accepted.kind !== "accepted") return { accepted, opened: null, now };
+    // From here the invitation is used up and the NIHO account is bound: a failure to open the session leaves the binding.
+    try {
+      return { accepted, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) }), now };
+    } catch (error) {
+      console.error(`[host-auth] invitation's session not opened: ${error instanceof Error ? error.name : "unknown error"}`);
+      return { accepted, opened: null, now };
+    }
   });
-  if (!verified.ok) return failed(verified.reason, login);
-  if (verified.value === null) return failed("unavailable", login);
+  // Before the invitation was used up (NIHO failed, the store failed): it is still usable, and the retry goes through it.
+  if (!verified.ok || verified.value === null) return failed("invite-unavailable");
   const { accepted, opened, now } = verified.value;
   switch (accepted.kind) {
     case "invalid": return failed("invite-invalid");
@@ -221,6 +235,7 @@ async function completeInvite(request: NextRequest, login: HostLoginState, code:
     case "host-account-not-active": return failed("suspended");
     case "accepted": break;
   }
+  // Used up and bound, but the session did not open: the invitation is gone, so the retry is the ordinary NIHO login.
   if (opened?.kind !== "ok") return failed("unavailable");
   const response = await signedIn(request, login, accounts, opened, now);
   clearInviteBindingCookie(response);
@@ -239,17 +254,17 @@ async function completeNihoLink(request: NextRequest, login: HostLoginState, cod
   // Another tab signed in as someone else meanwhile (a shared browser): nothing is bound to an account that did not ask.
   if (!login.hostAccountId || session.hostAccountId !== login.hostAccountId) return linkBack(login, "switched");
 
-  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeUtc) => {
+  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeMs) => {
     const now = Date.now();
     try {
       // The store refuses a NIHO sign-in older than the recent-sign-in window (`recent-authentication-required`).
-      return await identities.linkNihoIdentity({ hostAccountId: session.hostAccountId, nihoUserId, proof: { kind: "SESSION", sessionRef: session.sessionRef, nihoAuthenticatedAtUtc: signedInAt(authTimeUtc, now) }, nowUtc: nowUtc(now) });
+      return await identities.linkNihoIdentity({ hostAccountId: session.hostAccountId, nihoUserId, proof: { kind: "SESSION", sessionRef: session.sessionRef, nihoAuthenticatedAtUtc: signedInAt(authTimeMs, now) }, nowUtc: nowUtc(now) });
     } catch (error) {
       console.error(`[host-auth] NIHO account not linked: ${error instanceof Error ? error.name : "unknown error"}`);
       return null;
     }
   });
-  if (!verified.ok) return linkBack(login, "unavailable");
+  if (!verified.ok) return linkBack(login, verified.reason === "unverified" ? "unverified" : "unavailable");
   const result = verified.value;
   if (result === null) return linkBack(login, "unavailable");
   switch (result.kind) {

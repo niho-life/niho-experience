@@ -78,13 +78,13 @@ afterEach(() => {
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-const exchangeBody = (extra: Record<string, unknown> = {}) => ({ accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: REFRESH, connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成 ホスト", iconImage: null }, ...extra });
+const exchangeBody = (extra: Record<string, unknown> = {}) => ({ accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: REFRESH, connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成 ホスト", iconImage: null }, authTime: new Date().toISOString(), ...extra });
 
 /** A NIHO that exchanges the code, answers `identity` for the access token and ends the connection. */
 function niho(overrides: { exchange?: () => Response; identity?: () => Response; remove?: () => Response } = {}): Handler {
   return (url, init) => {
     if (url.pathname === "/api/auth/app-connect/exchange") {
-      return overrides.exchange?.() ?? json(200, { accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: REFRESH, connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成 ホスト", iconImage: null } });
+      return overrides.exchange?.() ?? json(200, exchangeBody());
     }
     if (url.pathname === "/api/experience-host/identity") {
       expect((init.headers as Record<string, string>).authorization).toBe(`Bearer ${ACCESS}`);
@@ -189,7 +189,9 @@ describe("the callback", () => {
     const asked = state.identities!.startSessionForNihoIdentity.mock.calls[0]![0] as { nihoUserId: string; authenticatedAtUtc: string; nowUtc: string };
     expect(Object.keys(asked).sort()).toEqual(["authenticatedAtUtc", "nihoUserId", "nowUtc"]);
     expect(asked.nihoUserId).toBe(NIHO_USER);
-    expect(asked.authenticatedAtUtc).toBe(asked.nowUtc);
+    // NIHO's authTime (just now here), never after the time of the return.
+    expect(Date.parse(asked.authenticatedAtUtc)).toBeLessThanOrEqual(Date.parse(asked.nowUtc));
+    expect(Date.parse(asked.nowUtc) - Date.parse(asked.authenticatedAtUtc)).toBeLessThan(5_000);
 
     // The connection ends right after the identity was read, with the connection's own token and no reason.
     expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url.pathname}`)).toEqual([
@@ -216,10 +218,20 @@ describe("the callback", () => {
     await signIn();
     const future = await at();
     expect(Date.parse(future.authenticatedAtUtc)).toBeLessThanOrEqual(Date.parse(future.nowUtc));
-    handler = niho({ exchange: () => json(200, exchangeBody({ authTime: "not a time" })) });
-    await signIn();
-    const missing = await at();
-    expect(missing.authenticatedAtUtc).toBe(missing.nowUtc);
+  });
+
+  it("fails closed without NIHO's sign-in time: no session, nothing bound, the connection still ends", async () => {
+    for (const authTime of [undefined, null, "", "not a time", {}]) {
+      state.identities!.startSessionForNihoIdentity.mockClear();
+      calls.length = 0;
+      handler = niho({ exchange: () => json(200, exchangeBody({ authTime })) });
+      const { response } = await signIn();
+      expect(response.headers.get("location"), String(authTime)).toBe("/host/auth/error?reason=unverified");
+      expect(setCookies(response).has(ACCOUNT_SESSION_COOKIE)).toBe(false);
+      expect(state.identities!.startSessionForNihoIdentity).not.toHaveBeenCalled();
+      // The identity is not even asked for, and the connection NIHO made is ended.
+      expect(calls.map((call) => `${call.init.method ?? "GET"} ${call.url.pathname}`)).toEqual(["POST /api/auth/app-connect/exchange", `DELETE /api/auth/app-connections/${CONNECTION}`]);
+    }
   });
 
   it("returns to the page the sign-in was for: an invitation, /write, or the provider's home", async () => {

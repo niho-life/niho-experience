@@ -239,10 +239,13 @@ export function hostLandingPath(providerId: string | null, connect: unknown): st
  * the one the host was registered with), `suspended` a bound host account that is suspended. `invite-*` (#596): the
  * invitation link ran out or was replaced (`expired`), was used (`used`), belongs to another browser (`browser`), or is
  * unknown or no longer open when the NIHO sign-in came back (`invalid`); the NIHO account is bound to another host
- * account (`in-use`) or the invited host account has another NIHO account (`has-identity`).
+ * account (`in-use`) or the invited host account has another NIHO account (`has-identity`), or the sign-in could not be
+ * completed this time (`unavailable`: the invitation stays usable). `unverified`: NIHO did not say when the person signed in,
+ * so no recent sign-in can be judged and nothing was opened or bound.
  */
 export const LOGIN_ERROR_REASONS = [
   "expired", "state", "denied", "rejected", "unavailable", "link", "unregistered", "suspended",
-  "invite-expired", "invite-used", "invite-browser", "invite-invalid", "invite-in-use", "invite-has-identity",
+  "invite-expired", "invite-used", "invite-browser", "invite-invalid", "invite-in-use", "invite-has-identity", "invite-unavailable",
+  "unverified",
 ] as const;
 export type LoginErrorReason = (typeof LOGIN_ERROR_REASONS)[number];
