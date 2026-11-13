@@ -12,6 +12,7 @@ export const PRIVATE_PATHS = [
   "/ja/booking/",
   "/preview/",
   "/host/",
+  "/account",
   "/admin",
 ] as const;
 

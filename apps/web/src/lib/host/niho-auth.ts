@@ -10,6 +10,26 @@ export interface NihoAuthDeps {
   nihoOrigin: string;
   firebaseWebApiKey?: string;
   timeoutMs?: number;
+  /**
+   * Experience's service ID token (Google OIDC, the same one the server-to-server contract carries), or null when it cannot be
+   * issued. It goes in `X-NIHO-Experience-Service-Id-Token` on the code exchange and the connection's end, so NIHO counts these
+   * calls against the Experience service instead of the one IP they all come from (niho-coliving/niho-app#20336). It is
+   * never an authorization: a call without it (or with one NIHO cannot verify) is simply counted by IP, as before.
+   */
+  serviceIdToken?: () => Promise<string | null>;
+}
+
+/** The header NIHO reads the service ID token from (the host `identity` call sends the same one). */
+export const NIHO_SERVICE_ID_TOKEN_HEADER = "x-niho-experience-service-id-token";
+
+/** The service ID token header for a call, or none: a token that cannot be issued never stops a log in. */
+async function serviceIdTokenHeader(deps: NihoAuthDeps): Promise<Record<string, string>> {
+  try {
+    const token = await deps.serviceIdToken?.();
+    return token ? { [NIHO_SERVICE_ID_TOKEN_HEADER]: token } : {};
+  } catch {
+    return {};
+  }
 }
 
 /** `rejected`: NIHO or Firebase said no (expired code, revoked connection). `unavailable`: try again later. */
@@ -51,7 +71,15 @@ export interface IdTokenResult {
  * here and nowhere else.
  */
 export const NIHO_CONNECT_AUDIENCE_PARAM = "audience";
-export type NihoConnectAudience = "host";
+export type NihoConnectAudience = "host" | "guest";
+
+/**
+ * A traveler's way in (niho-coliving/niho-app#20307): with `audience=guest` and one of these, NIHO goes straight to that
+ * provider's own screen, without its login page and without its name in front. Apple has no web sign-in at NIHO yet (the
+ * traveler is shown NIHO's usual screen), so the entrance does not offer it (traveler/methods.ts).
+ */
+export const NIHO_CONNECT_METHODS = ["google", "apple", "line"] as const;
+export type NihoConnectMethod = (typeof NIHO_CONNECT_METHODS)[number];
 
 /**
  * How recent a sign-in a step-up asks NIHO for (`max_age`, in seconds; NIHO accepts 60 to 86400): a re-login for a sensitive
@@ -66,10 +94,11 @@ export const NIHO_REAUTHENTICATION_MAX_AGE_SECONDS = 300;
  * NIHO's confirmation page for this site. `maxAgeSeconds` asks NIHO to sign the person in again when their last sign-in
  * is older (`max_age`, 60 to 86400 seconds; niho-coliving/niho-app#20305): a sensitive change's re-authentication (#595).
  */
-export function nihoConnectUrl(nihoOrigin: string, params: { challenge: string; state: string; origin: string; audience?: NihoConnectAudience; maxAgeSeconds?: number }): string {
+export function nihoConnectUrl(nihoOrigin: string, params: { challenge: string; state: string; origin: string; audience?: NihoConnectAudience; method?: NihoConnectMethod; maxAgeSeconds?: number }): string {
   const url = new URL("/connect/niho-experience", nihoOrigin);
   const search = new URLSearchParams({ v: "1", challenge: params.challenge, state: params.state, origin: params.origin });
   if (params.audience) search.set(NIHO_CONNECT_AUDIENCE_PARAM, params.audience);
+  if (params.method) search.set("method", params.method);
   if (params.maxAgeSeconds !== undefined) search.set("max_age", String(params.maxAgeSeconds));
   url.search = search.toString();
   return url.href;
@@ -108,7 +137,7 @@ async function postJson(deps: NihoAuthDeps, url: string, body: unknown, init: Re
 }
 
 export async function exchangeCode(deps: NihoAuthDeps, input: { code: string; codeVerifier: string }): Promise<NihoAuthResult<ExchangeResult>> {
-  const result = await postJson(deps, new URL("/api/auth/app-connect/exchange", deps.nihoOrigin).href, { clientId: NIHO_CLIENT_ID, code: input.code, codeVerifier: input.codeVerifier });
+  const result = await postJson(deps, new URL("/api/auth/app-connect/exchange", deps.nihoOrigin).href, { clientId: NIHO_CLIENT_ID, code: input.code, codeVerifier: input.codeVerifier }, { headers: await serviceIdTokenHeader(deps) });
   if (!result.ok) return result;
   const body = result.value as Record<string, unknown> | null;
   const user = (body?.user ?? {}) as Record<string, unknown>;
@@ -165,7 +194,7 @@ export async function deleteConnection(deps: NihoAuthDeps, connectionId: string,
   try {
     const response = await deps.fetch(url.href, {
       method: "DELETE",
-      headers: { authorization: `Bearer ${accessToken}` },
+      headers: { authorization: `Bearer ${accessToken}`, ...await serviceIdTokenHeader(deps) },
       cache: "no-store",
       redirect: "manual",
       signal: AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_TIMEOUT_MS),

@@ -248,6 +248,8 @@ export type {
 export { HOST_ACCOUNT_LIMITS, HostAccounts, isHostAccountId, normalizeHostEmail } from "./host-accounts.ts";
 export { HostAccountIdentities } from "./host-account-identities.ts";
 export { HOST_INVITATION_LIMITS, HostInvitations } from "./host-invitations.ts";
+export { TRAVELER_ACCOUNT_LIMITS, TravelerAccounts, isTravelerAccountId } from "./traveler-accounts.ts";
+export type { TravelerSession, TravelerSignInResult } from "./traveler-accounts.ts";
 export type { AcceptHostInvitationResult, CreateHostInvitationResult, HostInvitationLinkIssue, OpenHostInvitationResult } from "./host-invitations.ts";
 export type {
   LinkNihoIdentityResult,

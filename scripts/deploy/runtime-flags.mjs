@@ -309,6 +309,17 @@ export const FLAGS = Object.freeze([
     variable: "HOST_NIHO_LOGIN_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
   },
+  // 旅行者のアカウント (Epic #591, #597, ADR 0004 §8): Google / Apple / LINE のボタンから、NIHO の名前を出さずにアカウントを作る。
+  // アカウントとセッション（migration 0085）は Experience の DB で、ホストアカウントとは別の表と cookie。NIHO の戻りは同じ callback なので
+  // ホストのアカウント（HOST_ACCOUNTS_ENABLED。旧 NIHO トークン方式の callback に旅行者を入れないため）が前提。
+  // NIHO 側（niho-coliving/niho-app#20330・#20332）が stg に入り、stg の受入が済むまで ON にしない。
+  {
+    env: "EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED",
+    variable: "TRAVELER_ACCOUNTS_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
+    // The terms of service a traveler agrees to by logging in: linked beside the privacy notice while set.
+    settings: [{ env: "EXPERIENCE_TERMS_URL", variable: "TERMS_URL", shape: "httpsUrl", optional: true }],
+  },
   // Experience-native COHOST teams. This is independent from (and does not open) the legacy provider-operations consumer.
   {
     env: "EXPERIENCE_HOST_TEAM_ENABLED",

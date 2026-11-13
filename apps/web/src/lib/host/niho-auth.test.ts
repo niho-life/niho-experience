@@ -78,6 +78,50 @@ describe("Firebase custom token sign-in", () => {
   });
 });
 
+describe("the service ID token (niho-coliving/niho-app#20336)", () => {
+  const TOKEN = "synthetic.service.id-token";
+  const withToken = (serviceIdToken: NihoAuthDeps["serviceIdToken"], respond: Parameters<typeof deps>[0]) => {
+    const made = deps(respond);
+    return { ...made, deps: { ...made.deps, serviceIdToken } };
+  };
+  const ok = { accessToken: "web-access-1", expiresAt: "2026-10-21T04:00:00.000Z", refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: "2027-01-19T03:00:00.000Z", user: { displayName: "合成 ホスト", iconImage: null } };
+
+  it("goes in X-NIHO-Experience-Service-Id-Token on the exchange and on the connection's end, and nowhere else", async () => {
+    const exchanged = withToken(async () => TOKEN, () => json(200, ok));
+    await exchangeCode(exchanged.deps, { code: "c", codeVerifier: "v" });
+    expect((exchanged.calls[0]!.init.headers as Record<string, string>)["x-niho-experience-service-id-token"]).toBe(TOKEN);
+    // The token is never in the body or the URL.
+    expect(String(exchanged.calls[0]!.init.body)).not.toContain(TOKEN);
+    expect(exchanged.calls[0]!.url).not.toContain(TOKEN);
+
+    const deleted = withToken(async () => TOKEN, () => new Response(null, { status: 204 }));
+    await deleteConnection(deleted.deps, "conn_1", "id-1", { reason: null });
+    expect(deleted.calls[0]!.init.headers).toEqual({ authorization: "Bearer id-1", "x-niho-experience-service-id-token": TOKEN });
+    expect(deleted.calls[0]!.url).toBe(`${NIHO}/api/auth/app-connections/conn_1`);
+
+    // The refresh is not counted by service (a log in never refreshes): it carries none.
+    const refreshed = withToken(async () => TOKEN, () => json(200, { accessToken: "web-access-2", expiresAt: "2026-10-21T04:00:00.000Z", refreshToken: "refresh-2", connectionExpiresAt: "2027-01-19T03:00:00.000Z" }));
+    await refreshConnection(refreshed.deps, "refresh-1");
+    expect(JSON.stringify(refreshed.calls[0]!.init.headers)).not.toContain("service-id-token");
+  });
+
+  it("is left out, and the call still goes, when there is no token, it cannot be issued or the provider throws", async () => {
+    for (const provider of [undefined, async () => null, async () => "", async () => { throw new Error("metadata server unavailable"); }] as const) {
+      const exchanged = withToken(provider, () => json(200, ok));
+      expect((await exchangeCode(exchanged.deps, { code: "c", codeVerifier: "v" })).ok).toBe(true);
+      expect(JSON.stringify(exchanged.calls[0]!.init.headers)).not.toContain("service-id-token");
+      const deleted = withToken(provider, () => new Response(null, { status: 204 }));
+      expect(await deleteConnection(deleted.deps, "conn_1", "id-1", { reason: null })).toBe(true);
+      expect(deleted.calls[0]!.init.headers).toEqual({ authorization: "Bearer id-1" });
+    }
+  });
+
+  it("reads a 429 from the service's limit as try again later, not as a refused code", async () => {
+    const limited = withToken(async () => TOKEN, () => json(429, { error: { code: "RATE_LIMITED", details: { reason: "experience_service_rate_limited" } } }));
+    expect(await exchangeCode(limited.deps, { code: "c", codeVerifier: "v" })).toEqual({ ok: false, reason: "unavailable" });
+  });
+});
+
 describe("logout", () => {
   it("deletes the connection with the Web access token and reason=logout", async () => {
     const { deps: d, calls } = deps(() => new Response(null, { status: 204 }));

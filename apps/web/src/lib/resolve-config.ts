@@ -268,6 +268,26 @@ function hostNihoLoginSetting(apiMode: "mock" | "http", env: Env, hostConsoleEna
   return true;
 }
 
+/**
+ * 旅行者のアカウント (Epic #591, #597, ADR 0004 §8): a traveler may log in or sign up with Google, Apple or LINE (the NIHO account
+ * behind it is made on the way), without NIHO's name on the screen, and gets an Experience account and session of their own
+ * (not a host account). Guest booking stays as it is. Off by default. With the real NIHO (http) it needs the host accounts
+ * (NIHO's return comes to the same callback, whose state tells a traveler from a host; without them that callback is the
+ * former NIHO-token login, which a traveler must never reach), the console (the callback's home), the experience DB and
+ * NIHO's service audience (the identity call carries Experience's service ID token); the preview (mock) only needs
+ * the flag and walks a synthetic NIHO.
+ */
+function travelerAccountsSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, hostAccountsEnabled: boolean): boolean {
+  const name = "EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED";
+  if (env[name] !== "true") return false;
+  if (apiMode !== "http") return true;
+  if (!hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode (NIHO returns to the console's callback)`);
+  if (!hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error(`${name}=true needs EXPERIENCE_DATABASE_URL in http mode`);
+  if (!env.NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE?.trim()) throw new Error(`${name}=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE in http mode`);
+  return true;
+}
+
 /** 開催回の担当 (#535 v0): the NIHO-managed (承認後決済) occurrences only, so it needs that sale and both consoles' data. */
 function occurrenceAssignmentSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean): boolean {
   const name = "EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED";
@@ -719,6 +739,17 @@ function translationEnabledSetting(apiMode: "mock" | "http", env: Env): boolean 
  * NIHO's privacy policy, linked from the traveler privacy notice at /privacy. Optional: unset (or blank) leaves the link
  * out. A plain https URL only (no credentials), so a typo stops the server at start-up instead of printing a broken link.
  */
+/** NIHO's terms of service for travelers (#597), shown in the log in sentence; empty leaves the link out (the privacy notice stays). */
+function termsUrlSetting(value: string | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "";
+  let url: URL;
+  try { url = new URL(trimmed); }
+  catch { throw new Error("EXPERIENCE_TERMS_URL must be an absolute https URL"); }
+  if (url.protocol !== "https:" || url.username || url.password) throw new Error("EXPERIENCE_TERMS_URL must be an https URL without credentials");
+  return url.href;
+}
+
 function privacyPolicyUrlSetting(value: string | undefined): string {
   const raw = value?.trim() ?? "";
   if (!raw) return "";
@@ -855,6 +886,7 @@ export function resolveConfig(env: Env) {
     && experienceTranslateStandaloneRequested;
   const hostTeamEnabled = hostTeamSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const hostNihoLoginEnabled = hostNihoLoginSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
+  const travelerAccountsEnabled = travelerAccountsSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const occurrenceAssignmentEnabled = occurrenceAssignmentSetting(apiMode, env, hostConsoleEnabled);
   // After host accounts: with them, the host publication API reads Stripe and the experience DB instead of NIHO.
   const experiencePublication = experiencePublicationSettings(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
@@ -937,6 +969,8 @@ export function resolveConfig(env: Env) {
     nihoBookingHelpUrl: env.NIHO_BOOKING_HELP_URL ?? "",
     // NIHO's privacy policy, linked from /privacy (empty hides the link).
     privacyPolicyUrl: privacyPolicyUrlSetting(env.EXPERIENCE_PRIVACY_POLICY_URL),
+    // The terms of service a traveler agrees to by logging in (#597): linked beside the privacy notice only while set.
+    termsUrl: termsUrlSetting(env.EXPERIENCE_TERMS_URL),
     // Only the production runtime receives this public Umami website ID.
     umamiWebsiteId: env.UMAMI_WEBSITE_ID?.trim() ?? "",
     hostConsoleEnabled,
@@ -1018,6 +1052,8 @@ export function resolveConfig(env: Env) {
     hostAccountsEnabled,
     // 「NIHO アカウントでログイン」 (Epic #591): NIHO proves the host, Experience keeps the session.
     hostNihoLoginEnabled,
+    // 旅行者のアカウント (Epic #591, #597): log in or sign up with Google, Apple or LINE; an account of their own.
+    travelerAccountsEnabled,
     // Experience-native COHOST membership, independent from the legacy provider-operations consumer.
     hostTeamEnabled,
     occurrenceAssignmentEnabled,

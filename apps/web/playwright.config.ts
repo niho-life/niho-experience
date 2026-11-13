@@ -10,6 +10,8 @@ const FEE_SUMMARY_PORT = Number(process.env.E2E_FEE_SUMMARY_PORT ?? 3104);
 // A server with the NIHO account login on (Epic #591): the host's entrance is one 「NIHO アカウントでログイン」 button, so the
 // other host specs (which click 「NIHO でログイン」) keep the second server.
 const NIHO_LOGIN_PORT = Number(process.env.E2E_NIHO_LOGIN_PORT ?? 3105);
+// A server with travelers' accounts on (Epic #591, #597): the English log in page and the account page of the preview.
+const TRAVELER_PORT = Number(process.env.E2E_TRAVELER_PORT ?? 3106);
 // The host console and its preview tests run against the second server.
 const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|ota-bookings|sales|messages|session|reviews|settings(?:-navigation)?|support|standalone-translate|pwa)|admin-support)\.spec\.ts/;
 const SEPARATE_PREVIEW_SPEC = /(assisted-launch|provider-operations|host-bookings-unified|host-calendar|host-airbnb-google-setup|admin-channel-workspace|write-ui)\.spec\.ts/;
@@ -19,6 +21,7 @@ const ADMIN_CASE_SPEC = /admin-(support-case|operations|site-bookings|operators|
 const ADMIN_SITE_BOOKINGS_SPEC = /admin-(site-bookings|operators|providers)\.spec\.ts/;
 const FEE_SUMMARY_SPEC = /(admin|host)-fee-summary\.spec\.ts/;
 const NIHO_LOGIN_SPEC = /host-niho-login\.spec\.ts/;
+const TRAVELER_SPEC = /traveler-account\.spec\.ts/;
 // Synthetic guide drafts (docs/content/guides.md), shown on the first server only. An absolute path, as the setting requires.
 const GUIDE_DRAFTS_DIR = fileURLToPath(new URL("./e2e/fixtures/guide-drafts", import.meta.url));
 // Cloud sandboxes ship a pre-installed Chromium; CI installs the matching one.
@@ -35,6 +38,7 @@ const adminReadBaseURL = `http://127.0.0.1:${ADMIN_READ_PORT}`;
 const adminCaseBaseURL = `http://127.0.0.1:${ADMIN_CASE_PORT}`;
 const feeSummaryBaseURL = `http://127.0.0.1:${FEE_SUMMARY_PORT}`;
 const nihoLoginBaseURL = `http://127.0.0.1:${NIHO_LOGIN_PORT}`;
+const travelerBaseURL = `http://127.0.0.1:${TRAVELER_PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -50,13 +54,16 @@ export default defineConfig({
     launchOptions: { executablePath },
   },
   projects: [
-    { name: "mobile-360", testIgnore: [SEPARATE_PREVIEW_SPEC, HOST_CONSOLE_SPEC, ADMIN_READ_SPEC, ADMIN_CASE_SPEC, FEE_SUMMARY_SPEC, NIHO_LOGIN_SPEC], use: mobile },
-    { name: "desktop", testIgnore: [SEPARATE_PREVIEW_SPEC, HOST_CONSOLE_SPEC, ADMIN_READ_SPEC, ADMIN_CASE_SPEC, FEE_SUMMARY_SPEC, NIHO_LOGIN_SPEC], use: desktop },
+    { name: "mobile-360", testIgnore: [SEPARATE_PREVIEW_SPEC, HOST_CONSOLE_SPEC, ADMIN_READ_SPEC, ADMIN_CASE_SPEC, FEE_SUMMARY_SPEC, NIHO_LOGIN_SPEC, TRAVELER_SPEC], use: mobile },
+    { name: "desktop", testIgnore: [SEPARATE_PREVIEW_SPEC, HOST_CONSOLE_SPEC, ADMIN_READ_SPEC, ADMIN_CASE_SPEC, FEE_SUMMARY_SPEC, NIHO_LOGIN_SPEC, TRAVELER_SPEC], use: desktop },
     { name: "host-mobile-360", testMatch: HOST_CONSOLE_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...mobile, ...hostUse } },
     { name: "host-support-mobile-320", testMatch: /host-support\.spec\.ts/, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile320, ...hostUse } },
     { name: "host-desktop", testMatch: HOST_CONSOLE_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...desktop, ...hostUse } },
     { name: "host-niho-login-mobile-360", testMatch: NIHO_LOGIN_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile, baseURL: nihoLoginBaseURL, serviceWorkers: "block" as const } },
     { name: "host-niho-login-desktop", testMatch: NIHO_LOGIN_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...desktop, baseURL: nihoLoginBaseURL, serviceWorkers: "block" as const } },
+    { name: "traveler-account-mobile-320", testMatch: TRAVELER_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile320, baseURL: travelerBaseURL, serviceWorkers: "block" as const } },
+    { name: "traveler-account-mobile-360", testMatch: TRAVELER_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile, baseURL: travelerBaseURL, serviceWorkers: "block" as const } },
+    { name: "traveler-account-desktop", testMatch: TRAVELER_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...desktop, baseURL: travelerBaseURL, serviceWorkers: "block" as const } },
     { name: "admin-read-mobile-360", testMatch: ADMIN_READ_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...mobile, baseURL: adminReadBaseURL } },
     { name: "admin-read-desktop", testMatch: ADMIN_READ_SPEC, testIgnore: [SEPARATE_PREVIEW_SPEC, ADMIN_CASE_SPEC], use: { ...desktop, baseURL: adminReadBaseURL } },
     { name: "admin-case-mobile-360", testMatch: ADMIN_CASE_SPEC, testIgnore: SEPARATE_PREVIEW_SPEC, use: { ...mobile, baseURL: adminCaseBaseURL } },
@@ -110,6 +117,13 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
       env: { ...serverEnv, PORT: String(NIHO_LOGIN_PORT), HOST_CONSOLE_ENABLED: "true", EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", SITE_URL: nihoLoginBaseURL, MOCK_CATALOG: "pilot" },
+    },
+    {
+      command: "sh scripts/start-standalone.sh",
+      url: `${travelerBaseURL}/account/sign-in`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      env: { ...serverEnv, PORT: String(TRAVELER_PORT), EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "true", SITE_URL: travelerBaseURL, MOCK_CATALOG: "pilot" },
     },
   ],
 });
