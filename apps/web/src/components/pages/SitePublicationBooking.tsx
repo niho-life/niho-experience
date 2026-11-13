@@ -6,6 +6,7 @@ import { createClientRequestKey } from "@niho-experience/api-client";
 import { getSiteBookingApi } from "@/lib/browser-api";
 import { formatYen } from "@/lib/format";
 import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-card-model";
+import { readBookingAttribution } from "@/lib/booking-attribution";
 import { expectedSiteBookingTotalYen } from "@/lib/experience/site-booking-rules";
 import { answersForCheckout } from "@/lib/experience/site-booking-answers";
 import type { SitePublicExperience, SitePublicOffer } from "@/lib/experience/site-publications";
@@ -17,7 +18,7 @@ const FIELD_INPUT = "min-h-12 w-full min-w-0 rounded-xl border border-line-stron
 const FIELD_SELECT = `${FIELD_INPUT} truncate`;
 const FIELD_TEXTAREA = "min-h-24 w-full min-w-0 rounded-xl border border-line-strong p-3 text-base font-normal";
 
-export function SitePublicationBooking({ item, siteOrigin, consentVersion, bookingsEnabled, locale = "en" }: { item: SitePublicExperience; siteOrigin: string; consentVersion: string; bookingsEnabled: boolean; locale?: "en" | "ja" }) {
+export function SitePublicationBooking({ item, siteOrigin, consentVersion, bookingsEnabled, locale = "en", attributionEnabled = false }: { item: SitePublicExperience; siteOrigin: string; consentVersion: string; bookingsEnabled: boolean; locale?: "en" | "ja"; attributionEnabled?: boolean }) {
   const { publication, saleTerms } = item;
   const ja = locale === "ja";
   const sellerInformationUrl = siteSellerInformationHref(item, locale);
@@ -43,13 +44,19 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   const attempt = useRef<{ signature: string; key: string } | null>(null);
   const offer = offers.find((candidate) => candidate.id === offerId);
   const approval = offer?.acceptanceMode === "APPROVAL";
+  const total = offer ? expectedSiteBookingTotalYen(offer, adults, children) : null;
+  // 無料（0円）の予約は決済に進まず、そのまま確定する。支払い前提の文言を出さない（#59）。
+  const free = !approval && total === 0;
   const submitLabel = approval
     ? (submitting ? (ja ? "リクエストを送信中…" : "Sending your request…") : (ja ? "予約をリクエストする" : "Send booking request"))
-    : (submitting ? (ja ? "決済を開いています…" : "Opening secure checkout…") : (ja ? "安全な決済へ進む" : "Continue to secure checkout"));
+    : free
+      ? (submitting ? (ja ? "予約を確定しています…" : "Confirming your booking…") : (ja ? "無料で予約する" : "Book for free"))
+      : (submitting ? (ja ? "決済を開いています…" : "Opening secure checkout…") : (ja ? "安全な決済へ進む" : "Continue to secure checkout"));
   const connectionError = approval
     ? (ja ? "リクエストを送信できませんでした。再度お試しください。" : "We couldn’t send your request. Please try again.")
-    : (ja ? "決済に接続できませんでした。再度お試しください。" : "We couldn't reach checkout. You can retry this request safely.");
-  const total = offer ? expectedSiteBookingTotalYen(offer, adults, children) : null;
+    : free
+      ? (ja ? "予約を確定できませんでした。再度お試しください。" : "We couldn't confirm your booking. You can retry this request safely.")
+      : (ja ? "決済に接続できませんでした。再度お試しください。" : "We couldn't reach checkout. You can retry this request safely.");
   const selectedOccurrence = occurrences.find((occurrence) => occurrence.offerId === offerId && occurrence.date === date);
   const validAnswers = offer?.bookingQuestions.every((question) => {
     const answer = answers[question.id];
@@ -90,6 +97,8 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       answers: answersBody,
       consent: { agreedVersion: consentVersion },
       ...(saleTerms?.salesPlanRevision === undefined ? {} : { salesPlanRevision: saleTerms.salesPlanRevision }),
+      // 流入の印（utm_*）：最初の流入だけをメモリに持ち、Do Not Track なら送らない（lib/booking-attribution.ts）。
+      ...(attributionEnabled ? readBookingAttribution(navigator.doNotTrack) : {}),
     };
     const signature = JSON.stringify(bodyWithoutKey);
     if (attempt.current?.signature !== signature) attempt.current = { signature, key: createClientRequestKey() };
@@ -113,7 +122,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
           return;
         }
         if (code === "RATE_LIMITED") setProblem(ja ? "操作が多すぎます。少し待ってから再度お試しください。" : "Too many attempts. Please wait a moment and try again.");
-        else setProblem(approval ? connectionError : ja ? "決済を開始できませんでした。入力内容を確認して再度お試しください。" : "We couldn't start checkout. Check the details and try again.");
+        else setProblem(approval ? connectionError : free ? (ja ? "予約を確定できませんでした。入力内容を確認して再度お試しください。" : "We couldn't confirm your booking. Check the details and try again.") : ja ? "決済を開始できませんでした。入力内容を確認して再度お試しください。" : "We couldn't start checkout. Check the details and try again.");
       } else {
         setProblem(connectionError);
       }
@@ -181,7 +190,9 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       <button type="submit" disabled={!api || !selectedOccurrence?.bookable || total === null || !agreed || !validAnswers || submitting || loading || loadError} className="min-h-12 rounded-full bg-ink px-6 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-45">{submitLabel}</button>
       <p className="text-center text-xs text-muted">{approval
         ? (ja ? "リクエスト時のお支払いはありません。承認後、事務局からお支払いリンクをメールでお送りします。" : "No payment is taken when you request. If NIHO approves your request, we’ll email you a payment link.")
-        : (ja ? "お支払い情報はStripe Checkoutで入力します。氏名、メールアドレス、回答は予約の作成にのみ使用します。" : "Payment details are entered on Stripe Checkout. Your name, email and answers are sent only to create this booking.")}</p>
+        : free
+          ? (ja ? "お支払いは不要です。氏名、メールアドレス、回答は予約の作成にのみ使用します。" : "No payment is needed. Your name, email and answers are sent only to create this booking.")
+          : (ja ? "お支払い情報はStripe Checkoutで入力します。氏名、メールアドレス、回答は予約の作成にのみ使用します。" : "Payment details are entered on Stripe Checkout. Your name, email and answers are sent only to create this booking.")}</p>
     </div>
   </form>;
 }
