@@ -112,3 +112,16 @@ describe("the /privacy page", () => {
     expect(metadata.description).toEqual(expect.any(String));
   });
 });
+
+describe("the inquiry section (#532)", () => {
+  it("shows only while the inquiry form is open, and says what is kept, who sees it and for how long", () => {
+    const off = text(renderToStaticMarkup(createElement(PrivacyNotice, { policyUrl: "" })));
+    expect(off).not.toContain("If you send us an inquiry");
+    const on = renderToStaticMarkup(createElement(PrivacyNotice, { policyUrl: "", inquiry: true }));
+    expect(on).toContain('<section aria-labelledby="privacy-inquiry"');
+    const words = text(on);
+    expect(words).toContain("Only the NIHO office sees it: hosts do not, and nothing is sent to analytics.");
+    expect(words).toContain("We delete an inquiry one year after we close it, and sooner if you ask us to.");
+    expect(words).toContain("Sending an inquiry does not book or reserve anything.");
+  });
+});
