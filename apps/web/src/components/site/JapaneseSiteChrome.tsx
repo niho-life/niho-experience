@@ -54,10 +54,10 @@ export function JapaneseSiteHeader({ counterparts, hostSignedIn, inquiryOpen }: 
   const items = NAV.filter((item) => !item.needsInquiry || inquiryOpen);
   return <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur-md backdrop-saturate-[1.2]">
     <div className="container-page flex h-16 items-center gap-1.5">
-      <NavLink href="/ja" className="flex shrink-0 items-center gap-2 font-display text-xl font-semibold tracking-[-0.01em]">
+      <Link href="/ja" className="flex shrink-0 items-center gap-2 font-display text-xl font-semibold tracking-[-0.01em]">
         <span aria-hidden className="relative size-7 shrink-0 sm:size-8"><Image src="/icon.svg" alt="" sizes="32px" priority className="object-contain" /></span>
         <span className="flex items-baseline gap-1.5"><span>NIHO</span><span className="font-normal text-ink-soft max-[479px]:sr-only">Experience 鎌倉</span></span>
-      </NavLink>
+      </Link>
       <nav aria-label="メイン" className="ml-auto">
         <ul className="flex items-center gap-0.5 text-[0.9375rem] font-bold sm:gap-1">
           {items.map((item) => <li key={item.href} className={item.mobile ? undefined : "hidden sm:block"}>
@@ -81,9 +81,9 @@ export function JapaneseSiteFooter({ counterparts, inquiryOpen }: { counterparts
       </div>
       <nav aria-label="フッター">
         <ul className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm font-bold">
-          {links.map((link) => <li key={link.href}><NavLink href={link.href} className="hover:underline">{link.label}</NavLink></li>)}
+          {links.map((link) => <li key={link.href}><Link href={link.href} className="hover:underline">{link.label}</Link></li>)}
           <li><LanguageButton counterparts={counterparts} variant="text" /></li>
-          <li><NavLink href="/privacy" className="hover:underline">プライバシー</NavLink></li>
+          <li><Link href="/privacy" className="hover:underline">プライバシー</Link></li>
         </ul>
       </nav>
       <RubberStamp className="size-[104px] rotate-[10deg] text-moss max-sm:hidden" />
