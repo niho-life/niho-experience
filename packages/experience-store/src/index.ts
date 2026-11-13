@@ -13,6 +13,8 @@ export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOc
 export { ExperienceStore } from "./repository.ts";
 export { ManagedExperienceSalesRepository, validateManagedPlatformSellerConfig } from "./managed-sales.ts";
 export type { CheckoutTransitionOutcome, ManagedCompensation, ManagedPlatformSellerConfig, SalesPlanRevision, SalesPlanState, SalesPlanTransition } from "./managed-sales.ts";
+export { ProductClassificationRepository } from "./product-classifications.ts";
+export type { AdminProductClassificationRow, PublicClassificationBySlug } from "./product-classifications.ts";
 export { OccurrenceAssignmentRepository } from "./occurrence-assignments.ts";
 export type { AdminAssignmentRow, AssignmentAction, AssignmentAdminActor, AssignmentCandidate, AssignmentHistoryItem, AssignmentOccurrence, AssignmentOutcome, AssignmentRecordedBy, AssignmentResult, HostAssignmentList } from "./occurrence-assignments.ts";
 export { ManagedBookingApprovalRepository } from "./managed-booking-approvals.ts";

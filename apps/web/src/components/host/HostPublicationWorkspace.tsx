@@ -20,6 +20,7 @@ import { photoRightsConfirmed, type PhotoRightsConfirmation } from "./photo-righ
 import { reapplyProviderMediaEdits } from "./publication-conflict";
 import { HostBookingLinkCopy } from "./HostBookingLinkCopy";
 import { providerBookingLinkAvailable } from "@/lib/provider-booking-link";
+import { ProductClassificationPanel } from "./ProductClassificationPanel";
 import { PUBLICATION_FAQ_LIMITS, publicationContentFaqProblem, publicationFaqProblem, publicationFaqRows, withPublicationFaq, type PublicationFaqRow } from "./publication-faq";
 
 type Status = "DRAFT" | "PUBLISHED" | "STOPPED" | "RESTART_REQUIRED" | "SUSPENDED";
@@ -251,6 +252,8 @@ export function HostPublicationWorkspace({
 }: Props) {
   const router = useRouter();
   const adminDraft = mode === "admin-draft";
+  /** The provider an office proxy workspace is for (its API base names it): 分類 is read and saved through the office's own route. */
+  const adminProviderId = adminDraft ? decodeURIComponent(/product-workspaces\/([^/]+)\/products/.exec(apiBase)?.[1] ?? "") : "";
   const storageNamespace = adminDraft ? `admin-product-draft:${apiBase}` : "experience-product-draft";
   const [products, setProducts] = useState<Product[]>([]);
   const [product, setProduct] = useState<Product | null>(null);
@@ -1199,6 +1202,7 @@ export function HostPublicationWorkspace({
     return <HostPageBody>
       <PageHead title={localeIsJapanese ? japanese.title || title || "体験を編集" : title || japanese.title || "体験を編集"} />
       {statusAndMessages}
+      {product ? <ProductClassificationPanel key={product.id} target={adminDraft ? { kind: "admin", providerId: adminProviderId, productId: product.id } : { kind: "host", productId: product.id }} /> : null}
       <nav className="mb-4 flex gap-5 overflow-x-auto border-b border-line" aria-label="体験の編集">
         <button type="button" disabled={busy} aria-pressed={workspaceSection === "page"} className={`min-h-11 shrink-0 border-b-2 px-1 text-sm font-bold ${workspaceSection === "page" ? "border-ink text-ink" : "border-transparent text-muted"}`} onClick={() => setWorkspaceSection("page")}>体験ページ</button>
         <button type="button" disabled={busy} aria-pressed={workspaceSection === "pricing"} className={`min-h-11 shrink-0 border-b-2 px-1 text-sm font-bold ${workspaceSection === "pricing" ? "border-ink text-ink" : "border-transparent text-muted"}`} onClick={() => setWorkspaceSection("pricing")}>料金・予約</button>

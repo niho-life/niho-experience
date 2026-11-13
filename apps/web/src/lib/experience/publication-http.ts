@@ -25,7 +25,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { config } from "@/lib/config";
 import { noStoreJson } from "@/lib/host/server";
 import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";
-import { experiencePublicationRepository, guestMeetingGuideRepository, managedExperienceSalesRepository } from "./store-server";
+import { experiencePublicationRepository, guestMeetingGuideRepository, managedExperienceSalesRepository, productClassificationRepository } from "./store-server";
 import {
   publicationHostBoundary,
   publicationHostMutationAllowed,
@@ -47,7 +47,7 @@ type ProductDraftBody = {
   readonly currency: string;
   readonly unitAmount: number;
 };
-type Action = "read" | "save" | "publish" | "stop" | "readSaleTerms" | "saveSaleTerms" | "readBookingGuide" | "saveBookingGuide";
+type Action = "read" | "save" | "publish" | "stop" | "readSaleTerms" | "saveSaleTerms" | "readBookingGuide" | "saveBookingGuide" | "readClassification" | "saveClassification";
 const BODY_LIMIT = 256 * 1024;
 const PRODUCT_ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -262,7 +262,7 @@ function checksFor(content: Readonly<Record<string, unknown>>, photosReady: bool
 }
 
 function actionOperation(action: Action): "READ" | "EDIT" | "OWNER" {
-  if (action === "publish" || action === "stop" || action === "readBookingGuide" || action === "saveBookingGuide") return "OWNER";
+  if (action === "publish" || action === "stop" || action === "readBookingGuide" || action === "saveBookingGuide" || action === "readClassification" || action === "saveClassification") return "OWNER";
   if (action === "save" || action === "saveSaleTerms") return "EDIT";
   return "READ";
 }
@@ -324,11 +324,13 @@ export async function publicationRequest(request: Request, context: PublicationP
 
   let body: RecordValue | null = null;
   let revision: ProductRevision | null = null;
-  if (action !== "read" && action !== "readSaleTerms" && action !== "readBookingGuide") {
+  if (action !== "read" && action !== "readSaleTerms" && action !== "readBookingGuide" && action !== "readClassification") {
     const parsed = await parseJson(request);
     if (parsed instanceof Response) return parsed;
     body = parsed;
-    if (action === "saveBookingGuide") {
+    if (action === "saveClassification") {
+      if (!exactKeys(body, ["classification"])) return responseError("INVALID_INPUT", 400);
+    } else if (action === "saveBookingGuide") {
       if (!exactKeys(body, ["expectedVersion", "guide"])
         || (body.expectedVersion !== null && (!Number.isSafeInteger(body.expectedVersion) || Number(body.expectedVersion) < 1))) {
         return responseError("INVALID_INPUT", 400);
@@ -351,6 +353,12 @@ export async function publicationRequest(request: Request, context: PublicationP
   const { repository } = prepared;
   const actor = prepared.context.actor;
   try {
+    if (action === "readClassification" || action === "saveClassification") {
+      const classifications = productClassificationRepository();
+      if (!classifications) return responseError("UNAVAILABLE", 503);
+      if (action === "readClassification") return noStoreJson({ classification: await classifications.readForOwner(actor, productId) });
+      return noStoreJson({ classification: await classifications.saveForOwner(actor, productId, body!.classification) });
+    }
     if (action === "readBookingGuide" || action === "saveBookingGuide") {
       const guides = guestMeetingGuideRepository();
       if (!guides) return responseError("UNAVAILABLE", 503);
