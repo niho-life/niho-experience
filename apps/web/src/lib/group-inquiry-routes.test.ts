@@ -138,7 +138,10 @@ describe("the Admin inbox BFF", () => {
 
   it("lists with an allowed status only, and changes the office's side as the signed-in Admin", async () => {
     expect((await adminList(new Request(`${url}?status=NEW`))).status).toBe(200);
-    expect(state.repository!.list).toHaveBeenCalledWith({ status: "NEW" });
+    expect(state.repository!.list).toHaveBeenCalledWith({ status: "NEW", id: null });
+    // 運営の CLI (#576): one inquiry by its ID, however many there are.
+    expect((await adminList(new Request(`${url}?id=${ID}`))).status).toBe(200);
+    expect(state.repository!.list).toHaveBeenLastCalledWith({ status: null, id: ID });
     expect((await adminList(new Request(`${url}?email=a%40example.com`))).status).toBe(400);
     const response = await update({ action: "update", id: ID, status: "IN_PROGRESS", assigneeLabel: "高橋", nextDueOn: "2026-11-20", staffNote: "電話の予定" });
     expect(response.status).toBe(200);

@@ -7,7 +7,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/ja", useSearchParams: (
 
 import { JA_HOME_HAND, JA_HOME_HERO_PHOTOS, JA_HOME_LEAD, JA_HOME_TITLE } from "@/lib/ja-home";
 import { JapaneseHero } from "./JapaneseHero";
-import { JA_HOME_OCCASIONS } from "@/lib/ja-home";
+import { JA_HOME_OCCASIONS, pickHomeFeature } from "@/lib/ja-home";
 import { CategoryNav, ConsultBand, FeatureBand, GuidesBand, HomeFinder, HostBand, JapaneseHeroCopy, OccasionStrips, PeopleBand, PicksHeading } from "./JapaneseHomeSections";
 
 describe("日本語トップ（#563）", () => {
@@ -93,9 +93,10 @@ describe("日本語トップ（#563）", () => {
     expect(nav).toContain('href="/ja/experiences?category=walk"');
     expect(nav).toContain("<svg");
     expect(nav).toContain("海");
-    const feature = renderToStaticMarkup(createElement(FeatureBand));
-    expect(feature).toContain("ガイドと歩く、");
-    expect(feature).toContain('href="/ja/experiences?category=walk"');
+    const feature = renderToStaticMarkup(createElement(FeatureBand, { feature: pickHomeFeature([{ classification: { category: "zen" } }])! }));
+    expect(feature).toContain("静かな時間を、");
+    expect(feature).toContain('href="/ja/experiences?category=zen"');
+    expect(feature).toContain("禅と寺の体験を見る");
     const strips = renderToStaticMarkup(createElement(OccasionStrips, { items: JA_HOME_OCCASIONS.slice(0, 2) } as never));
     expect(strips).toContain("どんな日に行きますか");
     expect(strips).toContain('href="/ja/experiences?with=solo"');

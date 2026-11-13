@@ -24,10 +24,10 @@ export async function GET(request: Request) {
   const loaded = await loadAdminHttpSession();
   if (loaded.status !== "ok") return adminJson({ error: loaded.status === "error" ? "unavailable" : "unauthenticated" }, loaded.status === "error" ? 503 : 401);
   const url = new URL(request.url);
-  if ([...url.searchParams.keys()].some((key) => key !== "status")) return adminJson({ error: "invalid_input" }, 400);
+  if ([...url.searchParams.keys()].some((key) => key !== "status" && key !== "id")) return adminJson({ error: "invalid_input" }, 400);
   const repository = groupInquiryRepository();
   if (!repository) return adminJson({ error: "unavailable" }, 503);
-  try { return adminJson(await repository.list({ status: url.searchParams.get("status") })); } catch (error) { return failure(error); }
+  try { return adminJson(await repository.list({ status: url.searchParams.get("status"), id: url.searchParams.get("id") })); } catch (error) { return failure(error); }
 }
 
 export async function POST(request: Request) {

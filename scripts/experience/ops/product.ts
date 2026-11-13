@@ -134,6 +134,15 @@ const draftAction: Action = {
   },
 };
 
+/** The sale-terms fields the Admin API takes (admin-product-http.ts TERMS_KEYS); the DTO also carries `version` and `updatedAtUtc`, which a change must not send back. */
+export const SALE_TERMS_KEYS = [
+  "offerPrices", "childPricing", "minimumParticipants", "minimumChargeableParticipants", "maxPartySize",
+  "cancellationPolicy", "cancellationWindowMinutesBeforeStart", "cancellationRefundBasisPoints", "minimumAttendance", "bookingQuestions", "conditionsVersion",
+] as const;
+export function editableTerms(terms: Record<string, unknown> | null): Record<string, unknown> | null {
+  return terms === null ? null : Object.fromEntries(SALE_TERMS_KEYS.filter((key) => terms[key] !== undefined).map((key) => [key, terms[key]]));
+}
+
 interface TermsState { readonly unitAmount: number; readonly saleTerms: Record<string, unknown> | null }
 
 const terms: Action = {
@@ -149,11 +158,15 @@ const terms: Action = {
     try { given = JSON.parse(text); } catch { throw new OpsError("invalid_file", "The file is not JSON."); }
     if (!isRecord(given) || Object.keys(given).length === 0 || Object.keys(given).some((key) => key !== "unitAmount" && key !== "saleTerms")) throw new OpsError("invalid_file", "The file must be an object with unitAmount and/or saleTerms.");
     if (given.saleTerms !== undefined && !isRecord(given.saleTerms)) throw new OpsError("invalid_file", "saleTerms must be an object.");
+    if (isRecord(given.saleTerms)) {
+      const unknownKey = Object.keys(given.saleTerms).find((key) => !(SALE_TERMS_KEYS as readonly string[]).includes(key));
+      if (unknownKey) throw new OpsError("invalid_file", `saleTerms.${unknownKey} is not a sale-terms field (${SALE_TERMS_KEYS.join(", ")}).`);
+    }
     let product: ProductDto | null = null;
     const seed = createHash("sha256").update(text).digest("hex").slice(0, 16);
     const result = await writeOne<TermsState>(context, [seed, "product-terms", providerId, productId], {
       key: `${providerId}/${productId}`,
-      read: async () => { product = await readProduct(context, providerId, productId); return { unitAmount: product.draft.unitAmount, saleTerms: product.saleTerms }; },
+      read: async () => { product = await readProduct(context, providerId, productId); return { unitAmount: product.draft.unitAmount, saleTerms: editableTerms(product.saleTerms) }; },
       desired: (current) => ({ unitAmount: (given.unitAmount as number | undefined) ?? current.unitAmount, saleTerms: given.saleTerms === undefined ? current.saleTerms : { ...(current.saleTerms ?? {}), ...(given.saleTerms as Record<string, unknown>) } }),
       send: async (current, desired, operationId) => {
         let version = product!.version;
@@ -244,11 +257,17 @@ const calendarAdd: Action = {
     const commandId = stableCommandId("calendar-rule", providerId, productId, JSON.stringify(Object.fromEntries(Object.entries(rule).sort(([a], [b]) => (a < b ? -1 : 1)))));
     try { parseScheduleRule({ ...rule, id: commandId }); } catch (error) { throw new OpsError("invalid_rule", error instanceof Error ? error.message : "The rule is invalid."); }
     if (!context.apply) return { status: "dry_run", commandId, rule };
-    const day = new Date(context.now()).toISOString().slice(0, 10).replaceAll("-", "");
-    const response = await context.api.send("POST", `${ROOT}/${enc(providerId)}/products/${enc(productId)}/calendar`, { providerId, action: "createRule", experienceId: productId, rule, commandId }, `op-${day}-${commandId.replaceAll("-", "").slice(0, 12)}`);
-    if (response.status === 409 && errorCode(response.body) === "operation_already_recorded") return { status: "unchanged", commandId, note: "This rule was already sent; `product calendar` shows it." };
-    const saved = bodyOf(response, "product calendar-add");
-    return { status: response.status === 201 ? "applied" : "unchanged", commandId, ruleId: saved.id ?? null, version: saved.version ?? null };
+    const calendarUrl = `${ROOT}/${enc(providerId)}/products/${enc(productId)}/calendar`;
+    // The server records an operation ID before it runs, so "already recorded" is not "done": the rule has to be in the schedule.
+    const sent = await sendOnce(context, ["calendar-add", providerId, productId, commandId], (operationId) => context.api.send("POST", calendarUrl, { providerId, action: "createRule", experienceId: productId, rule, commandId }, operationId), async () => {
+      const day = (offset: number) => new Date(context.now() + offset * 86_400_000).toISOString().slice(0, 10);
+      const current = await context.api.get(`${calendarUrl}?providerId=${enc(providerId)}&fromDate=${day(0)}&toDate=${day(1)}`);
+      const rules = isRecord(current.body) && Array.isArray(current.body.rules) ? (current.body.rules as Array<{ id?: string }>) : [];
+      return rules.some((item) => item.id === commandId) ? { commandId } : null;
+    });
+    if ("done" in sent) return { status: "unchanged", commandId, note: "The rule is already in the schedule." };
+    const saved = bodyOf(sent.response, "product calendar-add");
+    return { status: sent.response.status === 201 ? "applied" : "unchanged", commandId, ruleId: saved.id ?? null, version: saved.version ?? null };
   },
 };
 
@@ -287,17 +306,31 @@ const photoAdd: Action = {
     };
     const seed = ["photo", providerId, productId, sha256, ...(flags.again === true ? [String(context.now())] : [])];
     const response = await context.api.send("POST", `${ROOT}/${enc(providerId)}/products/${enc(productId)}/media`, undefined, operationId(seed, 1, context.now()), { bytes, contentType: type, headers });
-    if (response.status === 409 && errorCode(response.body) === "operation_already_recorded") return { status: "unchanged", evidence, note: "This photo was already sent for this product; `product show` lists the photos. Use --again to upload it once more." };
+    if (response.status === 409 && errorCode(response.body) === "operation_already_recorded") {
+      // A photo has no identity to look up, so a repeat cannot tell a finished upload from one that failed after it was recorded.
+      throw new OpsError("photo_upload_unconfirmed", "This photo was sent before and the server cannot say whether it was stored: check `product show`; if it is missing, run the command again with --again.", EXIT.failed, { evidence });
+    }
     const created = bodyOf(response, "product photo-add");
     return { status: "applied", evidence, media: isRecord(created.product) ? (created.product as unknown as ProductDto).media ?? [] : [] };
   },
 };
 
-/** The publication state version inside a product's revision token (`1:<draft>:<state>:<terms>`), or null before it was ever published. */
-export function stateVersionOf(revision: string): number | null {
-  const parts = Buffer.from(revision, "base64url").toString("utf8").split(":");
-  const state = Number(parts[2]);
-  return parts.length === 4 && Number.isSafeInteger(state) && state > 0 ? state : null;
+interface PublicationState {
+  readonly stateVersion: number;
+  readonly published: boolean;
+  readonly operationsSuspended: boolean;
+  readonly selfStoppedAtUtc: string | null;
+  readonly ownerResumeRequired: boolean;
+}
+
+const stateUrl = (providerId: string, productId: string) => `/admin/api/experience-publications/providers/${enc(providerId)}/products/${enc(productId)}`;
+
+/** The publication state of a product, also when it is published (the draft workspace API answers for drafts only). null when it was never published. */
+async function readState(context: Context, providerId: string, productId: string): Promise<PublicationState | null> {
+  const response = await context.api.get(stateUrl(providerId, productId));
+  if (response.status === 404) return null;
+  const body = bodyOf(response, "product state");
+  return isRecord(body.publication) ? (body.publication as unknown as PublicationState) : null;
 }
 
 const suspend: Action = {
@@ -308,14 +341,16 @@ const suspend: Action = {
     const productId = need(context, "product");
     const reason = context.args.flags.reason;
     if (typeof reason !== "string" || !/^[A-Z0-9_]{1,80}$/.test(reason)) throw new OpsError("usage", "--reason <CODE> is required (capital letters, digits and _).", EXIT.usage);
-    const product = await readProduct(context, providerId, productId);
-    const stateVersion = stateVersionOf(product.version);
-    if (stateVersion === null) return { status: "unchanged", note: "The product was never published, so there is nothing to stop.", product: summary(product) };
-    if (!context.apply) return { status: "dry_run", wouldSuspend: { providerId, productId, reason, stateVersion } };
-    const path = `/admin/api/experience-publications/providers/${enc(providerId)}/products/${enc(productId)}/suspend`;
-    const response = await context.api.send("POST", path, { expectedStateVersion: stateVersion, reasonCode: reason }, operationId(["suspend", providerId, productId, String(stateVersion), reason], 1, context.now()));
-    if (response.status === 409 && errorCode(response.body) === "operation_already_recorded") return { status: "unchanged", note: "This stop was already sent for this state; `product show` shows the state." };
-    return { status: "applied", publication: bodyOf(response, "product suspend").publication ?? null };
+    const state = await readState(context, providerId, productId);
+    if (state === null || !state.published) return { status: "unchanged", note: "The product was never published, so there is nothing to stop." };
+    if (state.operationsSuspended) return { status: "unchanged", note: "The product is already suspended.", state };
+    if (!context.apply) return { status: "dry_run", wouldSuspend: { providerId, productId, reason, stateVersion: state.stateVersion } };
+    const sent = await sendOnce(context, ["suspend", providerId, productId, String(state.stateVersion), reason], (operationId) => context.api.send("POST", `${stateUrl(providerId, productId)}/suspend`, { expectedStateVersion: state.stateVersion, reasonCode: reason }, operationId), async () => {
+      const after = await readState(context, providerId, productId);
+      return after?.operationsSuspended ? after : null;
+    });
+    if ("done" in sent) return { status: "unchanged", note: "The product is suspended.", state: sent.done };
+    return { status: "applied", publication: bodyOf(sent.response, "product suspend").publication ?? null };
   },
 };
 
@@ -325,14 +360,16 @@ const resume: Action = {
   async run(context) {
     const providerId = need(context, "provider");
     const productId = need(context, "product");
-    const product = await readProduct(context, providerId, productId);
-    const stateVersion = stateVersionOf(product.version);
-    if (stateVersion === null) return { status: "unchanged", note: "The product was never published.", product: summary(product) };
-    if (!context.apply) return { status: "dry_run", wouldClearSuspension: { providerId, productId, stateVersion } };
-    const path = `/admin/api/experience-publications/providers/${enc(providerId)}/products/${enc(productId)}/clear-suspension`;
-    const response = await context.api.send("POST", path, { expectedStateVersion: stateVersion }, operationId(["resume", providerId, productId, String(stateVersion)], 1, context.now()));
-    if (response.status === 409 && errorCode(response.body) === "operation_already_recorded") return { status: "unchanged", note: "This was already sent for this state." };
-    return { status: "applied", publication: bodyOf(response, "product resume").publication ?? null };
+    const state = await readState(context, providerId, productId);
+    if (state === null || !state.published) return { status: "unchanged", note: "The product was never published." };
+    if (!state.operationsSuspended) return { status: "unchanged", note: "There is no operations suspension to lift.", state };
+    if (!context.apply) return { status: "dry_run", wouldClearSuspension: { providerId, productId, stateVersion: state.stateVersion } };
+    const sent = await sendOnce(context, ["resume", providerId, productId, String(state.stateVersion)], (operationId) => context.api.send("POST", `${stateUrl(providerId, productId)}/clear-suspension`, { expectedStateVersion: state.stateVersion }, operationId), async () => {
+      const after = await readState(context, providerId, productId);
+      return after && !after.operationsSuspended ? after : null;
+    });
+    if ("done" in sent) return { status: "unchanged", note: "The suspension is lifted.", state: sent.done };
+    return { status: "applied", publication: bodyOf(sent.response, "product resume").publication ?? null };
   },
 };
 

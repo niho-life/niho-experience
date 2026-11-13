@@ -15,20 +15,21 @@ const record = (over: Record<string, unknown> = {}) => ({
 function inquiryApi() {
   let row: Record<string, unknown> = record();
   const sent: Array<{ body: Record<string, unknown>; operationId: string }> = [];
+  const gets: string[] = [];
   const seen = new Set<string>();
   const api: Api = {
     env: "stg", aiKind: "codex",
-    async get(path) { return path.startsWith("/admin/api/inquiries") ? { status: 200, body: { inquiries: [row], counts: { NEW: 1 }, today: "2026-11-14" } } : { status: 404, body: {} }; },
+    async get(path) { gets.push(path); return path.startsWith("/admin/api/inquiries") ? { status: 200, body: { inquiries: [row], counts: { NEW: 1 }, today: "2026-11-14" } } : { status: 404, body: {} }; },
     async send(_method, _path, body, operationId): Promise<ApiResponse> {
       sent.push({ body: body as Record<string, unknown>, operationId });
       if (seen.has(operationId)) return { status: 409, body: { error: "operation_already_recorded" } };
       seen.add(operationId);
-      const { action: _action, id: _id, ...patch } = body as Record<string, unknown>;
+      const patch = Object.fromEntries(Object.entries(body as Record<string, unknown>).filter(([key]) => key !== "action" && key !== "id"));
       row = { ...row, ...patch };
       return { status: 200, body: { inquiry: row } };
     },
   };
-  return { api, sent };
+  return { api, sent, gets };
 }
 const exec = (target: string, api: Api, argv: string[]) => run([target, ...argv], { environment: {}, api, now: () => NOW });
 // Fake-API JSON has no fixed shape in these tests, so `any` is allowed for this one alias.
@@ -45,6 +46,7 @@ describe("inquiry", () => {
     for (const secret of ["Sample Person", "sender@example.test", "private words"]) expect(text).not.toContain(secret);
     expect(result.inquiries[0]).toMatchObject({ id: ID1, status: "NEW", kind: "GROUP" });
     expect((await exec("inquiry", fake.api, ["list", "--status", "OPEN"])).exit).toBe(2);
+    expect((await exec("inquiry", fake.api, ["list", "--status", "WAITING"])).exit).toBe(2);
   });
   it("changes only the fields given, plans first, and a repeat changes nothing", async () => {
     const fake = inquiryApi();
@@ -54,6 +56,7 @@ describe("inquiry", () => {
     expect(planned.result.changes.map((change: { path: string }) => change.path).sort()).toEqual(["assigneeLabel", "nextDueOn", "status"]);
     expect(fake.sent).toEqual([]);
     expect(out(await exec("inquiry", fake.api, [...flags, "--yes"])).result.status).toBe("applied");
+    expect(fake.gets.every((path) => path.includes(`id=${ID1}`))).toBe(true);
     expect(fake.sent[0]!.body).toEqual({ action: "update", id: ID1, status: "IN_PROGRESS", assigneeLabel: "高濱", nextDueOn: "2026-11-18" });
     expect(out(await exec("inquiry", fake.api, [...flags, "--yes"])).result.status).toBe("unchanged");
     expect(out(await exec("inquiry", fake.api, ["update", "--id", ID1, "--assignee", "", "--yes"])).result.status).toBe("applied");
@@ -61,7 +64,7 @@ describe("inquiry", () => {
   });
   it("refuses a bad id, status or date and an update that gives nothing", async () => {
     const fake = inquiryApi();
-    for (const argv of [["update", "--status", "DONE"], ["update", "--id", "nope", "--status", "DONE"], ["update", "--id", ID1, "--status", "X"], ["update", "--id", ID1, "--due", "soon"], ["update", "--id", ID1]]) expect((await exec("inquiry", fake.api, [...argv, "--yes"])).exit, argv.join(" ")).toBe(2);
+    for (const argv of [["update", "--status", "DONE"], ["update", "--id", "nope", "--status", "DONE"], ["update", "--id", ID1, "--status", "WAITING"], ["update", "--id", ID1, "--due", "soon"], ["update", "--id", ID1]]) expect((await exec("inquiry", fake.api, [...argv, "--yes"])).exit, argv.join(" ")).toBe(2);
     expect(fake.sent).toEqual([]);
   });
 });
@@ -85,8 +88,17 @@ describe("assignment", () => {
     expect(sent[0]).toMatchObject({ action: "CLAIM", providerId: "prv_1", occurrenceId: "occ_1", subjectNihoUserId: "u1", reason: "代行" });
     expect(sent[0]!.commandId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
+  it("records the same claim again only with --again (after a release the first record would be replayed)", async () => {
+    sent.length = 0;
+    await exec("assignment", api, ["claim", ...flags, "--subject", "u1", "--yes"]);
+    await exec("assignment", api, ["claim", ...flags, "--subject", "u1", "--again", "--yes"]);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]!.commandId).not.toBe(sent[1]!.commandId);
+  });
   it("reports a claim that lost the race, releases without a subject, and has no way to set a fee", async () => {
-    expect(out(await exec("assignment", api, ["claim", ...flags, "--subject", "taken", "--yes"])).result).toMatchObject({ status: "failed", error: "already_assigned" });
+    const lost = await exec("assignment", api, ["claim", ...flags, "--subject", "taken", "--yes"]);
+    expect(lost.exit).toBe(4);
+    expect(out(lost)).toMatchObject({ ok: false, error: "already_assigned" });
     expect(out(await exec("assignment", api, ["release", ...flags, "--yes"])).result.status).toBe("applied");
     expect(sent.at(-1)).toMatchObject({ action: "RELEASE" });
     expect((await exec("assignment", api, ["claim", ...flags, "--yes"])).exit).toBe(2);

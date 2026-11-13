@@ -351,20 +351,23 @@ export class GroupInquiryRepository {
    * The inquiries, open ones first (those past their due date lead), then by due date and newest. `status` keeps one
    * status; all when absent. Only the Admin console calls this: the caller has already checked the Admin session.
    */
-  async list(options: { status?: unknown; limit?: unknown } = {}): Promise<GroupInquiryList> {
+  async list(options: { status?: unknown; limit?: unknown; id?: unknown } = {}): Promise<GroupInquiryList> {
     const status = options.status === undefined || options.status === null || options.status === "" ? null : options.status;
     if (status !== null && (typeof status !== "string" || !(GROUP_INQUIRY_STATUSES as readonly string[]).includes(status))) throw new StoreValidationError("status is not valid.");
     const limit = options.limit === undefined ? 200 : boundedInteger(options.limit, "limit", 1, GROUP_INQUIRY_MAIL_LIMITS.listMax);
+    // One inquiry by its ID (運営の CLI, #576): found however many others there are.
+    const id = options.id === undefined || options.id === null || options.id === "" ? null : options.id;
+    if (id !== null && (typeof id !== "string" || !UUID.test(id))) throw new StoreValidationError("id must be a UUID.");
     const [rows, counts, today] = await Promise.all([
       this.#pool.query<DbRow>(
         `SELECT ${RECORD_COLUMNS},
                 (SELECT status FROM group_inquiry_mails WHERE inquiry_id = i.id AND recipient = 'STAFF') AS staff_mail,
                 (SELECT status FROM group_inquiry_mails WHERE inquiry_id = i.id AND recipient = 'SENDER') AS sender_mail
            FROM group_inquiries i
-          WHERE ($1::text IS NULL OR i.status = $1)
+          WHERE ($1::text IS NULL OR i.status = $1) AND ($3::uuid IS NULL OR i.id = $3::uuid)
           ORDER BY (i.status = 'DONE'), i.next_due_on NULLS LAST, i.created_at DESC, i.id
           LIMIT $2`,
-        [status, limit],
+        [status, limit, id],
       ),
       this.#pool.query<DbRow>("SELECT status, count(*)::int AS n FROM group_inquiries GROUP BY status"),
       this.#pool.query<DbRow>("SELECT (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date::text AS today"),

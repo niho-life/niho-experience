@@ -40,6 +40,7 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 - 組になるのは、静的ページは日本語側の route・SEO がともに indexable で英語側も index するもの（`/`・`/experiences`・`/host`）、体験詳細は同じ日本語 release のカタログにある slug。組の hreflang は英日とも `en`・`ja`・`x-default`（英語）の同じ組で、sitemap の `alternates.languages` もこの組を使う。
 - sitemap は、日本語 release が揃うときだけ、英語の静的ページ・詳細に組の `xhtml:link` を付け、日本語の indexable な静的ページと、英語の一覧にもある日本語詳細を足す。並びは英語の静的ページ、英語詳細、ガイド、日本語の静的ページ、日本語詳細。日本語詳細の `lastmod` は出さない（日本語カタログの `updatedAt` が翻訳の更新を表すか、契約で決まっていないため）。
 - 日本語詳細の hreflang は、英語の一覧（sitemap と同じ `kamakura`）にその slug があるときだけ英語を指す。無い・読めないときは canonical だけにする。
+- **日本語サイト独自のページ（#561）**：日本語版が公開されている（release が揃う）ときだけ、sitemap の最後に足す。`/ja/usage`・`/ja/business`・`/ja/schools`（いつも）、`/ja/people` と各人のページ（街の人が1人以上のとき）、`/ja/guides` と各記事（`lastmod` は更新日。公開記事が1本以上のとき。リンクだけで公開した記事は載せない）、`/ja/experiences?category=…`（そのカテゴリーに公開中の体験が1件以上あるものだけ）。街の人が0人・記事が0本・体験が0件のカテゴリーは、空のページを検索に出さないので載せない。絞り込み（エリア・だれと・こんな日に・人数・日にち）のURLと `/ja/inquiry` は載せない（`noindex`）。hreflang の組は作らない（英語に対応するページが無い）。`apps/web/src/app/sitemap.ts` が読み、`sitemap-entries.ts` が並べる。
 - 日本語版がオフ・未公開・release 不一致のときは、sitemap も hreflang も英語だけの従来どおり（項目・並びとも同じ。`sitemap-route.test.ts` で固定）。
 - 2026-10-31 時点で `EXPERIENCE_JAPANESE_SITE_ENABLED` はどの環境にも無く、日本語の hreflang・sitemap は出ていない。有効化の前に実機で `/sitemap.xml` と各ページの `<head>` を確かめる（[localization-consumer.md](localization-consumer.md) の「有効化の前に確かめること」）。
 - 検査：`localized-mapping.test.ts`（対応の規則・言語切替）、`sitemap-entries.test.ts`・`sitemap-route.test.ts`（sitemap）、`locale-metadata.test.ts`・`localized-metadata.test.ts`（英日の hreflang と sitemap の一致）。
