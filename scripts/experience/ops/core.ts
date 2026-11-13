@@ -41,7 +41,7 @@ export interface Args {
   readonly flags: Readonly<Record<string, string | true>>;
 }
 
-const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified", "listed", "unlisted", "photo-rights-confirmed", "consent-confirmed", "rights-confirmed", "again", "cover"]);
+const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified", "listed", "unlisted", "photo-rights-confirmed", "consent-confirmed", "rights-confirmed", "again", "cover", "logo"]);
 const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "status", "provider", "product", "seller-confirmation", "visibility", "id", "occurrence", "subject", "assignee", "due", "note", "kind", "name", "from", "to", "alt", "alt-ja", "photographer", "permission", "credit", "reason"]);
 
 /** `--name value`, `--name=value` and the boolean flags `--dry-run`, `--yes`; everything else is positional. */
@@ -209,7 +209,12 @@ export function failureOf(response: ApiResponse, action: string): OpsError {
   const blockers = ((response.body as { error?: { blockers?: unknown } } | null)?.error)?.blockers;
   const detail = { status: response.status, ...(Array.isArray(blockers) ? { blockers } : {}) };
   if (response.status === 401) return new OpsError(code, "Not signed in: the Google ID token was refused (expired, another client, or not a niho.life account).", EXIT.auth, detail);
-  if (response.status === 403) return new OpsError(code, code === "not_available_from_cli" ? "This is not available from the CLI." : "This account is not on the Admin allowlist, or the CLI is not open on this site.", EXIT.auth, detail);
+  if (response.status === 403) {
+    // The product API answers `{ error: { code: "FORBIDDEN" } }` for a resource it does not serve (a published product's draft workspace); the proxy and the
+    // allowlist answer `{ error: "forbidden" }`.
+    if (typeof (response.body as { error?: unknown } | null)?.error === "object") return new OpsError(code, `${action}: the server does not serve this resource (FORBIDDEN): for a product, the draft workspace answers only for products never published.`, EXIT.failed, detail);
+    return new OpsError(code, code === "not_available_from_cli" ? "This is not available from the CLI." : "This account is not on the Admin allowlist, or the CLI is not open on this site.", EXIT.auth, detail);
+  }
   if (response.status === 404) return new OpsError(code, `${action}: not found, or this feature is not open on this site.`, EXIT.failed, detail);
   if (response.status === 409 || response.status === 412) return new OpsError(code, `${action}: it changed meanwhile (${code}). Read it again and re-plan.`, EXIT.conflict, detail);
   return new OpsError(code, `${action} failed (${response.status}, ${code}).`, EXIT.failed, detail);

@@ -187,6 +187,26 @@ const terms: Action = {
   },
 };
 
+const review: Action = {
+  tier: "edit",
+  summary: "Records the office's review of the current manuscript (--provider, --product): the Japanese manuscript of a Japanese-only product, or both manuscripts. Changing the draft afterwards clears it, so review last. Without --yes it shows whether a review is still needed.",
+  async run(context) {
+    const providerId = need(context, "provider");
+    const productId = need(context, "product");
+    const product = await readProduct(context, providerId, productId);
+    const needed = (product.publicationBlockers ?? []).includes("MANUSCRIPT_REQUIRED");
+    if (!needed) return { status: "unchanged", note: "No manuscript review is needed (the blocker MANUSCRIPT_REQUIRED is not listed).", blockers: product.publicationBlockers ?? [] };
+    if (!context.apply) return { status: "dry_run", wouldReview: summary(product) };
+    const sent = await sendOnce(context, ["product-review", providerId, productId, product.version], (operationId) => context.api.send("POST", `${ROOT}/${enc(providerId)}/products/${enc(productId)}/english-review`, { version: product.version, reviewed: true }, operationId), async () => {
+      const after = await readProduct(context, providerId, productId);
+      return (after.publicationBlockers ?? []).includes("MANUSCRIPT_REQUIRED") ? null : summary(after);
+    });
+    if ("done" in sent) return { status: "unchanged", product: sent.done };
+    const done = bodyOf(sent.response, "product review");
+    return { status: "applied", product: isRecord(done.product) ? summary(done.product as unknown as ProductDto) : null };
+  },
+};
+
 const publish: Action = {
   tier: "publish",
   summary: "Publishes the draft as it is (--provider, --product, --seller-confirmation VERBAL|WRITTEN). The server refuses while a blocker remains (see `product show`). Photos are only ever ones whose rights are cleared (the owner's rule), so the photo rights confirmation is sent as true.",
@@ -195,6 +215,8 @@ const publish: Action = {
     const productId = need(context, "product");
     const method = context.args.flags["seller-confirmation"];
     if (method !== "VERBAL" && method !== "WRITTEN") throw new OpsError("usage", "--seller-confirmation VERBAL|WRITTEN is required (how the seller confirmed).", EXIT.usage);
+    const current = await readState(context, providerId, productId);
+    if (current?.published) return { status: "unchanged", note: "The product is already published.", state: current };
     const listed = bodyOf(await context.api.get(`${ROOT}/${enc(providerId)}/products`), "product list");
     const consentVersion = typeof listed.publicationConsentVersion === "string" ? listed.publicationConsentVersion : null;
     if (!consentVersion) throw new OpsError("unexpected_response", "The publication consent version was not returned.");
@@ -375,5 +397,5 @@ const resume: Action = {
 
 export const productTarget: Target = {
   summary: "Products: draft, price and sale terms, publishing (事務局の代理登録 / product workspaces)",
-  actions: { list, show, create, draft: draftAction, terms, calendar, "calendar-add": calendarAdd, "photo-add": photoAdd, publish, suspend, resume },
+  actions: { list, show, create, draft: draftAction, review, terms, calendar, "calendar-add": calendarAdd, "photo-add": photoAdd, publish, suspend, resume },
 };
