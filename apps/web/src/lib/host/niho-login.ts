@@ -208,16 +208,24 @@ async function completeInvite(request: NextRequest, login: HostLoginState, code:
 
   const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeMs) => {
     const now = Date.now();
+    let accepted;
     try {
-      const accepted = await invitations.acceptInvitation({ browserBindingHash: linkBindingHash(binding), nihoUserId, nowUtc: nowUtc(now) });
-      if (accepted.kind !== "accepted") return { accepted, opened: null, now };
-      return { accepted, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) }), now };
+      accepted = await invitations.acceptInvitation({ browserBindingHash: linkBindingHash(binding), nihoUserId, nowUtc: nowUtc(now) });
     } catch (error) {
+      // The transaction rolled back: the invitation is still open.
       console.error(`[host-auth] invitation not accepted: ${error instanceof Error ? error.name : "unknown error"}`);
       return null;
     }
+    if (accepted.kind !== "accepted") return { accepted, opened: null, now };
+    // From here the invitation is used up and the NIHO account is bound: a failure to open the session leaves the binding.
+    try {
+      return { accepted, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) }), now };
+    } catch (error) {
+      console.error(`[host-auth] invitation's session not opened: ${error instanceof Error ? error.name : "unknown error"}`);
+      return { accepted, opened: null, now };
+    }
   });
-  // The invitation is still usable after any of these: its retry goes through the invitation's sign-in, not the host login.
+  // Before the invitation was used up (NIHO failed, the store failed): it is still usable, and the retry goes through it.
   if (!verified.ok || verified.value === null) return failed("invite-unavailable");
   const { accepted, opened, now } = verified.value;
   switch (accepted.kind) {
@@ -227,7 +235,8 @@ async function completeInvite(request: NextRequest, login: HostLoginState, code:
     case "host-account-not-active": return failed("suspended");
     case "accepted": break;
   }
-  if (opened?.kind !== "ok") return failed("invite-unavailable");
+  // Used up and bound, but the session did not open: the invitation is gone, so the retry is the ordinary NIHO login.
+  if (opened?.kind !== "ok") return failed("unavailable");
   const response = await signedIn(request, login, accounts, opened, now);
   clearInviteBindingCookie(response);
   return response;
