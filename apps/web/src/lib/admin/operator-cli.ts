@@ -29,7 +29,7 @@ const API_PREFIX = "/admin/api/";
  * The /admin/api areas open to the CLI (the first path segment after /admin/api/). Everything else answers 403, so a
  * refund, a payout or a payout account (#576: never from a CLI) cannot be reached by adding a route. A stage adds its own area here.
  */
-export const OPERATOR_API_AREAS: readonly string[] = Object.freeze(["product-classifications", "people"]);
+export const OPERATOR_API_AREAS: readonly string[] = Object.freeze(["product-classifications", "people", "product-workspaces", "experience-publications"]);
 
 export const operatorApiPath = (pathname: string): boolean => pathname.startsWith(API_PREFIX);
 export const operatorApiAllowed = (pathname: string): boolean => operatorApiPath(pathname) && OPERATOR_API_AREAS.includes(pathname.slice(API_PREFIX.length).split("/", 1)[0]!);
@@ -39,8 +39,11 @@ const GOOGLE_SUBJECT = /^[\x21-\x7E]{1,255}$/;
 const ADMIN_EMAIL = /^[a-z0-9._%+-]{1,64}@niho\.life$/;
 const BEARER = /^Bearer ([A-Za-z0-9_-]{10,4096}\.[A-Za-z0-9_-]{10,4096}\.[A-Za-z0-9_-]{10,4096})$/;
 const OPERATION_ID = /^[A-Za-z0-9._:-]{8,64}$/;
-/** The largest body the CLI sends through the proxy (the BFFs' own limits are smaller or equal). */
+/** The largest body the CLI sends through the proxy: the BFFs' JSON limits are smaller; a product photo (/media) may be up to the 10 MB the image route takes. */
 export const OPERATOR_BODY_LIMIT = 1024 * 1024;
+export const OPERATOR_PHOTO_BODY_LIMIT = 10 * 1024 * 1024;
+const PHOTO_PATH = /^\/admin\/api\/product-workspaces\/[^/]+\/products\/[^/]+\/media$/;
+export const operatorBodyLimit = (pathname: string): number => (PHOTO_PATH.test(pathname) ? OPERATOR_PHOTO_BODY_LIMIT : OPERATOR_BODY_LIMIT);
 /** How long the sealed assertion the proxy hands to a route handler is good for. */
 export const OPERATOR_ASSERTION_TTL_MS = 60_000;
 
@@ -142,9 +145,10 @@ export async function gateOperatorRequest(request: Request, now = Date.now()): P
   if (!checked.ok) return { kind: "refuse", status: checked.status, error: checked.error };
   if (write) {
     const declared = Number(request.headers.get("content-length") ?? "0");
-    if (!Number.isFinite(declared) || declared > OPERATOR_BODY_LIMIT) return { kind: "refuse", status: 413, error: "invalid_input" };
+    const limit = operatorBodyLimit(pathname);
+    if (!Number.isFinite(declared) || declared > limit) return { kind: "refuse", status: 413, error: "invalid_input" };
     const body = Buffer.from(await request.clone().arrayBuffer());
-    if (body.length > OPERATOR_BODY_LIMIT) return { kind: "refuse", status: 413, error: "invalid_input" };
+    if (body.length > limit) return { kind: "refuse", status: 413, error: "invalid_input" };
     const requests = operatorCliRequests();
     if (!requests) return { kind: "refuse", status: 503, error: "unavailable" };
     try {

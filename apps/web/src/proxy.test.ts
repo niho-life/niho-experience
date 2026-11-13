@@ -49,7 +49,7 @@ vi.mock("@/lib/experience/store-server", () => ({
 
 import { PUT, GET } from "@/app/(admin)/admin/api/product-classifications/route";
 import { adminMutationAllowed } from "@/lib/admin/server";
-import { OPERATOR_ASSERTION_HEADER, operatorApiAllowed, operatorIdentity } from "@/lib/admin/operator-cli";
+import { OPERATOR_ASSERTION_HEADER, OPERATOR_BODY_LIMIT, OPERATOR_PHOTO_BODY_LIMIT, operatorApiAllowed, operatorBodyLimit, operatorIdentity } from "@/lib/admin/operator-cli";
 import { adminActorIdForGoogleSubject } from "@niho-experience/experience-store";
 import { proxy } from "./proxy";
 
@@ -102,6 +102,10 @@ describe("operatorIdentity", () => {
   it("opens only the areas the CLI is meant for, never a refund, a payout or an account", () => {
     expect(operatorApiAllowed("/admin/api/product-classifications")).toBe(true);
     expect(operatorApiAllowed("/admin/api/people")).toBe(true);
+    expect(operatorApiAllowed("/admin/api/product-workspaces/p/products/x/publish")).toBe(true);
+    expect(operatorApiAllowed("/admin/api/experience-publications/providers/p/products/x/suspend")).toBe(true);
+    expect(operatorBodyLimit("/admin/api/product-workspaces/p/products/x/media")).toBe(OPERATOR_PHOTO_BODY_LIMIT);
+    for (const path of ["/admin/api/product-workspaces/p/products/x", "/admin/api/product-workspaces/p/provider-media", "/admin/api/people"]) expect(operatorBodyLimit(path), path).toBe(OPERATOR_BODY_LIMIT);
     for (const path of ["/admin/api/refunds", "/admin/api/payouts", "/admin/api/bookings/x/cancel", "/admin/api/people-x", "/admin/auth/logout", "/admin/api/"]) expect(operatorApiAllowed(path), path).toBe(false);
   });
 });

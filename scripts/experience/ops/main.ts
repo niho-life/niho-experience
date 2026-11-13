@@ -3,6 +3,8 @@ import { EXIT, OpsError, createApi, parseArgs, redactable, resolveAiKind, resolv
 import { authTarget } from "./auth.ts";
 import { classificationTarget } from "./classification.ts";
 import { peopleTarget } from "./people.ts";
+import { productTarget } from "./product.ts";
+import { providerTarget } from "./provider.ts";
 
 /**
  * Every target the CLI knows. A stage adds its own here (classification, people, product, guide, inquiry); the
@@ -12,6 +14,8 @@ export const TARGETS: Readonly<Record<string, Target>> = Object.freeze({
   auth: authTarget,
   classification: classificationTarget,
   people: peopleTarget,
+  provider: providerTarget,
+  product: productTarget,
 });
 
 export interface Runtime {
@@ -20,6 +24,7 @@ export interface Runtime {
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
   readonly readFile?: (path: string) => string;
+  readonly readBytes?: (path: string) => Uint8Array;
   readonly api?: Api;
   readonly targets?: Readonly<Record<string, Target>>;
 }
@@ -61,6 +66,7 @@ export async function run(argv: readonly string[], runtime: Runtime): Promise<Ou
       api, args, env: env.name, now: runtime.now ?? Date.now,
       apply: action.tier !== "read" && args.flags.yes === true,
       readFile: runtime.readFile ?? ((path) => readFileSync(path, "utf8")),
+      readBytes: runtime.readBytes ?? ((path) => readFileSync(path)),
     };
     const result = await action.run(context);
     const mode = action.tier === "read" ? "read" : context.apply ? "apply" : "dry-run";

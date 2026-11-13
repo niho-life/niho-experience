@@ -79,7 +79,7 @@ describe("diffValues and operationId", () => {
 });
 
 describe("writeOne", () => {
-  const context = (apply: boolean): Context => ({ api: {} as Api, args: { positional: [], flags: {} }, apply, env: "stg", readFile: () => "", now: () => NOW });
+  const context = (apply: boolean): Context => ({ api: {} as Api, args: { positional: [], flags: {} }, apply, env: "stg", readFile: () => "", readBytes: () => new Uint8Array(), now: () => NOW });
   const spec = (state: { value: number }, send: (op: string) => Promise<{ status: number; body: unknown }>) => ({
     key: "item", read: async () => ({ ...state }), desired: () => ({ value: 2 }), send: async (_c: unknown, _d: unknown, op: string) => send(op),
   });
