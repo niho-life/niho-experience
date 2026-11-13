@@ -527,6 +527,8 @@ export interface HostThread {
   topic: string | null;
   /** Null for a question before booking. */
   booking: HostThreadBooking | null;
+  /** The language the guest reads replies in: a booking made in Japanese (#59) gets the host's Japanese as written. Absent means English. */
+  guestLanguage?: "ja" | "en";
   /** In time order. */
   messages: readonly HostThreadMessage[];
 }
