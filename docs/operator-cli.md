@@ -179,7 +179,7 @@ node scripts/experience/ops.mjs people withdraw --provider prov-a --yes      # �
 ### 相談の受付一覧と、開催回の担当の記録
 
 - `inquiry list` は、送り手の氏名・メールアドレス・本文・詳細を**出さない**（種別・状態・返信期限・次の期日・担当ラベル・スタッフのメモ・体験の slug だけ）。`inquiry update` は、書いた項目（`--status`・`--assignee`・`--due`・`--note`。空文字で消す）だけが変わる。相手にメールは送らない。
-- `assignment list` は開催回の一覧。`--provider` と `--occurrence` を付けると、その開催回の候補者と履歴。`claim`・`decline`・`release` は、その人に代わって担当を記録する（先に取られていれば `already_assigned`）。**合意した報酬（`SET_FEE`）は CLI では扱わない**（proxy が `403 not_available_from_cli` で断る。金額は画面で人が入れる）。
+- `assignment list` は開催回の一覧。`--provider` と `--occurrence` を付けると、その開催回の候補者と履歴。`claim`・`decline`・`release` は、その人に代わって担当を記録する（先に取られていれば `already_assigned`（終了コード 4）。同じ記録は同じ日なら1件（再送）で、担当を外したあとに同じ人がもう一度引き受けるときは `--again`）。**合意した報酬（`SET_FEE`）は CLI では扱わない**（proxy が `403 not_available_from_cli` で断る。金額は画面で人が入れる）。
 
 ### まだ CLI に無いもの
 

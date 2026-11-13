@@ -9,7 +9,8 @@ import { EXIT, OpsError, errorCode, failureOf, writeOne, type Action, type Targe
 const API = "/admin/api/inquiries";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const STATUSES = ["NEW", "IN_PROGRESS", "WAITING", "DONE"] as const;
+/** The site's own list (packages/experience-store group-inquiry-fields.ts GROUP_INQUIRY_STATUSES). */
+const STATUSES = ["NEW", "IN_PROGRESS", "DONE"] as const;
 
 interface InquiryRecord {
   readonly id: string;
@@ -34,8 +35,9 @@ export const projectInquiry = (record: InquiryRecord) => ({
   createdAt: record.createdAt, updatedAt: record.updatedAt,
 });
 
-async function readInquiries(context: Parameters<Action["run"]>[0], status?: string): Promise<{ inquiries: InquiryRecord[]; counts: unknown; today: unknown }> {
-  const response = await context.api.get(status ? `${API}?status=${encodeURIComponent(status)}` : API);
+async function readInquiries(context: Parameters<Action["run"]>[0], filter: { status?: string; id?: string } = {}): Promise<{ inquiries: InquiryRecord[]; counts: unknown; today: unknown }> {
+  const query = [filter.status ? `status=${encodeURIComponent(filter.status)}` : "", filter.id ? `id=${encodeURIComponent(filter.id)}` : ""].filter(Boolean).join("&");
+  const response = await context.api.get(query ? `${API}?${query}` : API);
   if (response.status !== 200) throw failureOf(response, "inquiry list");
   const body = response.body as { inquiries?: InquiryRecord[]; counts?: unknown; today?: unknown } | null;
   return { inquiries: Array.isArray(body?.inquiries) ? body.inquiries : [], counts: body?.counts ?? null, today: body?.today ?? null };
@@ -43,11 +45,12 @@ async function readInquiries(context: Parameters<Action["run"]>[0], status?: str
 
 const list: Action = {
   tier: "read",
-  summary: "Lists the inquiries (--status NEW|IN_PROGRESS|WAITING|DONE, --id <uuid>) without the sender's name, address or message: kind, status, due dates, assignee label, staff note.",
+  summary: "Lists the inquiries (--status NEW|IN_PROGRESS|DONE, --id <uuid>) without the sender's name, address or message: kind, status, due dates, assignee label, staff note.",
   async run(context) {
     const status = context.args.flags.status;
     if (status !== undefined && (typeof status !== "string" || !(STATUSES as readonly string[]).includes(status))) throw new OpsError("usage", `--status must be one of ${STATUSES.join(", ")}.`, EXIT.usage);
-    const { inquiries, counts, today } = await readInquiries(context, status as string | undefined);
+    const wanted = context.args.flags.id;
+    const { inquiries, counts, today } = await readInquiries(context, { status: status as string | undefined, ...(typeof wanted === "string" ? { id: wanted } : {}) });
     const id = context.args.flags.id;
     const rows = (typeof id === "string" ? inquiries.filter((item) => item.id === id) : inquiries).map(projectInquiry);
     return { count: rows.length, counts, today, inquiries: rows };
@@ -58,7 +61,7 @@ interface State { readonly status: string; readonly assigneeLabel: string | null
 
 const update: Action = {
   tier: "edit",
-  summary: "Changes an inquiry (--id <uuid>) by what is given: --status NEW|IN_PROGRESS|WAITING|DONE, --assignee <label> (\"\" clears it), --due YYYY-MM-DD (\"\" clears it), --note <text> (\"\" clears it). Only the fields given change. It sends nothing to the sender.",
+  summary: "Changes an inquiry (--id <uuid>) by what is given: --status NEW|IN_PROGRESS|DONE, --assignee <label> (\"\" clears it), --due YYYY-MM-DD (\"\" clears it), --note <text> (\"\" clears it). Only the fields given change. It sends nothing to the sender.",
   async run(context) {
     const flags = context.args.flags;
     const id = flags.id;
@@ -79,7 +82,7 @@ const update: Action = {
     const result = await writeOne<State>(context, ["inquiry-update", id, JSON.stringify(given)], {
       key: id,
       read: async () => {
-        const found = (await readInquiries(context)).inquiries.find((item) => item.id === id);
+        const found = (await readInquiries(context, { id })).inquiries.find((item) => item.id === id);
         if (!found) throw new OpsError("not_found", "No inquiry has this id.", EXIT.failed);
         return { status: found.status, assigneeLabel: found.assigneeLabel, nextDueOn: found.nextDueOn, staffNote: found.staffNote };
       },

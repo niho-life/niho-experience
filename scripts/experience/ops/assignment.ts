@@ -40,8 +40,9 @@ function record(action: "CLAIM" | "DECLINE" | "RELEASE", summary: string): Actio
       const subject = action === "RELEASE" ? undefined : need(context, "subject");
       const reason = context.args.flags.reason;
       if (reason !== undefined && typeof reason !== "string") throw new OpsError("usage", "--reason needs text.", EXIT.usage);
-      // The same record sent again the same day is one record (a retry); the same words on another day are a new decision.
-      const commandId = stableCommandId("assignment", action, providerId, occurrenceId, subject ?? "", String(reason ?? ""), new Date(context.now()).toISOString().slice(0, 10));
+      // The same record sent again the same day is one record (a retry); the same words on another day, or with --again, are a new decision
+      // (a person taking an occurrence again after releasing it).
+      const commandId = stableCommandId("assignment", action, providerId, occurrenceId, subject ?? "", String(reason ?? ""), new Date(context.now()).toISOString().slice(0, 10), context.args.flags.again === true ? String(context.now()) : "");
       const body = { action, providerId, occurrenceId, commandId, ...(subject ? { subjectNihoUserId: subject } : {}), ...(typeof reason === "string" ? { reason } : {}) };
       if (!context.apply) return { status: "dry_run", record: body };
       // "Already recorded" is not "done" (the server records an operation ID before it runs); the command ID makes the record itself
@@ -49,7 +50,7 @@ function record(action: "CLAIM" | "DECLINE" | "RELEASE", summary: string): Actio
       const sent = await sendOnce(context, ["assignment", commandId], (operationId) => context.api.send("POST", API, body, operationId), async () => null);
       if ("done" in sent) return { status: "unchanged" };
       const response = sent.response;
-      if (response.status === 409 && errorCode(response.body) === "already_assigned") return { status: "failed", error: "already_assigned", note: "Somebody else holds this occurrence: read the list again.", result: response.body };
+      if (response.status === 409 && errorCode(response.body) === "already_assigned") throw new OpsError("already_assigned", "Somebody else holds this occurrence: read `assignment list --provider --occurrence` again.", EXIT.conflict, { result: response.body });
       if (response.status < 200 || response.status >= 300) throw failureOf(response, `assignment ${action.toLowerCase()}`);
       return { status: "applied", result: response.body };
     },
@@ -60,7 +61,7 @@ export const assignmentTarget: Target = {
   summary: "Occurrence assignments: who takes an occurrence (claim, decline, release on someone's behalf). Fees are not handled here.",
   actions: {
     list,
-    claim: record("CLAIM", "Records that a person takes an occurrence (--provider, --occurrence, --subject <niho user id>, --reason? ). Refused when someone else holds it."),
+    claim: record("CLAIM", "Records that a person takes an occurrence (--provider, --occurrence, --subject <niho user id>, --reason?). Refused (exit 4) when someone else holds it. --again records the same claim once more after the occurrence was released."),
     decline: record("DECLINE", "Records that a person declines an occurrence (--provider, --occurrence, --subject, --reason?)."),
     release: record("RELEASE", "Releases the current assignee of an occurrence (--provider, --occurrence, --reason?)."),
   },
