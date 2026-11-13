@@ -1,6 +1,6 @@
 import { EXPERIENCE_API_CONTRACT } from "@niho-experience/api-client";
 import type { ReactNode } from "react";
-import { EN_STATIC_COPY_V1, PresentationRootV1, SiteFooterV1, SiteHeaderV1, type FooterLinkV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
+import { EN_STATIC_COPY_V1, PresentationRootV1, RichMessageV1, SiteFooterV1, type FooterLinkV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
 import { PRESENTATION_PRIMITIVES_V1 } from "./PresentationV1";
 import { NavLink } from "./NavLink";
 import { SITE_DESCRIPTION } from "@/lib/public-metadata";
@@ -31,9 +31,30 @@ export function PreviewNote({ catalog }: { catalog: PreviewCatalog }) {
   );
 }
 
+/**
+ * The English header. Since #562 the language button sits at its right end, in place of the "EN · ¥" pill and the row above the
+ * header (a link to the Japanese page; the pill stays only where there is no Japanese site). Everything else is the presentation's
+ * `SiteHeaderV1` markup, kept the same.
+ */
 export function SiteHeader({ brandLabel, exploreLabel, hostLabel, copy = EN_STATIC_COPY_V1, languageSwitch }: { brandLabel?: string; exploreLabel?: string; hostLabel?: string; copy?: StaticCopyAccessorV1; languageSwitch?: ReactNode } = {}) {
   const experiences = exploreLabel ?? copy.text("chrome.experiences");
-  return <>{languageSwitch ? <div className="border-b border-line bg-sand"><div className="container-page flex justify-end py-1.5">{languageSwitch}</div></div> : null}<SiteHeaderV1 primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} labels={{ brand: brandLabel, experiences, host: hostLabel }} experiencesLink={<NavLink href="/experiences" className="rounded-full px-2.5 py-2 hover:bg-sand sm:px-3">{experiences}</NavLink>} /></>;
+  const { Link, Image } = PRESENTATION_PRIMITIVES_V1;
+  return <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur-md backdrop-saturate-[1.2]">
+    <div className="container-page flex h-16 items-center gap-1.5">
+      <Link href="/" className="flex shrink-0 items-center gap-2 font-display text-xl font-semibold tracking-[-0.01em]">
+        <span aria-hidden className="relative size-7 shrink-0 sm:size-8"><Image src="/icon.svg" alt="" sizes="32px" priority className="object-contain" /></span>
+        <span className="flex items-baseline gap-1.5">{brandLabel ? <span>{brandLabel}</span> : <RichMessageV1 segments={copy.rich("chrome.brandRich")} emphasisClassName="font-normal text-ink-soft max-[479px]:sr-only" />}</span>
+      </Link>
+      <nav aria-label={copy.text("chrome.main")} className="ml-auto">
+        <ul className="flex items-center gap-0.5 text-[0.9375rem] font-bold sm:gap-1">
+          <li><NavLink href="/experiences" className="rounded-full px-2.5 py-2 hover:bg-sand sm:px-3">{experiences}</NavLink></li>
+          <li className="hidden sm:block"><Link href="/host" className="rounded-full px-3 py-2 hover:bg-sand">{hostLabel || copy.text("chrome.host")}</Link></li>
+          <li className="hidden sm:block"><Link href="/help" className="rounded-full px-3 py-2 hover:bg-sand">{copy.text("chrome.help")}</Link></li>
+        </ul>
+      </nav>
+      {languageSwitch ?? <p className="shrink-0 rounded-full border border-line-strong px-2.5 py-1 text-[0.8125rem] font-extrabold whitespace-nowrap"><span aria-hidden>{copy.text("chrome.localeCurrency")}</span><span className="sr-only">{copy.text("chrome.localeCurrencyLabel")}</span></p>}
+    </div>
+  </header>;
 }
 
 export function SiteFooter({

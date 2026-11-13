@@ -24,3 +24,17 @@ export function languageSwitchTarget(pathname: string, query: string, counterpar
   const filtered = switchQuery(sourcePath, query);
   return `${isEnglish ? japanesePath : sourcePath}${filtered ? `?${filtered}` : ""}`;
 }
+
+/**
+ * A counterpart of "" says the page has no page in the other language and the button is not shown (a Japanese-only
+ * experience, #59). A path with no entry at all has no pair, and the button goes to the other language's top page (#562).
+ */
+export const NO_LANGUAGE_COUNTERPART = "";
+
+/** Where the header's language button leads from this page, or null when it is not shown. */
+export function languageButtonTarget(pathname: string, query: string, counterparts: Readonly<Record<string, string>>): string | null {
+  const isJapanese = pathname === "/ja" || pathname.startsWith("/ja/");
+  const sourcePath = pathname === "/ja" || pathname === "/ja/" ? "/" : isJapanese ? pathname.slice(3) : pathname;
+  if (counterparts[sourcePath] === NO_LANGUAGE_COUNTERPART) return null;
+  return languageSwitchTarget(pathname, query, counterparts) ?? (isJapanese ? "/" : "/ja");
+}

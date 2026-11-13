@@ -59,10 +59,9 @@ describe("product classification (#529)", { skip: databaseUrl === undefined ? "T
       await assert.rejects(repository.adminSave(ADMIN, []), StoreValidationError);
       assert.equal((await pool.query("SELECT updated_by_admin FROM experience_product_classifications WHERE product_id='p-draft'")).rows[0]?.updated_by_admin, true);
 
-      // The public read has published products only (a draft's classification is not exposed), by slug.
-      const publicMap = await repository.listPublic();
-      assert.deepEqual([...publicMap.keys()].sort(), ["p-live", "p-other"]);
-      assert.equal(publicMap.get("p-other")?.category, "zen");
+      // The public read is the visible publications' only (here none: a product status alone shows nothing); the positive case
+      // and the stop are in managed-experience-sales.integration.test.ts, which publishes real products.
+      assert.equal((await repository.listPublic()).size, 0);
     } finally {
       await db.dispose();
     }

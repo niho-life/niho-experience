@@ -8,7 +8,7 @@ vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NEXT_NOT_FOUND"); } }));
 
 import { GroupGuidePage } from "@/components/pages/GroupGuidePage";
-import { InquiryBand } from "@/components/InquiryBand";
+import { ConsultBand } from "@/components/ja-home/JapaneseHomeSections";
 import { inquiryContextFromSearch } from "@/lib/group-inquiry-entry";
 import { inquiryFooterLinks } from "@/lib/group-inquiry-links";
 import { BUSINESS_GUIDE, GROUP_GUIDE_FACTS, GROUP_GUIDE_NUMBERS, SCHOOLS_GUIDE, from, n, range, type GroupGuide } from "@/lib/group-inquiry-guide";
@@ -77,7 +77,7 @@ describe("the links from the Japanese site", () => {
   });
 
   it("invites from the top page to the form, the company guide and the school guide", () => {
-    const html = renderToStaticMarkup(createElement(InquiryBand));
+    const html = renderToStaticMarkup(createElement(ConsultBand));
     expect(html).toContain('href="/ja/inquiry"');
     expect(html).toContain('href="/ja/business"');
     expect(html).toContain('href="/ja/schools"');

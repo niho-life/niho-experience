@@ -18,6 +18,8 @@ export function NewGuideForm({ providers, experience, editPath = "/write" }: { r
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // 書く言語 (#154): an English guide is shown on the English site; a Japanese one is the Japanese site's 読みもの.
+  const [language, setLanguage] = useState<"en" | "ja">("en");
 
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -36,7 +38,7 @@ export function NewGuideForm({ providers, experience, editPath = "/write" }: { r
           slug: slugFromTitle(title, fallback.current),
           title,
           description: "",
-          content: { markdown: "", language: "en" },
+          content: { markdown: "", language },
         }),
       });
       router.push(`${editPath}/${encodeURIComponent(response.guide.id)}`);
@@ -49,7 +51,12 @@ export function NewGuideForm({ providers, experience, editPath = "/write" }: { r
   return (
     <form className="write-new-card" onSubmit={(event) => void create(event)}>
       {providers.length > 1 ? <label>記事を書く提供者<select required value={providerId} onChange={(event) => setProviderId(event.target.value)}><option value="">選択してください</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}</select></label> : <p className="write-help">{providers[0]?.displayName}</p>}
-      <label>記事タイトル<input autoFocus maxLength={110} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="English title (can be added later)" /></label>
+      <fieldset className="write-language-choice">
+        <legend>記事を書く言語</legend>
+        <label><input type="radio" name="guide-language" value="en" checked={language === "en"} onChange={() => setLanguage("en")} /> 英語（英語サイトの記事）</label>
+        <label><input type="radio" name="guide-language" value="ja" checked={language === "ja"} onChange={() => setLanguage("ja")} /> 日本語（日本語サイトの「読みもの」。英語サイトには出ません）</label>
+      </fieldset>
+      <label>記事タイトル<input autoFocus maxLength={110} value={title} onChange={(event) => setTitle(event.target.value)} placeholder={language === "ja" ? "記事のタイトル（あとから入れても大丈夫です）" : "English title (can be added later)"} /></label>
       {experience ? <p className="write-help">体験「{experience}」が同じ提供者の公開中の商品なら関連付けます。見つからなくても記事は作成できます。</p> : null}
       <p className="write-help">作成しても公開はされません。本文や公開設定は次の画面で編集します。</p>
       {error ? <p className="write-error" role="alert">{error}</p> : null}
