@@ -45,6 +45,21 @@ describe("JaExperienceList", () => {
     expect(html).toContain("条件をクリア");
   });
 
+  it("narrows without scripts (a GET form with a button for them) and keeps the category and day as hidden fields", () => {
+    const html = render([card()], { category: "zen", date: days[2]!.key });
+    expect(html).toContain('method="get"');
+    expect(html).toContain('<input type="hidden" name="category" value="zen"/>');
+    expect(html).toContain(`name="date" value="${days[2]!.key}"`);
+    expect(html).toContain("<noscript>");
+    for (const name of ["area", "with", "occasion", "guests"]) expect(html).toContain(`name="${name}"`);
+  });
+
+  it("has no English in the list's own words (the handwritten accents are the design's)", () => {
+    const text = render([card()], { area: "kita" }).replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/g, " ");
+    const english = (text.match(/[A-Za-z]{3,}/g) ?? []).filter((word) => !["find", "your", "day"].includes(word));
+    expect(english).toEqual([]);
+  });
+
   it("offers the office when nothing matches, and the whole list stays a link away", () => {
     const html = render([], { category: "sea" }, 5);
     expect(html).toContain("<b>0件</b>の体験");

@@ -1,13 +1,12 @@
 import Link from "next/link";
 import type { DayOption } from "@/lib/date-filter";
 import {
-  EXPERIENCE_AREAS, EXPERIENCE_CATEGORIES, EXPERIENCE_COMPANIONS, EXPERIENCE_OCCASIONS, JA_GUEST_CHOICES,
+  EXPERIENCE_CATEGORIES,
   jaCategoryOf, jaListHref, jaQueryHasFilter, type JaCard, type JaListQuery,
 } from "@/lib/ja-catalog";
 import { CategoryIcon } from "./CategoryIcon";
 import { JaExperienceCard } from "./JaExperienceCard";
-
-const FIELD = "mt-1 block min-h-11 w-full rounded-[10px] border border-line-strong bg-canvas px-3 text-[1rem] text-ink md:min-h-10 md:text-[0.875rem]";
+import { JaFilterForm } from "./JaFilterForm";
 
 /**
  * 日本語サイトの体験の一覧 (#529): the category switch (すべて＋8つ) and its heading, the days and the area / だれと / こんな日に /
@@ -42,23 +41,7 @@ export function JaExperienceList({ cards, query, days, total }: { cards: readonl
             <li key={day.key} className="shrink-0"><Link href={jaListHref(query, { date: day.key })} aria-current={query.date === day.key ? "true" : undefined} aria-label={day.label} className={`flex h-14 w-12 flex-col items-center justify-center rounded-xl border leading-tight ${query.date === day.key ? "border-leaf bg-leaf-pale text-moss" : "border-line-strong bg-canvas hover:bg-sand"}`}><small className="text-[0.6875rem] font-bold">{day.weekday.replace("曜", "")}</small><b className="text-[1.0625rem]">{day.day}</b></Link></li>
           ))}
         </ul>
-        <form method="get" action="/ja/experiences" className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-5 md:items-end">
-          {query.category ? <input type="hidden" name="category" value={query.category} /> : null}
-          {query.date ? <input type="hidden" name="date" value={query.date} /> : null}
-          <label className="text-[0.8125rem] font-bold text-ink-soft">エリア
-            <select name="area" defaultValue={query.area ?? ""} className={FIELD}><option value="">すべて</option>{EXPERIENCE_AREAS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
-          </label>
-          <label className="text-[0.8125rem] font-bold text-ink-soft">だれと
-            <select name="with" defaultValue={query.companion ?? ""} className={FIELD}><option value="">すべて</option>{EXPERIENCE_COMPANIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
-          </label>
-          <label className="text-[0.8125rem] font-bold text-ink-soft">こんな日に
-            <select name="occasion" defaultValue={query.occasion ?? ""} className={FIELD}><option value="">すべて</option>{EXPERIENCE_OCCASIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
-          </label>
-          <label className="text-[0.8125rem] font-bold text-ink-soft">人数
-            <select name="guests" defaultValue={query.guests ? String(query.guests) : ""} className={FIELD}><option value="">すべて</option>{JA_GUEST_CHOICES.map((value) => <option key={value} value={value}>{value}人</option>)}</select>
-          </label>
-          <button type="submit" className="col-span-2 inline-flex min-h-11 items-center justify-center rounded-full bg-leaf px-5 text-[0.9375rem] font-extrabold text-ink hover:bg-leaf-hover md:col-span-1 md:min-h-10">絞り込む</button>
-        </form>
+        <JaFilterForm query={query} />
       </section>
 
       <p className="mt-6 text-[0.9375rem]" role="status" aria-live="polite">
