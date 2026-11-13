@@ -2880,11 +2880,16 @@ export class ExperiencePublicationRepository {
     const result = await this.#pool.query<DbRow>(
       `WITH ${VISIBLE_PUBLICATIONS_CTE}
        SELECT asset.object_key,asset.byte_size
-         FROM visible_publications publication
-         JOIN experience_provider_media_selection selection ON selection.provider_id=publication.provider_id
+         FROM experience_provider_media_selection selection
          JOIN experience_provider_media_assets asset
            ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id
         WHERE asset.id=$1::uuid AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL
+          AND (
+            EXISTS (SELECT 1 FROM visible_publications publication WHERE publication.provider_id=selection.provider_id)
+            -- 街の人 (#564): a listed person's photo is public too, also while they have no experience on sale.
+            OR (selection.placement='PROVIDER_PHOTO'
+                AND EXISTS (SELECT 1 FROM experience_people_listings listing WHERE listing.provider_id=selection.provider_id))
+          )
         LIMIT 1`, [assetId],
     );
     const row = result.rows[0];

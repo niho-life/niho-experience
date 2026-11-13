@@ -243,6 +243,8 @@ export type {
   OpenedBookingSession,
 } from "./booking-access.ts";
 export { HOST_ACCOUNT_LIMITS, HostAccounts, isHostAccountId, normalizeHostEmail } from "./host-accounts.ts";
+export { PEOPLE_LISTING_LIMITS, PeopleListingRepository, validatePeopleListingInput } from "./people-listings.ts";
+export type { AdminPeopleListingRow, PeopleListingInput, PublicPerson } from "./people-listings.ts";
 export { GROUP_INQUIRY_MAIL_LIMITS, GROUP_INQUIRY_MAIL_RECIPIENTS, GroupInquiryRepository } from "./group-inquiries.ts";
 export type {
   GroupInquiryList,
