@@ -266,9 +266,11 @@ describe("the NIHO sign-in of an invitation", () => {
     state.invitations!.acceptInvitation.mockRejectedValueOnce(new Error(`database said ${NIHO_USER} ${ACCESS}`));
     expect(location(await comeBack())).toBe("/host/auth/error?reason=invite-unavailable");
     expect(errors.mock.calls.flat().join(" ")).not.toMatch(new RegExp(`${NIHO_USER}|${ACCESS}`));
-    // The binding is kept when only the session fails to open; the retry goes through the invitation again.
+    // Used up and bound, but the session did not open: the invitation is gone, so the retry is the ordinary NIHO login.
     state.identities!.startSessionForNihoIdentity.mockResolvedValueOnce({ kind: "not-linked" });
-    expect(location(await comeBack())).toBe("/host/auth/error?reason=invite-unavailable");
+    expect(location(await comeBack())).toBe("/host/auth/error?reason=unavailable");
+    state.identities!.startSessionForNihoIdentity.mockRejectedValueOnce(new Error("boom"));
+    expect(location(await comeBack())).toBe("/host/auth/error?reason=unavailable");
     expect(location(await comeBack(undefined, "&error=access_denied"))).toBe("/host/auth/error?reason=denied");
   });
 });
