@@ -41,7 +41,7 @@ export function jaGuideLine(names: readonly string[]): string | null {
  * The card of a published, saleable product with Japanese text, or null (it is not on the Japanese list). `people`: the people on
  * 街の人 this experience is met through (#585); when there are any, the card says they guide it, in place of the provider's name.
  */
-export function jaCardOf(item: SitePublicExperience, classification: ExperienceClassification | undefined, people: readonly { readonly name: string }[] = []): JaCard | null {
+export function jaCardOf(item: SitePublicExperience, classification: ExperienceClassification | undefined, people: readonly { readonly name: string; readonly photo?: { readonly src: string } }[] = []): JaCard | null {
   const japanese = item.publication.japanese;
   const offers = item.saleTerms?.offers ?? [];
   if (!japanese || offers.length === 0) return null;
@@ -56,7 +56,8 @@ export function jaCardOf(item: SitePublicExperience, classification: ExperienceC
     lead: japanese.lead,
     cover: photo ? { url: photo.src, alt: photo.altJa || `${japanese.title}の写真` } : null,
     withLine: jaGuideLine(people.map((entry) => entry.name)) ?? (name ? (person ? `${name}さんと` : `${name}が案内`) : null),
-    face: face ? { url: face.src, alt: "" } : null,
+    // The face on the card is the first person it is met through (the name beside it is theirs); the provider's own photo only when nobody is linked.
+    face: people[0]?.photo ? { url: people[0].photo.src, alt: "" } : face ? { url: face.src, alt: "" } : null,
     durationMinutes: Math.min(...durations),
     capacity: { min: Math.min(...offers.map((offer) => offer.minimumParticipants)), max: Math.max(...offers.map((offer) => offer.maxPartySize)) },
     priceFromYen: Math.min(...offers.map((offer) => offer.pricing.adultPriceYen)),

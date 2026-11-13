@@ -48,6 +48,10 @@ describe("jaCardOf", () => {
     expect(jaGuideLine([])).toBeNull();
     expect(jaGuideLine([" ", ""])).toBeNull();
     expect(jaCardOf(item(), undefined, [])?.withLine).toBe("まさとさんと");
+    // The face goes with the name: the linked person's photo, else the provider's own.
+    expect(jaCardOf(item(), undefined, [{ name: "菅 倫明", photo: { src: "/p/suga.jpg" } }])?.face).toEqual({ url: "/p/suga.jpg", alt: "" });
+    expect(jaCardOf(item(), undefined, [{ name: "菅 倫明" }])?.face).toEqual({ url: "/media/p.jpg", alt: "" });
+    expect(jaCardOf(item(), undefined, [])?.face).toEqual({ url: "/media/p.jpg", alt: "" });
   });
 
   it("is not a card without Japanese text or a sale, and an unclassified product has the empty classification", () => {

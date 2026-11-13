@@ -161,7 +161,12 @@ const apply: Action = {
           key: item.providerId,
           read: async () => { const state = stateOf(await listPeople(context), item.providerId); version = state.version; return state.listing; },
           desired: (current) => desiredListing(version === null ? null : current, given),
-          send: async (_current, desired, operationId) => respondOk(await context.api.send("PUT", API, { providerId: item.providerId, listing: desired, expectedVersion: version }, operationId)),
+          send: async (_current, desired, operationId) => {
+            // The links are sent only when the file says them: an edit of something else must not carry (and have the server re-check) links it did not touch.
+            const { experiences: _kept, ...rest } = desired as Record<string, unknown>;
+            const listing = item.listing.experiences === undefined ? rest : desired;
+            return respondOk(await context.api.send("PUT", API, { providerId: item.providerId, listing, expectedVersion: version }, operationId));
+          },
         }));
       } catch (error) {
         if (error instanceof OpsError && error.exit !== EXIT.failed && error.code !== "invalid_listing" && error.code !== "provider_has_no_public_profile" && error.code !== "unknown_experience" && error.code !== "slug_is_ambiguous_use_providerId_and_productId") throw error;

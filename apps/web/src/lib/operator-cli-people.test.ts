@@ -43,7 +43,9 @@ function fakeApi(initial: PersonRow[]) {
         const refs = (next as { experiences?: Array<{ providerId: string; productId: string }> }).experiences;
         if (refs) (next as Record<string, unknown>).experiences = refs.map((ref) => ({ ...ref, ...PRODUCTS.find((product) => product.providerId === ref.providerId && product.productId === ref.productId) }));
         if ([...people.values()].some((other) => other !== row && other.listing?.slug === next.slug)) return { status: 409, body: { error: "conflict" } };
-        people.set(row.providerId, { ...row, listing: { ...next, version: (version ?? 0) + 1, updatedAtUtc: "2026-11-14T00:00:00.000Z" }, visible: row.photoReady });
+        // Links the request did not carry stay as they are (the store leaves them when `experiences` is left out).
+        const kept = (next as Record<string, unknown>).experiences ?? (row.listing as Record<string, unknown> | null)?.experiences;
+        people.set(row.providerId, { ...row, listing: { ...next, ...(kept === undefined ? {} : { experiences: kept }), version: (version ?? 0) + 1, updatedAtUtc: "2026-11-14T00:00:00.000Z" } as never, visible: row.photoReady });
       } else {
         if (body.expectedVersion !== version) return { status: 409, body: { error: "conflict" } };
         people.set(row.providerId, { ...row, listing: null, visible: false });
@@ -187,7 +189,10 @@ describe("people apply: experiences (#585)", () => {
     const fake = fakeApi([person("p1", { listing: listing({ experiences: [{ providerId: "prov-zen", productId: "zen-karate", slug: "zen-karate" }] } as never), visible: true })]);
     const out = await execute(fake.api, ["apply", "--file", "f.json", "--yes"], JSON.stringify({ items: [{ providerId: "p1", listing: { quoteJa: "ひとこと" } }] }));
     expect(statuses(out)).toEqual(["applied"]);
-    expect(fake.sent[0]).toMatchObject({ body: { listing: { quoteJa: "ひとこと", experiences: [{ providerId: "prov-zen", productId: "zen-karate" }] } } });
+    // Only what the file says is sent: the untouched links are not sent again (the server would re-check each of them).
+    expect(fake.sent[0]).toMatchObject({ body: { listing: { quoteJa: "ひとこと" } } });
+    expect((fake.sent[0]!.body.listing as Record<string, unknown>).experiences).toBeUndefined();
+    expect(fake.people.get("p1")!.listing!.experiences).toHaveLength(1);
   });
 
   it("says which item is wrong (an unknown or ambiguous slug) without sending it, and carries on with the others", async () => {
