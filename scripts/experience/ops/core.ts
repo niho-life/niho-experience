@@ -41,8 +41,8 @@ export interface Args {
   readonly flags: Readonly<Record<string, string | true>>;
 }
 
-const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified", "listed", "unlisted"]);
-const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "status", "provider"]);
+const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified", "listed", "unlisted", "photo-rights-confirmed", "consent-confirmed", "rights-confirmed", "again"]);
+const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "status", "provider", "product", "seller-confirmation", "kind", "name", "from", "to", "alt", "alt-ja", "photographer", "permission", "credit", "reason"]);
 
 /** `--name value`, `--name=value` and the boolean flags `--dry-run`, `--yes`; everything else is positional. */
 export function parseArgs(argv: readonly string[], valueFlags: ReadonlySet<string> = VALUE_FLAGS): Args {
@@ -121,7 +121,14 @@ export interface Api {
   readonly aiKind: AiKind;
   get(path: string): Promise<ApiResponse>;
   /** A change: `operationId` is the caller's ID for this one operation (the server refuses a repeat). */
-  send(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown, operationId: string): Promise<ApiResponse>;
+  send(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown, operationId: string, raw?: RawBody): Promise<ApiResponse>;
+}
+
+/** A body that is not JSON (a photo): its bytes and content type, and the headers the route reads. */
+export interface RawBody {
+  readonly bytes: Uint8Array;
+  readonly contentType: string;
+  readonly headers: Readonly<Record<string, string>>;
 }
 
 export interface ApiResponse {
@@ -136,6 +143,7 @@ export interface Context {
   readonly apply: boolean;
   readonly env: EnvName;
   readonly readFile: (path: string) => string;
+  readonly readBytes: (path: string) => Uint8Array;
   readonly now: () => number;
 }
 
@@ -162,14 +170,15 @@ export function createApi(options: ApiOptions): Api {
     }
     return `Bearer ${token}`;
   };
-  async function call(method: string, path: string, body: unknown, operationId: string | null): Promise<ApiResponse> {
+  async function call(method: string, path: string, body: unknown, operationId: string | null, raw?: RawBody): Promise<ApiResponse> {
     if (!path.startsWith("/admin/api/")) throw new OpsError("usage", "Only /admin/api paths are called.", EXIT.usage);
     const headers: Record<string, string> = { authorization: authorization(), "x-niho-operator-ai": options.aiKind, accept: "application/json", "user-agent": "niho-ops-cli/1" };
     if (operationId) headers["x-niho-operation-id"] = operationId;
-    if (body !== undefined) headers["content-type"] = "application/json";
+    if (raw) Object.assign(headers, raw.headers, { "content-type": raw.contentType });
+    else if (body !== undefined) headers["content-type"] = "application/json";
     let response: Response;
     try {
-      response = await doFetch(`${options.env.origin}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30_000), redirect: "error" });
+      response = await doFetch(`${options.env.origin}${path}`, { method, headers, body: raw ? raw.bytes as BodyInit : body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30_000), redirect: "error" });
     } catch {
       throw new OpsError("unreachable", `${options.env.name} did not answer.`, EXIT.failed);
     }
@@ -182,18 +191,28 @@ export function createApi(options: ApiOptions): Api {
     env: options.env.name,
     aiKind: options.aiKind,
     get: (path) => call("GET", path, undefined, null),
-    send: (method, path, body, operationId) => call(method, path, body, operationId),
+    send: (method, path, body, operationId, raw) => call(method, path, body, operationId, raw),
   };
+}
+
+/** The code of a refusal: `{ error: "code" }` or the product API's `{ error: { code: "CODE" } }` (lower-cased). */
+export function errorCode(body: unknown): string {
+  const error = (body as { error?: unknown } | null)?.error;
+  if (typeof error === "string") return error;
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" ? code.toLowerCase() : "request_failed";
 }
 
 /** The server's answer as an error: 401/403 are "not signed in / not allowed", 409 a change meanwhile. */
 export function failureOf(response: ApiResponse, action: string): OpsError {
-  const code = typeof (response.body as { error?: unknown } | null)?.error === "string" ? (response.body as { error: string }).error : "request_failed";
-  if (response.status === 401) return new OpsError(code, "Not signed in: the Google ID token was refused (expired, another client, or not a niho.life account).", EXIT.auth, { status: response.status });
-  if (response.status === 403) return new OpsError(code, code === "not_available_from_cli" ? "This is not available from the CLI." : "This account is not on the Admin allowlist, or the CLI is not open on this site.", EXIT.auth, { status: response.status });
-  if (response.status === 404) return new OpsError(code, `${action}: not found, or this feature is not open on this site.`, EXIT.failed, { status: response.status });
-  if (response.status === 409 || response.status === 412) return new OpsError(code, `${action}: it changed meanwhile (${code}). Read it again and re-plan.`, EXIT.conflict, { status: response.status });
-  return new OpsError(code, `${action} failed (${response.status}).`, EXIT.failed, { status: response.status });
+  const code = errorCode(response.body);
+  const blockers = ((response.body as { error?: { blockers?: unknown } } | null)?.error)?.blockers;
+  const detail = { status: response.status, ...(Array.isArray(blockers) ? { blockers } : {}) };
+  if (response.status === 401) return new OpsError(code, "Not signed in: the Google ID token was refused (expired, another client, or not a niho.life account).", EXIT.auth, detail);
+  if (response.status === 403) return new OpsError(code, code === "not_available_from_cli" ? "This is not available from the CLI." : "This account is not on the Admin allowlist, or the CLI is not open on this site.", EXIT.auth, detail);
+  if (response.status === 404) return new OpsError(code, `${action}: not found, or this feature is not open on this site.`, EXIT.failed, detail);
+  if (response.status === 409 || response.status === 412) return new OpsError(code, `${action}: it changed meanwhile (${code}). Read it again and re-plan.`, EXIT.conflict, detail);
+  return new OpsError(code, `${action} failed (${response.status}, ${code}).`, EXIT.failed, detail);
 }
 
 export interface Change {
@@ -262,6 +281,21 @@ export async function writeOne<State>(context: Context, seed: readonly string[],
     return { key: spec.key, status: "failed", changes, error: error.code };
   }
   return { key: spec.key, status: "failed", changes: [], error: "operation_already_recorded" };
+}
+
+/**
+ * Sends one change whose result cannot be diffed (a create, a publish): under a stable operation ID first, and, when the server
+ * says it already recorded that ID, `alreadyDone` looks at the current state; if the change is in place it is returned, otherwise
+ * the send is retried under a fresh ID (a try that failed has used up its own). Returns the response, or `alreadyDone`'s value.
+ */
+export async function sendOnce<Done>(context: Context, seed: readonly string[], send: (operationId: string) => Promise<ApiResponse>, alreadyDone: () => Promise<Done | null>): Promise<{ readonly response: ApiResponse } | { readonly done: Done }> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const response = await send(operationId(seed, attempt, context.now()));
+    if (!(response.status === 409 && errorCode(response.body) === "operation_already_recorded")) return { response };
+    const done = await alreadyDone();
+    if (done !== null) return { done };
+  }
+  throw new OpsError("operation_already_recorded", "The server kept refusing the operation ID; read the state and run it again.", EXIT.failed);
 }
 
 export interface Action {

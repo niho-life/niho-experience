@@ -106,6 +106,12 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 | `classification` | `apply --file 変更.json` | edit |
 | `people` | `list`（`--listed`・`--unlisted`・`--provider`） | read |
 | `people` | `apply --file 変更.json`、`withdraw --provider <providerId>` | publish |
+| `provider` | `list` | read |
+| `provider` | `create --name … --kind PERSON\|BUSINESS --consent-confirmed` | edit |
+| `product` | `list`・`show`・`calendar` | read |
+| `product` | `create`・`draft`・`calendar-add`・`photo-add` | edit |
+| `product` | `terms`（価格・販売条件） | terms |
+| `product` | `publish`・`suspend`・`resume` | publish |
 
 ## よくある作業
 
@@ -150,3 +156,18 @@ node scripts/experience/ops.mjs people withdraw --provider prov-a --yes      # �
 
 - 新しく載せるには `slug`（英小文字・数字・ハイフン）・`roleJa`（80字）・`areaJa`（40字）・`sortOrder`（0〜9999）が要る。`quoteJa`（160字）・`introJa`（1200字）は任意。載っている人は、書いたキーだけが変わる。値は、サーバーと同じ検証を実行の前に通す（前後に空白がある肩書などは断る）。
 - 読んだ版（`expectedVersion`）を付けて送る。画面などで先に変わっていた・スラッグを他の人が使っていたときは `409 conflict`（終了コード 4）で、何も上書きしない。ほかの項目の処理は続く。
+
+### 新しい日本語の商品を出す（stg の例。画面は使わない）
+
+前提：商品を載せる提供者に **販売者の登録（seller workspace）** が済んでいること（`provider list` の `sellers` に出る。新しい提供者の販売者は、移行・初期登録の運用スクリプト `scripts/experience/provision-host-seller.mjs`）。日本語のみの商品（`content.japaneseOnly`）は `EXPERIENCE_JAPANESE_SITE_ENABLED` が `true` の環境でだけ保存できる。以下は `--provider <providerId>` を付ける。商品の `id` は `product list` で分かる。
+
+1. **下書きをつくる**（`product create --file draft.json`）。`slug`・`publicTitle`（日本語のみのときは日本語の題と同じ）・`unitAmount`（円。0 か 50 以上）・`content`。日本語のみなら `content` に `"japaneseOnly": true` と `ja`（`title`・`lead`・`description`・`language`・`highlights`・`included`・`notIncluded`・`knowBeforeYouGo`・`notSuitableFor`・`timeline`）を入れ、英語の欄（`lead`・`description`・`facts.language`・配列）は空にする。同じ `slug` が既にあれば `unchanged`。
+2. **原稿を直す**（`product draft --product <id> --file changes.json`）。`slug`・`publicTitle`・`content` のうち書いたものだけ。`content` は上のキーごとに混ぜる（`ja` は丸ごと置き換わる）。
+3. **料金・販売条件**（`product terms --product <id> --file terms.json`、**terms の段階**）。`unitAmount` と `saleTerms`。販売条件が未設定の商品は、全項目が要る（例：`{"saleTerms":{"offerPrices":null,"childPricing":null,"minimumParticipants":1,"minimumChargeableParticipants":1,"maxPartySize":6,"cancellationPolicy":"FREE_UNTIL_24H","cancellationWindowMinutesBeforeStart":1440,"cancellationRefundBasisPoints":10000,"minimumAttendance":null,"bookingQuestions":[],"conditionsVersion":null}}`）。設定済みなら、書いたキーだけが変わる。
+4. **日程の枠**（`product calendar-add --product <id> --file rule.json`）。`timeZone: "Asia/Tokyo"`・`startsOn`・`endsOn`（任意）・`localStartTime`・`durationMinutes`・`capacity`・`bookingCutoffMinutes`・`busyBufferBeforeMinutes`・`busyBufferAfterMinutes`・`recurrence`（`{"kind":"WEEKLY"}` など）。同じ内容をもう一度送っても増えない。`product calendar --product <id>` で、できた日付を見る。
+5. **写真**（`product photo-add --product <id> --file 写真.jpg --alt "English alt" --alt-ja "日本語の説明" --photographer "撮影者" --permission "許諾の根拠" --rights-confirmed [--credit "公開するクレジット"]`）。jpg・png、10MB まで。**撮影者と許諾を人が確認したものだけ**。`--photographer`・`--permission` は結果（`evidence`）に sha256 とあわせて出るので、Issue か PR に貼って残す。
+6. **公開できるか見る**（`product publish --product <id> --seller-confirmation WRITTEN --photo-rights-confirmed`）。`--yes` なしは、サーバーが返す公開の妨げ（`blockers`）と、いま公開できるかだけを出す。妨げが残っていれば、直してから。
+7. **公開する**：同じコマンドに `--yes`。**本番は依頼した人の了承を取ってから。** 公開すると `/ja/experiences/<slug>` に出る。
+8. **停止する**（`product suspend --product <id> --reason SYNTHETIC_CLEANUP --yes`）：運営停止。合成の商品の片付けなど。止めたあと、持ち主が再開するまで出ない（`resume` は運営停止を解くだけ）。
+
+どの変更も、読んだときの版を付けて送る。画面などで先に変わっていたら `409`（終了コード 4）で止まり、上書きしない。`product show` は、いまの下書き・販売条件・写真・公開の妨げ・版を返す（予約者の情報は出ない）。
