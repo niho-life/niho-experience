@@ -10,6 +10,7 @@ import { config } from "@/lib/config";
 import { getPreparedJapaneseStaticRelease } from "@/lib/localized-content";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
 import { hostSignedIn } from "@/lib/host/signed-in";
+import { loadJapaneseGuides } from "@/lib/ja-guides";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ export default async function JapaneseRootLayout({ children }: { children: React
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-full focus:bg-ink focus:px-4 focus:py-2 focus:text-white">{data.copy.copy.text("chrome.skipToContent")}</a>
       <SiteLocaleProvider locale="ja" releaseId={data.copy.releaseId} values={data.copy.values}>
         <AttributionCapture enabled={attributionEnabled()} />
-        <JapaneseSiteChrome counterparts={data.counterparts} hostSignedIn={await hostSignedIn()} inquiryOpen={groupInquiryOpen()}>{children}</JapaneseSiteChrome>
+        <JapaneseSiteChrome counterparts={data.counterparts} hostSignedIn={await hostSignedIn()} inquiryOpen={groupInquiryOpen()} guidesOpen={(await loadJapaneseGuides()).length > 0}>{children}</JapaneseSiteChrome>
       </SiteLocaleProvider>
     </body></html>;
 }

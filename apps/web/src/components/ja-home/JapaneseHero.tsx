@@ -46,7 +46,7 @@ export function JapaneseHero({ photos, children }: { photos: readonly HeroPhoto[
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/35 to-black/10" />
     </div>
     <div className="container-page w-full pt-24 pb-14 text-white sm:pb-20">{children}</div>
-    {photos.length > 1 ? <div className="absolute right-4 bottom-4 flex gap-2 sm:right-8 sm:bottom-6" role="group" aria-label="写真の切り替え">
+    {photos.length > 1 ? <div className="absolute right-4 bottom-11 flex gap-2 sm:right-8 sm:bottom-12" role="group" aria-label="写真の切り替え">
       {photos.map((photo, position) => <button
         key={photo.src}
         type="button"

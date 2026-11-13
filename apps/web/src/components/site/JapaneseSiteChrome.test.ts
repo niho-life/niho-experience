@@ -9,10 +9,10 @@ import { defaultStaticCopyValuesV1 } from "@niho/experience-presentation/v1";
 import { SiteLocaleProvider } from "../SiteLocale";
 import { JAPANESE_SITE_DESCRIPTION, JapaneseSiteChrome } from "./JapaneseSiteChrome";
 
-const render = (props: { hostSignedIn?: boolean; inquiryOpen?: boolean }) => renderToStaticMarkup(createElement(
+const render = (props: { hostSignedIn?: boolean; inquiryOpen?: boolean; guidesOpen?: boolean }) => renderToStaticMarkup(createElement(
   SiteLocaleProvider,
   { locale: "ja", releaseId: "r", values: defaultStaticCopyValuesV1() } as never,
-  createElement(JapaneseSiteChrome, { counterparts: { "/": "/ja" }, hostSignedIn: props.hostSignedIn ?? false, inquiryOpen: props.inquiryOpen ?? true } as never, "BODY"),
+  createElement(JapaneseSiteChrome, { counterparts: { "/": "/ja" }, hostSignedIn: props.hostSignedIn ?? false, inquiryOpen: props.inquiryOpen ?? true, guidesOpen: props.guidesOpen ?? false } as never, "BODY"),
 ));
 
 describe("日本語サイトのヘッダーとフッター（#562）", () => {
@@ -33,16 +33,25 @@ describe("日本語サイトのヘッダーとフッター（#562）", () => {
   it("スマホ幅では「さがす」「相談」と言語のボタンだけ（ほかは sm 以上）", () => {
     const html = render({});
     const items = [...html.matchAll(/<li class="hidden sm:block">/g)];
-    // 法人・学校とホストの方が sm 以上、ほか（さがす・相談・言語）は常に見える
-    expect(items).toHaveLength(2);
+    // 街の人・法人・学校とホストの方が sm 以上、ほか（さがす・相談・言語）は常に見える
+    expect(items).toHaveLength(3);
+    expect([...render({ guidesOpen: true }).matchAll(/<li class="hidden sm:block">/g)]).toHaveLength(4);
     expect(html).toContain("max-sm:hidden");
   });
 
-  it("まだ無いページ（街の人・読みもの・ご利用の案内・カテゴリー）へのリンクを出さない", () => {
+  it("街の人はヘッダーとフッターに出る（スマホ幅のヘッダーでは出さない）。まだ無いページ（読みもの・カテゴリー）へのリンクは出さない", () => {
     const html = render({});
-    for (const path of ["/ja/people", "/ja/guides", "/ja/promise", "/ja/guide"]) expect(html).not.toContain(`href="${path}"`);
-    expect(html).not.toContain("街の人");
+    expect(html).toMatch(/<li class="hidden sm:block"><a[^>]*href="\/ja\/people"[^>]*>街の人<\/a><\/li>/);
+    expect(html.match(/href="\/ja\/people"/g)).toHaveLength(2);
+    for (const path of ["/ja/guides", "/ja/promise", "/ja/guide"]) expect(html).not.toContain(`href="${path}"`);
     expect(html).not.toContain("読みもの");
+  });
+
+  it("読みものは、公開中の記事があるときだけ、ヘッダー（スマホ幅では出さない）とフッターに出る", () => {
+    const html = render({ guidesOpen: true });
+    expect(html).toMatch(/<li class="hidden sm:block"><a[^>]*href="\/ja\/guides"[^>]*>読みもの<\/a><\/li>/);
+    expect(html.match(/href="\/ja\/guides"/g)).toHaveLength(2);
+    expect(render({ guidesOpen: false })).not.toContain("/ja/guides");
   });
 
   it("相談の flag が閉じているときは相談・法人・学校を出さない", () => {
@@ -71,5 +80,13 @@ describe("日本語サイトのヘッダーとフッター（#562）", () => {
     expect(html).toContain('href="/privacy"');
     expect(html).toContain("<main");
     expect(html).toContain("BODY");
+  });
+
+  it("フッターにカテゴリーのまとまり（8つ、一覧の ?category= へ）がある", () => {
+    const html = render({});
+    for (const [id, label] of [["walk", "歩く"], ["food", "つくる・食べる"], ["craft", "手を動かす"], ["zen", "禅と寺"], ["time", "朝と夜"], ["sea", "海"], ["people", "人に会う"], ["group", "団体・チームで"]]) {
+      expect(html).toContain(`href="/ja/experiences?category=${id}"`);
+      expect(html).toContain(label);
+    }
   });
 });
