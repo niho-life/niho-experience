@@ -9,9 +9,8 @@ import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import { guideOutline } from "@/lib/guides";
 import { guideLinkHref, parseGuideMarkdown } from "@/lib/guide-markdown";
 import { inquiryHref } from "@/lib/group-inquiry-entry";
+import { japaneseTileFacts } from "@/lib/ja-experience-tile";
 import { formatJapaneseDate } from "@/lib/ja-guides";
-
-const yen = (amount: number) => `${new Intl.NumberFormat("ja-JP").format(amount)}円`;
 
 /** 読みもの (#154):歩き方、時間の使い方、雨の日のこと。 Japanese site only; every article here was written in Japanese in /write. */
 export function JapaneseGuidesListPage({ guides }: { guides: readonly Guide[] }) {
@@ -117,17 +116,13 @@ export function JapaneseGuideArticlePage({ guide, experiences }: { guide: Guide;
 }
 
 function ExperienceTile({ item }: { item: SitePublicExperience }) {
-  const { publication, saleTerms } = item;
-  const title = publication.japanese?.title ?? publication.publicTitle;
-  const cover = publication.photos[0];
-  const minutes = saleTerms?.offers[0]?.durationMinutes ?? null;
-  const duration = minutes === null ? null : minutes % 60 === 0 ? `${minutes / 60}時間` : minutes > 60 ? `${Math.floor(minutes / 60)}時間${minutes % 60}分` : `${minutes}分`;
+  const tile = japaneseTileFacts(item);
   return (
     <li>
-      <Link href={`/ja/experiences/${publication.slug}`} className="group block">
-        <Photo image={cover ? { url: cover.src, alt: cover.altJa } : null} alt={cover?.altJa ?? ""} sizes="(min-width: 640px) 45vw, 90vw" aspect="aspect-[4/3]" rounded="rounded-[18px]" />
-        <span className="mt-3 block text-[1.0625rem] font-extrabold group-hover:underline">{title}</span>
-        <small className="block text-ink-soft">{[duration, `1名 ${yen(publication.unitAmount)}`].filter(Boolean).join("・")}</small>
+      <Link href={`/ja/experiences/${tile.slug}`} className="group block">
+        <Photo image={tile.cover} alt={tile.cover?.alt ?? ""} sizes="(min-width: 640px) 45vw, 90vw" aspect="aspect-[4/3]" rounded="rounded-[18px]" />
+        <span className="mt-3 block text-[1.0625rem] font-extrabold group-hover:underline">{tile.title}</span>
+        <small className="block text-ink-soft">{[tile.duration, tile.price].filter(Boolean).join("・")}</small>
       </Link>
     </li>
   );

@@ -16,7 +16,7 @@ const guide = (slug: string, over: Partial<Guide> = {}): Guide => ({
   relatedExperienceSlugs: ["tea"], relatedGuideSlugs: [], faq: [],
   body: "## 屋根の下で\n\n雨の日は、手を動かす体験がいいです。\n\n## 器を繕う\n\n欠けた器をひとつ持って行きます。", ...over,
 });
-const experience = { publication: { slug: "tea", publicTitle: "t", unitAmount: 4000, japanese: { title: "器を繕う二時間" }, photos: [] }, saleTerms: { offers: [{ durationMinutes: 120 }] }, sellerDisclosure: null, hostBio: null } as unknown as SitePublicExperience;
+const experience = { publication: { slug: "tea", publicTitle: "t", unitAmount: 3000, japanese: { title: "器を繕う二時間" }, photos: [] }, saleTerms: { offers: [{ pricing: { adultPriceYen: 4000 }, durationMinutes: 120 }] }, sellerDisclosure: null, hostBio: null } as unknown as SitePublicExperience;
 const text = (html: string) => html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((match) => match[1]!.replaceAll("&amp;", "&"));
 
