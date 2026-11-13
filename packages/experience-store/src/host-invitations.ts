@@ -49,7 +49,9 @@ export type HostInvitationLinkIssue =
 /** What opening the link told: `opened`, or why the link cannot be used (the page says it in words). */
 export type OpenHostInvitationResult =
   | { readonly kind: "opened" }
-  | { readonly kind: "expired" | "used" | "other-browser" | "invalid" };
+  | { readonly kind: "expired" | "used" | "other-browser" | "invalid" }
+  /** This browser's value already belongs to another open invitation (a shared browser): the caller opens again with a new value. */
+  | { readonly kind: "binding-in-use" };
 
 export type AcceptHostInvitationResult =
   | { readonly kind: "accepted"; readonly hostAccountId: string }
@@ -153,6 +155,8 @@ export class HostInvitations {
          JOIN host_accounts a ON a.id = i.host_account_id
         WHERE i.token_hash IS NULL AND i.consumed_at IS NULL AND i.revoked_at IS NULL
           AND i.created_at <= $1::timestamptz AND i.expires_at > $1::timestamptz AND a.status = 'ACTIVE'
+          -- The same conditions issueInvitationLink holds, so nothing listed is skipped for good and clogs the batch.
+          AND NOT EXISTS (SELECT 1 FROM host_account_identities x WHERE x.host_account_id = i.host_account_id AND x.provider = 'NIHO' AND x.unlinked_at IS NULL)
         ORDER BY i.created_at, i.id
         LIMIT $2`,
       [at, input.limit],
@@ -185,7 +189,7 @@ export class HostInvitations {
   /**
    * The host opens the emailed link: the browser that does so first is the one the invitation belongs to (its cookie's
    * SHA-256 is kept); the same browser may open it again before the invitation is used up. Another browser gets
-   * `other-browser`. `expired` covers a link that ran out or was replaced by a newer one, `used` one that bound its NIHO
+   * `other-browser`. `binding-in-use`: the browser's value holds another open invitation. `expired` covers a link that ran out or was replaced by a newer one, `used` one that bound its NIHO
    * account already, `invalid` anything unknown (the token is 256 random bits, so this says nothing about any account).
    */
   async openInvitation(input: { readonly token: string; readonly browserBindingHash: Uint8Array; readonly nowUtc: string }): Promise<OpenHostInvitationResult> {
@@ -214,8 +218,8 @@ export class HostInvitations {
           [invitation.id, Buffer.from(binding), at],
         );
       } catch (error) {
-        // The same cookie value opening a second invitation: a browser belongs to one invitation at a time.
-        if ((error as { code?: unknown } | null)?.code === "23505") return { kind: "invalid" } as const;
+        // The same cookie value already holds another open invitation: a browser belongs to one open invitation at a time.
+        if ((error as { code?: unknown } | null)?.code === "23505") return { kind: "binding-in-use" } as const;
         throw error;
       }
       return { kind: "opened" } as const;

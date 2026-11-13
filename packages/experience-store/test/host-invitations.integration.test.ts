@@ -133,6 +133,46 @@ describe("host account invitations", () => {
     });
   });
 
+  it("lets the same browser open the next invitation after the host was invited again, and holds one open invitation per browser", async () => {
+    await withInvitations(async (context) => {
+      const { accounts, invitations, identities } = context;
+      const host = await provision(accounts, "again@example.com");
+      const first = await invite(context, host, 0);
+      assert.deepEqual(await invitations.openInvitation({ token: first.token, browserBindingHash: browser("host"), nowUtc: at(HOUR) }), { kind: "opened" });
+      // Ops invites again before the host finished: the first invitation is replaced; its browser value stays with it as history.
+      const second = await invite(context, host, 2 * HOUR);
+      assert.deepEqual(await invitations.openInvitation({ token: first.token, browserBindingHash: browser("host"), nowUtc: at(3 * HOUR) }), { kind: "expired" });
+      assert.deepEqual(await invitations.openInvitation({ token: second.token, browserBindingHash: browser("host"), nowUtc: at(3 * HOUR) }), { kind: "opened" });
+      assert.deepEqual(await invitations.acceptInvitation({ browserBindingHash: browser("host"), nihoUserId: NIHO_A, nowUtc: at(3 * HOUR + MINUTE) }), { kind: "accepted", hostAccountId: host });
+      assert.notEqual(await identities.readNihoIdentity({ hostAccountId: host }), null);
+
+      // A shared browser that opened one host's invitation and never finished: another host's invitation needs another value.
+      const other = await provision(accounts, "shared-a@example.com");
+      const third = await provision(accounts, "shared-b@example.com");
+      const otherSent = await invite(context, other, 4 * HOUR);
+      const thirdSent = await invite(context, third, 5 * HOUR);
+      assert.deepEqual(await invitations.openInvitation({ token: otherSent.token, browserBindingHash: browser("shared"), nowUtc: at(6 * HOUR) }), { kind: "opened" });
+      assert.deepEqual(await invitations.openInvitation({ token: thirdSent.token, browserBindingHash: browser("shared"), nowUtc: at(6 * HOUR + MINUTE) }), { kind: "binding-in-use" });
+      assert.deepEqual(await invitations.openInvitation({ token: thirdSent.token, browserBindingHash: browser("shared-new"), nowUtc: at(6 * HOUR + 2 * MINUTE) }), { kind: "opened" });
+    });
+  });
+
+  it("does not list an invitation whose host account got a NIHO account bound before the email went, so it cannot clog the batch", async () => {
+    await withInvitations(async (context) => {
+      const { accounts, invitations, identities } = context;
+      const bound = await provision(accounts, "bound-first@example.com");
+      await invitations.createInvitation({ hostAccountId: bound, nowUtc: at(MINUTE) });
+      assert.deepEqual(await identities.linkNihoIdentity({ hostAccountId: bound, nihoUserId: NIHO_A, proof: { kind: "OPS" }, nowUtc: at(2 * MINUTE) }), { kind: "linked" });
+      const waiting = await provision(accounts, "waiting@example.com");
+      const created = await invitations.createInvitation({ hostAccountId: waiting, nowUtc: at(3 * MINUTE) });
+      assert.equal(created.kind, "created");
+      assert.deepEqual(await invitations.listPendingInvitations({ nowUtc: at(5 * MINUTE), limit: 10 }), [(created as { invitationId: string }).invitationId]);
+      // Unbound again later, the earlier invitation is simply listed again (it is still open and unexpired).
+      await identities.unlinkNihoIdentity({ hostAccountId: bound, proof: { kind: "OPS" }, nowUtc: at(6 * MINUTE) });
+      assert.equal((await invitations.listPendingInvitations({ nowUtc: at(7 * MINUTE), limit: 10 })).length, 2);
+    });
+  });
+
   it("refuses a NIHO account bound elsewhere or a host account bound to another one, records it, and keeps the invitation usable", async () => {
     await withInvitations(async (context) => {
       const { accounts, identities, invitations, pool } = context;
@@ -175,9 +215,10 @@ describe("host account invitations", () => {
       await invitations.createInvitation({ hostAccountId: bound, nowUtc: at(3 * MINUTE) });
       await accounts.suspendHostAccount({ hostAccountId: late, nowUtc: at(4 * MINUTE) });
       assert.deepEqual(await identities.linkNihoIdentity({ hostAccountId: bound, nihoUserId: NIHO_A, proof: { kind: "OPS" }, nowUtc: at(4 * MINUTE) }), { kind: "linked" });
-      assert.deepEqual(await invitations.listPendingInvitations({ nowUtc: at(5 * MINUTE), limit: 10 }), (await pool.query("SELECT id::text FROM host_account_invitations WHERE host_account_id = $1", [bound])).rows.map((row) => row.id));
-      const [pendingBound] = await invitations.listPendingInvitations({ nowUtc: at(5 * MINUTE), limit: 10 });
-      assert.deepEqual(await invitations.issueInvitationLink({ invitationId: pendingBound!, nowUtc: at(5 * MINUTE) }), { kind: "skip" });
+      // Neither is listed any more: the suspended account's, and the bound account's (it would be skipped for good).
+      assert.deepEqual(await invitations.listPendingInvitations({ nowUtc: at(5 * MINUTE), limit: 10 }), []);
+      const [row] = (await pool.query("SELECT id::text FROM host_account_invitations WHERE host_account_id = $1", [bound])).rows;
+      assert.deepEqual(await invitations.issueInvitationLink({ invitationId: row!.id as string, nowUtc: at(5 * MINUTE) }), { kind: "skip" });
 
       await assert.rejects(invitations.createInvitation({ hostAccountId: "niho-owner", nowUtc: at(0) }), StoreValidationError);
       await assert.rejects(invitations.createInvitation({ hostAccountId: late, nowUtc: "yesterday" }), StoreValidationError);

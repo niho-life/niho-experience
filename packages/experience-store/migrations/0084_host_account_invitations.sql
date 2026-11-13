@@ -18,7 +18,7 @@ CREATE TABLE host_account_invitations (
   token_hash bytea UNIQUE CHECK (token_hash IS NULL OR octet_length(token_hash) = 32),
   issued_at timestamptz,
   -- The browser the link was first opened in.
-  browser_binding_hash bytea UNIQUE CHECK (browser_binding_hash IS NULL OR octet_length(browser_binding_hash) = 32),
+  browser_binding_hash bytea CHECK (browser_binding_hash IS NULL OR octet_length(browser_binding_hash) = 32),
   opened_at timestamptz,
   consumed_at timestamptz,
   revoked_at timestamptz,
@@ -35,6 +35,10 @@ CREATE TABLE host_account_invitations (
 -- One open invitation per host account (a new one revokes the earlier one first).
 CREATE UNIQUE INDEX host_account_invitations_open_idx
   ON host_account_invitations (host_account_id) WHERE consumed_at IS NULL AND revoked_at IS NULL;
+-- A browser belongs to one open invitation at a time. A used or replaced invitation keeps the value it was bound to (history)
+-- and does not hold it: the same browser can open the next invitation of the same host.
+CREATE UNIQUE INDEX host_account_invitations_browser_open_idx
+  ON host_account_invitations (browser_binding_hash) WHERE browser_binding_hash IS NOT NULL AND consumed_at IS NULL AND revoked_at IS NULL;
 -- The invitation emails still to send.
 CREATE INDEX host_account_invitations_pending_idx
   ON host_account_invitations (created_at) WHERE token_hash IS NULL AND consumed_at IS NULL AND revoked_at IS NULL;

@@ -133,6 +133,18 @@ describe("opening the invitation", () => {
     expect(state.invitations!.openInvitation).toHaveBeenCalledWith(expect.objectContaining({ browserBindingHash: sha256(BINDING) }));
   });
 
+  it("opens again with a new value when the browser's own holds another open invitation", async () => {
+    state.invitations!.openInvitation.mockResolvedValueOnce({ kind: "binding-in-use" });
+    const response = await inviteOpen(post(`t=${TOKEN}`, sameOrigin, `${INVITE_BINDING_COOKIE}=${BINDING}`));
+    expect(response.status).toBe(204);
+    const fresh = setCookies(response).get(INVITE_BINDING_COOKIE)!.value;
+    expect(fresh).not.toBe(BINDING);
+    expect(state.invitations!.openInvitation.mock.calls.map(([input]) => (input as { browserBindingHash: Buffer }).browserBindingHash)).toEqual([sha256(BINDING), sha256(fresh)]);
+    // A value that is taken twice is just an invitation that cannot be used.
+    state.invitations!.openInvitation.mockResolvedValue({ kind: "binding-in-use" });
+    expect(await (await inviteOpen(post(`t=${TOKEN}`, sameOrigin, `${INVITE_BINDING_COOKIE}=${BINDING}`))).json()).toEqual({ reason: "invite-invalid" });
+  });
+
   it("tells why a link cannot be used, in the invitation's words, and sets no cookie", async () => {
     const reasons: [OpenHostInvitationResult, string][] = [
       [{ kind: "expired" }, "invite-expired"], [{ kind: "used" }, "invite-used"], [{ kind: "other-browser" }, "invite-browser"], [{ kind: "invalid" }, "invite-invalid"],

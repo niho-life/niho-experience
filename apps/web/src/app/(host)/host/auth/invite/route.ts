@@ -95,15 +95,22 @@ export async function POST(request: NextRequest) {
   const store = hostInvitations();
   if (!store) return noStoreJson({ error: "unavailable" }, 503);
 
+  // The browser's own value again when it opens the link a second time (or the next invitation of the same host); a new one
+  // when it has none, or when its value holds another open invitation (a shared browser that never finished the first).
   const existing = request.cookies.get(INVITE_BINDING_COOKIE)?.value;
-  const binding = isOpaqueSecret(existing) ? existing : newLinkBinding();
+  let binding = isOpaqueSecret(existing) ? existing : newLinkBinding();
   let opened;
   try {
     opened = await store.openInvitation({ token: form.value, browserBindingHash: linkBindingHash(binding), nowUtc: nowUtc() });
+    if (opened.kind === "binding-in-use") {
+      binding = newLinkBinding();
+      opened = await store.openInvitation({ token: form.value, browserBindingHash: linkBindingHash(binding), nowUtc: nowUtc() });
+    }
   } catch (error) {
     console.error(`[host-auth] invitation not opened: ${error instanceof Error ? error.name : "unknown error"}`);
     return noStoreJson({ error: "unavailable" }, 503);
   }
+  if (opened.kind === "binding-in-use") return noStoreJson({ reason: REASONS.invalid }, 400);
   if (opened.kind !== "opened") return noStoreJson({ reason: REASONS[opened.kind] }, 400);
   const response = new NextResponse(null, { status: 204, headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" } });
   setInviteBindingCookie(response, binding);
