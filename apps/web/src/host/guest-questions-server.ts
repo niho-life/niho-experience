@@ -24,7 +24,7 @@ import { hostReplyToEnglish } from "@/lib/translation/prompts";
 import { actionTime } from "./bookings";
 import { HOST_INVALID_INPUT_TEXT, HOST_SESSION_ENDED_TEXT } from "./errors";
 import { todayInJapan } from "./format";
-import { BOOKING_THREAD_CLOSED_TEXT, bookingOfNewThread, emptyThreadFor, newBookingThreadId, PERSON_EXPERIENCE_ID, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
+import { BOOKING_THREAD_CLOSED_TEXT, bookingOfNewThread, emptyThreadFor, newBookingThreadId, personExperienceId, REPLY_DRAFT_FAILED_TEXT, REPLY_DRAFT_UNAVAILABLE_TEXT } from "./messages";
 import { mockExperienceBookings, mockExperienceThreads } from "./mock/experience-reservations";
 import { MOCK_NOW, MOCK_TODAY } from "./mock/bookings";
 import { siteBooking, siteBookingExperiences } from "./site-bookings";
@@ -53,9 +53,13 @@ const LIST_LIMIT = 50;
 /** 英語にする waits this long for the Claude API; after that the host writes the English. */
 export const REPLY_DRAFT_TIMEOUT_MS = 15_000;
 
-/** The experience (id and title) a stored thread is filed under; a message from a person's page has none of its own. */
-function experienceOf(thread: { productId: string | null; productTitle: string | null }): { id: string; title: string } {
-  return thread.productId === null || thread.productTitle === null ? { id: PERSON_EXPERIENCE_ID, title: PERSON_THREAD_LABEL } : { id: thread.productId, title: thread.productTitle };
+/**
+ * The experience (id and title) a stored thread is filed under. A message from a person's page has none of its own: it is
+ * filed as "◯◯さんあて" (the person it was addressed to, #589), so a provider with several people sees whose it is.
+ */
+function experienceOf(thread: { productId: string | null; productTitle: string | null; personName?: string | null }): { id: string; title: string } {
+  if (thread.productId !== null && thread.productTitle !== null) return { id: thread.productId, title: thread.productTitle };
+  return { id: personExperienceId(thread.personName), title: thread.personName ? `${thread.personName}さんあて` : PERSON_THREAD_LABEL };
 }
 
 /** What a question is about, as the host reads it; "Other" names nothing. */
@@ -97,10 +101,10 @@ export function hostThreadBooking(booking: GuestQuestionThreadBooking): HostThre
   };
 }
 
-export function hostThread(thread: Pick<StoredThread, "id" | "productId" | "guestName" | "topic" | "language" | "booking">, messages: readonly GuestQuestionMessage[]): HostThread {
+export function hostThread(thread: Pick<StoredThread, "id" | "productId" | "guestName" | "topic" | "language" | "booking"> & { readonly personName?: string | null }, messages: readonly GuestQuestionMessage[]): HostThread {
   return {
     id: thread.id,
-    experienceId: thread.productId ?? PERSON_EXPERIENCE_ID,
+    experienceId: thread.productId ?? personExperienceId(thread.personName),
     guest: thread.guestName,
     topic: thread.topic ? (TOPIC_JA[thread.topic] ?? null) : null,
     booking: thread.booking ? hostThreadBooking(thread.booking) : null,

@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { BookingMessagesClosedError, StoreAccessDeniedError, StoreConflictError, StoreError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "./errors.ts";
 import { enqueueBookingMessageNotification, enqueueGuestQuestionNotification } from "./host-notification-outbox.ts";
-import { PEOPLE_OWNER_CONDITION, PEOPLE_PUBLIC_JOINS } from "./people-listings.ts";
+import { PEOPLE_MEMBER_CONDITION, PEOPLE_PHOTO_JOIN } from "./people-listings.ts";
 import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -115,6 +115,8 @@ export interface GuestQuestionThreadSummary {
   /** The experience a question or a booking is about; null for a message from a person's page (#589). */
   readonly productId: string | null;
   readonly productTitle: string | null;
+  /** The person a message from their page was addressed to (#589), as named when it was sent; null for any other thread. */
+  readonly personName: string | null;
   /** The guest's name: the question's, or the booking's (from its guest record). */
   readonly guestName: string;
   /** What a question is about; null for a booking's thread. */
@@ -430,7 +432,7 @@ const BOOKING_COLUMNS = `b.public_booking_id::text AS booking_public_id, b.statu
   b.occurrence_snapshot->>'localDate' AS booking_local_date, b.occurrence_snapshot->>'localStartTime' AS booking_local_start,
   b.occurrence_snapshot->>'startUtc' AS booking_start_utc, g.adult_count AS booking_adults, g.child_count AS booking_children,
   ${bookingMessagesOpenSql("b")} AS booking_open`;
-const THREAD_COLUMNS = `t.id, t.product_id, p.public_title, COALESCE(t.guest_name, g.guest_name) AS guest_name, t.topic, t.guest_language,
+const THREAD_COLUMNS = `t.id, t.product_id, p.public_title, t.person_name, COALESCE(t.guest_name, g.guest_name) AS guest_name, t.topic, t.guest_language,
   t.needs_reply, t.host_read_at, t.last_message_at, t.created_at,
   to_char(t.last_message_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at, ${BOOKING_COLUMNS}`;
 
@@ -469,6 +471,7 @@ function threadFields(row: DbRow): Omit<GuestQuestionThreadSummary, "lastMessage
     id: String(row.id),
     productId: row.product_id === null || row.product_id === undefined ? null : String(row.product_id),
     productTitle: row.public_title === null || row.public_title === undefined ? null : String(row.public_title),
+    personName: row.person_name === null || row.person_name === undefined ? null : String(row.person_name),
     guestName: String(row.guest_name ?? ""),
     topic: row.topic === null || row.topic === undefined ? null : String(row.topic) as GuestQuestionTopic,
     language: String(row.guest_language) as GuestQuestionLanguage,
@@ -672,23 +675,25 @@ export class GuestQuestionRepository {
   /**
    * A message to a person listed on 街の人 (#589), from their page: a thread of the person's provider that is about no
    * experience, the guest's message and the outbox events (translation and the host's push) in one transaction, so it
-   * reaches the OWNER as a question does and is answered the same way. The same clientRequestKey for the person again
+   * reaches the provider's inbox as a question does (addressed to the person, who is a current OWNER or co-host of it) and is answered the same way by the OWNER and the co-hosts. The same clientRequestKey for the person again
    * answers `received` without a second thread. Throws StoreNotFoundError unless the person is shown on 街の人 now
-   * (listed, with a public profile, a rights-confirmed photo and a current OWNER), StoreRateLimitedError past the hourly limits.
+   * (listed, with a rights-confirmed photo and a member who is a current OWNER or co-host), StoreRateLimitedError past the hourly limits.
    */
   async submitPersonMessage(input: SubmitPersonMessageInput): Promise<{ status: "received" }> {
     const message = validPersonMessage(input);
     return withTransaction(this.#pool, async (client) => {
       const person = await client.query<DbRow>(
-        `SELECT listing.provider_id
+        `SELECT listing.id, listing.provider_id, listing.name_ja
            FROM experience_people_listings listing
-           ${PEOPLE_PUBLIC_JOINS}
-          WHERE listing.slug = $1 AND ${PEOPLE_OWNER_CONDITION}
+           ${PEOPLE_PHOTO_JOIN}
+          WHERE listing.slug = $1 AND ${PEOPLE_MEMBER_CONDITION}
           FOR SHARE OF listing`,
         [message.personSlug],
       );
       if (!person.rows[0]) throw new StoreNotFoundError("person");
       const providerId = String(person.rows[0].provider_id);
+      const listingId = String(person.rows[0].id);
+      const personName = String(person.rows[0].name_ja);
       // One message at a time per person, so the counts below hold until this one is in.
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 53))", [`person-messages:${providerId}`]);
       const repeated = await client.query(
@@ -699,12 +704,12 @@ export class GuestQuestionRepository {
 
       const counts = await client.query<DbRow>(
         `SELECT count(*) FILTER (WHERE guest_email_key = lower($2))::int AS by_guest,
-                count(*)::int AS by_person,
+                count(*) FILTER (WHERE person_listing_id = $3)::int AS by_person,
                 GREATEST(1, ceil(extract(epoch FROM min(created_at) FILTER (WHERE guest_email_key = lower($2)) + interval '60 minutes' - clock_timestamp())))::int AS guest_retry,
-                GREATEST(1, ceil(extract(epoch FROM min(created_at) + interval '60 minutes' - clock_timestamp())))::int AS person_retry
+                GREATEST(1, ceil(extract(epoch FROM min(created_at) FILTER (WHERE person_listing_id = $3) + interval '60 minutes' - clock_timestamp())))::int AS person_retry
            FROM guest_question_threads
           WHERE provider_id = $1 AND product_id IS NULL AND booking_id IS NULL AND created_at > clock_timestamp() - interval '60 minutes'`,
-        [providerId, message.guestEmail],
+        [providerId, message.guestEmail, listingId],
       );
       const count = counts.rows[0]!;
       if (Number(count.by_guest) >= GUEST_QUESTION_LIMITS.newPersonThreadsPerGuestPerHour) throw new StoreRateLimitedError(Number(count.guest_retry));
@@ -715,9 +720,9 @@ export class GuestQuestionRepository {
       await client.query(
         `WITH now AS (SELECT clock_timestamp() AS at)
          INSERT INTO guest_question_threads
-           (id, provider_id, guest_name, guest_email, guest_email_key, guest_language, client_request_key, last_message_at, created_at)
-         SELECT $1::uuid, $2, $3, $4, lower($4), $5, $6, now.at, now.at FROM now`,
-        [threadId, providerId, message.guestName, message.guestEmail, message.language, message.clientRequestKey],
+           (id, provider_id, guest_name, guest_email, guest_email_key, guest_language, client_request_key, person_listing_id, person_name, last_message_at, created_at)
+         SELECT $1::uuid, $2, $3, $4, lower($4), $5, $6, $7, $8, now.at, now.at FROM now`,
+        [threadId, providerId, message.guestName, message.guestEmail, message.language, message.clientRequestKey, listingId, personName],
       );
       await client.query(
         `INSERT INTO guest_question_messages (id, provider_id, thread_id, author, source, body, created_at)
@@ -949,7 +954,7 @@ export class GuestQuestionRepository {
           `SELECT COALESCE(t.guest_email, g.guest_email) AS guest_email, COALESCE(t.guest_name, g.guest_name) AS guest_name,
                   t.guest_language, t.booking_id IS NOT NULL AS for_booking, b.public_booking_id::text AS public_booking_id,
                   b.occurrence_snapshot, p.public_title,
-                  COALESCE(b.seller_snapshot->>'displayName', p.seller_display_name, person.public_display_name) AS seller_display_name
+                  COALESCE(b.seller_snapshot->>'displayName', p.seller_display_name, t.person_name, person.public_display_name) AS seller_display_name
              FROM ${THREAD_FROM}
              LEFT JOIN experience_provider_public_profiles person ON person.provider_id = t.provider_id
             WHERE t.provider_id = $1 AND t.id = $2::uuid`,
@@ -1072,7 +1077,7 @@ export class GuestQuestionRepository {
     if (typeof token !== "string" || !TOKEN.test(token)) return null;
     const found = await this.#pool.query<DbRow>(
       `SELECT r.provider_id, r.thread_id, r.expires_at, r.used_at, r.expires_at > clock_timestamp() AS open,
-              t.guest_name, t.guest_language, p.public_title, COALESCE(p.seller_display_name, person.public_display_name) AS seller_display_name
+              t.guest_name, t.guest_language, p.public_title, COALESCE(p.seller_display_name, t.person_name, person.public_display_name) AS seller_display_name
          FROM guest_question_reply_tokens r
          JOIN guest_question_threads t ON t.provider_id = r.provider_id AND t.id = r.thread_id
          LEFT JOIN experience_products p ON p.provider_id = t.provider_id AND p.id = t.product_id

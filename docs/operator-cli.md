@@ -104,8 +104,8 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 | `auth` | `check` | read |
 | `classification` | `list`（`--slug`・`--status`・`--unclassified`）、`options` | read |
 | `classification` | `apply --file 変更.json` | edit |
-| `people` | `list`（`--listed`・`--unlisted`・`--provider`） | read |
-| `people` | `apply --file 変更.json`、`withdraw --provider <providerId>` | publish |
+| `people` | `list`（`--listed`・`--unlisted`・`--provider`・`--slug`） | read |
+| `people` | `apply --file 変更.json`、`withdraw --slug <slug>` | publish |
 | `provider` | `list`（`publicDisplayNameEn` に英語の公開名も出る） | read |
 | `provider` | `create --name … [--name-en …] --kind PERSON\|BUSINESS --consent-confirmed`・`profile --provider … [--name-en … \| --clear-name-en]`（既存の提供者の公開プロフィール）・`photo-add --provider … --file …`（提供者の写真・ロゴ） | edit |
 | `product` | `list`・`show`・`calendar` | read |
@@ -146,11 +146,11 @@ node scripts/experience/ops.mjs classification apply --file changes.json --yes  
 
 ### 街の人に載せる・変える・外す
 
-載せる・変える・外すは、日本語サイトの `/ja/people` にすぐ出る・消えるので `publish` の段階（**本番は依頼した人の了承を取ってから `--yes`**）。載せられるのは、公開プロフィールがある提供者だけ（`people list` の `publicDisplayName`・`photoReady`・`hasHostBio`・`visible` を見る。提供者の写真が許可つきで選ばれていないと、載せても表示されない。本人のアカウント（現役の OWNER）が無い人も表示されない（#589）。載せたのに表示されない人には、`hiddenBecause` に理由が付く）。
+載せる・変える・外すは、日本語サイトの `/ja/people` にすぐ出る・消えるので `publish` の段階（**本番は依頼した人の了承を取ってから `--yes`**）。載せるのは「提供者 × メンバー（ホストアカウント）」の人（#589）。`people list` には、掲載（`listing`）と、まだ載せていない現役の OWNER・共同ホスト（`listing: null`、`providerId`・`memberId`・`memberRole`）が並ぶ。表示されるのは、メンバーがその提供者の現役の OWNER か共同ホストで、掲載の写真が許可つきのとき（`visible`）。載せたのに表示されない人には、`hiddenBecause` に理由が付く。メンバーのいない掲載は下書きで、公開側には出ない（本人のアカウントが付けば出る）。
 
 ```json
 { "items": [
-  { "providerId": "prov-a", "listing": { "slug": "yuki", "roleJa": "料理家", "areaJa": "長谷", "sortOrder": 10, "quoteJa": "台所に立つ人", "experiences": ["zen-karate"] } }
+  { "providerId": "prov-a", "memberId": "hst_0123456789abcdef0123456789abcdef", "listing": { "slug": "yuki", "nameJa": "雪", "roleJa": "料理家", "areaJa": "長谷", "sortOrder": 10, "quoteJa": "台所に立つ人", "experiences": ["zen-karate"] } }
 ] }
 ```
 
@@ -158,11 +158,12 @@ node scripts/experience/ops.mjs classification apply --file changes.json --yes  
 node scripts/experience/ops.mjs people list --unlisted                       # まだ載っていない人
 node scripts/experience/ops.mjs people apply --file people.json              # 差分だけ
 node scripts/experience/ops.mjs people apply --file people.json --yes        # 載せる／変える
-node scripts/experience/ops.mjs people withdraw --provider prov-a --yes      # 外す（公開プロフィールと写真は残る）
+node scripts/experience/ops.mjs people withdraw --slug yuki --yes              # 外す（届いたメッセージと写真は残る）
 ```
 
-- 新しく載せるには `slug`（英小文字・数字・ハイフン）・`roleJa`（80字）・`areaJa`（40字）・`sortOrder`（0〜9999）が要る。`quoteJa`（160字）・`introJa`（1200字）は任意。載っている人は、書いたキーだけが変わる。値は、サーバーと同じ検証を実行の前に通す（前後に空白がある肩書などは断る）。
-- **この人に会える体験**（`listing.experiences`、#585）：人は提供者1つに1人ですが、案内している体験は別の提供者（事業者など）のものでもあります。`"experiences": ["zen-karate", {"providerId": "prov-a", "productId": "twin-a"}]` のように、商品の slug（同じ slug が複数の提供者にあるときは `providerId` と `productId`）で並べます。**書いたときだけ**全体を置き換え（書かなければいまの結び付けのまま、`[]` で空にする）、並びは書いた順です。結び付けた商品のうち**公開中のものだけ**が人のページ・体験の詳細の「案内する人」・一覧のカード（「◯◯さんが案内」）に出ます。この人の提供者自身の公開中の体験は、書かなくても出ます。不明な slug・複数の提供者にある slug（`slug_is_ambiguous_use_providerId_and_productId`）・保管した商品・同じ商品の重複は、その項目だけ失敗にして何も送りません（slug の解決に、商品の分類と同じ `/admin/api/product-classifications` を読みます）。`people list` の `listing.experiences` で、いま結び付いている商品（slug・題・状態）を見られます。
+- 掲載は **`listing.slug` で指す**（`providerId` は、その人が属する提供者。別の `providerId`・`memberId` を書くと付け替える）。`memberId` は、その提供者の現役の OWNER か共同ホストのホストアカウント（`people list` の `memberId`）。**書かなければ、いまのメンバーのまま**（新しい掲載はメンバー無し＝下書き）、`null` で外す。メンバーが提供者の現役の OWNER・共同ホストでなければ、その項目は断られる。
+- 新しく載せるには `slug`（英小文字・数字・ハイフン）・`nameJa`（名前、40字）・`roleJa`（80字）・`areaJa`（40字）・`sortOrder`（0〜9999）が要る。`quoteJa`（160字）・`introJa`（1200字）は任意。**写真**は、書かなければ提供者自身の写真を取る（新しい掲載）か、いまのまま（既存）。別の写真は `"photo": {"assetId": "…", "altJa": "…", "credit": null}`（許可の確認が済んだ提供者の写真の資産。`people list` の `listing.photo` に出る）、`null` で外す（外すと表示されない）。載っている人は、書いたキーだけが変わる。値は、サーバーと同じ検証を実行の前に通す（前後に空白がある肩書などは断る）。
+- **この人に会える体験**（`listing.experiences`、#585）：案内している体験は、人が属する提供者のものでも、別の提供者（事業者など）のものでもあります。`"experiences": ["zen-karate", {"providerId": "prov-a", "productId": "twin-a"}]` のように、商品の slug（同じ slug が複数の提供者にあるときは `providerId` と `productId`）で並べます。**書いたときだけ**全体を置き換え（書かなければいまの結び付けのまま、`[]` で空にする）、並びは書いた順です。結び付けた商品のうち**公開中のものだけ**が人のページ・体験の詳細の「案内する人」・一覧のカード（「◯◯さんが案内」）に出ます。提供者自身の商品も、書いたものだけが出ます（自動では付きません）。不明な slug・複数の提供者にある slug（`slug_is_ambiguous_use_providerId_and_productId`）・保管した商品・同じ商品の重複は、その項目だけ失敗にして何も送りません（slug の解決に、商品の分類と同じ `/admin/api/product-classifications` を読みます）。`people list` の `listing.experiences` で、いま結び付いている商品（slug・題・状態）を見られます。
 - 読んだ版（`expectedVersion`）を付けて送る。画面などで先に変わっていた・スラッグを他の人が使っていたときは `409 conflict`（終了コード 4）で、何も上書きしない。ほかの項目の処理は続く。
 
 ### 新しい日本語の商品を出す（stg の例。画面は使わない）

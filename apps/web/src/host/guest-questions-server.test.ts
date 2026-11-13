@@ -56,7 +56,7 @@ const QUESTION: GuestQuestionMessage = { id: "m-1", author: "GUEST", source: "SI
 const REPLY: GuestQuestionMessage = { id: "m-2", author: "HOST", source: "HOST_CONSOLE", body: "Yes, we can.", bodyJa: "はい、できます。", createdAtUtc: "2026-10-31T02:00:00.000Z", deliveryStatus: "PENDING" };
 const ANSWER: GuestQuestionMessage = { id: "m-3", author: "GUEST", source: "REPLY_PAGE", body: "Thank you!", bodyJa: null, createdAtUtc: "2026-10-31T15:30:00.000Z", deliveryStatus: null };
 const STORED: Omit<GuestQuestionThreadSummary, "lastMessage"> = {
-  id: THREAD_ID, productId: "tea", productTitle: "Synthetic tea", guestName: "Sample Guest", topic: "FOOD", language: "EN",
+  id: THREAD_ID, productId: "tea", productTitle: "Synthetic tea", personName: null, guestName: "Sample Guest", topic: "FOOD", language: "EN",
   needsReply: true, read: false, lastMessageAtUtc: ANSWER.createdAtUtc, createdAtUtc: QUESTION.createdAtUtc, booking: null,
 };
 const SUMMARY: GuestQuestionThreadSummary = { ...STORED, lastMessage: ANSWER };
@@ -126,6 +126,29 @@ describe("a message sent from a person's page (#589)", () => {
     expect(opened).toMatchObject({ status: "live", loaded: [THREAD_ID] });
     expect(opened.status === "live" && opened.experiences).toContainEqual({ id: "person-page", title: "人物ページから" });
     expect(JSON.stringify(opened)).not.toMatch(/@/);
+  });
+});
+
+describe("a message addressed to a person of the provider (#589)", () => {
+  const TO = (personName: string, over: Partial<GuestQuestionThreadSummary> = {}): GuestQuestionThreadSummary => ({
+    ...STORED, id: `00000000-0000-4000-8000-${personName.length.toString().padStart(12, "0")}`, productId: null, productTitle: null, topic: null, language: "JA", guestName: "山田 花子", personName,
+    lastMessage: { ...QUESTION, body: "はじめまして。" }, ...over,
+  });
+
+  it("is filed as ◯◯さんあて, each person apart, so a provider with several people sees whose it is", async () => {
+    state.store!.listThreads!.mockResolvedValueOnce({ threads: [TO("高浜拓也"), TO("スタッフ花子"), SUMMARY], nextCursor: null });
+    const list = await loadGuestQuestions(OWNER, null);
+    expect(list.status === "live" && list.experiences).toEqual([{ id: "person-page:高浜拓也", title: "高浜拓也さんあて" }, { id: "person-page:スタッフ花子", title: "スタッフ花子さんあて" }, { id: "tea", title: "Synthetic tea" }]);
+    // Still a message from a person's page, not a question before booking.
+    const thread = hostThread(TO("高浜拓也"), []);
+    expect(thread.experienceId).toBe("person-page:高浜拓也");
+    expect(threadKind(thread)).toBe("人物ページからのメッセージ");
+    expect(threadWhen(thread)).toBe("");
+    expect(threadHeading(thread)).toBe("山田 花子 さんからのメッセージ");
+  });
+
+  it("is filed as 人物ページから for a thread sent before the person was recorded", () => {
+    expect(hostThread(TO("高浜拓也", { personName: null }), []).experienceId).toBe("person-page");
   });
 });
 

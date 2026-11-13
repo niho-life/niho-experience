@@ -2907,21 +2907,23 @@ export class ExperiencePublicationRepository {
     return { objectKey: String(row.object_key), byteSize: safeInteger(row.byte_size, "media byte_size") };
   }
 
-  /** A provider profile image is public only while an active product by that seller is published. */
+  /**
+   * A provider profile image is public only while an active product by that seller is published, or while it is the photo of
+   * a person listed on 街の人 (#564, #589: the listing names the asset, whichever provider holds it).
+   */
   async getPublicProviderMediaAsset(assetId: string): Promise<PublicExperienceMediaAsset | null> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assetId)) return null;
     const result = await this.#pool.query<DbRow>(
       `WITH ${VISIBLE_PUBLICATIONS_CTE}
        SELECT asset.object_key,asset.byte_size
-         FROM experience_provider_media_selection selection
-         JOIN experience_provider_media_assets asset
-           ON asset.id=selection.asset_id AND asset.provider_id=selection.provider_id
+         FROM experience_provider_media_assets asset
         WHERE asset.id=$1::uuid AND asset.state='READY' AND asset.rights_confirmed_at IS NOT NULL
           AND (
-            EXISTS (SELECT 1 FROM visible_publications publication WHERE publication.provider_id=selection.provider_id)
-            -- 街の人 (#564): a listed person's photo is public too, also while they have no experience on sale.
-            OR (selection.placement='PROVIDER_PHOTO'
-                AND EXISTS (SELECT 1 FROM experience_people_listings listing WHERE listing.provider_id=selection.provider_id))
+            EXISTS (SELECT 1 FROM experience_provider_media_selection selection
+                     WHERE selection.asset_id=asset.id AND selection.provider_id=asset.provider_id
+                       AND EXISTS (SELECT 1 FROM visible_publications publication WHERE publication.provider_id=selection.provider_id))
+            -- 街の人: a listed person's photo is public too, also while they have no experience on sale.
+            OR EXISTS (SELECT 1 FROM experience_people_listings listing WHERE listing.photo_asset_id=asset.id AND listing.photo_provider_id=asset.provider_id)
           )
         LIMIT 1`, [assetId],
     );
