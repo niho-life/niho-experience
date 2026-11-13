@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, type FunctionComponent } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { SiteLocaleProvider } from "@/components/SiteLocale";
@@ -32,7 +32,7 @@ function item(offers = [offer()]): SitePublicExperience {
   } as unknown as SitePublicExperience;
 }
 const card: JaCard = { slug: "synthetic-walk", title: "合成の山道を歩く", lead: "山道を歩きます。", cover: { url: "/synthetic.jpg", alt: "山道" }, withLine: "まさとさんと", face: null, durationMinutes: 180, capacity: { min: 2, max: 8 }, priceFromYen: 5500, offers: [], classification: { category: "walk", area: "kita", companions: [], occasions: [] } };
-const render = async (value = item(), related: JaCard[] = [], person: { slug: string; name: string; roleJa: string } | null = null) => renderToStaticMarkup(createElement(SiteLocaleProvider, { locale: "ja", values: JA_STATIC_COPY_V1, children: await JaExperiencePage({ item: value, card, related, person }) }));
+const render = async (value = item(), related: JaCard[] = [], person: { slug: string; name: string; roleJa: string } | null = null) => renderToStaticMarkup(createElement(SiteLocaleProvider as unknown as FunctionComponent<Record<string, unknown>>, { locale: "ja", values: JA_STATIC_COPY_V1 }, await JaExperiencePage({ item: value, card, related, person })));
 /** The words a visitor reads: tags, attributes and scripts removed. */
 const visibleText = (html: string) => html.replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/g, " ");
 
