@@ -69,14 +69,41 @@ stg（`https://experience-stg.niho.life`、main `7407185e` 相当）で、合成
 5. **配備後の確認**：`/ja/business`・`/ja/schools`・フォーム・受付番号・`/admin/inquiries`。合成の相談を1件送り、受付メール2通（事務局宛・本人宛）が届くのを自分の宛先で確かめ、終わったら削除する。
 6. **切り戻し**：該当の `PROD_*` を `false`（または削除）にして候補 → 昇格。入口とページは消え、受け付けたデータは残る。migration は戻さない。
 
-## 本番の現状（variable 名のみ）
+## 本番の現状（2026-11-13 に開けた）
 
-`PROD_GUEST_MAIL_ENABLED`・`PROD_GUEST_BOOKING_ENABLED`・`PROD_MANAGED_SALES_ENABLED`・`PROD_MANAGED_SALES_WEBHOOKS_ENABLED`・`PROD_HOST_ACCOUNTS_ENABLED`・`PROD_HOST_PUBLICATION_API_ENABLED`・`PROD_ADMIN_SUPPORT_CONSOLE_ENABLED` は `true`。`PROD_GROUP_INQUIRY_ENABLED`・`PROD_JAPANESE_SITE_ENABLED`・`PROD_OCCURRENCE_ASSIGNMENT_ENABLED` は未設定（OFF）。
+配備した commit：`3b767649`（main。#558・#559 を含む）。最終の稼働 revision は `niho-experience-00112-cey`（100%）。
+
+| 項目 | 状態 |
+| --- | --- |
+| migration | `experience_prd` に `0073`・`0074` を適用（`0069`〜`0072` は適用済みだった）。runtime への grants も宣言どおりに合わせた |
+| `PROD_GROUP_INQUIRY_ENABLED` | `true`（相談を開いた） |
+| `PROD_OCCURRENCE_ASSIGNMENT_ENABLED` | `true`（担当を開いた） |
+| `PROD_JAPANESE_SITE_ENABLED` | `true`（日本語サイトを開いた。オーナー決定 2026-11-14：有料の支払いを stg で試さずに本番で開いてよい。画面文言342項目は確認済み） |
+| 前提の flag | `PROD_GUEST_MAIL_ENABLED`・`PROD_GUEST_BOOKING_ENABLED`・`PROD_MANAGED_SALES_ENABLED`・`PROD_MANAGED_SALES_WEBHOOKS_ENABLED`・`PROD_HOST_ACCOUNTS_ENABLED`・`PROD_HOST_PUBLICATION_API_ENABLED`・`PROD_ADMIN_SUPPORT_CONSOLE_ENABLED`・`PROD_PUBLICATIONS_ENABLED` は `true` のまま |
+
+### 本番で確かめられたこと
+
+- **相談**：`/inquiry` から合成の相談を1件送り、受付番号と返信の目安（2営業日）が出た。受付メール（相手宛）と事務局への通知の2通が、送信済みとして実際に届いた。`/admin/inquiries` に出て、状態を「完了」にして内部メモを付けた（件は月次の削除で消してよい旨をメモに書いた。DB の行はまだ残っている）。`/privacy` に相談の節が出る。相談ページは noindex。
+- **担当**：Admin の「予約」の「開催回の担当」が開き、既存の申込の回が「募集中」で出る。画面のエラーなし。予約・担当のデータは書き換えていない。`/host/bookings` は未ログインでログインへ移る（以前と同じ）。
+- **日本語サイト**：`/ja`・`/ja/experiences`・`/ja/experiences/<slug>`・`/ja/business`・`/ja/schools`・`/ja/inquiry`・`/ja/help`・`/ja/host` が開く。確認済みの日本語原稿がある2商品が `/ja` に出る。英語側（`/`・`/experiences`・体験・`/inquiry`・`/privacy`）は変わらず 200。sitemap に `/ja` 系が足され、英語の体験ページに `hreflang="ja"` が付いた。`/ja` のトップとフッターに相談への導線がある。
+- 配備後のログに 5xx・ERROR は無かった。
+
+### 本番で未確認のまま残るもの
+
+- 有料の日本語の予約（日本語の checkout から決済まで）と、前日の案内メール。
+- 担当の通知（申込みが来たときの push・メール）と、ホストの「対応する」「担当を外れる」。ホストの画面（`/host/bookings`）は、ホストでログインして見ていない。
+- 体験ページの「◯◯さんに相談する」（ホスト名つきの導線）。
+- 日本語の相談フォーム（`/ja/inquiry`）からの送信。本番で送ったのは英語の `/inquiry` だけ。
+- `/ja/business`・`/ja/schools` に robots の noindex は付いていない（`SITE_INDEXING=allow`）。sitemap には載せていない。
+
+### 運用の注意（本番）
+
+- 本番の migration は、runtime ロールに開いたセッションがあると止まる。今回は Scheduler の `experience-jobs-drain-prd` と `experience-google-busy-sync-prd` を一時停止して実行し、すぐ再開した（その間、メール・同期は数分止まった）。
 
 ## オーナーの確認（2026-11-13）
 
 - 法人・学校の案内ページの数字（金額・人数・時間・期間。`GROUP_GUIDE_NUMBERS` / `GROUP_GUIDE_FACTS`）：**いまの値のまま公開してよい**と確認済み。
 - 相談の運用：返信の目安は2営業日（土日を除く）、事務局への通知先は `PROD_MAIL_REPLY_TO` のまま、保持は完了から1年・月1回の手動削除：**確認済み**。`/privacy` に相談の入力内容の扱いを追記した（相談の flag が ON のときだけ出る節）。
 - 担当（#535）：stg を整えずに、本番で flag を開いて確かめる（予約者の画面・メール・決済には出ない内部の機能で、flag を戻せば消える）：**決定済み**。ただし確認のために本番で予約・申込みを作らず、既存のデータも書き換えない。
-- 日本語サイト：stg で日本語の予約を確認中。結果が出るまで本番では開けない。
+- 日本語サイト：2026-11-14 に、有料の支払いを stg で試さずに本番で開いてよい、画面文言（342項目）は確認済みとして進めてよい、と決定。本番で開けた。
 - 担当の報酬の扱いなど `docs/occurrence-assignments.md` の「まだ無いもの」は未決のまま。
