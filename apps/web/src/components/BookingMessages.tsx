@@ -135,7 +135,10 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
     const result = await sendBookingMessage({ publicBookingId, clientRequestKey: attempt.current.key, message: words });
     setSending(false);
     if (result.kind === "sent") {
-      setSent((current) => [...current, { id: attempt.current!.key, from: "guest", atUtc: new Date().toISOString(), body: words, sentHere: true }]);
+      // The key and the time are read now: React runs the updater later, when `attempt.current` is already null (that threw
+      // and replaced the page with the error page right after every successful send, seen on stg #59).
+      const sentMessage: SentHere = { id: attempt.current.key, from: "guest", atUtc: new Date().toISOString(), body: words, sentHere: true };
+      setSent((current) => [...current, sentMessage]);
       attempt.current = null;
       setMessage("");
       setStatus(ja ? `送信しました。${hostDisplayName}にメッセージが届きました。返信は、このページとメールでお知らせします。` : `Sent. ${hostDisplayName} gets your message now and will answer here and by email.`);
