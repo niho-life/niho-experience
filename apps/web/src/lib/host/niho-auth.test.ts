@@ -30,10 +30,21 @@ describe("code exchange", () => {
   it("posts the client id, code and verifier and reads the connection", async () => {
     const { deps: d, calls } = deps(() => json(200, ok));
     const result = await exchangeCode(d, { code: "code-1", codeVerifier: "verifier-1" });
-    expect(result).toEqual({ ok: true, value: { accessToken: "web-access-1", accessTokenExpiresAt: Date.parse(ok.expiresAt), refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: Date.parse(ok.connectionExpiresAt), displayName: "合成 ホスト", iconUrl: "https://images.example.test/a.jpg" } });
+    expect(result).toEqual({ ok: true, value: { accessToken: "web-access-1", accessTokenExpiresAt: Date.parse(ok.expiresAt), refreshToken: "refresh-1", connectionId: "conn_1", connectionExpiresAt: Date.parse(ok.connectionExpiresAt), displayName: "合成 ホスト", iconUrl: "https://images.example.test/a.jpg", authTimeUtc: null } });
     expect(calls[0]!.url).toBe(`${NIHO}/api/auth/app-connect/exchange`);
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ clientId: "niho-experience", code: "code-1", codeVerifier: "verifier-1" });
     expect(calls[0]!.init.redirect).toBe("manual");
+  });
+
+  it("reads when the person signed in at NIHO (authTime) as a canonical UTC instant, and none for a missing or invalid one", async () => {
+    const withTime = (authTime: unknown) => deps(() => json(200, { ...ok, authTime })).deps;
+    const read = async (authTime: unknown) => {
+      const result = await exchangeCode(withTime(authTime), { code: "c", codeVerifier: "v" });
+      return result.ok ? result.value.authTimeUtc : "failed";
+    };
+    expect(await read("2026-10-21T03:10:00+00:00")).toBe("2026-10-21T03:10:00.000Z");
+    expect(await read(Date.parse("2026-10-21T03:10:00.000Z"))).toBe("2026-10-21T03:10:00.000Z");
+    for (const missing of [undefined, null, "", "yesterday", {}]) expect(await read(missing), String(missing)).toBeNull();
   });
 
   it("separates a refused code from an outage", async () => {

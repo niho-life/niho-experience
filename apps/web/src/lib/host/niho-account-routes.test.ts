@@ -21,6 +21,8 @@ const state = vi.hoisted(() => ({
     siteUrl: "https://experience.example.test",
   },
   cookies: {} as Record<string, string>,
+  /** When the person signed in at NIHO, as the exchange answer says (default: just now). */
+  authTime: () => new Date().toISOString(),
   identities: null as {
     readNihoIdentity: ReturnType<typeof import("vitest").vi.fn>;
     linkNihoIdentity: ReturnType<typeof import("vitest").vi.fn>;
@@ -89,7 +91,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = new URL(String(input));
     calls.push({ url, init });
-    if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: "refresh-link", connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成", iconImage: null } });
+    if (url.pathname === "/api/auth/app-connect/exchange") return json(200, { accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: "refresh-link", connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成", iconImage: null }, authTime: state.authTime() });
     if (url.pathname === "/api/experience-host/identity") return json(200, { nihoUserId: NIHO_USER, accountStatus: "ACTIVE" });
     if (init.method === "DELETE") return new Response(null, { status: 204 });
     return json(404, {});
@@ -171,12 +173,22 @@ describe("the NIHO round trip of a binding", () => {
     expect(state.identities!.linkNihoIdentity).toHaveBeenCalledTimes(1);
     const asked = state.identities!.linkNihoIdentity.mock.calls[0]![0] as { hostAccountId: string; nihoUserId: string; proof: { kind: string; sessionRef: string; nihoAuthenticatedAtUtc: string }; nowUtc: string };
     expect(asked).toMatchObject({ hostAccountId: HOST, nihoUserId: NIHO_USER, proof: { kind: "SESSION", sessionRef: REF } });
-    expect(asked.proof.nihoAuthenticatedAtUtc).toBe(asked.nowUtc);
+    // The store is told when the person signed in at NIHO (NIHO's authTime), which it holds against the recent-sign-in window.
+    expect(Math.abs(Date.parse(asked.proof.nihoAuthenticatedAtUtc) - Date.parse(asked.nowUtc))).toBeLessThan(5_000);
     // No new session, no change to the one that is open, and the connection ends.
     expect(state.identities!.startSessionForNihoIdentity).not.toHaveBeenCalled();
     expect(response.headers.getSetCookie().some((entry) => entry.startsWith(`${ACCOUNT_SESSION_COOKIE}=`))).toBe(false);
     expect(calls.filter((call) => call.init.method === "DELETE")).toHaveLength(1);
     expect([location(response), ...response.headers.getSetCookie()].join("\n")).not.toContain(NIHO_USER);
+  });
+
+  it("passes NIHO's authTime to the store as it is, so an old NIHO sign-in is the store's to refuse", async () => {
+    const old = new Date(Date.now() - 45 * 60_000).toISOString();
+    state.authTime = () => old;
+    state.identities!.linkNihoIdentity.mockResolvedValueOnce({ kind: "recent-authentication-required" });
+    expect(location(await comeBack())).toBe(`${SETTINGS}&niho=reauth`);
+    expect((state.identities!.linkNihoIdentity.mock.calls[0]![0] as { proof: { nihoAuthenticatedAtUtc: string } }).proof.nihoAuthenticatedAtUtc).toBe(old);
+    state.authTime = () => new Date().toISOString();
   });
 
   it("tells what the store said, and never a NIHO user ID", async () => {

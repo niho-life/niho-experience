@@ -93,21 +93,30 @@ function nihoRoundTrip(intent: Pick<HostLoginState, "providerId" | "invitationId
   return response;
 }
 
+/**
+ * When the person signed in at NIHO, as the store takes it: NIHO's `authTime`, never later than `now` (clock skew), so that
+ * the recent-sign-in rule reads what NIHO says. A NIHO that does not return it yet (niho-coliving/niho-app#20305 not deployed)
+ * leaves the time of the return: the NIHO login stays off in production until it is deployed (ADR 0004 §6).
+ */
+function signedInAt(authTimeUtc: string | null, now: number): string {
+  return nowUtc(authTimeUtc === null ? now : Math.min(now, Date.parse(authTimeUtc)));
+}
+
 type Verified<T> = { ok: true; value: T } | { ok: false; reason: "rejected" | "unavailable" };
 
 /**
  * The NIHO round trip's proof and nothing else: the code is exchanged, Host v1 `identity` names the NIHO user ID, `run` runs
- * with it, and the connection ends whatever happened. No token is passed on or kept.
+ * with it and with when the person signed in at NIHO, and the connection ends whatever happened. No token is passed on or kept.
  */
-async function withNihoIdentity<T>(code: string, verifier: string, run: (nihoUserId: string) => Promise<T>): Promise<Verified<T>> {
+async function withNihoIdentity<T>(code: string, verifier: string, run: (nihoUserId: string, authTimeUtc: string | null) => Promise<T>): Promise<Verified<T>> {
   const deps = nihoAuthDeps();
   const exchanged = await exchangeCode(deps, { code, codeVerifier: verifier });
   if (!exchanged.ok) return exchanged;
-  const { accessToken, connectionId } = exchanged.value;
+  const { accessToken, connectionId, authTimeUtc } = exchanged.value;
   try {
     const identity = await lookupNihoIdentity(accessToken);
     if (!identity.ok) return identity;
-    return { ok: true, value: await run(identity.nihoUserId) };
+    return { ok: true, value: await run(identity.nihoUserId, authTimeUtc) };
   } finally {
     // The connection only proved who the person is: end it now (best effort; NIHO's own expiry is the backstop).
     await deleteConnection(deps, connectionId, accessToken, { reason: null });
@@ -133,13 +142,12 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
   const accounts = hostAccounts();
   if (!identities || !accounts) return failed("unavailable", login);
 
-  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId) => {
+  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeUtc) => {
     const now = Date.now();
     try {
-      // NIHO's `auth_time` is not in the identity answer: the person has just signed in (or confirmed) at NIHO for this
-      // connection, so the sign-in is now. A step-up asked NIHO to sign them in again (`max_age`, a few minutes), which
-      // bounds how far back the real sign-in can be. The sensitive changes that ask for a recent one read this time.
-      return { now, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: nowUtc(now), nowUtc: nowUtc(now) }) };
+      // The session's `authenticated_at` is when the person signed in at NIHO (`authTime`), so the sensitive changes that
+      // ask for a recent sign-in read NIHO's time, not the time of this return.
+      return { now, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeUtc, now), nowUtc: nowUtc(now) }) };
     } catch (error) {
       console.error(`[host-auth] NIHO sign-in not opened: ${error instanceof Error ? error.name : "unknown error"}`);
       return null;
@@ -228,10 +236,11 @@ async function completeNihoLink(request: NextRequest, login: HostLoginState, cod
   // The session ended while the host was at NIHO: sign in again, then bind from 設定.
   if (!session) return failed("expired");
 
-  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId) => {
-    const now = nowUtc();
+  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeUtc) => {
+    const now = Date.now();
     try {
-      return await identities.linkNihoIdentity({ hostAccountId: session.hostAccountId, nihoUserId, proof: { kind: "SESSION", sessionRef: session.sessionRef, nihoAuthenticatedAtUtc: now }, nowUtc: now });
+      // The store refuses a NIHO sign-in older than the recent-sign-in window (`recent-authentication-required`).
+      return await identities.linkNihoIdentity({ hostAccountId: session.hostAccountId, nihoUserId, proof: { kind: "SESSION", sessionRef: session.sessionRef, nihoAuthenticatedAtUtc: signedInAt(authTimeUtc, now) }, nowUtc: nowUtc(now) });
     } catch (error) {
       console.error(`[host-auth] NIHO account not linked: ${error instanceof Error ? error.name : "unknown error"}`);
       return null;
