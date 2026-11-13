@@ -2717,6 +2717,17 @@ export class ExperiencePublicationRepository {
     });
   }
 
+  /**
+   * The publication state of a product for the office (運営の CLI, #576): what a stop or a lifted suspension must name as
+   * `expectedStateVersion`. null while the product was never published. Read-only; the Admin boundary has authenticated the actor.
+   */
+  async getStateForOperations(actor: PublicationOperationsActor, providerId: string, productId: string): Promise<ExperiencePublicationState | null> {
+    assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
+    assertStoreIdentifier(providerId, "providerId");
+    assertStoreIdentifier(productId, "productId");
+    return withTransaction(this.#pool, (client) => lockedState(client, providerId, productId, false));
+  }
+
   async suspendByOperations(
     actor: PublicationOperationsActor,
     providerId: string,

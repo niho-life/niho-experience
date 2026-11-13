@@ -3,11 +3,12 @@ import { TrackView } from "@/components/Analytics";
 import { DesktopGallery, MobileGallery } from "@/components/DetailGallery";
 import { HandIcon } from "@/components/HandIcon";
 import { JsonLd } from "@/components/JsonLd";
-import { NextDateBand } from "@/components/NextDateBand";
+import { bookingCloseOf } from "@/components/NextDateBand";
 import { Photo } from "@/components/Photo";
 import { ReviewsSection } from "@/components/ReviewsSection";
 import { config } from "@/lib/config";
 import { dayOption } from "@/lib/date-filter";
+import { formatTime, jstDateKey } from "@/lib/format";
 import { cancellationSummary } from "@/lib/experience/site-card-model";
 import type { SitePublicExperience, SitePublicOffer } from "@/lib/experience/site-publications";
 import { siteSellerInformationHref } from "@/lib/experience/site-seller-information";
@@ -49,6 +50,7 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
   const bookable = config.bookingsEnabled && config.guestBookingEnabled && offers.length > 0;
   const approval = offers.some((offer) => offer.acceptanceMode === "APPROVAL");
   const nextDates = bookable ? await siteNextDates(publication.slug) : [];
+  const closes = nextDates[0] ? bookingCloseOf(nextDates[0]) : null;
   const bookHref = `/ja/experiences/${encodeURIComponent(publication.slug)}/book`;
   const providerName = publication.providerPublicName?.trim() || null;
   const person = publication.providerKind === "PERSON";
@@ -86,9 +88,7 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
             {area ? <li><span className="block text-[0.75rem] font-extrabold text-muted">エリア</span><p className="font-extrabold">{area}</p></li> : null}
             {content.language.trim() ? <li><span className="block text-[0.75rem] font-extrabold text-muted">対応言語</span><p className="font-extrabold">{content.language.trim()}</p></li> : null}
           </ul>
-          {sellerInformationHref ? <a href={sellerInformationHref} rel="noopener noreferrer" className="mt-2 inline-flex min-h-6 items-center text-sm text-muted underline underline-offset-2 hover:text-ink">販売者情報</a> : null}
         </header>
-        {nextDates.length ? <NextDateBand dates={nextDates} locale="ja" bookingHref={bookHref} allDatesHref={bookHref} /> : null}
         <DesktopGallery photos={photos} title={title} />
 
         <div className="grid gap-10 pt-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-[72px] lg:pt-4">
@@ -154,12 +154,14 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
               {nextDates.length ? <>
                 <p className="mt-4 text-[0.8125rem] font-extrabold text-ink-soft">次の開催</p>
                 <ul className="mt-2 grid grid-cols-3 gap-2">{nextDates.slice(0, 3).map((date) => { const day = dayOption(date.date, "ja"); return <li key={`${date.offerId}-${date.date}`}><Link href={bookHref} className="flex flex-col items-center rounded-xl border border-line-strong py-2 leading-tight hover:bg-sand"><small className="text-[0.6875rem] font-bold">{day.weekday.replace("曜", "")}</small><b>{day.label.replace(/（.+$/, "")}</b></Link></li>; })}</ul>
+                {closes ? <p className="mt-2 text-[0.8125rem] text-ink-soft">予約締切：<time dateTime={closes} className="font-bold text-ink">{dayOption(jstDateKey(closes), "ja").label} {formatTime(closes, "ja")}</time></p> : null}
               </> : null}
               {bookable ? <Link href={bookHref} className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-leaf px-6 font-extrabold text-ink hover:bg-leaf-hover">{cta}</Link> : <p className="mt-4 text-ink-soft">この体験は現在、予約を受け付けていません。</p>}
               {approval ? <p className="mt-2 text-sm text-ink-soft">申込みを送ると、日程を確認してご連絡します。お支払いは、確認のあとにご案内します。</p> : null}
               {config.groupInquiryEnabled ? <Link href={askHref} className="mt-3 block text-center text-sm font-bold text-moss underline underline-offset-4">ほかの日を相談する</Link> : null}
               {cancellation.length ? <ul className="mt-5 space-y-1.5 border-t border-line pt-4 text-sm text-ink-soft">{cancellation.map((line) => <li key={`${line.label}-${line.text}`} className="flex gap-2"><HandIcon name="umbrella" className="mt-0.5 size-5 shrink-0" /><span>{line.label ? `${line.label}：` : ""}{line.text}</span></li>)}</ul> : null}
             </> : <p className="text-ink-soft">この体験は現在、予約を受け付けていません。</p>}
+            {sellerInformationHref ? <p className="mt-4 border-t border-line pt-3 text-[0.8125rem]"><a href={sellerInformationHref} rel="noopener noreferrer" className="inline-flex min-h-6 items-center text-muted underline underline-offset-2 hover:text-ink">販売者情報</a></p> : null}
           </aside>
         </div>
 
