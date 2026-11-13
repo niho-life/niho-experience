@@ -23,14 +23,14 @@ const BUTTON = "inline-flex min-h-12 w-full items-center justify-center gap-2 ro
  * Where a traveler logs in or signs up (Epic #591, #597, ADR 0004 §8). English, and no NIHO in front: a heading, a button for each
  * way in (it goes straight to that provider's own screen), one sentence of consent, and, last and small, the way in for someone who
  * already has a NIHO account (NIHO's own login screen). The buttons are plain forms: the page works without JavaScript. An account
- * is optional: booking as a guest is unchanged. `?error=` tells why a log in did not finish.
+ * is optional: booking as a guest is unchanged. `?error=` tells why a log in did not finish. The site's layout holds the `<main>`.
  */
 export default async function TravelerSignInPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   if (!config.travelerAccountsEnabled) notFound();
   if (await readTravelerSession()) redirect(TRAVELER_HOME_PATH);
   const error = travelerLoginErrorOrNull((await searchParams).error);
   return (
-    <main id="main" className="container-page max-w-md py-10 sm:py-16">
+    <div className="container-page max-w-md py-10 sm:py-16">
       <h1 className="text-3xl">Log in or sign up</h1>
       {error ? <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-warn">{ERRORS[error]}</p> : null}
       {/* A plain form: the route answers with a redirect to the provider's own screen. */}
@@ -47,6 +47,6 @@ export default async function TravelerSignInPage({ searchParams }: { searchParam
       <form method="post" action={TRAVELER_START_PATH} className="mt-10 border-t border-line pt-4">
         <button type="submit" className="min-h-10 text-[0.875rem] font-bold text-ink-soft underline underline-offset-4 hover:text-ink">Log in with a NIHO account</button>
       </form>
-    </main>
+    </div>
   );
 }

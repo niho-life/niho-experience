@@ -24,7 +24,8 @@ const securityHeaders = [
       "frame-src https://www.youtube-nocookie.com",
       "frame-ancestors 'none'",
       "base-uri 'self'",
-      "form-action 'self' https://checkout.stripe.com https://connect.stripe.com https://stripe.com",
+      // NIHO too: a traveler's log in is a form post answered with a redirect to NIHO (#597), and Chromium holds a redirect to form-action.
+      `form-action 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"} https://checkout.stripe.com https://connect.stripe.com https://stripe.com`,
     ].join("; "),
   },
 ];
@@ -77,8 +78,10 @@ const nextConfig: NextConfig = {
     return [
       { source: "/:path*", headers: securityHeaders },
       // 旅行者のアカウント (Epic #591, #597): the log in page, the signed-in page and their routes.
-      { source: "/account", headers: privatePageHeaders },
-      { source: "/account/:path*", headers: privatePageHeaders },
+      // `same-origin`, not `no-referrer`: the pages' own form posts must carry this site's Origin (with no-referrer browsers send
+      // `Origin: null` and the routes' same-origin check would refuse them), as the host console's do.
+      { source: "/account", headers: hostConsoleHeaders },
+      { source: "/account/:path*", headers: hostConsoleHeaders },
       { source: "/experiences/:slug/book", headers: privatePageHeaders },
       { source: "/ja/experiences/:slug/book", headers: privatePageHeaders },
       { source: "/booking/:path*", headers: privatePageHeaders },

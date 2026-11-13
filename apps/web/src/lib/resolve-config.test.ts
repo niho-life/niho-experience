@@ -585,6 +585,38 @@ describe("admin support console settings", () => {
     expect(() => resolveConfig({ EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
   });
 
+  it("opens travelers' accounts only with host accounts, the console, the DB and NIHO's service audience, and the preview only needs the flag (Epic #591, #597)", () => {
+    const mail = {
+      EXPERIENCE_API_MODE: "http", SITE_URL: "https://experience.example", EXPERIENCE_GUEST_MAIL_ENABLED: "true",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused", EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587",
+      EXPERIENCE_SMTP_USER: "sample-smtp-user", EXPERIENCE_SMTP_PASSWORD: "sample-smtp-password",
+      EXPERIENCE_MAIL_FROM: "NIHO Experiences <experiences@example.com>", EXPERIENCE_MAIL_REPLY_TO: "support@example.com",
+      EXPERIENCE_JOBS_AUDIENCE: "https://experience.example/internal/experience-jobs",
+      EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: "experience-jobs@example.iam.gserviceaccount.com",
+    };
+    const host = { HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key" };
+    const accounts = { ...mail, ...host, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" };
+    const on = { ...accounts, EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" };
+    // Off by default; "1" is not "true"; the host's NIHO login is a flag of its own.
+    expect(resolveConfig({}).travelerAccountsEnabled).toBe(false);
+    expect(resolveConfig(accounts).travelerAccountsEnabled).toBe(false);
+    expect(resolveConfig({ ...on, EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "1" }).travelerAccountsEnabled).toBe(false);
+    expect(resolveConfig(on)).toMatchObject({ travelerAccountsEnabled: true, hostNihoLoginEnabled: false });
+    // The real NIHO's return comes to the console's callback, which without host accounts is the former NIHO-token login.
+    expect(() => resolveConfig({ ...mail, ...host, EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" }))
+      .toThrow("EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
+    expect(() => resolveConfig({ ...accounts, EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
+    expect(() => resolveConfig({ ...mail, EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "true" })).toThrow("EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
+    // The preview walks a synthetic traveler and needs nothing else.
+    expect(resolveConfig({ EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "true" })).toMatchObject({ travelerAccountsEnabled: true });
+    // The terms link of the log in sentence is optional and https only.
+    expect(resolveConfig({}).termsUrl).toBe("");
+    expect(resolveConfig({ EXPERIENCE_TERMS_URL: "https://terms.example.test/traveler" }).termsUrl).toBe("https://terms.example.test/traveler");
+    expect(() => resolveConfig({ EXPERIENCE_TERMS_URL: "http://terms.example.test" })).toThrow("EXPERIENCE_TERMS_URL must be an https URL");
+    expect(() => resolveConfig({ EXPERIENCE_TERMS_URL: "not a url" })).toThrow("EXPERIENCE_TERMS_URL must be an absolute https URL");
+  });
+
   it("opens the host publication API with host accounts from Stripe and the payout consent version, without NIHO (ADR 0003 slice 3)", () => {
     const on = {
       EXPERIENCE_API_MODE: "http", SITE_URL: "https://experience.example", EXPERIENCE_GUEST_MAIL_ENABLED: "true",

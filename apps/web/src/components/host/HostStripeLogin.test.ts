@@ -21,6 +21,9 @@ describe("HostStripeLogin", () => {
     const headers = await nextConfig.headers!();
     const csp = headers.find((rule) => rule.source === "/:path*")?.headers.find((header) => header.key === "Content-Security-Policy")?.value;
 
-    expect(csp).toContain("form-action 'self' https://checkout.stripe.com https://connect.stripe.com https://stripe.com");
+    // Only this site, NIHO (a traveler's log in is a form post answered with a redirect to NIHO, #597) and the Stripe hosts.
+    const formAction = csp?.split("; ").find((directive) => directive.startsWith("form-action "));
+    expect(formAction).toBe(`form-action 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"} https://checkout.stripe.com https://connect.stripe.com https://stripe.com`);
+    expect(formAction).not.toContain("*");
   });
 });

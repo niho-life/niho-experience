@@ -16,13 +16,13 @@ export default async function TravelerAccountPage() {
   if (!config.travelerAccountsEnabled) notFound();
   if (!await readTravelerSession()) redirect(TRAVELER_SIGN_IN_PATH);
   return (
-    <main id="main" className="container-page max-w-md py-10 sm:py-16">
+    <div className="container-page max-w-md py-10 sm:py-16">
       <h1 className="text-3xl">Your account</h1>
       <p className="mt-3 text-ink-soft">You&rsquo;re logged in.</p>
       <p className="mt-2 text-sm text-ink-soft">Booking as a guest works as it always has, with or without an account.</p>
       <form method="post" action={TRAVELER_LOGOUT_PATH} className="mt-8">
         <button type="submit" className={BUTTON}>Log out</button>
       </form>
-    </main>
+    </div>
   );
 }
