@@ -189,8 +189,20 @@ const photoAdd: Action = {
     const cover = context.args.flags.cover === true;
     if (!context.apply) return { status: "dry_run", photo: { bytes: bytes.byteLength, contentType: type, alt, credit, cover }, sha256 };
     const seed = ["guide-photo", id, sha256, ...(context.args.flags.again === true ? [String(context.now())] : [])];
-    const uploaded = await context.api.send("POST", `${ROOT}/${enc(id)}/media`, undefined, operationId(seed, 1, context.now()), { bytes, contentType: type, headers: {} });
-    if (uploaded.status === 409 && (uploaded.body as { error?: unknown } | null)?.error === "operation_already_recorded") return { status: "unchanged", sha256, note: "This photo was already sent for this article; `guide show` lists what is attached. Use --again to upload it once more." };
+    const mediaUrl = `${ROOT}/${enc(id)}/media`;
+    // The server records an operation ID before it works, so "already recorded" is not "stored": an upload that failed (storage down)
+    // also uses its ID up. Nothing in the article tells which photo an asset is, and an asset found there is never adopted (it may be
+    // a photo nobody has cleared). So the one proof of an earlier run is its cover: set with this alt text and credit, confirmed, and
+    // present among the article's photos. Otherwise the photo is uploaded again under a fresh ID; a leftover copy stays unconfirmed.
+    const sent = await sendOnce(context, seed, (op) => context.api.send("POST", mediaUrl, undefined, op, { bytes, contentType: type, headers: {} }), async () => {
+      if (!cover) return null;
+      const current = (await readGuide(context, id)).cover;
+      if (!isRecord(current) || current.alt !== alt || current.credit !== credit || current.webConfirmed !== true || typeof current.assetId !== "string") return null;
+      const assets = body(await context.api.get(mediaUrl), "guide media").assets;
+      return Array.isArray(assets) && assets.some((item) => isRecord(item) && item.id === current.assetId) ? current.assetId : null;
+    });
+    if ("done" in sent) return { status: "unchanged", assetId: sent.done, sha256, cover, note: "This photo is already the article's cover (same alt text and credit)." };
+    const uploaded = sent.response;
     const asset = body(uploaded, "guide photo-add").asset;
     if (!isRecord(asset) || typeof asset.id !== "string") throw new OpsError("unexpected_response", "The asset was not understood.");
     const assetId = asset.id;

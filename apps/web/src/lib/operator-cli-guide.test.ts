@@ -17,11 +17,13 @@ function fakeApi() {
   const sent: Array<{ method: string; path: string; body: Loose | undefined; operationId: string; raw?: unknown }> = [];
   const seen = new Set<string>();
   const hooks = { rejectNext: null as null | ApiResponse };
+  let assets = 0; // The real server gives every upload a fresh asset ID.
   const api: Api = {
     env: "stg", aiKind: "claude-code",
     async get(path) {
       if (path === "/write/api/categories") return { status: 200, body: { categories: [{ slug: "walks" }] } };
       if (path === ROOT) return { status: 200, body: { guides: [...guides.values()] } };
+      if (path.endsWith("/media")) return { status: 200, body: { assets: [{ id: "asset-1", webConfirmed: true }] } };
       const id = path.slice(ROOT.length + 1);
       const guide = guides.get(id);
       return guide ? { status: 200, body: { guide } } : { status: 404, body: { error: "not_found" } };
@@ -46,8 +48,8 @@ function fakeApi() {
         guides.set(id, { ...guide, slug: b.slug, title: b.title, description: b.description, content: b.content, ...(b.cover === undefined ? {} : b.cover === null ? { cover: undefined } : { cover: b.cover }), revision: guide.revision + 1 });
         return { status: 200, body: { guide: guides.get(id) } };
       }
-      if (path.endsWith("/media") && method === "POST") return { status: 201, body: { asset: { id: "asset-1" } } };
-      if (path.includes("/media/") && method === "PUT") return { status: 200, body: { asset: { id: "asset-1", webConfirmed: true } } };
+      if (path.endsWith("/media") && method === "POST") return { status: 201, body: { asset: { id: `asset-${++assets}` } } };
+      if (path.includes("/media/") && method === "PUT") return { status: 200, body: { asset: { id: path.split("/").at(-1), webConfirmed: true } } };
       if (path.endsWith("/publication") && method === "POST") {
         if (b.expectedRevision !== guide.revision) return { status: 409, body: { error: "conflict" } };
         guides.set(id, { ...guide, status: "PUBLISHED", revision: guide.revision + 1 });
@@ -134,7 +136,31 @@ describe("guide photo-add", () => {
     expect((upload!.raw as { contentType: string }).contentType).toBe("image/jpeg");
     expect(confirm).toMatchObject({ method: "PUT", body: { publicCredit: "NIHO kamakura", webConfirmed: true } });
     expect(patch).toMatchObject({ method: "PATCH", body: { cover: { assetId: "asset-1", alt: "A rainy lane", credit: "NIHO kamakura", webConfirmed: true } } });
-    expect(out(await exec(fake.api, [...base, "--yes"], undefined, bytes)).result.status).toBe("unchanged");
+    // The same command with --cover again: the article's cover is this photo (same alt text and credit, confirmed), so nothing is sent.
+    const uploads = () => fake.sent.filter((call) => call.method === "POST" && call.path.endsWith("/media")).length;
+    const before = uploads();
+    expect(out(await exec(fake.api, [...base, "--cover", "--yes"], undefined, bytes)).result).toMatchObject({ status: "unchanged", assetId: "asset-1" });
+    expect(uploads()).toBe(before + 1);
+    expect(fake.sent.filter((call) => call.method === "PUT").length).toBe(1);
+  });
+  it("does not take an already-recorded upload for a stored photo: after a failed upload the same command uploads again under a fresh ID", async () => {
+    const fake = fakeApi();
+    await exec(fake.api, ["create", "--provider", "prov-a", "--file", "a.json", "--yes"], file);
+    const id = [...fake.guides.keys()][0]!;
+    const argv = ["photo-add", "--id", id, "--file", "rain.jpg", "--alt", "A rainy lane", "--yes"];
+    const uploads = () => fake.sent.filter((call) => call.method === "POST" && call.path.endsWith("/media"));
+    fake.hooks.rejectNext = { status: 503, body: { error: "media_storage_unavailable" } };
+    const failed = await exec(fake.api, argv, undefined, bytes);
+    expect(failed.exit).toBe(1);
+    expect(uploads()).toHaveLength(1);
+    // Same day, same photo: the server has recorded the first ID, which it used up without storing anything.
+    const again = out(await exec(fake.api, argv, undefined, bytes));
+    expect(again.result).toMatchObject({ status: "applied", assetId: "asset-1" });
+    expect(uploads()).toHaveLength(3);
+    expect(uploads()[2]!.operationId).not.toBe(uploads()[0]!.operationId);
+    expect(fake.sent.at(-1)).toMatchObject({ method: "PUT", body: { publicCredit: "NIHO kamakura", webConfirmed: true } });
+    // Without --cover nothing proves the earlier run finished, so a repeat uploads again and says so.
+    expect(out(await exec(fake.api, argv, undefined, bytes)).result.status).toBe("applied");
   });
   it("needs the article id, a file of the right kind and an alt text", async () => {
     const fake = fakeApi();

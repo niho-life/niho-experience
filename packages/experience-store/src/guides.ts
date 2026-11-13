@@ -932,12 +932,17 @@ async function activePublicLinksByPublication(
              AND publication.subject_kind='PROVIDER'
              AND publication.subject_provider_id=l.provider_id
         )
-        AND EXISTS (
-          SELECT 1 FROM provider_memberships membership
-           WHERE membership.provider_id=l.provider_id
-             AND membership.niho_user_id=l.link_created_by_niho_user_id
-             AND membership.active=true
-             AND membership.role='OWNER'
+        AND (
+          -- 運営の CLI (#576 ⑤): a link made when the office published (the creator is an Admin actor ID, which only a verified
+          -- Admin session and the office repository can write, and no provider membership carries) stays with that publication.
+          l.link_created_by_niho_user_id ~ '^adm_[0-9a-f]{32}$'
+          OR EXISTS (
+            SELECT 1 FROM provider_memberships membership
+             WHERE membership.provider_id=l.provider_id
+               AND membership.niho_user_id=l.link_created_by_niho_user_id
+               AND membership.active=true
+               AND membership.role='OWNER'
+          )
         )
       ORDER BY l.publication_id, l.display_order NULLS LAST, l.provider_id, l.product_id`,
     [publicationIds],

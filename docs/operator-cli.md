@@ -203,7 +203,7 @@ node scripts/experience/ops.mjs guide publish --id <articleId> --yes            
 node scripts/experience/ops.mjs guide stop --id <articleId> --yes                    # 停止
 ```
 
-- `--provider` は記事が属する提供者（存在する提供者なら、OWNER でなくてよい）。`create` は slug から決めた ID で作るので、同じ slug をもう一度流しても増えない。`content.author` を書けば著者を変えられる（既定の紹介文は仮：`scripts/experience/ops/guide.ts` の `OFFICE_AUTHOR`）。
+- `--provider` は記事が属する提供者（存在する提供者なら、OWNER でなくてよい）。`create` は slug から決めた ID で作るので、同じ slug をもう一度流しても増えない。`photo-add` は、サーバーが操作 ID を先に記録するので「記録済み」を保存済みとは見なさない：アップロードに失敗した同じ日の再実行も、新しい操作 ID で上げ直す（途中で残った写真は未確認のままで、公開されない）。`--cover` をつけた再実行で、その記事の表紙がすでに同じ代替テキストとクレジットの確認済みの写真なら、何も送らない。`content.author` を書けば著者を変えられる（既定の紹介文は仮：`scripts/experience/ops/guide.ts` の `OFFICE_AUTHOR`）。
 - 写真は JPEG・PNG（10MB まで）。アップロードすると、掲載の確認（クレジットは `--credit`、既定は NIHO kamakura）までを行う。本文に使うときは、結果の `assetId` を記事の Markdown の写真の記法に書く。
 - 読んだ版（`expectedRevision`）を付けて送る。画面などで先に変わっていたら `409`（終了コード 4）で上書きしない。
 - 事務局が書いた記事は、提供者の OWNER の `/write` の一覧には出ない（作成者が事務局の ID のため）。体験への関連づけ（`draftProductLinks`）は CLI に入れていない（公開の関連表示は作成者が OWNER のときだけ出る作り）。
