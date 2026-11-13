@@ -1,6 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { SiteLocaleProvider } from "@/components/SiteLocale";
+import { JA_STATIC_COPY_V1 } from "@/lib/ja-static-copy";
 import { SAMPLE_TERMS } from "@/lib/testing/guest-booking-fixtures";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import type { JaCard } from "@/lib/ja-catalog";
@@ -30,7 +32,9 @@ function item(offers = [offer()]): SitePublicExperience {
   } as unknown as SitePublicExperience;
 }
 const card: JaCard = { slug: "synthetic-walk", title: "合成の山道を歩く", lead: "山道を歩きます。", cover: { url: "/synthetic.jpg", alt: "山道" }, withLine: "まさとさんと", face: null, durationMinutes: 180, capacity: { min: 2, max: 8 }, priceFromYen: 5500, offers: [], classification: { category: "walk", area: "kita", companions: [], occasions: [] } };
-const render = async (value = item(), related: JaCard[] = [], person: { slug: string; name: string; roleJa: string } | null = null) => renderToStaticMarkup(await JaExperiencePage({ item: value, card, related, person }));
+const render = async (value = item(), related: JaCard[] = [], person: { slug: string; name: string; roleJa: string } | null = null) => renderToStaticMarkup(createElement(SiteLocaleProvider, { locale: "ja", values: JA_STATIC_COPY_V1, children: await JaExperiencePage({ item: value, card, related, person }) }));
+/** The words a visitor reads: tags, attributes and scripts removed. */
+const visibleText = (html: string) => html.replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/g, " ");
 
 describe("JaExperiencePage", () => {
   it("is in the order the owner described, from the title to what to know, with the person", async () => {
@@ -50,6 +54,18 @@ describe("JaExperiencePage", () => {
     const html = await render(value);
     expect(html).toContain("対応言語");
     expect(html).toContain("英語");
+  });
+
+  it("has no English in the page's own words: the gallery says it in Japanese, and there is no next-date band", async () => {
+    const value = item();
+    (value.publication as { photos: unknown[] }).photos = [...value.publication.photos, ...value.publication.photos];
+    const html = await render(value, [{ ...card, slug: "other", title: "もうひとつの体験" }]);
+    const english = visibleText(html).match(/[A-Za-z]{3,}/g) ?? [];
+    // The category's handwritten accent ("take a walk") is the design's own English; nothing else is.
+    expect(english.filter((word) => !["NIHO", "JST", "take", "walk"].includes(word))).toEqual([]);
+    expect(html).toContain("枚の写真をすべて見る");
+    expect(html).not.toContain("Show all");
+    expect(html).not.toContain("data-next-date-band");
   });
 
   it("links the person's section to their page on 街の人 when they are listed, and not otherwise", async () => {
