@@ -18,7 +18,8 @@ type Step = { icon: HandIconName; title: string; text: string };
  * says what to expect next, and its wording may follow the kind of booking (a fixed word on the URL, never free text, so
  * nobody can put their own wording on this page).
  */
-export function BookingReturn({ type, showReview, freeBooking = false }: { type: BookingReturnType | null; showReview: boolean; freeBooking?: boolean }) {
+export function BookingReturn({ type, showReview, freeBooking = false, locale = "en" }: { type: BookingReturnType | null; showReview: boolean; freeBooking?: boolean; locale?: "en" | "ja" }) {
+  if (locale === "ja") return <BookingReturnJa type={type} showReview={showReview} freeBooking={freeBooking} />;
   const approval = type === "approval";
   const managedRequest = type === "managed-request";
   const eyebrow = type ? "thank you" : "almost there";
@@ -63,6 +64,59 @@ export function BookingReturn({ type, showReview, freeBooking = false }: { type:
       <div className="mt-6 flex flex-wrap gap-3">
         <ButtonLink href="/help">Didn&apos;t get the email?</ButtonLink>
         <ButtonLink href="/experiences" variant="secondary">Browse experiences</ButtonLink>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 日本語の戻りページ（#59）。英語版と同じ事実だけを言う：このページは予約の状況を示さず、次に何が起きるかだけを言う。
+ * 種別は URL の固定語（自由記入ではない）で決まり、誰も自分の文言を差し込めない。
+ */
+function BookingReturnJa({ type, showReview, freeBooking }: { type: BookingReturnType | null; showReview: boolean; freeBooking: boolean }) {
+  const approval = type === "approval";
+  const managedRequest = type === "managed-request";
+  const eyebrow = type ? "ありがとうございます" : "もうすぐです";
+  const heading = managedRequest ? "NIHO事務局が内容を確認します" : approval ? "ホストが内容を確認します" : freeBooking ? "無料のご予約の確認メールをご確認ください" : type ? "ご予約の確認メールをご確認ください" : "メールをご確認ください";
+  const lead = managedRequest
+    ? "お申込みの受付メールをお送りします。お申込みにカードの入力やお支払いは要りません。NIHO事務局が承認した場合は、Stripeのお支払いリンクをメールでお送りします。"
+    : approval
+      ? "ホストが承認した場合にだけ、お支払いが発生します。結果はどちらの場合もメールでお知らせします。"
+      : freeBooking
+        ? "お支払いは不要です。ご予約の確認は、メールでお送りします。"
+        : type
+          ? "お支払いが完了すると、ご予約の確認をメールでお送りします。"
+          : "ご予約についてメールでお知らせします。ホストの承認が必要な場合は、メールにそのことを書きます。";
+  const steps: Step[] = [
+    { icon: "mail", title: managedRequest ? "NIHO事務局からの返信をお待ちください" : approval ? "お申込みについてのメール" : "確認メール", text: managedRequest ? "承認された場合は、期限内にお支払いリンクからお支払いください。お支払い後にご予約が確定します。" : approval ? "お申込みがホストに届いたことをお知らせします。ホストが答えたら、あらためてお送りします。" : freeBooking ? "体験、日時、人数と、ご予約のページへのリンクをお知らせします。お支払いは不要です。" : "体験、日時、人数、お支払い額と、ご予約のページへのリンクをお知らせします。" },
+    { icon: "pin", title: "集合場所のご案内", text: "集合場所は、当日より前にお届けします。" },
+    { icon: "cal", title: "ホストに会う", text: "当日は、ご案内した集合場所でホストにお会いください。" },
+    ...(showReview ? [{ icon: "chat" as const, title: "感想を聞かせてください", text: "体験のあとで、いかがでしたかとおたずねします。" }] : []),
+  ];
+  return (
+    <div className="container-page max-w-2xl py-12" lang="ja">
+      <p className="hand text-[1.75rem]">{eyebrow}</p>
+      <h1 className="mt-1 text-3xl">{heading}</h1>
+      <p className="mt-3 text-ink-soft">{lead}</p>
+      <h2 className="mt-9 font-sans text-sm font-extrabold tracking-[0.04em] text-muted">このあとの流れ</h2>
+      <ol className="mt-4">
+        {steps.map((step, index) => (
+          <li key={step.title} className="relative flex gap-4 pb-6 last:pb-0">
+            {index < steps.length - 1 ? <span aria-hidden className="absolute top-11 bottom-0 left-[19px] border-l-2 border-dashed border-line-strong" /> : null}
+            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-leaf-pale">
+              <HandIcon name={step.icon} className="size-6 text-moss" />
+            </span>
+            <div className="min-w-0 pt-1">
+              <b className="block font-extrabold">{step.title}</b>
+              <span className="block text-[0.9375rem] text-ink-soft">{step.text}</span>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-8 text-sm text-muted">このページには、ご予約の状況は表示されません。状況は、お送りするメールでご確認ください。</p>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <ButtonLink href="/ja/help">メールが届かないとき</ButtonLink>
+        <ButtonLink href="/ja/experiences" variant="secondary">体験を探す</ButtonLink>
       </div>
     </div>
   );

@@ -18,14 +18,15 @@ export const PROVIDER_LINK_PLACEMENTS = [
 export type ProviderLinkPlacement = (typeof PROVIDER_LINK_PLACEMENTS)[number]["value"];
 
 /** The public page's address with the mark, or null for something that is not a link we would hand out. */
-export function providerBookingLink(input: { readonly origin: string; readonly slug: string; readonly placement: ProviderLinkPlacement }): string | null {
+/** `japaneseOnly` (#59): a product with no English page lives at `/ja/experiences/{slug}`, so the link points there. */
+export function providerBookingLink(input: { readonly origin: string; readonly slug: string; readonly placement: ProviderLinkPlacement; readonly japaneseOnly?: boolean }): string | null {
   if (!PROVIDER_LINK_PLACEMENTS.some((item) => item.value === input.placement)) return null;
   if (!SAFE_UTM_VALUE.test(PROVIDER_LINK_SOURCE) || !SAFE_UTM_VALUE.test(input.placement)) return null;
   if (typeof input.slug !== "string" || input.slug === "" || input.slug.length > 160) return null;
   let base: URL;
   try { base = new URL(input.origin); } catch { return null; }
   if (base.protocol !== "https:" && !(base.protocol === "http:" && (base.hostname === "localhost" || base.hostname === "127.0.0.1"))) return null;
-  const url = new URL(`/experiences/${encodeURIComponent(input.slug)}`, base.origin);
+  const url = new URL(`${input.japaneseOnly === true ? "/ja" : ""}/experiences/${encodeURIComponent(input.slug)}`, base.origin);
   url.searchParams.set("utm_source", PROVIDER_LINK_SOURCE);
   url.searchParams.set("utm_medium", input.placement);
   return url.href;

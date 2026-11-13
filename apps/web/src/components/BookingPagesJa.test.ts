@@ -54,3 +54,22 @@ describe("予約ページまわりの日本語（#59）", () => {
     expect(html(createElement(BookingSignOut, { publicBookingId: "x", locale: "ja" }))).toContain("この端末でログアウトする");
   });
 });
+
+describe("日本語の戻りページ（#59）", () => {
+  it("予約の種別ごとに日本語で「このあとの流れ」を言い、状況は言わない", async () => {
+    const { BookingReturn } = await import("./BookingReturn");
+    const page = (props: Record<string, unknown>) => renderToStaticMarkup(createElement(BookingReturn, { showReview: false, locale: "ja", ...props } as never));
+    const paid = page({ type: "instant" });
+    expect(paid).toContain('lang="ja"');
+    expect(paid).toContain("ご予約の確認メールをご確認ください");
+    expect(paid).toContain("お支払いが完了すると");
+    expect(paid).toContain("このページには、ご予約の状況は表示されません");
+    expect(paid).toContain('href="/ja/experiences"');
+    expect(page({ type: "instant", freeBooking: true })).toContain("お支払いは不要です");
+    expect(page({ type: "approval" })).toContain("ホストが内容を確認します");
+    expect(page({ type: "managed-request" })).toContain("NIHO事務局が内容を確認します");
+    expect(page({ type: null })).toContain("メールをご確認ください");
+    expect(paid).not.toContain("Check your email");
+    expect(page({ type: "instant", locale: "en" })).toContain("Check your email for your booking");
+  });
+});

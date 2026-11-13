@@ -24,13 +24,40 @@
 
 stg の Stripe test 側の準備と、合成の販売者の値の決定が要る。本番にはこれらが既にある（下の「本番の現状」）。
 
+## 日本語の予約の流れ（#59・流れ A）の stg 確認（2026-11-14 JST）
+
+stg（`https://experience-stg.niho.life`、main `7407185e` 相当）で、合成の日本語のみの商品を事務局の代理登録でつくって確認した。**stg の配備・flag は変えていない。** 確認で見つけた不具合のうち小さいものは同じ PR で直した。
+
+| 確認 | 結果 |
+| --- | --- |
+| 日本語のみの商品を事務局の代理登録でつくって公開する（#544） | ○ 「日本語のみで公開する」で日本語原稿だけを入れ、「日本語原稿を確認」→ 販売者への確認方法と写真権利 → 代理公開まで通った。英語の入力は要らない（写真の説明〔英語〕だけは必須のまま）。公開の条件に英語の欄は出なかった |
+| `/ja` の一覧・体験ページ・予約入力に出る | ○ `/ja/experiences` に載り、体験ページ（所要・言語・日程・料金・取消条件）と予約入力（日時・氏名・メール・同意）が日本語。canonical は `/ja/experiences/{slug}` |
+| 英語側に出ない | ○ `/experiences` の一覧に出ず、`/experiences/{slug}` と `/experiences/{slug}/book` は 404。日本語の体験ページに hreflang も「English」の言語切替も出ない。sitemap は stg が `SITE_INDEXING=block` で空のため実機では確認できない（unit で固定） |
+| `/ja` から申込み → 控え（無料の商品で確認） | ○ 無料（0円）の日本語のみの商品で申込み → `/ja/booking/return?type=instant&payment=free` に遷移し、予約は受け付けられた（admin の通知に「予約を受け付けました」）。**この戻りページは日本語の種別別の案内が無く、どの予約にも同じ一般的な案内（「NIHOからお送りした確認リンクをご利用ください」）だった → 直した**（英語の戻りページと同じ「このあとの流れ」を日本語で出す） |
+| 予約フォームの文言 | △ 無料（0円）の商品でも送信ボタンが「安全な決済へ進む」、注記が「お支払い情報はStripe Checkoutで入力します」（英語側も同様と見られる既存の文言。次の修正候補） |
+| 支払いの案内・確定の画面とメール・前日の案内（#547） | **未確認**。(1) 有料の支払いは Stripe Checkout のテストカード入力が要り、私は入力できない（人が行う）。(2) stg の drain job は park（#541）で、メールが送られない。解除は Cloud Scheduler の操作で、配備に当たるため行っていない。文面は `templates-ja.test.ts` で確認済み |
+| 予約ページ・照会・取消の依頼・ホストへの質問（#552） | **未確認**。予約ページは確認メールのリンクが要る（上と同じ理由）。stg で確かめるときは、drain を一度再開して、宛先を自分で確認できるアドレスにした予約を1件つくる |
+| ホスト画面の「予約リンクをコピー」が `/ja` の URL になる（#551） | **#544 の分岐が未対応だった → 直した**（日本語のみの商品は `/ja/experiences/{slug}` のリンクをコピーする）。host にログインできず画面では未確認、unit で確認 |
+| 事務局の代理登録画面の文言 | 直した：日本語のみの商品でも「事務局の英語原稿レビュー」「事務局として英語原稿を確認」と出ていたのを日本語原稿用の文言にした |
+| スマホ幅 | **未確認**（使えたブラウザーの窓幅を 390px にできなかった）。コードの確認のみ |
+
+**stg に残っているもの**（admin のログインが切れて、片付けられなかった）：公開中の商品 `v0-ja-check-1113`（有料 3,000円）と `v0-ja-free-1113`（無料）、`v0-ja-free-1113` の無料の予約 1 件（`825db4ef-c410-429a-bc2c-0720d9ae8043`、2026-11-20、宛先 `v0-ja-check@example.test`）。代理公開した商品は事務局の画面から停止できず（OWNER が止める設計）、予約も support 対象外で admin の取消が使えなかった。次に stg を触る人が、商品の停止と予約の取消をしてほしい（drain を再開する前に。再開すると取消・確認のメールが `example.test` 宛てに積まれる）。
+
+### 本番で `PROD_JAPANESE_SITE_ENABLED` を開く前提（stg で見たとおり）
+
+- **日本語のみの商品だけを出す場合**：NIHO の日本語 release は要らない。`/ja` の文言（342キー）と静的4ページはこのリポジトリのもの（`ja-static-copy.ts`）を使い、体験は公開データから描画する。要るのは、`EXPERIENCE_PUBLICATIONS_ENABLED`（`PROD_PUBLICATIONS_ENABLED` が `true` か、開く前に確認する）、日本語の 342 キーのオーナー確認（`localization-consumer.md`）、日本語のみの商品の公開、`SITE_INDEXING=allow` の環境での sitemap・hreflang の実機確認。`PROD_JAPANESE_SITE_ENABLED` が `false` の間は、日本語のみの商品の draft 自体を API が拒否する（保存できない）ので、**先に flag を開いてから商品をつくる**順になる。
+- **既存の英語原文の商品が `/ja` でどう見えるか**：stg には英語原文の商品が無く、画面では見ていない。コードの動きは次のとおり。**日本語の確認済み原稿（英語原稿の確認と同時に「日本語を確認」した公開版）がある商品だけ**、`/ja` の一覧・体験ページ・予約に日本語で出る。確認済みの日本語が無い商品は `/ja` に**出ない**（体験ページは「この日本語ページは公開されていないか、現在利用できません」、一覧にも載らない。英語のまま出すことも訳を自動で足すこともしない）。英語側は従来どおりで、言語切替と hreflang は日英の組がある商品だけに付く。だから flag を開く前に、本番の公開中の商品ごとに、日本語の確認済み原稿があるかを見ておく（無い商品は `/ja` に出ないだけで、壊れはしない）。
+- **日本語の予約の checkout**：日本語ページは `Accept-Language` を日本語にして checkout を呼び、予約に日本語の言語（`guest_language = JA`）が付く。決済・在庫・販売者は英語と同じ。
+- **本番のメール**：日本語の予約のメールは日本語で出る（#547・#552）が、予約ページ・照会が日本語になるのは予約が `JA` のものだけ。`/questions/reply`・`/reviews/write`・`/privacy` は英語のまま（`docs/guest-booking.md`）。
+- **計測**：日本語のページには流入の印（`utm_*`）の取り込みが無い（`/ja` のレイアウトに `AttributionCapture` を置いていない）。ホストの「予約リンクをコピー」の印付きリンクを日本語のみの商品で使うと、予約への帰属が数えられない。方針（日本語のページに印だけ取り込むか）は未決。
+
 ## 本番で開く手順
 
 1. **migration を先に当てる**：`experience_prd` に `0069`〜`0074` のうち未適用のものを辞書順で。`CONFIRM_EXPERIENCE_DB_MIGRATE=niho-app-prd`、niho-app の `niho-db.sh prd --via-bastion -- node scripts/gcp/apply-experience-db-migrations.mjs`（手順は `docs/host-calendar-staging.md`「以降のmigrationとruntime権限」）。runtime ロールに開いたセッションがあると止まる（stg では Scheduler の drain job を一時停止して待つと通った。終わったら再開する）。新しいコードより先。追加のみで、戻さない。
 2. **配備**：`Deploy production`（候補 → 昇格）。この時点では flag は OFF のまま、挙動は変わらない。
 3. **flag を開く**（repository variable `PROD_*`、未設定か `false` が OFF）。1つずつ、開くたびに候補 → 昇格：
    - `PROD_GROUP_INQUIRY_ENABLED=true`（前提：DB・ゲストメール。どちらも本番は ON）
-   - `PROD_JAPANESE_SITE_ENABLED=true`（前提：host console。**加えて** NIHO の日本語 release の実配備と実機確認。`docs/localization-consumer.md`）
+   - `PROD_JAPANESE_SITE_ENABLED=true`（前提：host console と公開機能〔`EXPERIENCE_PUBLICATIONS_ENABLED`〕。このサイトが公開する体験の日本語は NIHO の release を使わない〔`localJapaneseRelease()`〕ので、NIHO の日本語 release の実配備は **NIHO のカタログの体験を `/ja` に出すときだけ**の前提。詳細は下の「日本語の予約の流れの stg 確認」）
    - `PROD_OCCURRENCE_ASSIGNMENT_ENABLED=true`（前提：完全代行の販売。本番は ON）
 4. **設定値**：事務局への相談の通知先は `PROD_MAIL_REPLY_TO`（今は `info@niho.life`）。この宛先を事務局が見るか、確認する。受付メールの送信元は `PROD_MAIL_FROM`。
 5. **配備後の確認**：`/ja/business`・`/ja/schools`・フォーム・受付番号・`/admin/inquiries`。合成の相談を1件送り、受付メール2通（事務局宛・本人宛）が届くのを自分の宛先で確かめ、終わったら削除する。

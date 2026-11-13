@@ -785,7 +785,7 @@ export function HostPublicationWorkspace({
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       if (!isRecord(body) || !isRecord(body.product)) throw new Error("英語原稿の確認結果を読み取れませんでした。");
       setProduct((body as ProductResponse).product);
-      setNotice("現在の日英原稿を事務局レビューとして確認しました。");
+      setNotice(product.draft.content.japaneseOnly === true ? "現在の日本語原稿を事務局レビューとして確認しました。" : "現在の日英原稿を事務局レビューとして確認しました。");
       await refresh(false);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "英語原稿を確認できませんでした。"); }
     finally { setBusy(false); }
@@ -962,7 +962,7 @@ export function HostPublicationWorkspace({
   if (!productId) return <HostPageBody><PageHead title={adminDraft ? "代理登録の商品" : "体験"}>{bookingGuideHref ? <Link className={consoleButtonClass("secondary")} href={bookingGuideHref}>予約後の集合案内</Link> : null}</PageHead><section className={`${HOST_SURFACE} p-4 md:p-6`}>
     <div className="mb-4 flex items-center justify-between gap-3"><p className="text-ink-soft">{adminDraft ? "事務局が作成した、一度も公開していない下書き" : "あなたが販売する体験"}</p><Link className={consoleButtonClass("primary")} href={createHref}>{adminDraft ? "商品を代理登録" : "体験を作成"}</Link></div>
     {error ? <p role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : null}
-    {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={`${experiencesBase}/${encodeURIComponent(item.id)}`}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p>{!adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) ? <HostBookingLinkCopy slug={item.draft.slug} origin={publicSiteOrigin} /> : null}</div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}
+    {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={`${experiencesBase}/${encodeURIComponent(item.id)}`}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p>{!adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) ? <HostBookingLinkCopy slug={item.draft.slug} origin={publicSiteOrigin} japaneseOnly={item.draft.content.japaneseOnly === true} /> : null}</div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}
   </section></HostPageBody>;
 
   if (!product) return <HostPageBody><PageHead title="体験を読み込み中" />{error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : <p>商品を読み込んでいます…</p>}<button type="button" className={consoleButtonClass("secondary")} onClick={() => void refresh().catch((reason) => setError(reason instanceof Error ? reason.message : "読み込みに失敗しました。"))}>再読み込み</button></HostPageBody>;
@@ -978,7 +978,7 @@ export function HostPublicationWorkspace({
   const publicHref = product.status === "PUBLISHED" && !product.publicationNeedsUpdate ? `${product.draft.content.japaneseOnly === true ? "/ja" : ""}/experiences/${encodeURIComponent(product.draft.slug)}` : null;
   const nextActionControl = adminDraft
     ? (dirty ? <button type="button" disabled={busy || !!conflictProduct} className={consoleButtonClass("primary")} onClick={() => void saveAll()}>入力を保存</button>
-      : !product.adminEnglishReview?.reviewed ? <button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void confirmAdminEnglish()}>事務局として英語原稿を確認</button>
+      : !product.adminEnglishReview?.reviewed ? <button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void confirmAdminEnglish()}>{product.draft.content.japaneseOnly === true ? "事務局として日本語原稿を確認" : "事務局として英語原稿を確認"}</button>
         : savedBlockers.length === 0 ? <button type="button" disabled={busy || !canPublish || !sellerConfirmed || !publicationPhotoRightsConfirmed || !sellerConfirmationMethod} className={consoleButtonClass("primary")} onClick={() => void changeState("publish")}>事務局として代理公開</button>
           : <Link className={consoleButtonClass("primary")} href={calendarHref}>開催枠を確認</Link>)
     : nextAction === "SAVE"
@@ -1001,7 +1001,7 @@ export function HostPublicationWorkspace({
                 ? <Link className={consoleButtonClass("primary")} href={publicHref}>公開ページを見る</Link>
                 : null;
   const nextActionText = conflictProduct ? "競合を解消してから保存・公開できます。現在の入力は保持しています。"
-    : adminDraft ? (dirty ? "代理登録中の入力を保存してください。" : !product.adminEnglishReview?.reviewed ? "現在の日英原稿を事務局レビューとして確認してください。" : savedBlockers.length ? "通常公開と同じ未完了条件を解消してください。" : "販売者への確認方法と写真掲載権利を記録すると、事務局として代理公開できます。")
+    : adminDraft ? (dirty ? "代理登録中の入力を保存してください。" : !product.adminEnglishReview?.reviewed ? (product.draft.content.japaneseOnly === true ? "現在の日本語原稿を事務局レビューとして確認してください。" : "現在の日英原稿を事務局レビューとして確認してください。") : savedBlockers.length ? "通常公開と同じ未完了条件を解消してください。" : "販売者への確認方法と写真掲載権利を記録すると、事務局として代理公開できます。")
     : nextAction === "SAVE" ? "まず、現在の入力を保存してください。公開可否は保存済みの内容で判定します。"
     : nextAction === "SCHEDULE" ? "次に、旅行者が選べる開催枠をこの商品へ追加してください。"
       : nextAction === "PRICING" ? "開催枠を確認したうえで、基本料金または枠別料金、人数、取消条件を保存してください。"
@@ -1234,8 +1234,8 @@ export function HostPublicationWorkspace({
       </dl> : null}
       <p className="text-sm text-ink-soft">現在の保存版・販売条件・掲載同意版・事務局担当者・確認方法を公開と同じtransactionで監査記録します。自由記入欄や個人情報は記録しません。</p>
       <div className="rounded-xl border border-line bg-sand/40 p-3 text-xs text-ink-soft">
-        <p className="font-bold text-ink">事務局の英語原稿レビュー</p>
-        <p className="mt-1">{product.adminEnglishReview?.reviewed ? "現在の保存版を確認済みです。" : "英語文面を読み、日本語原稿との対応を確認してください。"}</p>
+        <p className="font-bold text-ink">{product.draft.content.japaneseOnly === true ? "事務局の日本語原稿レビュー" : "事務局の英語原稿レビュー"}</p>
+        <p className="mt-1">{product.adminEnglishReview?.reviewed ? "現在の保存版を確認済みです。" : (product.draft.content.japaneseOnly === true ? "日本語原稿を読み、内容を確認してください。" : "英語文面を読み、日本語原稿との対応を確認してください。")}</p>
         <dl className="mt-2 grid gap-1 break-all font-mono">
           <div><dt className="inline font-sans font-bold">Content: </dt><dd className="inline">{product.adminEnglishReview?.contentFingerprint ?? "unavailable"}</dd></div>
           <div><dt className="inline font-sans font-bold">Japanese: </dt><dd className="inline">{product.adminEnglishReview?.japaneseFingerprint ?? "incomplete"}</dd></div>
