@@ -273,7 +273,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
     const values = [next.name.trim(), next.role.trim(), next.bio.trim()];
     if (values.every((item) => item === "")) {
       const current = draftRef.current.content;
-      const content = { markdown: current.markdown, language: "en" as const, ...(current.checkedOn === undefined ? {} : { checkedOn: current.checkedOn }) };
+      const content = { markdown: current.markdown, language: current.language ?? ("en" as const), ...(current.checkedOn === undefined ? {} : { checkedOn: current.checkedOn }) };
       setAuthorInvalid(false); patchDraft({ content }); return;
     }
     if (values.some((item) => item === "")) { setAuthorInvalid(true); return; }
