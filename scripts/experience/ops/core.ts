@@ -41,8 +41,8 @@ export interface Args {
   readonly flags: Readonly<Record<string, string | true>>;
 }
 
-const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified"]);
-const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "status"]);
+const BOOLEAN_FLAGS = new Set(["dry-run", "yes", "help", "unclassified", "listed", "unlisted"]);
+const VALUE_FLAGS = new Set(["env", "file", "ai", "id", "slug", "status", "provider"]);
 
 /** `--name value`, `--name=value` and the boolean flags `--dry-run`, `--yes`; everything else is positional. */
 export function parseArgs(argv: readonly string[], valueFlags: ReadonlySet<string> = VALUE_FLAGS): Args {
@@ -191,6 +191,7 @@ export function failureOf(response: ApiResponse, action: string): OpsError {
   const code = typeof (response.body as { error?: unknown } | null)?.error === "string" ? (response.body as { error: string }).error : "request_failed";
   if (response.status === 401) return new OpsError(code, "Not signed in: the Google ID token was refused (expired, another client, or not a niho.life account).", EXIT.auth, { status: response.status });
   if (response.status === 403) return new OpsError(code, code === "not_available_from_cli" ? "This is not available from the CLI." : "This account is not on the Admin allowlist, or the CLI is not open on this site.", EXIT.auth, { status: response.status });
+  if (response.status === 404) return new OpsError(code, `${action}: not found, or this feature is not open on this site.`, EXIT.failed, { status: response.status });
   if (response.status === 409 || response.status === 412) return new OpsError(code, `${action}: it changed meanwhile (${code}). Read it again and re-plan.`, EXIT.conflict, { status: response.status });
   return new OpsError(code, `${action} failed (${response.status}).`, EXIT.failed, { status: response.status });
 }

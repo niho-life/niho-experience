@@ -104,6 +104,8 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 | `auth` | `check` | read |
 | `classification` | `list`（`--slug`・`--status`・`--unclassified`）、`options` | read |
 | `classification` | `apply --file 変更.json` | edit |
+| `people` | `list`（`--listed`・`--unlisted`・`--provider`） | read |
+| `people` | `apply --file 変更.json`、`withdraw --provider <providerId>` | publish |
 
 ## よくある作業
 
@@ -128,3 +130,23 @@ node scripts/experience/ops.mjs classification apply --file changes.json --yes  
 - 送るのは50商品ずつ（1回の要求は全部成功か全部失敗）。各商品に、読んだ値（`expected`）を付けて送る。画面などで先に変わっていたら、その要求は保存せずに `409 conflict`（終了コード 4）。CLI はそこで止まり、済んだ分・未着手の分を返す。読み直して同じコマンドをもう一度。
 - ファイルに誤り（不明な商品・曖昧な slug・定義にない値）があるときは、何も送らずに止まる。
 - 分類は公開版の一部ではなく、保存するとすぐ日本語の一覧・カード・詳細に反映される（再公開は要らない）。公開してよいかの判断は人（本番は了承を取る）。
+
+### 街の人に載せる・変える・外す
+
+載せる・変える・外すは、日本語サイトの `/ja/people` にすぐ出る・消えるので `publish` の段階（**本番は依頼した人の了承を取ってから `--yes`**）。載せられるのは、公開プロフィールがある提供者だけ（`people list` の `publicDisplayName`・`photoReady`・`hasHostBio`・`visible` を見る。提供者の写真が許可つきで選ばれていないと、載せても表示されない）。
+
+```json
+{ "items": [
+  { "providerId": "prov-a", "listing": { "slug": "yuki", "roleJa": "料理家", "areaJa": "長谷", "sortOrder": 10, "quoteJa": "台所に立つ人" } }
+] }
+```
+
+```bash
+node scripts/experience/ops.mjs people list --unlisted                       # まだ載っていない人
+node scripts/experience/ops.mjs people apply --file people.json              # 差分だけ
+node scripts/experience/ops.mjs people apply --file people.json --yes        # 載せる／変える
+node scripts/experience/ops.mjs people withdraw --provider prov-a --yes      # 外す（公開プロフィールと写真は残る）
+```
+
+- 新しく載せるには `slug`（英小文字・数字・ハイフン）・`roleJa`（80字）・`areaJa`（40字）・`sortOrder`（0〜9999）が要る。`quoteJa`（160字）・`introJa`（1200字）は任意。載っている人は、書いたキーだけが変わる。値は、サーバーと同じ検証を実行の前に通す（前後に空白がある肩書などは断る）。
+- 読んだ版（`expectedVersion`）を付けて送る。画面などで先に変わっていた・スラッグを他の人が使っていたときは `409 conflict`（終了コード 4）で、何も上書きしない。ほかの項目の処理は続く。

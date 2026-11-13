@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { EXIT, OpsError, createApi, parseArgs, redactable, resolveAiKind, resolveEnv, type Api, type Context, type Target, type TokenSource } from "./core.ts";
 import { authTarget } from "./auth.ts";
 import { classificationTarget } from "./classification.ts";
+import { peopleTarget } from "./people.ts";
 
 /**
  * Every target the CLI knows. A stage adds its own here (classification, people, product, guide, inquiry); the
@@ -10,6 +11,7 @@ import { classificationTarget } from "./classification.ts";
 export const TARGETS: Readonly<Record<string, Target>> = Object.freeze({
   auth: authTarget,
   classification: classificationTarget,
+  people: peopleTarget,
 });
 
 export interface Runtime {
