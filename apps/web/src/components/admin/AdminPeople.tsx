@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import type { AdminPeopleListingRow } from "@niho-experience/experience-store";
+import { useEffect, useState } from "react";
+import type { AdminPeopleListingRow, AdminProductClassificationRow } from "@niho-experience/experience-store";
 import { PEOPLE_LISTING_LIMITS } from "@niho-experience/experience-store";
 
 const API = "/admin/api/people";
@@ -9,11 +9,15 @@ const BUTTON = "min-h-11 rounded-full border border-line-strong px-4 font-extrab
 const PRIMARY = "min-h-11 rounded-full bg-ink px-5 font-extrabold text-white hover:bg-ink/90 disabled:opacity-50";
 const FIELD = "mt-1 block min-h-11 w-full rounded-xl border border-line-strong bg-canvas px-3 font-normal";
 
-type Draft = { slug: string; roleJa: string; areaJa: string; quoteJa: string; introJa: string; sortOrder: string };
+type Draft = { slug: string; roleJa: string; areaJa: string; quoteJa: string; introJa: string; sortOrder: string; experiences: { providerId: string; productId: string }[] };
+type Product = Pick<AdminProductClassificationRow, "providerId" | "productId" | "slug" | "title" | "status">;
+const STATUS = { PUBLISHED: "公開中", DRAFT: "下書き", ARCHIVED: "保管" } as const;
+const productKey = (ref: { providerId: string; productId: string }) => `${ref.providerId}\u0000${ref.productId}`;
 
 const draftOf = (row: AdminPeopleListingRow): Draft => ({
   slug: row.listing?.slug ?? "", roleJa: row.listing?.roleJa ?? "", areaJa: row.listing?.areaJa ?? "",
   quoteJa: row.listing?.quoteJa ?? "", introJa: row.listing?.introJa ?? "", sortOrder: String(row.listing?.sortOrder ?? 100),
+  experiences: (row.listing?.experiences ?? []).map((link) => ({ providerId: link.providerId, productId: link.productId })),
 });
 
 const ERRORS: Record<number, string> = {
@@ -30,6 +34,18 @@ const ERRORS: Record<number, string> = {
 export function AdminPeople({ initial }: { initial: AdminPeopleListingRow[] }) {
   const [rows, setRows] = useState(initial);
   const [message, setMessage] = useState<string | null>(null);
+  // 街の人 → 体験 (#585): every product (any provider) a person can be met through.
+  const [products, setProducts] = useState<readonly Product[]>([]);
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      void fetch("/admin/api/product-classifications", { cache: "no-store", credentials: "same-origin" })
+        .then(async (response) => (response.ok ? await response.json() as { products?: Product[] } : null))
+        .then((body) => { if (active && Array.isArray(body?.products)) setProducts(body.products); })
+        .catch(() => { /* the field then lists only what is linked now */ });
+    });
+    return () => { active = false; };
+  }, []);
 
   async function reload() {
     try {
@@ -53,14 +69,14 @@ export function AdminPeople({ initial }: { initial: AdminPeopleListingRow[] }) {
       <div><button type="button" onClick={() => void reload()} className={BUTTON}>再読み込み</button></div>
       {message ? <p role="alert" className="font-bold text-danger">{message}</p> : null}
       <ul className="space-y-4">
-        {rows.map((row) => <PersonCard key={`${row.providerId}:${row.listing?.version ?? 0}`} row={row} onChanged={setRows} />)}
+        {rows.map((row) => <PersonCard key={`${row.providerId}:${row.listing?.version ?? 0}`} row={row} products={products} onChanged={setRows} />)}
         {rows.length === 0 ? <li className="rounded-2xl border border-line bg-canvas p-8 text-center text-ink-soft">公開用の情報がある提供者はまだいません</li> : null}
       </ul>
     </div>
   );
 }
 
-function PersonCard({ row, onChanged }: { row: AdminPeopleListingRow; onChanged: (rows: AdminPeopleListingRow[]) => void }) {
+function PersonCard({ row, products, onChanged }: { row: AdminPeopleListingRow; products: readonly Product[]; onChanged: (rows: AdminPeopleListingRow[]) => void }) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(row));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -73,7 +89,7 @@ function PersonCard({ row, onChanged }: { row: AdminPeopleListingRow; onChanged:
     setBusy(true); setNotice(null);
     try {
       const body = method === "PUT"
-        ? { providerId: row.providerId, expectedVersion: row.listing?.version ?? null, listing: { slug: draft.slug.trim(), roleJa: draft.roleJa.trim(), areaJa: draft.areaJa.trim(), quoteJa: draft.quoteJa.trim() === "" ? null : draft.quoteJa.trim(), introJa: draft.introJa.trim() === "" ? null : draft.introJa, sortOrder: Number(draft.sortOrder) } }
+        ? { providerId: row.providerId, expectedVersion: row.listing?.version ?? null, listing: { slug: draft.slug.trim(), roleJa: draft.roleJa.trim(), areaJa: draft.areaJa.trim(), quoteJa: draft.quoteJa.trim() === "" ? null : draft.quoteJa.trim(), introJa: draft.introJa.trim() === "" ? null : draft.introJa, sortOrder: Number(draft.sortOrder), experiences: draft.experiences } }
         : { providerId: row.providerId, expectedVersion: row.listing?.version };
       const response = await fetch(API, { method, cache: "no-store", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       if (!response.ok) { setNotice({ tone: "error", text: ERRORS[response.status] ?? "保存できませんでした。もう一度お試しください。" }); return; }
@@ -114,6 +130,20 @@ function PersonCard({ row, onChanged }: { row: AdminPeopleListingRow; onChanged:
         <label className="font-bold sm:col-span-2">紹介文（任意。空のときは、本人が書いた紹介文があればそれを出します）
           <textarea className={`${FIELD} min-h-32 py-2`} value={draft.introJa} maxLength={PEOPLE_LISTING_LIMITS.introMax} onChange={(event) => setDraft({ ...draft, introJa: event.target.value })} />
         </label>
+        <fieldset className="sm:col-span-2">
+          <legend className="font-bold">この人に会える体験（ほかの提供者の体験も選べます。公開中のものだけが、人のページと体験のページに出ます）</legend>
+          <ul className="mt-2 grid max-h-64 gap-1 overflow-y-auto rounded-xl border border-line-strong p-2 sm:grid-cols-2">
+            {[...products, ...draft.experiences.filter((ref) => !products.some((product) => productKey(product) === productKey(ref))).map((ref) => ({ ...ref, slug: ref.productId, title: ref.productId, status: "DRAFT" as const }))].map((product) => {
+              const on = draft.experiences.some((ref) => productKey(ref) === productKey(product));
+              return <li key={productKey(product)}><label className="flex min-h-10 items-start gap-2 rounded-lg px-2 py-1 font-normal hover:bg-sand">
+                <input type="checkbox" className="mt-1 size-4" checked={on} onChange={() => setDraft({ ...draft, experiences: on ? draft.experiences.filter((ref) => productKey(ref) !== productKey(product)) : [...draft.experiences, { providerId: product.providerId, productId: product.productId }] })} />
+                <span className="min-w-0"><span className="block [overflow-wrap:anywhere]">{product.title}</span><span className="block text-xs text-ink-soft">{product.slug}・{STATUS[product.status]}</span></span>
+              </label></li>;
+            })}
+            {products.length === 0 && draft.experiences.length === 0 ? <li className="p-2 text-sm text-ink-soft">体験を読み込めませんでした。</li> : null}
+          </ul>
+          <p className="mt-1 text-xs text-ink-soft">選んだ順に並びます。この人の提供者自身の公開中の体験は、選ばなくても出ます。</p>
+        </fieldset>
         <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
           <button type="submit" disabled={busy || !complete || !dirty} className={PRIMARY}>{busy ? "保存しています…" : listed ? "保存する" : "街の人に載せる"}</button>
           {listed ? <button type="button" disabled={busy} className={BUTTON} onClick={() => { if (window.confirm(`${row.publicDisplayName} さんを街の人から外しますか？（公開用の情報と写真はそのまま残ります）`)) void send("DELETE"); }}>街の人から外す</button> : null}

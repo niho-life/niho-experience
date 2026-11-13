@@ -5,6 +5,7 @@ import { SiteLocaleProvider } from "@/components/SiteLocale";
 import { JA_STATIC_COPY_V1 } from "@/lib/ja-static-copy";
 import { SAMPLE_TERMS } from "@/lib/testing/guest-booking-fixtures";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
+import type { PublicPerson } from "@niho-experience/experience-store";
 import type { JaCard } from "@/lib/ja-catalog";
 
 vi.mock("server-only", () => ({}));
@@ -32,7 +33,7 @@ function item(offers = [offer()]): SitePublicExperience {
   } as unknown as SitePublicExperience;
 }
 const card: JaCard = { slug: "synthetic-walk", title: "合成の山道を歩く", lead: "山道を歩きます。", cover: { url: "/synthetic.jpg", alt: "山道" }, withLine: "まさとさんと", face: null, durationMinutes: 180, capacity: { min: 2, max: 8 }, priceFromYen: 5500, offers: [], classification: { category: "walk", area: "kita", companions: [], occasions: [] } };
-const render = async (value = item(), related: JaCard[] = [], person: { slug: string; name: string; roleJa: string } | null = null) => renderToStaticMarkup(createElement(SiteLocaleProvider as unknown as FunctionComponent<Record<string, unknown>>, { locale: "ja", values: JA_STATIC_COPY_V1 }, await JaExperiencePage({ item: value, card, related, person })));
+const render = async (value = item(), related: JaCard[] = [], people: PublicPerson[] = []) => renderToStaticMarkup(createElement(SiteLocaleProvider as unknown as FunctionComponent<Record<string, unknown>>, { locale: "ja", values: JA_STATIC_COPY_V1 }, await JaExperiencePage({ item: value, card, related, people })));
 /** The words a visitor reads: tags, attributes and scripts removed. */
 const visibleText = (html: string) => html.replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/g, " ");
 
@@ -68,12 +69,28 @@ describe("JaExperiencePage", () => {
     expect(html).not.toContain("data-next-date-band");
   });
 
-  it("links the person's section to their page on 街の人 when they are listed, and not otherwise", async () => {
-    const linked = await render(item(), [], { slug: "masato", name: "まさと", roleJa: "山のガイド" });
-    expect(linked).toContain('href="/ja/people/masato"');
-    expect(linked).toContain("まさとさんのページ");
-    expect(linked).toContain("山のガイド");
-    expect(await render()).not.toContain("/ja/people/");
+  const guide = (slug: string, name: string, over: Partial<PublicPerson> = {}): PublicPerson => ({
+    slug, name, roleJa: "空手指導者", areaJa: "鎌倉", quoteJa: "うまく書こうとしなくて大丈夫。", introJa: "円覚寺で教えています。", photo: { src: `/p/${slug}.jpg`, altJa: `${name}の写真`, credit: null }, experienceSlugs: ["synthetic-walk"], sortOrder: 10, ...over,
+  });
+
+  it("shows the people it is met through (#585) with a link to each page, one as 「会いにいく人」 and several as 「案内する人」", async () => {
+    const one = await render(item(), [], [guide("suga", "菅 倫明")]);
+    expect(one).toContain("会いにいく人");
+    expect(one).toContain('href="/ja/people/suga"');
+    expect(one).toContain("菅 倫明さんのページ");
+    expect(one).toContain("空手指導者・鎌倉");
+    expect(one).toContain("うまく書こうとしなくて大丈夫。");
+    // The listed person stands in for the provider's own bio here.
+    expect(one).not.toContain("鎌倉で山を案内しています。");
+    const many = await render(item(), [], [guide("suga", "菅 倫明"), guide("takuya", "高浜 拓也")]);
+    expect(many).toContain("案内する人");
+    expect(many).not.toContain("会いにいく人");
+    expect(many).toContain('href="/ja/people/takuya"');
+    // Nobody linked: the provider's own section as before, and no link to 街の人.
+    const none = await render();
+    expect(none).toContain("会いにいく人");
+    expect(none).toContain("鎌倉で山を案内しています。");
+    expect(none).not.toContain("/ja/people/");
   });
 
   it("puts the booking column's price, the way to book, the other-day inquiry and the product's own cancellation deadline in one place", async () => {

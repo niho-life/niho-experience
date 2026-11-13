@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { PublicPerson } from "@niho-experience/experience-store";
 import { TrackView } from "@/components/Analytics";
 import { DesktopGallery, MobileGallery } from "@/components/DetailGallery";
 import { HandIcon } from "@/components/HandIcon";
@@ -37,7 +38,7 @@ export function jaCancellationLines(offers: readonly SitePublicOffer[]): { label
  * cancellation terms, and experiences of the same category; the booking column holds the price, the next dates, the way to
  * book (or to send a request) and the product's own cancellation deadline. No sales method, seller or guarantee label.
  */
-export async function JaExperiencePage({ item, cancelled = false, card, related, person: listed = null }: { item: SitePublicExperience; cancelled?: boolean; card: JaCard | null; related: readonly JaCard[]; person?: { slug: string; name: string; roleJa: string } | null }) {
+export async function JaExperiencePage({ item, cancelled = false, card, related, people = [] }: { item: SitePublicExperience; cancelled?: boolean; card: JaCard | null; related: readonly JaCard[]; people?: readonly PublicPerson[] }) {
   const { publication, saleTerms, hostBio } = item;
   const content = publication.japanese!;
   const title = content.title;
@@ -55,7 +56,7 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
   const providerName = publication.providerPublicName?.trim() || null;
   const person = publication.providerKind === "PERSON";
   const identity = providerName ? publication.providerPhoto ?? (publication.providerKind === "BUSINESS" ? publication.businessLogo : null) : null;
-  const identityPhoto = identity ? { url: identity.src, alt: identity.altJa } : null;
+  const identityPhoto = people[0] ? { url: people[0].photo.src, alt: people[0].photo.altJa } : identity ? { url: identity.src, alt: identity.altJa } : null;
   const bio = hostBio?.ja ?? null;
   const askHref = inquiryHref("ja", { from: "EXPERIENCE", experienceSlug: publication.slug, experienceTitle: title, hostName: providerName });
   const sellerInformationHref = siteSellerInformationHref(item, "ja");
@@ -113,10 +114,24 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
               </ol>
             </section> : null}
 
-            {providerName || bio ? <section id="host" className={`${SECTION} scroll-mt-24`} aria-labelledby="ja-person"><h2 id="ja-person" className={H2}>{person ? "会いにいく人" : "案内する人"}</h2>
+            {people.length ? <section id="host" className={`${SECTION} scroll-mt-24`} aria-labelledby="ja-person"><h2 id="ja-person" className={H2}>{people.length === 1 ? "会いにいく人" : "案内する人"}</h2>
+              <ul className="mt-5 grid gap-6">
+                {people.map((entry) => (
+                  <li key={entry.slug} className="flex items-start gap-4">
+                    <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} aria-label={`${entry.name}さんのページ`} className="shrink-0"><Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20" sizes="80px" /></Link>
+                    <div className="min-w-0">
+                      <p className="font-extrabold">{entry.name}<span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{entry.roleJa}・{entry.areaJa}</span></p>
+                      {entry.quoteJa ? <p className="mt-1.5 text-[1.0625rem] leading-snug">「{entry.quoteJa}」</p> : null}
+                      {entry.introJa ? <p className="mt-2 line-clamp-3 whitespace-pre-line break-words text-ink-soft">{entry.introJa}</p> : null}
+                      <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} className="mt-2 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{entry.name}さんのページ</Link>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section> : providerName || bio ? <section id="host" className={`${SECTION} scroll-mt-24`} aria-labelledby="ja-person"><h2 id="ja-person" className={H2}>{person ? "会いにいく人" : "案内する人"}</h2>
               <div className="mt-5 flex items-start gap-4">
                 {identityPhoto ? <Photo image={identityPhoto} alt={identityPhoto.alt} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" /> : null}
-                <div className="min-w-0"><p className="font-extrabold">{providerName}{listed?.roleJa ? <span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{listed.roleJa}</span> : null}</p>{bio ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{bio}</p> : null}{listed ? <Link href={`/ja/people/${encodeURIComponent(listed.slug)}`} className="mt-3 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{listed.name}さんのページ</Link> : null}</div>
+                <div className="min-w-0"><p className="font-extrabold">{providerName}</p>{bio ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{bio}</p> : null}</div>
               </div>
             </section> : null}
 

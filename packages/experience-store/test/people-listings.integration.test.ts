@@ -98,6 +98,99 @@ describe("街の人 listings (#564)", { skip: databaseUrl === undefined ? "TEST_
     }
   });
 
+  it("links a person to other providers' experiences: public ones only, replaced as a whole, and seen from the experience (#585)", async () => {
+    const db = await createIsolatedDatabase(databaseUrl, "people_listing_experiences");
+    try {
+      const pool = db.pool;
+      const publications = new ExperiencePublicationRepository(pool);
+      const people = new PeopleListingRepository(pool);
+      const person = async (name: string, kind: "PERSON" | "BUSINESS" = "PERSON") => {
+        const provider = await publications.createAdminProvider(ADMIN, { publicDisplayName: name, providerKind: kind, consentVersion: CONSENT });
+        await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,'owner','OWNER',true)", [provider.providerId]);
+        const assetId = randomUUID();
+        await publications.addProviderMediaAsAdmin(ADMIN, provider.providerId, 1, CONSENT, {
+          id: assetId, objectKey: `experience-provider-media/${assetId}.jpg`, sourceRefHash: "b".repeat(64), width: 800, height: 800, byteSize: 4096,
+          placement: "PROVIDER_PHOTO", altText: `${name} photo`, altTextJa: `${name}の写真`, publicCredit: null,
+        });
+        return provider.providerId;
+      };
+      const publish = async (providerId: string, slug: string, status: "PUBLISHED" | "DRAFT" | "ARCHIVED" = "PUBLISHED", live = true) => {
+        await pool.query(
+          `INSERT INTO experience_products (provider_id,id,slug,status,public_title,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+           VALUES ($1,$2,$2,$3,$4,'JPY',5000,'terms','seller','acct_x','Seller')`, [providerId, slug, status, `体験 ${slug}`],
+        );
+        if (!live) return;
+        const publication = await pool.query<{ id: string }>(
+          `INSERT INTO experience_product_publications (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,cancellation_terms_ref,
+             seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id)
+           VALUES ($1,$2,1,$2,$3,'{}','JPY',5000,'terms','seller','acct_x','Seller','consent-v1','owner') RETURNING id::text`, [providerId, slug, `体験 ${slug}`],
+        );
+        await pool.query("INSERT INTO experience_product_publication_states (provider_id,product_id,current_publication_id,first_published_at) VALUES ($1,$2,$3::bigint,clock_timestamp())", [providerId, slug, publication.rows[0]!.id]);
+      };
+      const sugaProvider = await person("菅 倫明");
+      const takuyaProvider = await person("高浜 拓也");
+      const zenKarate = await person("ZEN KARATE", "BUSINESS");
+      await publish(zenKarate, "zen-karate");
+      await publish(zenKarate, "zen-karate-draft", "DRAFT", false);
+      await publish(zenKarate, "zen-karate-gone", "PUBLISHED", false);
+      await publish(sugaProvider, "suga-own");
+      await publish(takuyaProvider, "dinner");
+      await people.adminSave(ADMIN.nihoUserId, sugaProvider, null, input("suga", { sortOrder: 10 }));
+      await people.adminSave(ADMIN.nihoUserId, takuyaProvider, null, input("takuya", { sortOrder: 20 }));
+      const ref = (providerId: string, productId: string) => ({ providerId, productId });
+
+      // Before any link a person shows only their own provider's experiences.
+      assert.deepEqual((await people.getPublicBySlug("suga"))?.experienceSlugs, ["suga-own"]);
+      assert.deepEqual((await people.getPublicBySlug("takuya"))?.experienceSlugs, ["dinner"]);
+
+      // Another provider's products can be pointed at, in the order given. A product that is only a draft or was never
+      // published is linked but not shown; a left-out `experiences` leaves the links as they are.
+      await people.adminSave(ADMIN.nihoUserId, sugaProvider, 1, input("suga", { sortOrder: 10, experiences: [ref(zenKarate, "zen-karate"), ref(zenKarate, "zen-karate-draft"), ref(zenKarate, "zen-karate-gone")] }));
+      assert.deepEqual((await people.getPublicBySlug("suga"))?.experienceSlugs.slice().sort(), ["suga-own", "zen-karate"]);
+      const row = (await people.adminList()).find((item) => item.providerId === sugaProvider)?.listing;
+      assert.deepEqual(row?.experiences.map((link) => [link.slug, link.status, link.title]), [["zen-karate", "PUBLISHED", "体験 zen-karate"], ["zen-karate-draft", "DRAFT", "体験 zen-karate-draft"], ["zen-karate-gone", "PUBLISHED", "体験 zen-karate-gone"]]);
+      await people.adminSave(ADMIN.nihoUserId, sugaProvider, 2, input("suga", { sortOrder: 10, roleJa: "空手指導者" }));
+      assert.equal((await people.adminList()).find((item) => item.providerId === sugaProvider)?.listing?.experiences.length, 3);
+
+      // Several people can share one experience; the experience sees them in the Admin's order, and an unlisted provider's experience has none.
+      await people.adminSave(ADMIN.nihoUserId, takuyaProvider, 1, input("takuya", { sortOrder: 20, experiences: [ref(zenKarate, "zen-karate")] }));
+      const seen = await people.personForExperiences(["zen-karate", "suga-own", "dinner", "zen-karate-draft", "nope"]);
+      assert.deepEqual(seen.get("zen-karate")?.map((p) => p.slug), ["suga", "takuya"]);
+      assert.deepEqual(seen.get("suga-own")?.map((p) => p.slug), ["suga"]);
+      assert.deepEqual(seen.get("dinner")?.map((p) => p.slug), ["takuya"]);
+      assert.equal(seen.has("zen-karate-draft"), false);
+      assert.equal(seen.has("nope"), false);
+
+      // A stopped product leaves the person's page and the experience's people at once.
+      await pool.query("UPDATE experience_product_publication_states SET self_stopped_at=clock_timestamp() WHERE product_id='zen-karate'");
+      assert.deepEqual((await people.getPublicBySlug("suga"))?.experienceSlugs, ["suga-own"]);
+      assert.equal((await people.personForExperiences(["zen-karate"])).has("zen-karate"), false);
+      await pool.query("UPDATE experience_product_publication_states SET self_stopped_at=NULL WHERE product_id='zen-karate'");
+      assert.equal((await people.getPublicBySlug("suga"))?.experienceSlugs.includes("zen-karate"), true);
+
+      // Replaced as a whole; an empty list clears; a product that does not exist or is archived, a repeat and too many are refused.
+      await people.adminSave(ADMIN.nihoUserId, sugaProvider, 3, input("suga", { sortOrder: 10, roleJa: "空手指導者", experiences: [] }));
+      assert.deepEqual((await people.getPublicBySlug("suga"))?.experienceSlugs, ["suga-own"]);
+      await publish(zenKarate, "zen-karate-old", "ARCHIVED", false);
+      for (const bad of [[ref(zenKarate, "no-such")], [ref(zenKarate, "zen-karate-old")]]) {
+        await assert.rejects(people.adminSave(ADMIN.nihoUserId, sugaProvider, 4, input("suga", { sortOrder: 10, roleJa: "空手指導者", experiences: bad })), StoreNotFoundError);
+      }
+      for (const bad of [[ref(zenKarate, "zen-karate"), ref(zenKarate, "zen-karate")], [{ providerId: zenKarate }], "zen-karate", Array.from({ length: 51 }, (_, i) => ref(zenKarate, `p${i}`))]) {
+        await assert.rejects(people.adminSave(ADMIN.nihoUserId, sugaProvider, 4, input("suga", { sortOrder: 10, roleJa: "空手指導者", experiences: bad as never })), StoreValidationError);
+      }
+      // A failed save changes nothing (the links were cleared above and are still empty).
+      assert.deepEqual((await people.getPublicBySlug("suga"))?.experienceSlugs, ["suga-own"]);
+
+      // Withdrawing the person takes their links with them.
+      await people.adminSave(ADMIN.nihoUserId, takuyaProvider, 2, input("takuya", { sortOrder: 20, experiences: [ref(zenKarate, "zen-karate")] }));
+      const version = (await people.adminList()).find((item) => item.providerId === takuyaProvider)?.listing?.version as number;
+      await people.adminWithdraw(ADMIN.nihoUserId, takuyaProvider, version);
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM experience_people_listing_experiences")).rows[0]?.n, 0);
+    } finally {
+      await db.dispose();
+    }
+  });
+
   it("checks what the Admin typed the way the table does", () => {
     const ok = validatePeopleListingInput(input("kintsugi-2"));
     assert.equal(ok.slug, "kintsugi-2");

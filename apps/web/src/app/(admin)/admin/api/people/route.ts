@@ -62,6 +62,8 @@ export async function PUT(request: Request) {
     await peopleListingRepository()!.adminSave(actorId, body.providerId as string, expected as number | null, {
       slug: value.slug as string, roleJa: value.roleJa as string, areaJa: value.areaJa as string,
       quoteJa: (value.quoteJa ?? null) as string | null, introJa: (value.introJa ?? null) as string | null, sortOrder: value.sortOrder as number,
+      // 街の人 → 体験 (#585): written only when given; the store checks each product and replaces the links as a whole.
+      ...(value.experiences === undefined ? {} : { experiences: value.experiences as never }),
     });
   });
 }

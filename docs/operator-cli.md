@@ -150,7 +150,7 @@ node scripts/experience/ops.mjs classification apply --file changes.json --yes  
 
 ```json
 { "items": [
-  { "providerId": "prov-a", "listing": { "slug": "yuki", "roleJa": "料理家", "areaJa": "長谷", "sortOrder": 10, "quoteJa": "台所に立つ人" } }
+  { "providerId": "prov-a", "listing": { "slug": "yuki", "roleJa": "料理家", "areaJa": "長谷", "sortOrder": 10, "quoteJa": "台所に立つ人", "experiences": ["zen-karate"] } }
 ] }
 ```
 
@@ -162,6 +162,7 @@ node scripts/experience/ops.mjs people withdraw --provider prov-a --yes      # �
 ```
 
 - 新しく載せるには `slug`（英小文字・数字・ハイフン）・`roleJa`（80字）・`areaJa`（40字）・`sortOrder`（0〜9999）が要る。`quoteJa`（160字）・`introJa`（1200字）は任意。載っている人は、書いたキーだけが変わる。値は、サーバーと同じ検証を実行の前に通す（前後に空白がある肩書などは断る）。
+- **この人に会える体験**（`listing.experiences`、#585）：人は提供者1つに1人ですが、案内している体験は別の提供者（事業者など）のものでもあります。`"experiences": ["zen-karate", {"providerId": "prov-a", "productId": "twin-a"}]` のように、商品の slug（同じ slug が複数の提供者にあるときは `providerId` と `productId`）で並べます。**書いたときだけ**全体を置き換え（書かなければいまの結び付けのまま、`[]` で空にする）、並びは書いた順です。結び付けた商品のうち**公開中のものだけ**が人のページ・体験の詳細の「案内する人」・一覧のカード（「◯◯さんが案内」）に出ます。この人の提供者自身の公開中の体験は、書かなくても出ます。不明な slug・複数の提供者にある slug（`slug_is_ambiguous_use_providerId_and_productId`）・保管した商品・同じ商品の重複は、その項目だけ失敗にして何も送りません（slug の解決に、商品の分類と同じ `/admin/api/product-classifications` を読みます）。`people list` の `listing.experiences` で、いま結び付いている商品（slug・題・状態）を見られます。
 - 読んだ版（`expectedVersion`）を付けて送る。画面などで先に変わっていた・スラッグを他の人が使っていたときは `409 conflict`（終了コード 4）で、何も上書きしない。ほかの項目の処理は続く。
 
 ### 新しい日本語の商品を出す（stg の例。画面は使わない）

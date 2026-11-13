@@ -63,6 +63,16 @@ describe("/admin/api/people", () => {
     expect(state.repository!.adminSave).not.toHaveBeenCalled();
   });
 
+  it("passes the linked experiences (#585) only when they are given, and leaves the check to the store", async () => {
+    const experiences = [{ providerId: "prov-zen", productId: "zen-karate" }];
+    expect((await send("PUT", { providerId: PROVIDER, expectedVersion: 3, listing: { ...LISTING, experiences } })).status).toBe(200);
+    expect(state.repository!.adminSave).toHaveBeenLastCalledWith("adm_00000000000000000000000000000001", PROVIDER, 3, { ...LISTING, experiences });
+    expect((await send("PUT", { providerId: PROVIDER, expectedVersion: 3, listing: { ...LISTING } })).status).toBe(200);
+    expect(state.repository!.adminSave).toHaveBeenLastCalledWith("adm_00000000000000000000000000000001", PROVIDER, 3, { ...LISTING });
+    state.repository!.adminSave!.mockRejectedValueOnce(new StoreNotFoundError("A linked experience was not found."));
+    expect((await send("PUT", { providerId: PROVIDER, expectedVersion: 3, listing: { ...LISTING, experiences } })).status).toBe(404);
+  });
+
   it("lists a person with the version the Admin saw, takes them off, and maps the store's refusals", async () => {
     const ok = await send("PUT", { providerId: PROVIDER, expectedVersion: 3, listing: LISTING });
     expect(ok.status).toBe(200);

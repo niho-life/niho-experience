@@ -121,6 +121,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   group_inquiry_mails: { write: IU },
   // 街の人 (#564, 0077): the Admin lists, edits and withdraws (DELETE) people on the Japanese site's 街の人.
   experience_people_listings: { write: IUD },
+  // 街の人 → 体験の結び付け (#585, 0080): replaced as a whole by the Admin (delete and insert); removed with the listing.
+  experience_people_listing_experiences: { write: ID },
   guest_review_invitations: { write: IU },
   guest_reviews: { write: IU },
   // PII-free post-accept mail feedback; DELETE with the booking guest's PII erasure.
