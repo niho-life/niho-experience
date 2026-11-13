@@ -55,3 +55,44 @@ export function pickHomeExperiences<T extends { slug: string }>(items: readonly 
   }
   return chosen.slice(0, limit);
 }
+
+/* ---- カテゴリー・さがす欄・どんな日に・特集（#529・#563） ---- */
+
+/** 特集：1つのテーマの紹介と、その一覧への入口。そのカテゴリーに公開中の体験があるときだけ出す。 */
+export const JA_HOME_FEATURE = {
+  categoryId: "walk",
+  hand: "take a walk",
+  title: ["ガイドと歩く、", "鎌倉の山と切通し"],
+  text: "鎌倉の山は低いけれど、道が古い。地図では分からない分かれ道や切通しを、歩きなれた人と一緒に歩きます。",
+  cta: "歩く体験を見る",
+  photos: [
+    { src: "/sample/photos/temple-path.jpg", position: "50% 50%" },
+    { src: "/sample/photos/bamboo.jpg", position: "50% 50%" },
+    { src: "/sample/photos/daibutsu.jpg", position: "40% 50%" },
+  ],
+} as const;
+
+/** どんな日に行きますか：絞り込み（だれと／こんな日に）への入口。該当する体験が1件以上あるものだけ出す。 */
+export const JA_HOME_OCCASIONS = [
+  { param: "with", id: "solo", hand: "just me", label: "ひとりで", photo: "/sample/photos/zazen-hall.jpg" },
+  { param: "with", id: "date", hand: "for two", label: "ふたりで", photo: "/sample/photos/shichirigahama-fuji.jpg" },
+  { param: "with", id: "friends", hand: "with friends", label: "友人と", photo: "/sample/photos/dinner-around-table.jpg" },
+  { param: "with", id: "family", hand: "with kids", label: "子どもと", photo: "/sample/photos/dinner-cooking-together.jpg" },
+  { param: "occasion", id: "rain", hand: "rainy day", label: "雨の日に", photo: "/sample/photos/calligraphy-brush.jpg" },
+  { param: "occasion", id: "anniv", hand: "special day", label: "特別な日に", photo: "/sample/photos/dinner-long-table.jpg" },
+] as const;
+export type HomeOccasion = (typeof JA_HOME_OCCASIONS)[number];
+
+type Classified = { readonly classification: { readonly category: string | null; readonly companions: readonly string[]; readonly occasions: readonly string[] } };
+
+/** 該当する体験が1件以上あるカテゴリー（定義の順）。 */
+export function categoriesWithExperiences<C extends { id: string }>(categories: readonly C[], cards: readonly Classified[]): C[] {
+  return categories.filter((category) => cards.some((card) => card.classification.category === category.id));
+}
+
+/** 該当する体験が1件以上ある「どんな日に」（定義の順）。 */
+export function occasionsWithExperiences(cards: readonly Classified[]): HomeOccasion[] {
+  return JA_HOME_OCCASIONS.filter((item) => cards.some((card) => (item.param === "with" ? card.classification.companions : card.classification.occasions).includes(item.id)));
+}
+
+export const occasionHref = (item: HomeOccasion): string => `/ja/experiences?${item.param}=${item.id}`;

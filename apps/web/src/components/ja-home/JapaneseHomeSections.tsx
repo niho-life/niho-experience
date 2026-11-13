@@ -1,8 +1,11 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { PublicPerson } from "@niho-experience/experience-store";
+import { EXPERIENCE_COMPANIONS, type ExperienceCategoryId } from "@niho-experience/experience-domain";
 import type { Guide } from "@/content/guides";
 import { guideLinkHref } from "@/lib/guide-markdown";
+import { JA_HOME_FEATURE, occasionHref, type HomeOccasion } from "@/lib/ja-home";
+import { CategoryIcon } from "../ja/CategoryIcon";
 import { Photo } from "../Photo";
 import { buttonClass } from "../ui";
 import { inquiryHref } from "@/lib/group-inquiry-entry";
@@ -103,6 +106,71 @@ export function GuidesBand({ guides }: { guides: readonly Guide[] }) {
           {guide.category ? <span className="mt-3 block text-[0.8125rem] font-extrabold text-moss">{guide.category.labelJa ?? guide.category.label}</span> : null}
           <span className="mt-1 block text-[1.125rem] leading-snug font-extrabold group-hover:underline">{guide.title}</span>
           {guide.description ? <span className="mt-1 block text-[0.9375rem] text-ink-soft">{guide.description}</span> : null}
+        </Link>
+      </li>)}
+    </ul>
+  </section>;
+}
+
+/** さがす欄（なにをする／だれと）：JS なしで動く GET フォーム。一覧（`/ja/experiences`）の `category`・`with` に渡す。 */
+export function HomeFinder({ categories }: { categories: readonly { id: string; label: string }[] }) {
+  const field = "mt-0.5 block w-full min-w-0 bg-transparent text-[1rem] font-extrabold text-ink outline-none";
+  return <form method="get" action="/ja/experiences" role="search" aria-label="体験をさがす" className="container-page relative z-10 -mt-7">
+    <div className="grid gap-3 rounded-[22px] border border-line bg-white p-4 shadow-[0_10px_30px_rgba(0,0,0,0.08)] sm:grid-cols-[1fr_1fr_auto] sm:items-center sm:gap-4 sm:p-5">
+      <label className="block rounded-xl bg-sand/60 px-4 py-2.5"><small className="block text-[0.75rem] font-bold text-ink-soft">なにをする</small>
+        <select name="category" defaultValue="" className={field}><option value="">すべての体験</option>{categories.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
+      </label>
+      <label className="block rounded-xl bg-sand/60 px-4 py-2.5"><small className="block text-[0.75rem] font-bold text-ink-soft">だれと</small>
+        <select name="with" defaultValue="" className={field}><option value="">決めていない</option>{EXPERIENCE_COMPANIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
+      </label>
+      <button type="submit" className={buttonClass("primary", "w-full sm:w-auto")}>さがす</button>
+    </div>
+  </form>;
+}
+
+/** カテゴリーの並び（アイコンつき）。公開中の体験があるカテゴリーだけ（呼ぶ側が絞る）。 */
+export function CategoryNav({ categories }: { categories: readonly { id: string; label: string }[] }) {
+  return <nav aria-label="カテゴリー" className="container-page mt-6">
+    <ul className="-mx-5 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden">
+      {categories.map((item) => <li key={item.id} className="shrink-0">
+        <Link href={`/ja/experiences?category=${item.id}`} className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line-strong bg-white px-4 text-[0.9375rem] font-bold hover:bg-sand">
+          <CategoryIcon id={item.id as ExperienceCategoryId} className="size-[1.125rem] text-moss" />{item.label}
+        </Link>
+      </li>)}
+    </ul>
+  </nav>;
+}
+
+/** 特集：1つのテーマの紹介と一覧への入口（写真は権利の確認できた既存の素材）。 */
+export function FeatureBand() {
+  const feature = JA_HOME_FEATURE;
+  return <section aria-labelledby="feature-band" className="container-page my-14 sm:my-16">
+    <div className="grid items-center gap-8 md:grid-cols-2 md:gap-12">
+      <div>
+        <span className="hand text-[1.5rem] text-moss">{feature.hand}</span>
+        <h2 id="feature-band" className="text-[1.75rem] leading-snug sm:text-[2.25rem]">{feature.title[0]}<br />{feature.title[1]}</h2>
+        <p className="mt-3 max-w-[34rem] text-ink-soft">{feature.text}</p>
+        <div className="mt-6"><Link href={`/ja/experiences?category=${feature.categoryId}`} className={buttonClass("primary", "w-full sm:w-auto")}>{feature.cta}</Link></div>
+      </div>
+      <ul className="grid grid-cols-3 gap-2" aria-hidden="true">
+        {feature.photos.map((photo) => <li key={photo.src}><Photo image={{ url: photo.src, alt: "" }} alt="" sizes="(min-width: 768px) 20vw, 30vw" aspect="aspect-[3/4]" rounded="rounded-[14px]" imgClassName="" /></li>)}
+      </ul>
+    </div>
+  </section>;
+}
+
+/** どんな日に行きますか：絞り込んだ一覧への入口。該当する体験があるものだけ（呼ぶ側が絞る）。 */
+export function OccasionStrips({ items }: { items: readonly HomeOccasion[] }) {
+  return <section aria-labelledby="occasion-band" className="container-page my-14 sm:my-16">
+    <span className="hand text-[1.5rem] text-moss">pick your day</span>
+    <h2 id="occasion-band" className="text-[1.75rem] sm:text-[2rem]">どんな日に行きますか</h2>
+    {/* 共有の presentation の `.nexp-v1 .grid-cols-2` は特異性が高く、`sm:grid-cols-3` を打ち消す。列の数は任意値で書く。 */}
+    <ul className="mt-6 grid grid-cols-[repeat(2,minmax(0,1fr))] gap-3 sm:grid-cols-[repeat(3,minmax(0,1fr))]">
+      {items.map((item) => <li key={item.id}>
+        <Link href={occasionHref(item)} className="group relative block aspect-[4/3] overflow-hidden rounded-[18px] bg-sand">
+          <Photo image={{ url: item.photo, alt: "" }} alt="" sizes="(min-width: 640px) 30vw, 45vw" aspect="aspect-[4/3]" rounded="rounded-none" imgClassName="transition-transform duration-300 group-hover:scale-[1.03] motion-reduce:transition-none" />
+          <span className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          <span className="absolute right-3 bottom-3 left-3 text-white"><b className="hand block text-[1.25rem] leading-none font-normal">{item.hand}</b><span className="mt-0.5 block text-[0.9375rem] font-extrabold">{item.label}</span></span>
         </Link>
       </li>)}
     </ul>

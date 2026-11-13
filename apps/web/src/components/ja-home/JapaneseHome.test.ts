@@ -7,7 +7,8 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/ja", useSearchParams: (
 
 import { JA_HOME_HAND, JA_HOME_HERO_PHOTOS, JA_HOME_LEAD, JA_HOME_TITLE } from "@/lib/ja-home";
 import { JapaneseHero } from "./JapaneseHero";
-import { ConsultBand, GuidesBand, HostBand, JapaneseHeroCopy, PeopleBand, PicksHeading } from "./JapaneseHomeSections";
+import { JA_HOME_OCCASIONS } from "@/lib/ja-home";
+import { CategoryNav, ConsultBand, FeatureBand, GuidesBand, HomeFinder, HostBand, JapaneseHeroCopy, OccasionStrips, PeopleBand, PicksHeading } from "./JapaneseHomeSections";
 
 describe("日本語トップ（#563）", () => {
   it("題・手書き風の英語・説明が指定どおりで、写真の点がある", () => {
@@ -72,5 +73,33 @@ describe("日本語トップ（#563）", () => {
     expect(html).toContain('href="/ja/guides/a"');
     expect(html).toContain('href="/ja/guides/b"');
     expect(html).toContain('href="/ja/guides"');
+  });
+
+  it("さがす欄（なにをする／だれと）は JS なしの GET フォームで、一覧の category・with に渡す", () => {
+    const html = renderToStaticMarkup(createElement(HomeFinder, { categories: [{ id: "walk", label: "歩く" }, { id: "sea", label: "海" }] }));
+    expect(html).toContain('action="/ja/experiences"');
+    expect(html).toContain('method="get"');
+    expect(html).toContain('name="category"');
+    expect(html).toContain('name="with"');
+    expect(html).toContain("なにをする");
+    expect(html).toContain("だれと");
+    expect(html).toContain('<option value="walk">歩く</option>');
+    expect(html).toContain('<option value="solo">ひとりで</option>');
+    expect(html).toContain("さがす");
+  });
+
+  it("カテゴリーの並び（アイコンつき）、特集、どんな日に", () => {
+    const nav = renderToStaticMarkup(createElement(CategoryNav, { categories: [{ id: "walk", label: "歩く" }, { id: "sea", label: "海" }] }));
+    expect(nav).toContain('href="/ja/experiences?category=walk"');
+    expect(nav).toContain("<svg");
+    expect(nav).toContain("海");
+    const feature = renderToStaticMarkup(createElement(FeatureBand));
+    expect(feature).toContain("ガイドと歩く、");
+    expect(feature).toContain('href="/ja/experiences?category=walk"');
+    const strips = renderToStaticMarkup(createElement(OccasionStrips, { items: JA_HOME_OCCASIONS.slice(0, 2) } as never));
+    expect(strips).toContain("どんな日に行きますか");
+    expect(strips).toContain('href="/ja/experiences?with=solo"');
+    expect(strips).toContain("ふたりで");
+    expect(strips).not.toContain("雨の日に");
   });
 });

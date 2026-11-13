@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { HandIcon, PresentationRootV1, RubberStamp } from "@niho/experience-presentation/v1";
+import { EXPERIENCE_CATEGORIES } from "@niho-experience/experience-domain";
 import { NavLink } from "../NavLink";
 import { PRESENTATION_PRIMITIVES_V1 } from "../PresentationV1";
 import { LanguageButton } from "./LanguageButton";
@@ -10,8 +11,7 @@ import { LanguageButton } from "./LanguageButton";
  * 配色・書体・手描きのアイコンは公開サイトの部品（presentation v1）のまま。英語側の `SiteChrome.tsx` とは別。
  *
  * ヘッダーは1行：ロゴ、ナビ、言語のボタン。スマホ幅では「さがす」「相談」と言語のボタンだけにし、ほかはフッターから行く。
- * まだ無いページ（カテゴリー #529）へのリンクは、そのページが main に入ってから
- * `NAV` と `FOOTER_LINKS` に足す（入るまで出さない）。
+ * ページが無いものへのリンクは出さない。足すときは `NAV` と `FOOTER_LINKS` に1行ずつ。
  */
 
 type Counterparts = Readonly<Record<string, string>>;
@@ -31,7 +31,7 @@ const NAV: readonly NavItem[] = [
 ];
 
 type FooterLink = { href: string; label: string; needsInquiry?: boolean; needsGuides?: boolean };
-/** フッターの2つ目のまとまり。カテゴリーのまとまり（#529）は、入ってから足す。読みものは公開中の記事があるときだけ。 */
+/** フッターの2つ目のまとまり（1つ目はカテゴリー）。読みものは公開中の記事があるときだけ。 */
 const FOOTER_LINKS: readonly FooterLink[] = [
   { href: "/ja/people", label: "街の人" },
   { href: "/ja/guides", label: "読みもの", needsGuides: true },
@@ -77,13 +77,16 @@ export function JapaneseSiteHeader({ counterparts, hostSignedIn, inquiryOpen, gu
 export function JapaneseSiteFooter({ counterparts, inquiryOpen, guidesOpen = false }: { counterparts: Counterparts; inquiryOpen: boolean; guidesOpen?: boolean }) {
   const links = FOOTER_LINKS.filter((link) => (!link.needsInquiry || inquiryOpen) && (!link.needsGuides || guidesOpen));
   return <footer className="mt-24 border-t border-line bg-white">
-    <div className="container-page grid gap-7 pt-11 pb-14 sm:grid-cols-[2fr_1fr_auto] sm:items-start">
+    <div className="container-page grid gap-7 pt-11 pb-14 sm:grid-cols-[1.2fr_2fr_auto] sm:items-start">
       <div className="max-w-md">
         <p className="font-display text-xl font-semibold text-muted">NIHO Experience 鎌倉</p>
         <p className="mt-2 text-sm text-muted">{JAPANESE_SITE_DESCRIPTION}</p>
       </div>
-      <nav aria-label="フッター">
-        <ul className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm font-bold">
+      <nav aria-label="フッター" className="grid grid-cols-2 gap-x-6 gap-y-2 sm:gap-x-10">
+        <ul aria-label="カテゴリー" className="grid content-start gap-2 text-sm font-bold">
+          {EXPERIENCE_CATEGORIES.map((category) => <li key={category.id}><Link href={`/ja/experiences?category=${category.id}`} className="hover:underline">{category.label}</Link></li>)}
+        </ul>
+        <ul className="grid content-start gap-2 text-sm font-bold">
           {links.map((link) => <li key={link.href}><Link href={link.href} className="hover:underline">{link.label}</Link></li>)}
           <li><LanguageButton counterparts={counterparts} variant="text" /></li>
           <li><Link href="/privacy" className="hover:underline">プライバシー</Link></li>

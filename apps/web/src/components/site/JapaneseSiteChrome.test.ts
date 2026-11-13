@@ -81,4 +81,12 @@ describe("日本語サイトのヘッダーとフッター（#562）", () => {
     expect(html).toContain("<main");
     expect(html).toContain("BODY");
   });
+
+  it("フッターにカテゴリーのまとまり（8つ、一覧の ?category= へ）がある", () => {
+    const html = render({});
+    for (const [id, label] of [["walk", "歩く"], ["food", "つくる・食べる"], ["craft", "手を動かす"], ["zen", "禅と寺"], ["time", "朝と夜"], ["sea", "海"], ["people", "人に会う"], ["group", "団体・チームで"]]) {
+      expect(html).toContain(`href="/ja/experiences?category=${id}"`);
+      expect(html).toContain(label);
+    }
+  });
 });

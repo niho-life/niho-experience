@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { JA_HOME_HERO_PHOTOS, JA_HOME_SEO_DESCRIPTION, JA_HOME_SEO_TITLE, pickFeaturedPerson, pickHomeExperiences } from "./ja-home";
+import { EXPERIENCE_CATEGORIES } from "@niho-experience/experience-domain";
+import { JA_HOME_FEATURE, JA_HOME_HERO_PHOTOS, JA_HOME_OCCASIONS, JA_HOME_SEO_DESCRIPTION, JA_HOME_SEO_TITLE, categoriesWithExperiences, occasionHref, occasionsWithExperiences, pickFeaturedPerson, pickHomeExperiences } from "./ja-home";
 import { localJapaneseCopy } from "./ja-static-copy";
 import { existsSync } from "node:fs";
 
@@ -34,5 +35,24 @@ describe("日本語トップの編集内容（#563）", () => {
     expect(pickFeaturedPerson(people, "zzz")?.slug).toBe("a");
     expect(pickFeaturedPerson(people, null)?.slug).toBe("a");
     expect(pickFeaturedPerson([], "a")).toBeNull();
+  });
+
+  const card = (category: string | null, companions: string[] = [], occasions: string[] = []) => ({ classification: { category, companions, occasions } });
+
+  it("カテゴリーは、公開中の体験が1件以上あるものだけ（定義の順）", () => {
+    expect(categoriesWithExperiences(EXPERIENCE_CATEGORIES, [card("sea"), card("walk"), card(null)]).map((item) => item.id)).toEqual(["walk", "sea"]);
+    expect(categoriesWithExperiences(EXPERIENCE_CATEGORIES, [])).toEqual([]);
+  });
+
+  it("どんな日には、該当する体験があるものだけ。リンクは一覧の with / occasion へ", () => {
+    const items = occasionsWithExperiences([card("walk", ["solo", "friends"], ["rain"]), card(null, ["family"])]);
+    expect(items.map((item) => item.id)).toEqual(["solo", "friends", "family", "rain"]);
+    expect(items.map(occasionHref)).toEqual(["/ja/experiences?with=solo", "/ja/experiences?with=friends", "/ja/experiences?with=family", "/ja/experiences?occasion=rain"]);
+    expect(occasionsWithExperiences([])).toEqual([]);
+  });
+
+  it("特集と「どんな日に」の写真は、既存の素材のファイルがある。特集のカテゴリーは定義にある", () => {
+    for (const src of [...JA_HOME_FEATURE.photos.map((photo) => photo.src), ...JA_HOME_OCCASIONS.map((item) => item.photo)]) expect(existsSync(`public${src}`)).toBe(true);
+    expect(EXPERIENCE_CATEGORIES.some((category) => category.id === JA_HOME_FEATURE.categoryId)).toBe(true);
   });
 });
