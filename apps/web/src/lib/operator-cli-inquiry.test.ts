@@ -23,7 +23,7 @@ function inquiryApi() {
       sent.push({ body: body as Record<string, unknown>, operationId });
       if (seen.has(operationId)) return { status: 409, body: { error: "operation_already_recorded" } };
       seen.add(operationId);
-      const { action: _action, id: _id, ...patch } = body as Record<string, unknown>;
+      const patch = Object.fromEntries(Object.entries(body as Record<string, unknown>).filter(([key]) => key !== "action" && key !== "id"));
       row = { ...row, ...patch };
       return { status: 200, body: { inquiry: row } };
     },

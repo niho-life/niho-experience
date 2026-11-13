@@ -1,4 +1,4 @@
-import { EXIT, OpsError, errorCode, failureOf, type Action, type Target } from "./core.ts";
+import { EXIT, OpsError, errorCode, failureOf, sendOnce, type Action, type Target } from "./core.ts";
 import { stableCommandId } from "./product.ts";
 
 /*
@@ -40,12 +40,15 @@ function record(action: "CLAIM" | "DECLINE" | "RELEASE", summary: string): Actio
       const subject = action === "RELEASE" ? undefined : need(context, "subject");
       const reason = context.args.flags.reason;
       if (reason !== undefined && typeof reason !== "string") throw new OpsError("usage", "--reason needs text.", EXIT.usage);
-      const commandId = stableCommandId("assignment", action, providerId, occurrenceId, subject ?? "", String(reason ?? ""));
+      // The same record sent again the same day is one record (a retry); the same words on another day are a new decision.
+      const commandId = stableCommandId("assignment", action, providerId, occurrenceId, subject ?? "", String(reason ?? ""), new Date(context.now()).toISOString().slice(0, 10));
       const body = { action, providerId, occurrenceId, commandId, ...(subject ? { subjectNihoUserId: subject } : {}), ...(typeof reason === "string" ? { reason } : {}) };
       if (!context.apply) return { status: "dry_run", record: body };
-      const day = new Date(context.now()).toISOString().slice(0, 10).replaceAll("-", "");
-      const response = await context.api.send("POST", API, body, `op-${day}-${commandId.replaceAll("-", "").slice(0, 12)}`);
-      if (response.status === 409 && errorCode(response.body) === "operation_already_recorded") return { status: "unchanged", note: "This was already sent; `assignment list --provider --occurrence` shows the history." };
+      // "Already recorded" is not "done" (the server records an operation ID before it runs); the command ID makes the record itself
+      // idempotent, so a repeat under a fresh operation ID is safe.
+      const sent = await sendOnce(context, ["assignment", commandId], (operationId) => context.api.send("POST", API, body, operationId), async () => null);
+      if ("done" in sent) return { status: "unchanged" };
+      const response = sent.response;
       if (response.status === 409 && errorCode(response.body) === "already_assigned") return { status: "failed", error: "already_assigned", note: "Somebody else holds this occurrence: read the list again.", result: response.body };
       if (response.status < 200 || response.status >= 300) throw failureOf(response, `assignment ${action.toLowerCase()}`);
       return { status: "applied", result: response.body };
