@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { run } from "../../../../scripts/experience/ops/main.ts";
 import { CLASSIFICATION_CHUNK, parseChangeFile, planChanges, type Classification, type ProductRow } from "../../../../scripts/experience/ops/classification.ts";
-import type { Api, ApiResponse } from "../../../../scripts/experience/ops/core.ts";
+import { OpsError, type Api, type ApiResponse } from "../../../../scripts/experience/ops/core.ts";
 
 /* 運営の CLI (#576) ②: the classification target against an in-memory copy of the Admin API. No network; synthetic products only. */
 
@@ -137,6 +137,31 @@ describe("classification apply", () => {
     const ids = fake.puts.map((put) => put.operationId);
     expect(ids).toHaveLength(3);
     expect(ids[2]).toMatch(new RegExp(`^${ids[0]}-r[0-9a-f]{6}$`));
+  });
+
+  it("keeps what was applied when a later request gets no answer, and marks that chunk unconfirmed", async () => {
+    const many = Array.from({ length: CLASSIFICATION_CHUNK * 2 + 1 }, (_, i) => row("p1", `x${i}`, `slug-${i}`));
+    const fake = fakeApi(many);
+    const original = fake.api.send;
+    let calls = 0;
+    (fake.api as { send: Api["send"] }).send = async (...args) => { calls += 1; if (calls === 2) throw new OpsError("unreachable", "no answer"); return original(...args); };
+    const big = JSON.stringify({ items: many.map((item) => ({ slug: item.slug, classification: { category: "sea" } })) });
+    const out = await execute(fake.api, big, "--yes");
+    expect(out.exit).toBe(1);
+    const all = items(out);
+    expect(all.filter((item) => item.status === "applied")).toHaveLength(CLASSIFICATION_CHUNK);
+    expect(all.filter((item) => item.error === "unreachable_result_unconfirmed")).toHaveLength(CLASSIFICATION_CHUNK);
+    expect(all.filter((item) => item.status === "not_attempted")).toHaveLength(1);
+  });
+
+  it("treats a product that cannot be resolved after a re-read as a failure, not as done", async () => {
+    const fake = start();
+    await execute(fake.api, file, "--yes");
+    fake.products.get("p1/a")!.classification = EMPTY;
+    fake.products.delete("p1/b");
+    const out = await execute(fake.api, file, "--yes");
+    expect(out.exit).toBe(1);
+    expect(items(out).some((item) => item.status === "failed")).toBe(true);
   });
 
   it("reports another refusal as failed with the server's code", async () => {
