@@ -1,4 +1,5 @@
 import type { StaticCopyAccessorV1, StaticCopyValuesV1 } from "@niho/experience-presentation/v1";
+import { JA_HOME_SEO_DESCRIPTION, JA_HOME_SEO_TITLE } from "./ja-home";
 import { createJapaneseCopy } from "./ja-copy";
 
 /**
@@ -13,9 +14,9 @@ import { createJapaneseCopy } from "./ja-copy";
 export const LOCAL_JAPANESE_RELEASE_ID = "experience-local-ja-v1";
 
 export const JA_STATIC_COPY_V1: StaticCopyValuesV1 = {
-  "meta.siteTitle": "鎌倉に暮らす人と出会う | NIHO Experience",
+  "meta.siteTitle": JA_HOME_SEO_TITLE,
   "meta.titleTemplate": "{title} | NIHO Experience",
-  "meta.description": "鎌倉に暮らす人が開く、少人数の体験。料理、ものづくり、散歩、食卓を囲む時間まで。アカウント登録なしで、ゲストとして予約できます。",
+  "meta.description": JA_HOME_SEO_DESCRIPTION,
 
   "chrome.skipToContent": "本文へ移動",
   "chrome.brand": "NIHO Experience",
