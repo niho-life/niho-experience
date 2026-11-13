@@ -1,5 +1,7 @@
 # ホストのアカウント（メールのログインリンク）
 
+> 2026-11-14: ホストのログインは NIHO アカウントへ揃える（[ADR 0004](adr/0004-niho-account-login.md)、Epic [#591](https://github.com/niho-life/niho-experience/issues/591)）。`hst_` のホストアカウントは残し、NIHO user ID を結び付ける。この文書のメールのリンクは、移行が終わるまでのフォールバック（画面には出さない）で、移行後の扱いは [#598](https://github.com/niho-life/niho-experience/issues/598) で決める。
+
 [ADR 0003](adr/0003-experience-independence.md) の 2・3 段目（[#456](https://github.com/niho-life/niho-experience/issues/456)）。`/host` に、NIHO アカウントの代わりに Experience 自前のホストアカウントでログインし（2 段目）、受取口座の判定を Stripe への直接照会と Experience での利用同意で行う（3 段目）。フラグ `EXPERIENCE_HOST_ACCOUNTS_ENABLED`（既定 OFF）。OFF の間は今までの「NIHO でログイン」と NIHO の Connect projection のまま変わらない。Store は migration `0064`（`HostAccounts`）と `0065`（ホストアカウントの販売者・`ProviderPayoutAccountConsents`）。
 
 ## 流れ

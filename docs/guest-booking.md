@@ -81,6 +81,8 @@ IP制限の拒否は429 RATE_LIMITEDとRetry-Afterで返し、予約やメール
 
 オーナー決定（2026-10-27）：旅行者は体験サイトで完結し、会話と取消のある予約ページは `/bookings/{publicBookingId}` に置く。旅行者のアカウントと「すべての予約の一覧」は作らない。オーナー決定（2026-10-31、#285）：確認メールのリンクから、その 1 件の予約のセッションに入る（設計 v1）。この段の前半（6a）は読むだけのページで、メッセージは 6b。取消は第7段で足した（下の「取消と返金（第7段）」）。
 
+見直し（オーナー決定 2026-11-14、[ADR 0004](adr/0004-niho-account-login.md) §8）：旅行者のアカウントは任意で作れるようにする。入口は NIHO の名前を出さない Google / Apple / LINE のボタン（一番下に小さく「NIHO アカウントでログイン」）。ゲスト予約と、この予約ごとのセッションは残す。予約・メッセージとアカウントの結び付けは [#597](https://github.com/niho-life/niho-experience/issues/597) で決める。
+
 - **リンクは何か**：メールのリンク `{SITE_URL}/bookings/open#g=<grant>` は、その 1 件の予約を開ける持参人の資格（bearer credential）で、本人確認でも強い認証でもない。メールを読める人・転送された人は、まだ使われていなければ開ける。メールとページは「転送しないで」と書く。
 - **流れ**：
   1. メール job が確認メール（第5段）と「Find your booking」のメールを組むときに、メールごとに一度きりの grant を発行する（`GuestBookingAccess.issueBookingAccessGrant`）。token は 32 byte の乱数（base64url）で、生の値はメールのリンクの fragment にだけある。DB には SHA-256 だけを置く。
