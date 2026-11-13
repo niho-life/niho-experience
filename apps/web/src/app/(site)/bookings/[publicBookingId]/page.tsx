@@ -21,21 +21,23 @@ export const metadata: Metadata = { title: "Your booking", robots: { index: fals
  * with the host (#285 slice 6b) are read with the same session; when only they cannot be read, the page shows the
  * booking and says so where they would be.
  */
-export default async function GuestBookingPage({ params }: { params: Promise<{ publicBookingId: string }> }) {
+export default async function GuestBookingPage({ params, searchParams }: { params: Promise<{ publicBookingId: string }>; searchParams?: Promise<{ lang?: string | string[] }> }) {
   if (!bookingPagesEnabled()) notFound();
+  // Before a session opens the booking its language is unknown: `?lang=ja` (from a Japanese booking's email) picks it (#59).
+  const unknown = (await searchParams)?.lang === "ja" ? "ja" : "en";
   const bookingId = publicBookingIdOrNull((await params).publicBookingId);
-  if (!bookingId) return <BookingNotOpen />;
+  if (!bookingId) return <BookingNotOpen locale={unknown} />;
   const sessionId = accessSecret((await cookies()).get(bookingSessionCookieName(bookingId))?.value);
-  if (!sessionId) return <BookingNotOpen />;
+  if (!sessionId) return <BookingNotOpen locale={unknown} />;
   const access = guestBookingAccess();
-  if (!access) return <BookingUnavailable />;
+  if (!access) return <BookingUnavailable locale={unknown} />;
   let booking: GuestBookingView | null;
   try {
     booking = await access.readBookingSession(sessionId, bookingId);
   } catch {
-    return <BookingUnavailable />;
+    return <BookingUnavailable locale={unknown} />;
   }
-  if (!booking) return <BookingNotOpen />;
+  if (!booking) return <BookingNotOpen locale={unknown} />;
   let conversation: GuestBookingConversation | null = null;
   try {
     conversation = (await guestBookingMessages()?.readConversation(sessionId, bookingId)) ?? null;

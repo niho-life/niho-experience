@@ -220,7 +220,7 @@ describe("the booking page links (#285 slice 6)", () => {
 
   it("emails a host message about a booking: the host's English, the booking, and the page with the grant in the fragment only (#285 slice 6b)", () => {
     const message = {
-      ...link, hostDisplayName: "Sample <Host>", english: "Welcome!\nMeet at the <north> gate.",
+      ...link, hostDisplayName: "Sample <Host>", english: "Welcome!\nMeet at the <north> gate.", japanese: null,
     };
     const mail = bookingMessageEmail(message, { siteUrl: SITE, bookingPageGrant: GRANT });
     expect(mail.subject).toBe("Sample <Host> sent you a message about your booking: Synthetic tea ceremony, Sat 14 Nov 2026 10:00");

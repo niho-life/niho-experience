@@ -65,6 +65,21 @@ export function cancellationTermsWordsJa(
   return `${moment}（開始の${period}前）までのキャンセルは${percent}を返金します。それ以降のキャンセルは、NIHO事務局へご連絡ください。`;
 }
 
+const HOURS: Readonly<Record<string, number>> = { FREE_UNTIL_24H: 24, FREE_UNTIL_48H: 48 };
+
+/** 予約ページ用：予約時に固定した取消方針と、無料キャンセルが終わる時刻。方針が無ければ null。 */
+export function cancellationWordsJa(
+  booking: { readonly cancellationPolicy: GuestCancellationPolicy | null; readonly startUtc: string; readonly timeZone: string },
+  now: Date,
+): string | null {
+  if (booking.cancellationPolicy === null) return null;
+  if (booking.cancellationPolicy === "NONE") return "このご予約は返金できません。";
+  const hours = HOURS[booking.cancellationPolicy]!;
+  const deadline = Date.parse(booking.startUtc) - hours * 3_600_000;
+  if (!Number.isFinite(deadline) || deadline <= now.getTime()) return `無料キャンセルは開始の${hours}時間前に終了したため、このご予約は返金できません。`;
+  return `${zonedMomentJa(deadline, booking.timeZone)}（${zoneNameJa(booking.timeZone)}、開始の${hours}時間前）まで無料でキャンセルできます。それ以降は返金できません。`;
+}
+
 /** カードの返金が明細に出るまでの目安。 */
 export const REFUND_TIMING_JA = "カード会社によっては、明細に反映されるまで5〜10営業日かかることがあります。";
 

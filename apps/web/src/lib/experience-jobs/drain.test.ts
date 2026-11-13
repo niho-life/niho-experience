@@ -44,7 +44,7 @@ const replyFor = (n: number): ClaimedQuestionReply => ({
   kind: "QUESTION",
   messageId: `00000000-0000-4000-8000-00000000000${n}`, providerId: "provider-a", threadId: "00000000-0000-4000-8000-0000000000aa",
   guestEmail: `guest${n}@example.com`, guestName: `Sample Guest ${n}`, guestLanguage: "EN", experienceTitle: "Synthetic tea ceremony",
-  hostDisplayName: "Sample Host", english: "Yes, we can.", replyToken: `${TOKEN.slice(0, -1)}${n}`, replyLinkExpiresAtUtc: "2026-11-15T00:00:00.000Z", attempt: 1,
+  hostDisplayName: "Sample Host", english: "Yes, we can.", japanese: null, replyToken: `${TOKEN.slice(0, -1)}${n}`, replyLinkExpiresAtUtc: "2026-11-15T00:00:00.000Z", attempt: 1,
 });
 
 /** A host message about a booking made on this site (#285 slice 6b): no reply link of its own. */
@@ -52,7 +52,7 @@ const bookingMessageFor = (n: number): ClaimedBookingMessage => ({
   kind: "BOOKING",
   messageId: `00000000-0000-4000-8000-00000000020${n}`, providerId: "provider-a", threadId: "00000000-0000-4000-8000-0000000000bb",
   guestEmail: `booker${n}@example.com`, guestName: `Sample Booker ${n}`, guestLanguage: "EN", experienceTitle: "Synthetic walk",
-  hostDisplayName: "Sample Host", english: "See you at the station.", attempt: 1,
+  hostDisplayName: "Sample Host", english: "See you at the station.", japanese: null, attempt: 1,
   publicBookingId: `0f8fad5b-d9cb-469f-a165-70867728950${n}`, localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
   deliveryRef: `ex1_${(0x200 + n).toString(16).padStart(32, "0")}`,
 });

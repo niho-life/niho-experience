@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookingConfirmationEmail, BookingLinkEmail, BookingMeetingGuideEmail, BookingNoticeEmail, ReviewInvitationEmail } from "@niho-experience/experience-store";
-import { bookingConfirmationEmail, bookingLinkEmail, bookingMeetingGuideEmail, bookingNoticeEmail, reviewInvitationEmail, type RenderedMail } from "./templates";
+import { bookingConfirmationEmail, bookingLinkEmail, bookingMeetingGuideEmail, bookingMessageEmail, bookingNoticeEmail, questionReplyEmail, reviewInvitationEmail, supportBookingMessageEmail, type RenderedMail } from "./templates";
 
 /** 日本語で申し込んだゲストへのメール（#59）。合成データのみ。 */
 const SITE = "https://experience.example";
@@ -44,10 +44,10 @@ describe("日本語のゲストへのメール（#59）", () => {
     expect(mail.text).toContain("日本時間");
     expect(mail.text).toContain("まで無料でキャンセルできます");
     expect(mail.text).toContain("NIHO事務局が日本語でご案内します");
-    expect(mail.text).toContain("予約の確認ページは現在、英語の表示のみです");
+    expect(mail.text).not.toContain("英語の表示のみ");
     expect(mail.html).toContain('<html lang="ja">');
     expect(links(mail)).toContain(`${SITE}/ja/experiences/sample-tea`);
-    expect(links(mail)).toContain(`${SITE}/bookings/open#g=${GRANT}`);
+    expect(links(mail)).toContain(`${SITE}/bookings/open?lang=ja#g=${GRANT}`);
     noEnglishSentence(mail);
   });
 
@@ -70,7 +70,7 @@ describe("日本語のゲストへのメール（#59）", () => {
     const mail = bookingLinkEmail(link, { siteUrl: SITE, bookingPageGrant: GRANT });
     expect(mail.subject).toBe("ご予約の確認リンク：合成の茶道体験（2026年11月14日(土) 10:00）");
     expect(mail.subject).not.toContain(GRANT);
-    expect(links(mail).filter((href) => href.includes(GRANT))).toEqual([`${SITE}/bookings/open#g=${GRANT}`]);
+    expect(links(mail).filter((href) => href.includes(GRANT))).toEqual([`${SITE}/bookings/open?lang=ja#g=${GRANT}`]);
     expect(mail.text).toContain("お心当たりがない場合は、このメールを破棄してください。");
     noEnglishSentence(mail);
   });
@@ -87,7 +87,7 @@ describe("日本語のゲストへのメール（#59）", () => {
     const refunded = bookingNoticeEmail({ ...facts, kind: "REFUNDED", amount: 10_000, currency: "JPY" }, { siteUrl: SITE, bookingPageGrant: GRANT });
     expect(refunded.subject).toContain("返金が完了しました");
     expect(refunded.text).toContain("5〜10営業日");
-    expect(links(refunded)).toContain(`${SITE}/bookings/open#g=${GRANT}`);
+    expect(links(refunded)).toContain(`${SITE}/bookings/open?lang=ja#g=${GRANT}`);
 
     const declined = bookingNoticeEmail({ ...facts, kind: "REQUEST_DECLINED", message: "規定により取消はできません。" }, { siteUrl: SITE });
     expect(declined.text).toContain("規定により取消はできません。");
@@ -117,5 +117,31 @@ describe("日本語のゲストへのメール（#59）", () => {
     expect(mail.subject).toBe("ご参加ありがとうございました：合成の茶道体験");
     expect(links(mail)).toEqual([`${SITE}/reviews/write#t=tok`]);
     expect(mail.text).toContain("現在、英語の表示のみです");
+  });
+
+  it("ホスト・事務局のメッセージ：枠は日本語、本文はホストが書いた日本語（無ければ英語）のまま", () => {
+    const message = { guestName: "合成 花子", guestLanguage: "JA" as const, hostDisplayName: "合成ホスト", experienceTitle: "合成の茶道体験", english: "See you at the gate.", japanese: "門の前でお会いしましょう。", publicBookingId: confirmation.publicBookingId, localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo" };
+    const mail = bookingMessageEmail(message, { siteUrl: SITE, bookingPageGrant: GRANT });
+    expect(mail.subject).toBe("合成ホストからご予約についてメッセージが届いています：合成の茶道体験（2026年11月14日(土) 10:00）");
+    expect(mail.text).toContain("門の前でお会いしましょう。");
+    expect(mail.text).not.toContain("See you at the gate.");
+    expect(links(mail)).toContain(`${SITE}/bookings/open?lang=ja#g=${GRANT}`);
+    expect(mail.text).toContain("NIHO事務局が日本語でご案内します");
+    expect(bookingMessageEmail({ ...message, japanese: null }, { siteUrl: SITE, bookingPageGrant: null }).text).toContain("See you at the gate.");
+    expect(bookingMessageEmail(message, { siteUrl: SITE, bookingPageGrant: null }).text).not.toContain("/bookings");
+    noEnglishSentence(mail);
+
+    const support = supportBookingMessageEmail(message, { siteUrl: SITE, bookingPageGrant: GRANT });
+    expect(support.subject).toContain("NIHO事務局からご予約についてメッセージが届いています");
+    expect(support.text).toContain("門の前でお会いしましょう。");
+  });
+
+  it("質問への返事のメール：日本語の枠、返信ページが英語であることを事務局の案内とともに言う", () => {
+    const mail = questionReplyEmail({ siteUrl: SITE, guestName: "合成 花子", guestLanguage: "JA", hostName: "合成ホスト", experienceTitle: "合成の茶道体験", reply: "Yes, we can.", japanese: "はい、できます。", replyToken: "t".repeat(43), linkTtlDays: 14 });
+    expect(mail.subject).toBe("合成ホストからご質問への返信が届きました：合成の茶道体験");
+    expect(mail.text).toContain("はい、できます。");
+    expect(mail.text).toContain("期限は14日です");
+    expect(mail.text).toContain("返信ページは現在、英語の表示のみです");
+    expect(links(mail)).toEqual([`${SITE}/questions/reply#t=${"t".repeat(43)}`]);
   });
 });

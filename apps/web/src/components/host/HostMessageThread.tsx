@@ -130,6 +130,8 @@ function ReplyComposer({ thread, providerId, onSend }: { thread: HostThread; pro
   const japaneseField = useRef<HTMLTextAreaElement>(null);
   const draft = useReplyDraft((japanese) => draftReplyEnglish({ providerId, threadId: thread.id, japanese }), { onChange: () => setSent(false) });
   const { canSend } = replyDraftState(draft);
+  /** A guest who booked in Japanese reads the Japanese written here; the English is kept as the record (#59). */
+  const japaneseGuest = thread.booking !== null && thread.guestLanguage === "ja";
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -153,7 +155,7 @@ function ReplyComposer({ thread, providerId, onSend }: { thread: HostThread; pro
 
   return (
     <form onSubmit={(event) => void submit(event)} aria-label="返信" aria-busy={sending || undefined} className="sticky bottom-0 z-10 mt-auto rounded-b-2xl border-t border-line bg-canvas px-4 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:px-5">
-      <ReplyDraftFields draft={draft} japaneseRef={japaneseField} maxLength={MESSAGE_TEXT_LIMIT} englishLabel={`${thread.guest} さんに届く英語`} submitLabel={sending ? "送っています…" : "この英語で送る"} canSubmit={canSend && !sending} />
+      <ReplyDraftFields draft={draft} japaneseRef={japaneseField} maxLength={MESSAGE_TEXT_LIMIT} englishLabel={japaneseGuest ? `記録用の英語（${thread.guest} さんには上の日本語が届きます）` : `${thread.guest} さんに届く英語`} submitLabel={sending ? "送っています…" : japaneseGuest ? "この内容で送る" : "この英語で送る"} canSubmit={canSend && !sending} />
       {problem ? (
         <p role="alert" className="mt-2 text-[0.78125rem] leading-normal font-extrabold text-danger">
           {problem}

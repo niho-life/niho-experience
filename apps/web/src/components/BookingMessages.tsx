@@ -4,6 +4,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { BOOKING_FIELD_INPUT_CLASS_V1, BOOKING_FIELD_LABEL_CLASS_V1 } from "@niho/experience-presentation/v1";
 import type { GuestBookingConversation, GuestBookingMessage } from "@niho-experience/experience-store";
 import { zonedMoment, zoneName } from "@/lib/booking-words";
+import { zoneNameJa, zonedMomentJa } from "@/lib/booking-words-ja";
 import { BOOKING_MESSAGE_MAX_LENGTH, sendBookingMessage, type BookingMessageResult } from "@/lib/guest-booking-page";
 import { HandIcon } from "./HandIcon";
 import { TranslationNotice } from "./TranslationNotice";
@@ -12,7 +13,8 @@ import { Notice, buttonClass } from "./ui";
 type Problem = { tone: "danger" | "warn"; title: string; body?: string };
 
 /** What the page says after a send that did not go through; null when it did. */
-export function bookingMessageProblem(result: BookingMessageResult, hostDisplayName: string): Problem | null {
+export function bookingMessageProblem(result: BookingMessageResult, hostDisplayName: string, locale: "en" | "ja" = "en"): Problem | null {
+  if (locale === "ja") return bookingMessageProblemJa(result, hostDisplayName);
   switch (result.kind) {
     case "sent":
       return null;
@@ -33,17 +35,38 @@ export function bookingMessageProblem(result: BookingMessageResult, hostDisplayN
   }
 }
 
+function bookingMessageProblemJa(result: BookingMessageResult, hostDisplayName: string): Problem | null {
+  switch (result.kind) {
+    case "sent":
+      return null;
+    case "closed":
+      return { tone: "warn", title: "このご予約では、メッセージを送れなくなりました", body: "メッセージは送られていません。ご不明な点は、確認メールに返信してください。NIHO事務局が日本語でご案内します。" };
+    case "limited": {
+      const minutes = Math.max(1, Math.ceil(result.retryAfterSeconds / 60));
+      return { tone: "warn", title: `この1時間に多くのメッセージを送りました。${minutes}分後に、もう一度お試しください。`, body: "入力した内容は残っています。" };
+    }
+    case "invalid":
+      return { tone: "danger", title: `${BOOKING_MESSAGE_MAX_LENGTH}文字までのメッセージを入力してください。` };
+    case "conflict":
+      return { tone: "danger", title: "状況が変わりました。もう一度「送信」を押してください。", body: "入力した内容は残っています。" };
+    case "signedOut":
+      return { tone: "warn", title: "このご予約は、この端末ではもう開かれていません", body: "メールのリンクからもう一度開くか、新しいリンクを請求してください。" };
+    case "failed":
+      return { tone: "danger", title: `${hostDisplayName}にメッセージが届いたか確認できませんでした。もう一度お試しください。`, body: "もう一度送っても、二重に送られることはありません。" };
+  }
+}
+
 /** A message sent from this page, shown until the page is read again. */
 interface SentHere extends GuestBookingMessage {
   readonly sentHere: true;
 }
 
-function MessageList({ messages, hostDisplayName, timeZone }: { messages: readonly (GuestBookingMessage | SentHere)[]; hostDisplayName: string; timeZone: string }) {
+function MessageList({ messages, hostDisplayName, timeZone, ja }: { messages: readonly (GuestBookingMessage | SentHere)[]; hostDisplayName: string; timeZone: string; ja: boolean }) {
   return (
-    <ol aria-label={`Your messages with ${hostDisplayName}`} className="mt-5 flex flex-col gap-3.5">
+    <ol aria-label={ja ? `${hostDisplayName}とのメッセージ` : `Your messages with ${hostDisplayName}`} className="mt-5 flex flex-col gap-3.5">
       {messages.map((message) => {
         const mine = message.from === "guest";
-        const sender = mine ? "You" : message.from === "support" ? "NIHO support" : hostDisplayName;
+        const sender = mine ? (ja ? "あなた" : "You") : message.from === "support" ? (ja ? "NIHO事務局" : "NIHO support") : hostDisplayName;
         return (
           <li key={message.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
             <div className={`max-w-[88%] rounded-2xl px-4 py-3 [overflow-wrap:anywhere] ${mine ? "rounded-tr-md bg-leaf-pale" : "rounded-tl-md bg-sand"}`}>
@@ -51,8 +74,8 @@ function MessageList({ messages, hostDisplayName, timeZone }: { messages: readon
               <p className="whitespace-pre-wrap">{message.body}</p>
             </div>
             <p className="mt-1 px-1 text-xs text-muted">
-              {sender} · <time dateTime={message.atUtc}>{zonedMoment(Date.parse(message.atUtc), timeZone)}</time>
-              {"sentHere" in message ? " · Sent" : null}
+              {sender} · <time dateTime={message.atUtc}>{ja ? zonedMomentJa(Date.parse(message.atUtc), timeZone) : zonedMoment(Date.parse(message.atUtc), timeZone)}</time>
+              {"sentHere" in message ? (ja ? " · 送信済み" : " · Sent") : null}
             </p>
           </li>
         );
@@ -67,7 +90,7 @@ function MessageList({ messages, hostDisplayName, timeZone }: { messages: readon
  * messages (cancelled, or 30 days after the experience) shows its history only. The key of a message stays the same
  * while its words do, so a retry after a lost answer never sends it twice.
  */
-export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, conversation, translationNotice = false, quickReplies = [] }: {
+export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, conversation, translationNotice = false, quickReplies = [], locale = "en" }: {
   publicBookingId: string;
   hostDisplayName: string;
   timeZone: string;
@@ -76,7 +99,9 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
   /** The server says whether messages are translated into Japanese for the host (lib/translation-notice.ts); then one sentence says so. */
   translationNotice?: boolean;
   quickReplies?: readonly { label: string; message: string }[];
+  locale?: "en" | "ja";
 }) {
+  const ja = locale === "ja";
   const [sent, setSent] = useState<readonly SentHere[]>([]);
   const [open, setOpen] = useState(conversation?.open ?? false);
   const [message, setMessage] = useState("");
@@ -89,7 +114,7 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
   if (!conversation) {
     return (
       <p role="alert" className="mt-3 text-[0.9375rem] text-ink-soft">
-        We couldn&apos;t load your messages with {hostDisplayName}. Reloading this page is enough to try again.
+        {ja ? `${hostDisplayName}とのメッセージを読み込めませんでした。このページを再読み込みすると、もう一度試せます。` : <>We couldn&apos;t load your messages with {hostDisplayName}. Reloading this page is enough to try again.</>}
       </p>
     );
   }
@@ -100,7 +125,7 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
     if (sending) return;
     const words = message.trim();
     if (!words || words.length > BOOKING_MESSAGE_MAX_LENGTH) {
-      setProblem(bookingMessageProblem({ kind: "invalid" }, hostDisplayName));
+      setProblem(bookingMessageProblem({ kind: "invalid" }, hostDisplayName, locale));
       return;
     }
     if (attempt.current?.words !== words) attempt.current = { words, key: crypto.randomUUID() };
@@ -113,22 +138,22 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
       setSent((current) => [...current, { id: attempt.current!.key, from: "guest", atUtc: new Date().toISOString(), body: words, sentHere: true }]);
       attempt.current = null;
       setMessage("");
-      setStatus(`Sent. ${hostDisplayName} gets your message now and will answer here and by email.`);
+      setStatus(ja ? `送信しました。${hostDisplayName}にメッセージが届きました。返信は、このページとメールでお知らせします。` : `Sent. ${hostDisplayName} gets your message now and will answer here and by email.`);
       return;
     }
     if (result.kind === "closed") setOpen(false);
     if (result.kind === "conflict") attempt.current = null;
-    setProblem(bookingMessageProblem(result, hostDisplayName));
+    setProblem(bookingMessageProblem(result, hostDisplayName, locale));
     requestAnimationFrame(() => alertBox.current?.focus());
   }
 
   return (
     <>
       {messages.length ? (
-        <MessageList messages={messages} hostDisplayName={hostDisplayName} timeZone={timeZone} />
+        <MessageList messages={messages} hostDisplayName={hostDisplayName} timeZone={timeZone} ja={ja} />
       ) : (
         <p className="mt-3 text-[0.9375rem] text-ink-soft">
-          {open ? `No messages yet. Write to ${hostDisplayName} about this booking: they'll answer here and by email.` : "No messages were sent about this booking."}
+          {open ? (ja ? `まだメッセージはありません。このご予約について${hostDisplayName}に書けます。返信は、このページとメールでお知らせします。` : `No messages yet. Write to ${hostDisplayName} about this booking: they'll answer here and by email.`) : (ja ? "このご予約についてのメッセージはありません。" : "No messages were sent about this booking.")}
         </p>
       )}
       <p role="status" className="mt-3 text-[0.9375rem] font-bold text-moss empty:hidden">{status}</p>
@@ -141,7 +166,7 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
         <form onSubmit={(event) => void submit(event)} noValidate className="mt-6">
           {quickReplies.length ? (
             <fieldset className="mb-4">
-              <legend className="mb-2 text-sm font-bold text-ink-soft">Quick message</legend>
+              <legend className="mb-2 text-sm font-bold text-ink-soft">{ja ? "かんたんメッセージ" : "Quick message"}</legend>
               <div className="flex flex-wrap gap-2">
                 {quickReplies.map((reply) => (
                   <button key={reply.label} type="button" disabled={sending} onClick={() => { setMessage(reply.message); setProblem(null); }} className={buttonClass("secondary", "text-sm")}>
@@ -152,7 +177,7 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
             </fieldset>
           ) : null}
           <label className={BOOKING_FIELD_LABEL_CLASS_V1}>
-            Write to {hostDisplayName}
+            {ja ? `${hostDisplayName}へのメッセージ` : `Write to ${hostDisplayName}`}
             <textarea
               name="message"
               required
@@ -167,17 +192,17 @@ export function BookingMessages({ publicBookingId, hostDisplayName, timeZone, co
           <p className="mt-3.5 flex items-start gap-2.5 text-[0.875rem] text-ink-soft">
             <HandIcon name="chat" className="size-6 shrink-0 text-moss" />
             <span>
-              {hostDisplayName} gets your message right away. Their answer comes here and to your email. Times are {zoneName(timeZone)}.
+              {ja ? `${hostDisplayName}にすぐ届きます。返信は、このページとメールでお知らせします。時刻は${zoneNameJa(timeZone)}です。` : `${hostDisplayName} gets your message right away. Their answer comes here and to your email. Times are ${zoneName(timeZone)}.`}
             </span>
           </p>
           {translationNotice ? <TranslationNotice className="mt-2" /> : null}
           <button type="submit" disabled={sending} aria-busy={sending || undefined} className={buttonClass("primary", "mt-5 w-full sm:w-auto")}>
-            {sending ? "Sending…" : "Send message"}
+            {sending ? (ja ? "送信中…" : "Sending…") : (ja ? "メッセージを送る" : "Send message")}
           </button>
         </form>
       ) : (
         <p className="mt-4 text-[0.9375rem] text-ink-soft">
-          This booking no longer takes messages. Questions? Reply to your confirmation email and NIHO support will help.
+          {ja ? "このご予約では、メッセージを送れなくなりました。ご不明な点は、確認メールに返信してください。NIHO事務局が日本語でご案内します。" : "This booking no longer takes messages. Questions? Reply to your confirmation email and NIHO support will help."}
         </p>
       )}
     </>

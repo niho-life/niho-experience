@@ -121,6 +121,22 @@ async function endedDaysAgo(pool: Pool, publicBookingId: string, daysAgo: number
 const reply = (english: string, japanese: string | null = null) => ({ english, japanese, commandId: randomUUID() });
 
 describe("PostgreSQL booking messages (#285 slice 6b)", { skip: databaseUrl === undefined }, () => {
+  // #59: a booking made in Japanese reads the host's own Japanese (the English when they wrote none); an English one never does.
+  it("shows the host's Japanese to a booking made in Japanese, and only the English to an English one", async () => {
+    await withSchema(async (context) => {
+      const { messages, questions } = context;
+      const ja = await confirmed(context, { guestLanguage: "JA", guestEmail: "ja@example.com", guestName: "合成 花子" });
+      const en = await confirmed(context, { guestEmail: "en@example.com" });
+      for (const booking of [ja, en]) {
+        await questions.replyToBooking(ownerA, booking.publicBookingId, reply("See you at the gate.", "門の前でお会いしましょう。"));
+        await questions.replyToBooking(ownerA, booking.publicBookingId, reply("English only."));
+      }
+      const read = async (booking: typeof ja) => (await messages.readConversation(await session(context, booking.publicBookingId), booking.publicBookingId))?.messages.map((message) => message.body);
+      assert.deepEqual(await read(ja), ["門の前でお会いしましょう。", "English only."]);
+      assert.deepEqual(await read(en), ["See you at the gate.", "English only."]);
+    });
+  });
+
   it("keeps one thread per booking for the guest's session: the message, its translation row and the host's push, idempotent by key", async () => {
     await withSchema(async (context) => {
       const { pool, messages } = context;

@@ -127,6 +127,8 @@ interface ClaimedHostMessage {
   readonly experienceTitle: string;
   readonly hostDisplayName: string;
   readonly english: string;
+  /** The Japanese the host wrote, or null when they wrote English directly. A Japanese-language guest reads it (#59). */
+  readonly japanese: string | null;
   /** 1 for the first try. */
   readonly attempt: number;
 }
@@ -818,7 +820,7 @@ export class GuestQuestionRepository {
                     THEN 'ex1_' || replace(gen_random_uuid()::text, '-', '') END
            FROM due
           WHERE m.provider_id = due.provider_id AND m.id = due.id
-         RETURNING m.id, m.provider_id, m.thread_id, m.author, m.body, m.delivery_attempts, m.created_at, m.mail_delivery_ref`,
+         RETURNING m.id, m.provider_id, m.thread_id, m.author, m.body, m.body_ja, m.delivery_attempts, m.created_at, m.mail_delivery_ref`,
         [limit, leaseSeconds, GUEST_QUESTION_LIMITS.deliveryAttempts],
       );
       const rows = [...claimed.rows].sort((a, b) => isoValue(a, "created_at").localeCompare(isoValue(b, "created_at")) || String(a.id).localeCompare(String(b.id)));
@@ -843,6 +845,7 @@ export class GuestQuestionRepository {
           experienceTitle: String(detail.public_title),
           hostDisplayName: String(detail.seller_display_name),
           english: String(row.body),
+          japanese: typeof row.body_ja === "string" && row.body_ja !== "" ? row.body_ja : null,
           attempt: Number(row.delivery_attempts),
         };
         if (detail.for_booking === true) {

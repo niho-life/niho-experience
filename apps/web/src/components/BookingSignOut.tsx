@@ -8,7 +8,8 @@ import { Notice, buttonClass } from "./ui";
  * "Sign out on this device" on the guest's booking page (#285 slice 6): a same-origin POST that ends this device's
  * session for the booking and removes its cookie, then shows the page without the booking.
  */
-export function BookingSignOut({ publicBookingId }: { publicBookingId: string }) {
+export function BookingSignOut({ publicBookingId, locale = "en" }: { publicBookingId: string; locale?: "en" | "ja" }) {
+  const ja = locale === "ja";
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -29,11 +30,11 @@ export function BookingSignOut({ publicBookingId }: { publicBookingId: string })
     <div>
       {failed ? (
         <div role="alert" className="mb-4">
-          <Notice tone="danger" title="We couldn't sign you out. Please try again." />
+          <Notice tone="danger" title={ja ? "ログアウトできませんでした。もう一度お試しください。" : "We couldn't sign you out. Please try again."} />
         </div>
       ) : null}
       <button type="button" onClick={() => void signOut()} disabled={busy} aria-busy={busy || undefined} className={buttonClass("secondary")}>
-        {busy ? "Signing out…" : "Sign out on this device"}
+        {busy ? (ja ? "ログアウト中…" : "Signing out…") : (ja ? "この端末でログアウトする" : "Sign out on this device")}
       </button>
     </div>
   );

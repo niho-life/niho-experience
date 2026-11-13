@@ -98,6 +98,7 @@ export function hostThread(thread: Pick<StoredThread, "id" | "productId" | "gues
     guest: thread.guestName,
     topic: thread.topic ? (TOPIC_JA[thread.topic] ?? null) : null,
     booking: thread.booking ? hostThreadBooking(thread.booking) : null,
+    ...(thread.language === "JA" ? { guestLanguage: "ja" as const } : {}),
     messages: messages.map((message) => hostThreadMessage(message, thread.language)),
   };
 }

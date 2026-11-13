@@ -140,12 +140,20 @@ describe("the booking page's cancellation section", () => {
   const NOW = new Date("2026-11-01T00:00:00.000Z");
   const page = (booking: Partial<GuestBookingView>) => renderToStaticMarkup(createElement(GuestBookingDetails, { booking: { ...VIEW, ...booking }, now: NOW }));
 
-  it("tells a booking made in Japanese that this page is English only and where Japanese support is (#59)", () => {
-    const japanese = page({ guestLanguage: "JA" });
-    expect(japanese).toContain("この予約確認ページは現在、英語の表示のみです");
-    expect(japanese).toContain("NIHO事務局が日本語でご案内します");
+  it("shows a booking made in Japanese in Japanese, with the Japanese experience page and support's way in (#59)", () => {
+    const japanese = page({ guestLanguage: "JA", experienceTitle: "合成の散歩" });
+    expect(japanese).toContain('lang="ja"');
+    expect(japanese).toContain("予約確定");
+    expect(japanese).toContain("大人2名、子ども1名");
+    expect(japanese).toContain("7,500円");
+    expect(japanese).toContain("キャンセルして全額返金を受ける");
+    expect(japanese).toContain("ホストとのメッセージ");
     expect(japanese).toContain("/ja/experiences/sample-walk");
-    expect(page({})).not.toContain("英語の表示のみ");
+    expect(japanese).not.toContain("英語の表示のみ");
+    expect(japanese).not.toContain("Messages with your host");
+    const asking = page({ guestLanguage: "JA", freeCancellationOpen: false });
+    expect(asking).toContain("キャンセルを依頼する");
+    expect(page({}).includes("Messages with your host")).toBe(true);
   });
 
   it("offers a full refund before the deadline, with the deadline in Japan time", () => {

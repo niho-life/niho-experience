@@ -348,6 +348,8 @@ async function sendQuestionReplies(deps: ExperienceJobDeps): Promise<QuestionRep
         hostName: reply.hostDisplayName,
         experienceTitle: reply.experienceTitle,
         reply: reply.english,
+        guestLanguage: reply.guestLanguage,
+        japanese: reply.japanese,
         replyToken: reply.replyToken,
         linkTtlDays: EXPERIENCE_JOB_LIMITS.replyLinkTtlDays,
       });
