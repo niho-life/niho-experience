@@ -168,6 +168,6 @@ node scripts/experience/ops.mjs people withdraw --provider prov-a --yes      # �
 5. **写真**（`product photo-add --product <id> --file 写真.jpg --alt "English alt" --alt-ja "日本語の説明" --photographer "撮影者" --permission "許諾の根拠" --rights-confirmed [--credit "公開するクレジット"]`）。jpg・png、10MB まで。**撮影者と許諾を人が確認したものだけ**。`--photographer`・`--permission` は結果（`evidence`）に sha256 とあわせて出るので、Issue か PR に貼って残す。
 6. **公開できるか見る**（`product publish --product <id> --seller-confirmation WRITTEN --photo-rights-confirmed`）。`--yes` なしは、サーバーが返す公開の妨げ（`blockers`）と、いま公開できるかだけを出す。妨げが残っていれば、直してから。
 7. **公開する**：同じコマンドに `--yes`。**本番は依頼した人の了承を取ってから。** 公開すると `/ja/experiences/<slug>` に出る。
-8. **停止する**（`product suspend --product <id> --reason SYNTHETIC_CLEANUP --yes`）：運営停止。合成の商品の片付けなど。止めたあと、持ち主が再開するまで出ない（`resume` は運営停止を解くだけ）。
+8. **停止する**（`product suspend --product <id> --reason SYNTHETIC_CLEANUP --yes`）：運営停止。合成の商品の片付けなど。公開状態の版は、公開済みの商品でも読める専用の `GET /admin/api/experience-publications/providers/<p>/products/<x>` から取る（下書き用の `product show` は公開済みには答えない）。止めたあと、持ち主が再開するまで出ない（`resume` は運営停止を解くだけ）。
 
 どの変更も、読んだときの版を付けて送る。画面などで先に変わっていたら `409`（終了コード 4）で止まり、上書きしない。`product show` は、いまの下書き・販売条件・写真・公開の妨げ・版を返す（予約者の情報は出ない）。

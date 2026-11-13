@@ -18,6 +18,7 @@ function fakeApi(blockers: string[] = []) {
   let draftVersion = 1;
   let termsVersion = 0;
   let stateVersion = 0;
+  let suspended = false;
   const providers = [{ providerId: "prv_1", publicDisplayName: "Sample", providerKind: "PERSON", profileVersion: 1 }];
   let product: (ProductDto & { terms: Record<string, unknown> | null }) | null = null;
   const sent: Array<{ method: string; path: string; body: Record<string, unknown>; operationId: string }> = [];
@@ -32,7 +33,8 @@ function fakeApi(blockers: string[] = []) {
       if (path === ROOT) return { status: 200, body: { providers, sellers: [] } };
       if (path === `${ROOT}/prv_1/products`) return { status: 200, body: { products: product ? [dto()] : [], publicationConsentVersion: CONSENT } };
       if (path === `${ROOT}/prv_1/products/x1` && product) return { status: 200, body: { product: dto() } };
-      if (path.startsWith(`${ROOT}/prv_1/products/x1/calendar?`)) return { status: 200, body: { rules: [], occurrences: [{ occurrenceId: "o1" }] } };
+      if (path.startsWith(`${ROOT}/prv_1/products/x1/calendar?`)) return { status: 200, body: { rules: [...sentRules].map((id) => ({ id })), occurrences: [{ occurrenceId: "o1" }] } };
+      if (path === "/admin/api/experience-publications/providers/prv_1/products/x1") return stateVersion === 0 ? { status: 404, body: { error: { code: "NOT_FOUND" } } } : { status: 200, body: { publication: { stateVersion, published: true, operationsSuspended: suspended, selfStoppedAtUtc: null, ownerResumeRequired: suspended } } };
       return { status: 404, body: { error: { code: "NOT_FOUND" } } };
     },
     async send(method, path, body, operationId, raw): Promise<ApiResponse> {
@@ -44,8 +46,8 @@ function fakeApi(blockers: string[] = []) {
       const b = (body ?? {}) as Loose;
       if (method === "POST" && path.endsWith("/calendar")) return seen.size && sentRules.has(b.commandId) ? { status: 200, body: { id: b.commandId, version: 1 } } : (sentRules.add(b.commandId), { status: 201, body: { id: b.commandId, version: 1 } });
       if (method === "POST" && path.endsWith("/media")) { product = { ...product!, media: [...(product!.media ?? []), { id: "m1", altText: raw!.headers["x-experience-photo-alt-text-utf8-base64url"] }] }; return { status: 201, body: { product: dto() } }; }
-      if (method === "POST" && path.endsWith("/suspend")) return { status: 200, body: { publication: { state: "OPERATIONS_SUSPENDED", stateVersion: 3 } } };
-      if (method === "POST" && path.endsWith("/clear-suspension")) return { status: 200, body: { publication: { state: "RESUME_REQUIRED", stateVersion: 4 } } };
+      if (method === "POST" && path.endsWith("/suspend")) { suspended = true; return { status: 200, body: { publication: { state: "OPERATIONS_SUSPENDED", stateVersion: stateVersion + 1 } } }; }
+      if (method === "POST" && path.endsWith("/clear-suspension")) { suspended = false; return { status: 200, body: { publication: { state: "RESUME_REQUIRED", stateVersion: stateVersion + 1 } } }; }
       if (method === "POST" && path === ROOT) return { status: 201, body: { profile: { providerId: "prv_2", publicDisplayName: b.publicDisplayName } } };
       if (method === "POST" && path === `${ROOT}/prv_1/products`) {
         product = { id: "x1", version: "", draft: { slug: b.slug, publicTitle: b.publicTitle, content: b.content, currency: "JPY", unitAmount: b.unitAmount }, saleTerms: null, terms: null };
@@ -157,6 +159,21 @@ describe("product terms", () => {
   });
 });
 
+describe("product terms with terms already set", () => {
+  it("never sends the response-only fields back, and refuses a field that is not a sale-terms field", async () => {
+    const fake = fakeApi();
+    fake.seed();
+    fake.current()!.terms = { version: 3, updatedAtUtc: "2026-11-01T00:00:00.000Z", maxPartySize: 4, cancellationPolicy: "FREE_UNTIL_24H", bookingQuestions: [], conditionsVersion: null };
+    const result = out(await exec(fake.api, ["terms", "--provider", "prv_1", "--product", "x1", "--file", "t.json", "--yes"], JSON.stringify({ saleTerms: { maxPartySize: 6 } })));
+    expect(result.result.status).toBe("applied");
+    expect(result.result.changes.map((change: { path: string }) => change.path)).toEqual(["saleTerms.maxPartySize"]);
+    expect(Object.keys(fake.sent[0]!.body.saleTerms as object).sort()).toEqual(["bookingQuestions", "cancellationPolicy", "conditionsVersion", "maxPartySize"]);
+    const bad = await exec(fake.api, ["terms", "--provider", "prv_1", "--product", "x1", "--file", "t.json", "--yes"], JSON.stringify({ saleTerms: { version: 9 } }));
+    expect(bad.exit).toBe(1);
+    expect(fake.sent).toHaveLength(1);
+  });
+});
+
 describe("product publish", () => {
   const flags = ["publish", "--provider", "prv_1", "--product", "x1", "--seller-confirmation", "WRITTEN", "--photo-rights-confirmed"];
   it("needs the seller's confirmation method and the photo rights confirmed by a person", async () => {
@@ -216,6 +233,17 @@ describe("product calendar", () => {
     expect(out(await exec(fake.api, ["calendar-add", "--provider", "prv_1", "--product", "x1", "--file", "r.json"], same)).result.commandId).toBe(planned.result.commandId);
     expect(out(await exec(fake.api, ["calendar-add", "--provider", "prv_1", "--product", "x1", "--file", "r.json"], JSON.stringify({ ...RULE, capacity: 5 }))).result.commandId).not.toBe(planned.result.commandId);
   });
+  it("does not call a rule done because the server recorded the operation: it must be in the schedule, otherwise it is sent again", async () => {
+    const fake = fakeApi();
+    fake.seed();
+    fake.hooks.rejectNext = { status: 503, body: { error: "unavailable" } };
+    const file = JSON.stringify(RULE);
+    expect((await exec(fake.api, ["calendar-add", "--provider", "prv_1", "--product", "x1", "--file", "r.json", "--yes"], file)).exit).toBe(1);
+    const again = out(await exec(fake.api, ["calendar-add", "--provider", "prv_1", "--product", "x1", "--file", "r.json", "--yes"], file));
+    expect(again.result.status).toBe("applied");
+    expect(fake.sent[2]!.operationId).toMatch(new RegExp(`^${fake.sent[0]!.operationId}-r[0-9a-f]{6}$`));
+  });
+
   it("refuses a rule the domain refuses", async () => {
     const fake = fakeApi();
     fake.seed();
@@ -254,7 +282,9 @@ describe("product photo-add", () => {
     expect(raw.headers).toMatchObject({ "x-experience-photo-rights-confirmed": "true", "x-experience-media-placement": "GALLERY" });
     expect(Buffer.from(raw.headers["x-experience-photo-alt-text-ja-utf8-base64url"]!, "base64url").toString("utf8")).toBe("茶碗");
     expect(Buffer.from(raw.headers["x-experience-photo-credit-utf8-base64url"]!, "base64url").toString("utf8")).toBe("撮影：NIHO");
-    expect(out(await exec(fake.api, [...base, "--yes"], undefined, bytes)).result.status).toBe("unchanged");
+    const repeat = await exec(fake.api, [...base, "--yes"], undefined, bytes);
+    expect(repeat.exit).toBe(1);
+    expect(out(repeat).error).toBe("photo_upload_unconfirmed");
     expect(fake.sent).toHaveLength(2);
   });
 });
@@ -272,7 +302,9 @@ describe("product suspend and resume", () => {
     const done = out(await exec(fake.api, [...stop, "--yes"]));
     expect(done).toMatchObject({ tier: "publish", result: { status: "applied" } });
     expect(fake.sent[0]).toMatchObject({ method: "POST", path: "/admin/api/experience-publications/providers/prv_1/products/x1/suspend", body: { expectedStateVersion: 2, reasonCode: "SYNTHETIC_CLEANUP" } });
+    expect(out(await exec(fake.api, [...stop, "--yes"])).result.status).toBe("unchanged");
     expect(out(await exec(fake.api, ["resume", "--provider", "prv_1", "--product", "x1", "--yes"])).result.status).toBe("applied");
     expect(fake.sent[1]).toMatchObject({ path: "/admin/api/experience-publications/providers/prv_1/products/x1/clear-suspension", body: { expectedStateVersion: 2 } });
+    expect(out(await exec(fake.api, ["resume", "--provider", "prv_1", "--product", "x1", "--yes"])).result.status).toBe("unchanged");
   });
 });
