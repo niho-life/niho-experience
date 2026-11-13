@@ -7,7 +7,7 @@ import { assertStoreIdentifier } from "./validation.ts";
 
 /*
  * 街の人 (#564, docs/people.md): who the Japanese site shows on 街の人 and on a page of their own. A listing is a person
- * who belongs to a provider (#589, 0083): provider × member (a host account). The Admin decides who is listed and gives them
+ * who belongs to a provider (#589, 0084): provider × member (a host account). The Admin decides who is listed and gives them
  * their name, photo, role, area, line, introduction and the experiences they are met through. The public readers add the
  * conditions that keep a person off the page by themselves: the member must be a current OWNER or COHOST of the provider
  * (whoever is shown can be written to, and the message reaches the provider's inbox, addressed to them) and the photo must be
