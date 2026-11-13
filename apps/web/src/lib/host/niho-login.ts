@@ -67,8 +67,9 @@ export function startNihoLogin(request: NextRequest): NextResponse {
 }
 
 /** A signed-in host's 「結び付ける」: the same round trip, which on return binds the NIHO account instead of opening a session. */
-export function startNihoLink(providerId: string | null): NextResponse {
-  return nihoRoundTrip({ providerId, returnPath: hostAccountSettingsPath(providerId), purpose: "link" }, true);
+export function startNihoLink(providerId: string | null, hostAccountId: string): NextResponse {
+  // The host account that asked is part of the sealed state: the return binds to it and to no other.
+  return nihoRoundTrip({ providerId, returnPath: hostAccountSettingsPath(providerId), purpose: "link", hostAccountId }, true);
 }
 
 /** The host opened an invitation link in this browser: the same round trip, which on return binds the NIHO account to the invited host account. */
@@ -78,7 +79,7 @@ export function startNihoInvite(request: NextRequest): NextResponse {
   return nihoRoundTrip({ providerId: null, purpose: "invite" }, false);
 }
 
-function nihoRoundTrip(intent: Pick<HostLoginState, "providerId" | "invitationId" | "returnPath" | "purpose">, reauth: boolean): NextResponse {
+function nihoRoundTrip(intent: Pick<HostLoginState, "providerId" | "invitationId" | "returnPath" | "purpose" | "hostAccountId">, reauth: boolean): NextResponse {
   const verifier = createPkceVerifier();
   const state = createLoginState();
   const response = seeOther(nihoConnectUrl(config.nihoWebOrigin, {
@@ -235,6 +236,8 @@ async function completeNihoLink(request: NextRequest, login: HostLoginState, cod
   catch { return linkBack(login, "unavailable"); }
   // The session ended while the host was at NIHO: sign in again, then bind from 設定.
   if (!session) return failed("expired");
+  // Another tab signed in as someone else meanwhile (a shared browser): nothing is bound to an account that did not ask.
+  if (!login.hostAccountId || session.hostAccountId !== login.hostAccountId) return linkBack(login, "switched");
 
   const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeUtc) => {
     const now = Date.now();

@@ -109,6 +109,7 @@ const loginState = (response: Response) => {
   return decodeLoginState(cookieSealer(state.config.hostSessionSecret, "login"), header.split(";")[0]!.slice(LOGIN_COOKIE.length + 1), Date.now());
 };
 const location = (response: Response) => response.headers.get("location")!;
+const loginStateOf = loginState;
 
 describe("the return pages", () => {
   it("allows 設定 › ログイン情報 with only a provider as a return, and nothing wider", () => {
@@ -130,7 +131,7 @@ describe("binding a NIHO account (設定)", () => {
     expect(to.origin).toBe("https://niho.example.test");
     expect(to.searchParams.get("audience")).toBe("host");
     expect(to.searchParams.get("max_age")).toBe("300");
-    expect(loginState(response)).toMatchObject({ purpose: "link", providerId: "p_1", returnPath: SETTINGS });
+    expect(loginState(response)).toMatchObject({ purpose: "link", providerId: "p_1", returnPath: SETTINGS, hostAccountId: HOST });
     expect(state.identities!.linkNihoIdentity).not.toHaveBeenCalled();
   });
 
@@ -207,6 +208,16 @@ describe("the NIHO round trip of a binding", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect(location(await comeBack())).toBe(`${SETTINGS}&niho=unavailable`);
     expect(errors.mock.calls.flat().join(" ")).not.toContain(NIHO_USER);
+  });
+
+  it("binds only the host account that asked: a session switched to another account meanwhile is refused", async () => {
+    const other = `hst_${"f".repeat(32)}`;
+    const response = await comeBack("", () => state.accounts!.readSession.mockResolvedValue({ ...stored(60_000), hostAccountId: other }));
+    expect(location(response)).toBe(`${SETTINGS}&niho=switched`);
+    expect(state.identities!.linkNihoIdentity).not.toHaveBeenCalled();
+    expect(loginStateOf(await nihoIdentity(post("action=link&providerId=p_1")))).toMatchObject({ hostAccountId: other });
+    // Refused before NIHO is called at all: no code is exchanged, so no connection exists to end.
+    expect(calls).toEqual([]);
   });
 
   it("goes back to 設定 when NIHO denies or fails, and asks for a sign-in when the session ended meanwhile", async () => {

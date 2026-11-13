@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     if (bound !== null) return back("already-linked");
     // The host proves it is them first (the emailed link: nothing is bound yet), then NIHO proves the NIHO account.
     if (stale) return seeOther(await reauthenticationHref(session.hostAccountId, settings, identities));
-    return startNihoLink(providerId);
+    return startNihoLink(providerId, session.hostAccountId);
   }
 
   try {
