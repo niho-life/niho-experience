@@ -19,6 +19,15 @@
 
 preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock-login → ホーム。`?mock=unregistered` は未登録の案内で終わる。
 
+### 設定 › ログイン情報（#595）
+
+ホストアカウントの自分のセッションだけ（`EXPERIENCE_HOST_NIHO_LOGIN_ENABLED` が ON のとき）。「NIHO アカウント」の行に、結び付けの状態（結び付け済み／結び付けていません）、結び付けた日と最後のログインの日（NIHO user ID は出さない）、「NIHO アカウントを結び付ける」、「結び付けを解除する」（開いて確かめてから「解除する」）が出る。フォームは JavaScript なしの POST（`/host/api/niho-identity`、同一 origin だけ）で、結果は 303 で `設定 › ログイン情報` へ戻り、`?niho=` が結果を言葉で出す（`niho-identity.ts`）。
+
+- **結び付け**：30 分以内にログインしたセッションが要る（古いと、メールのリンクで入り直して設定へ戻る。まだ何も結び付いていないので NIHO では入り直せない）。そのうえで NIHO へ送り（PKCE・`audience=host`・`max_age=300`）、戻ったら、開いているセッションのホストアカウントに、いま確かめた NIHO アカウントを結び付ける（`linkNihoIdentity`、証明は「セッションの直近のログイン」と「NIHO の直近のログイン」）。新しいセッションは開かない。NIHO アカウントがほかのホストアカウントに結び付いている（`identity-in-use`）、このホストアカウントに別の NIHO アカウントが付いている（`account-has-identity`）ときは断り、監査に残す。
+- **解除**：30 分以内のログインが要る。メールのリンクが残る間は許す（`EMAIL_SIGN_IN_AVAILABLE`、#598 で撤去を決めるとき false にする。false の間は `last-sign-in-method` で断り、理由を出す）。いまのセッションはそのまま続く。
+- **再ログイン**：受取口座の同意・取り消し、Stripe ダッシュボードを開く、結び付けと解除は、`HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes`（30 分）以内のログインを見る（意味は変えない）。古いとき、結び付いた NIHO アカウントで入るホストは NIHO で入り直す（`/host/auth/login?reauth=1&returnTo=…`、`max_age=300`。戻ると新しいセッションの `authenticated_at` は戻った時刻で、前のセッションは失効する）。結び付けていないホストは、これまでどおりメールのリンク（受取口座）か Stripe 自身のログイン（ダッシュボード）。`max_age` は NIHO の接続 URL の再認証の指定（niho-coliving/niho-app#20305）。NIHO が `auth_time` を返すようになったら、`authenticated_at` を戻った時刻の近似から NIHO の値へ切り替える。
+- 公開の直近ログイン（ADR 0004 §6）は、いまの公開 API にはまだ 30 分の検査が無い。入れるときは同じ判定（`recentlyAuthenticated`）と再ログイン（`reauthenticationHref`）を使う。
+
 結び付けの Store（`HostAccountIdentities`、migration `0083`）は `packages/experience-store/README.md`。1 つの `hst_` に有効な NIHO user ID は 1 つ、同じ NIHO user ID は 1 つの `hst_` だけ。結び付け・解除・拒否は `host_account_identity_events` に残る。設定での結び付け・解除と再ログインは #595、招待リンクと既存 OWNER の移行は #596。
 
 ## 流れ

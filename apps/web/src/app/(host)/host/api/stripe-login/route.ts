@@ -1,5 +1,5 @@
 import { STRIPE_DASHBOARD_URL } from "@/host/payout";
-import { hostStripeLoginUrl } from "@/host/stripe-login-server";
+import { hostStripeLoginUrl, hostStripeReauthHref } from "@/host/stripe-login-server";
 import { config } from "@/lib/config";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { nihoIdOrNull } from "@/lib/host/providers";
@@ -74,6 +74,9 @@ export async function POST(request: Request): Promise<Response> {
   if (!providerId) return noStoreJson({ error: "invalid_input" }, 400);
 
   try {
+    // A host signed in with a bound NIHO account, whose sign-in is too old: NIHO again, then back to 受取口座.
+    const reauth = await hostStripeReauthHref(providerId);
+    if (reauth) return redirectToStripe(reauth);
     const url = await hostStripeLoginUrl(providerId);
     return redirectToStripe(url ?? STRIPE_DASHBOARD_URL);
   } catch (error) {

@@ -4,6 +4,7 @@ import type { PayoutConsentOutcome } from "@/host/payout-account";
 import { config } from "@/lib/config";
 import { experiencePublicationRepository, payoutAccountConsents } from "@/lib/experience/store-server";
 import { nowUtc, readExperienceHostSession, readSmallForm } from "@/lib/host/accounts";
+import { reauthenticationHref } from "@/lib/host/niho-identity-server";
 import { nihoIdOrNull } from "@/lib/host/providers";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { HOST_EMAIL_SIGN_IN_PATH, hostPayoutSettingsPath, withQuery } from "@/lib/host/routes";
@@ -40,8 +41,13 @@ export async function POST(request: NextRequest) {
   let session: Awaited<ReturnType<typeof readExperienceHostSession>>;
   try { session = await readExperienceHostSession(request.cookies.get(ACCOUNT_SESSION_COOKIE)?.value); }
   catch { return back(providerId, "unavailable"); }
-  const signInAgain = seeOther(withQuery(HOST_EMAIL_SIGN_IN_PATH, { reauth: "1", next: hostPayoutSettingsPath(providerId) }));
-  if (!session || !recentlyAuthenticated(session, Date.now(), HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes)) return signInAgain;
+  // Signed out, or the last sign-in is older than 30 minutes: sign in again and come back to 受取口座. A host who signs in
+  // with a bound NIHO account does it at NIHO (the recent sign-in is read from NIHO's); everyone else by the emailed link.
+  const signInAgain = withQuery(HOST_EMAIL_SIGN_IN_PATH, { reauth: "1", next: hostPayoutSettingsPath(providerId) });
+  if (!session) return seeOther(signInAgain);
+  if (!recentlyAuthenticated(session, Date.now(), HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes)) {
+    return seeOther(await reauthenticationHref(session.hostAccountId, hostPayoutSettingsPath(providerId)).catch(() => signInAgain));
+  }
 
   const repository = experiencePublicationRepository();
   const consents = payoutAccountConsents();

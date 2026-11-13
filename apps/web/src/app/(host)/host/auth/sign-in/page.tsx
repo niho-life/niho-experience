@@ -83,7 +83,9 @@ export default async function HostEmailSignInPage({ searchParams }: { searchPara
       <p className="mt-3 text-ink-soft">登録しているメールアドレスに、ログインのリンクをお送りします。パスワードはありません。</p>
       {reauth ? (
         <p role="status" className="mt-4 rounded-xl bg-info-pale p-3 text-ink">
-          受取口座の同意と取り消しには、{HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes} 分以内のログインが必要です。もう一度ログインしてください。リンクを開くと、設定の「受取口座」に戻ります。
+          {next?.includes("section=account")
+            ? <>NIHO アカウントの結び付けと解除には、{HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes} 分以内のログインが必要です。もう一度ログインしてください。リンクを開くと、設定の「ログイン情報」に戻ります。</>
+            : <>受取口座の同意と取り消しには、{HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes} 分以内のログインが必要です。もう一度ログインしてください。リンクを開くと、設定の「受取口座」に戻ります。</>}
         </p>
       ) : null}
       {error ? <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-warn">{error}</p> : null}

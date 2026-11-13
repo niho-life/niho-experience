@@ -48,6 +48,15 @@ export const NIHO_CONNECT_AUDIENCE_PARAM = "audience";
 export type NihoConnectAudience = "host";
 
 /**
+ * How recent a sign-in a step-up asks NIHO for (`max_age`, in seconds; NIHO accepts 60 to 86400): a re-login for a sensitive
+ * change, and the binding of a NIHO account. The identity answer carries no `auth_time` yet, so the return takes the time
+ * of the return as the sign-in; asking for this window bounds how far back the real sign-in can be. Five minutes covers a
+ * person who signs in with an app switch, and keeps the 30-minute rule (HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes)
+ * from stretching past a few minutes. Replace the approximation with NIHO's `auth_time` when it is returned.
+ */
+export const NIHO_REAUTHENTICATION_MAX_AGE_SECONDS = 300;
+
+/**
  * NIHO's confirmation page for this site. `maxAgeSeconds` asks NIHO to sign the person in again when their last sign-in
  * is older (`max_age`, 60 to 86400 seconds; niho-coliving/niho-app#20305): a sensitive change's re-authentication (#595).
  */

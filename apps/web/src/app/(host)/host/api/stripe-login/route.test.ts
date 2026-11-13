@@ -5,7 +5,7 @@ const state = vi.hoisted(() => ({
   hostStripeLoginUrl: vi.fn(async () => state.url),
 }));
 
-vi.mock("@/host/stripe-login-server", () => ({ hostStripeLoginUrl: (...args: unknown[]) => state.hostStripeLoginUrl(...args as []) }));
+vi.mock("@/host/stripe-login-server", () => ({ hostStripeLoginUrl: (...args: unknown[]) => state.hostStripeLoginUrl(...args as []), hostStripeReauthHref: async () => null }));
 vi.mock("@/lib/config", () => ({ config: { hostConsoleEnabled: true, apiMode: "http" } }));
 vi.mock("@/lib/host/relay", () => ({
   mutationFromSameOrigin: (_method: string, headers: Headers, origin: string) => headers.get("origin") === origin && headers.get("sec-fetch-site") === "same-origin",
