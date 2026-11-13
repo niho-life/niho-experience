@@ -1,40 +1,32 @@
 import type { Metadata } from "next";
-import { HomeViewV1, type ExperienceCardModelV1, type HomeViewModelV1 } from "@niho/experience-presentation/v1";
-import { EmptyResults } from "@/components/States";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
-import { CardDates, type CardDatesSource } from "@/components/CardDates";
+import type { CardDatesSource } from "@/components/CardDates";
+import { ExperienceCard } from "@/components/ExperienceCard";
+import { JapaneseHero } from "@/components/ja-home/JapaneseHero";
+import { ConsultBand, HostBand, JapaneseHeroCopy, PicksHeading } from "@/components/ja-home/JapaneseHomeSections";
 import { guestBookingSources } from "@/lib/guest-booking-source";
-import { HomeFinder } from "@/components/HomeFinder";
-import { InquiryBand } from "@/components/InquiryBand";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
-import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { getApi } from "@/lib/api";
 import { config } from "@/lib/config";
 import { listPublicationSummaries } from "@/lib/experience/publication-site";
 import { buildCardModels } from "@/lib/card-model";
-import type { CardModel } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
-import { upcomingDays } from "@/lib/date-filter";
-import { imageAlt } from "@/lib/experience-copy";
+import { JA_HOME_HAND, JA_HOME_HERO_PHOTOS, JA_HOME_LEAD, JA_HOME_TITLE, pickHomeExperiences } from "@/lib/ja-home";
 import { assertSameJapaneseRelease, getJapaneseCatalog, getJapaneseCopy } from "@/lib/localized-content";
 import { japaneseStaticMetadata } from "@/lib/locale-metadata";
-import { BANNER_VIDEO, HERO_PHOTO, HOST_BAND_VIDEO, POSTCARDS } from "@/lib/site-media";
 import { getReviewSummaries } from "@/lib/journey";
 import { withReviewLines } from "@/lib/reviews-ui";
-
-const cardModel = (card: CardModel): ExperienceCardModelV1 => ({
-  ...card,
-  href: `/ja/experiences/${card.slug}`,
-  cover: card.cover ? { src: card.cover.url, alt: imageAlt(card.cover, card.title) } : null,
-  face: { ...card.face, image: card.face.image ? { src: card.face.image.url, alt: imageAlt(card.face.image, card.face.name) } : null },
-  priceSuffix: " / 大人",
-});
 
 export async function generateMetadata(): Promise<Metadata> {
   try { return await japaneseStaticMetadata("home"); }
   catch { return { title: "Japanese version unavailable", robots: { index: false, follow: false } }; }
 }
 
+/**
+ * 日本語のトップ（#563）。英語のトップの訳ではなく、日本語サイト独自の構成：題と写真の入れ替え、おすすめの体験、相談、体験を載せる。
+ * さがす欄・カテゴリー・どんな日に（#529）、街の人（#564）、読みもの（#154）は、それぞれが main に入ってから、ここに足す
+ * （空の枠は見せない）。
+ */
 export default async function JapaneseHome() {
   let data;
   try {
@@ -42,27 +34,23 @@ export default async function JapaneseHome() {
     const catalog = config.apiMode === "http" ? await listPublicationSummaries("kamakura", "ja") : await getJapaneseCatalog();
     if (!Array.isArray(catalog)) assertSameJapaneseRelease(copy.releaseId, catalog);
     const summaries = Array.isArray(catalog) ? catalog : catalog.experiences;
-    const details = await loadDetails(api, summaries, true, "ja", copy.releaseId);
-    const plainCards = buildCardModels(summaries, details, false, "ja", copy.copy);
+    const picked = pickHomeExperiences(summaries);
+    const details = await loadDetails(api, picked, true, "ja", copy.releaseId);
+    const plainCards = buildCardModels(picked, details, false, "ja", copy.copy);
     const cards = withReviewLines(plainCards, await getReviewSummaries(plainCards.map((card) => card.slug)), "ja");
-    data = { copy, cards };
+    data = { cards, total: summaries.length };
   } catch { return <JapaneseUnavailable />; }
-  const { copy, cards } = data;
+  const { cards, total } = data;
   const cardDates: CardDatesSource = { kind: "read", preview: false, sources: await guestBookingSources(cards.map((card) => card.slug)) };
-  const model: HomeViewModelV1 = {
-    hero: { src: HERO_PHOTO.src, alt: HERO_PHOTO.alt, position: HERO_PHOTO.position },
-    finder: <HomeFinder days={upcomingDays(new Date(), 14, "ja")} />,
-    // Editorial theme labels are English-only until they join the approved copy release.
-    themes: [],
-    cardsEyebrow: `${cards.length}件`,
-    cards: cards.map((card) => ({ model: cardModel(card), dates: <CardDates slug={card.slug} scheduleLabel={card.scheduleLabel} source={cardDates} /> })),
-    empty: <EmptyResults clearHref={null} />,
-    strips: [],
-    stripsEyebrow: "",
-    banner: { src: BANNER_VIDEO.src, poster: BANNER_VIDEO.poster },
-    figures: [{ value: String(cards.length), unit: copy.copy.text(cards.length === 1 ? "home.wayToStartUnit" : "home.waysToStartUnit"), note: copy.copy.text("home.hostedNote") }],
-    postcards: POSTCARDS.map((postcard) => ({ id: postcard.src, image: { src: postcard.src, alt: postcard.alt, position: postcard.position }, place: postcard.place, rotate: postcard.rotate })),
-    hostBand: { src: HOST_BAND_VIDEO.src, poster: HOST_BAND_VIDEO.poster },
-  };
-  return <><HomeViewV1 model={model} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy.copy} />{groupInquiryOpen() ? <InquiryBand /> : null}</>;
+  return <>
+    <JapaneseHero photos={JA_HOME_HERO_PHOTOS}><JapaneseHeroCopy title={JA_HOME_TITLE} hand={JA_HOME_HAND} lead={JA_HOME_LEAD} /></JapaneseHero>
+    {cards.length ? <section aria-labelledby="picks" className="container-page mt-14 sm:mt-16">
+      <div id="picks"><PicksHeading total={total} /></div>
+      <div className="mt-7 grid gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
+        {cards.map((card, index) => <ExperienceCard key={card.slug} card={card} variant="home" priority={index < 3} dates={cardDates} />)}
+      </div>
+    </section> : null}
+    {groupInquiryOpen() ? <ConsultBand /> : null}
+    <HostBand />
+  </>;
 }
