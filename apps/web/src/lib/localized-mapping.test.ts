@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { languageSwitchTarget } from "./locale-links";
-import { experienceCounterparts, mapJapaneseExperiences, pairLanguages, staticPair } from "./localized-mapping";
+import { experienceCounterparts, mapJapaneseExperiences, mapPublicationJapaneseExperiences, pairLanguages, staticPair } from "./localized-mapping";
+import { sitemapEntries } from "./sitemap-entries";
 
 const catalog = (releaseId: string, ...slugs: string[]) => ({ releaseId, experiences: slugs.map((slug) => ({ slug })) });
 const detail = (slug: string, releaseId: string, bookingReady: boolean) => ({
@@ -13,8 +14,8 @@ const page = (sourcePath: string, path: string, indexable = true, seoIndexable =
 describe("experience mapping (owner decision 2026-10-31)", () => {
   it("pairs each slug of the same release's Japanese catalog with /ja/experiences/{slug}", () => {
     expect([...mapJapaneseExperiences("release-1", catalog("release-1", "tea-ceremony", "zen-walk")).values()]).toEqual([
-      { slug: "tea-ceremony", englishPath: "/experiences/tea-ceremony", japanesePath: "/ja/experiences/tea-ceremony", bookingReady: false },
-      { slug: "zen-walk", englishPath: "/experiences/zen-walk", japanesePath: "/ja/experiences/zen-walk", bookingReady: false },
+      { slug: "tea-ceremony", englishPath: "/experiences/tea-ceremony", japanesePath: "/ja/experiences/tea-ceremony", bookingReady: false, japaneseOnly: false },
+      { slug: "zen-walk", englishPath: "/experiences/zen-walk", japanesePath: "/ja/experiences/zen-walk", bookingReady: false, japaneseOnly: false },
     ]);
   });
 
@@ -78,5 +79,46 @@ describe("static pairs and hreflang", () => {
     expect(pairLanguages("https://e.example/experiences/tea", "https://e.example/ja/experiences/tea")).toEqual({
       en: "https://e.example/experiences/tea", ja: "https://e.example/ja/experiences/tea", "x-default": "https://e.example/experiences/tea",
     });
+  });
+});
+
+// 日本語を原文にした商品（#59）：英語のページが無いので、言語切替・hreflang の組にならず、sitemap には日本語の URL だけが載る。
+describe("Japanese-only experiences (#59)", () => {
+  const sale = { offers: [{}] };
+  const items = [
+    { publication: { slug: "ja-first", japanese: {}, japaneseOnly: true }, saleTerms: sale },
+    { publication: { slug: "ja-first-no-sale", japanese: {}, japaneseOnly: true }, saleTerms: null },
+    { publication: { slug: "translated", japanese: {}, japaneseOnly: false }, saleTerms: sale },
+  ];
+  const mapping = mapPublicationJapaneseExperiences(items, true);
+
+  it("keeps a Japanese-only experience that can be sold, marked, and drops one with no sale", () => {
+    expect(mapping.get("ja-first")).toEqual({ slug: "ja-first", englishPath: "/experiences/ja-first", japanesePath: "/ja/experiences/ja-first", bookingReady: true, japaneseOnly: true });
+    expect(mapping.has("ja-first-no-sale")).toBe(false);
+    expect(mapping.get("translated")?.japaneseOnly).toBe(false);
+  });
+
+  it("gives it no language-switch row, while a translated experience keeps its pair", () => {
+    const rows = experienceCounterparts(mapping);
+    expect(rows["/experiences/ja-first"]).toBeUndefined();
+    expect(rows["/experiences/ja-first/book"]).toBeUndefined();
+    expect(rows["/experiences/translated"]).toBe("/ja/experiences/translated");
+    expect(languageSwitchTarget("/ja/experiences/ja-first", "", rows)).toBeNull();
+  });
+
+  it("lists only the Japanese URL in the sitemap, with no hreflang, and never an English URL", () => {
+    const entries = sitemapEntries({
+      siteUrl: "https://experience.example",
+      experiences: [{ slug: "translated", updatedAt: "2026-11-01T00:00:00.000Z" }],
+      guides: [],
+      japanese: { pages: [], experiences: mapping },
+    });
+    const urls = entries.map((entry) => entry.url);
+    expect(urls).toContain("https://experience.example/ja/experiences/ja-first");
+    expect(urls).not.toContain("https://experience.example/experiences/ja-first");
+    const own = entries.find((entry) => entry.url === "https://experience.example/ja/experiences/ja-first");
+    expect(own?.alternates).toBeUndefined();
+    const translated = entries.find((entry) => entry.url === "https://experience.example/experiences/translated");
+    expect(translated?.alternates?.languages?.ja).toBe("https://experience.example/ja/experiences/translated");
   });
 });

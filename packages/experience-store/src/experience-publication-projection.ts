@@ -1,6 +1,7 @@
 import {
   englishPublicationManuscriptOf,
   hasPublicationManuscriptKeys,
+  isJapaneseOnlyContent,
   projectPublicationFaq,
   publicationContentFingerprint,
   publicationManuscriptFingerprint,
@@ -73,6 +74,11 @@ export interface PublicExperiencePublication {
     readonly timeline: readonly PublicExperiencePublicationTimelineItem[];
     readonly faq: readonly ExperiencePublicationFaqItem[];
   } | null;
+  /**
+   * 日本語を原文にした商品（#59）。true のとき `content`・`publicTitle` の英語側は原稿ではなく（空、商品名は日本語の
+   * 商品名と同じ）、英語の一覧・詳細・sitemap・hreflang・言語切替・予約には出さない。`japanese` が唯一の原稿。
+   */
+  readonly japaneseOnly: boolean;
   readonly publishedAtUtc: string;
 }
 
@@ -219,9 +225,11 @@ function projectJapaneseManuscript(
 ): PublicExperiencePublication["japanese"] {
   const japanese = record(content.ja);
   const translation = record(content.translation);
-  if (!japanese || !translation || typeof translation.sourceFingerprint !== "string"
+  const japaneseOnly = isJapaneseOnlyContent(content);
+  // 日本語のみの商品は日本語が原文なので、英語との照合（translation）は要らない。
+  if (!japanese || (!japaneseOnly && (!translation || typeof translation.sourceFingerprint !== "string"
       || translation.confirmedSourceFingerprint !== translation.sourceFingerprint
-      || typeof translation.confirmedEnglishFingerprint !== "string") return null;
+      || typeof translation.confirmedEnglishFingerprint !== "string"))) return null;
   if (!hasPublicationManuscriptKeys(japanese)) return null;
   const title = text(japanese.title, false);
   const lead = text(japanese.lead, false);
@@ -235,9 +243,13 @@ function projectJapaneseManuscript(
   const timeline = projectTimeline(japanese.timeline);
   const faq = projectPublicationFaq(japanese.faq);
   if (!title || !lead || !description || !language || !highlights || !included || !notIncluded || !knowBeforeYouGo || !notSuitableFor || !timeline || !faq) return null;
-  const sourceFingerprint = publicationManuscriptFingerprint(japanese);
-  const englishFingerprint = publicationManuscriptFingerprint(englishPublicationManuscriptOf(englishTitle, content));
-  if (sourceFingerprint !== translation.sourceFingerprint || englishFingerprint !== translation.confirmedEnglishFingerprint) return null;
+  if (japaneseOnly) {
+    if (title !== englishTitle) return null;
+  } else {
+    const sourceFingerprint = publicationManuscriptFingerprint(japanese);
+    const englishFingerprint = publicationManuscriptFingerprint(englishPublicationManuscriptOf(englishTitle, content));
+    if (sourceFingerprint !== translation!.sourceFingerprint || englishFingerprint !== translation!.confirmedEnglishFingerprint) return null;
+  }
   const localizedTimeline = timeline.map((item) => {
     if (item.photoIndex === null) return item;
     const photoIndex = galleryPositionBySourcePosition.get(item.photoIndex);
@@ -340,7 +352,8 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   const publicTitle = text(row.public_title, false);
   const storedContent = record(row.content);
   if (!storedContent) return null;
-  const source = reviewedAdminContent(row, storedContent);
+  const japaneseOnly = isJapaneseOnlyContent(storedContent);
+  const source = japaneseOnly ? storedContent : reviewedAdminContent(row, storedContent);
   let manuscript = projectPublicExperiencePublicationManuscript(source);
   const currency = typeof row.currency === "string" && /^[A-Z]{3}$/.test(row.currency) ? row.currency : null;
   const unitAmount = safeInteger(row.unit_amount);
@@ -357,8 +370,10 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   manuscript = remapPhotoReferences(manuscript, source, media.galleryPositionBySourcePosition);
   if (!manuscript) return null;
   const japanese = projectJapaneseManuscript(row, source, publicTitle, media.galleryPositionBySourcePosition);
+  // 日本語のみの商品は、日本語の原稿が読めなければ公開として成立しない（英語で補わない）。
+  if (japaneseOnly && !japanese) return null;
   return {
     slug, publicTitle, ...manuscript, currency, unitAmount, sellerDisplayName, providerPublicName, providerKind,
-    photos: media.photos, providerPhoto: providerMedia.providerPhoto, businessLogo: providerMedia.businessLogo, japanese, publishedAtUtc,
+    photos: media.photos, providerPhoto: providerMedia.providerPhoto, businessLogo: providerMedia.businessLogo, japanese, japaneseOnly, publishedAtUtc,
   };
 }

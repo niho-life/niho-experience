@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adminHomePath, adminSections, isAdminSectionActive, NO_ADMIN_SECTION_FLAGS, type AdminSectionFlags } from "./sections";
+import { adminBackLink, adminHomePath, adminSections, isAdminSectionActive, NO_ADMIN_SECTION_FLAGS, type AdminSectionFlags } from "./sections";
 
 const ALL: AdminSectionFlags = { bookingSupport: true, siteBookings: true, notifications: true, inquiries: true, products: true, operators: true, preparations: true, channels: true };
 
@@ -39,5 +39,15 @@ describe("isAdminSectionActive", () => {
     expect(isAdminSectionActive("/admin/bookings", "/admin/bookings")).toBe(true);
     expect(isAdminSectionActive("/admin/bookings/abc", "/admin/bookings")).toBe(true);
     expect(isAdminSectionActive("/admin/bookings-extra", "/admin/bookings")).toBe(false);
+  });
+});
+
+describe("adminBackLink", () => {
+  it("is 提供者 on the page of one provider only", () => {
+    expect(adminBackLink("/admin/products/provider-sample-kitchen")).toEqual({ href: "/admin/products", label: "提供者" });
+    expect(adminBackLink("/admin/products/provider-sample-kitchen/")).not.toBeNull();
+    expect(adminBackLink("/admin/products")).toBeNull();
+    expect(adminBackLink("/admin/products/provider-sample-kitchen/new")).toBeNull();
+    expect(adminBackLink("/admin/operators")).toBeNull();
   });
 });

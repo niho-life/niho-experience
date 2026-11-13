@@ -18,6 +18,8 @@ import { publicationCanPublish, publicationNextAction } from "./publication-work
 import { canonicalPublicationJson as canonicalJson, confirmPublicationEnglish, englishIsConfirmed, englishPublicationManuscript, liveEnglishStaleNote } from "./publication-confirmation";
 import { photoRightsConfirmed, type PhotoRightsConfirmation } from "./photo-rights";
 import { reapplyProviderMediaEdits } from "./publication-conflict";
+import { HostBookingLinkCopy } from "./HostBookingLinkCopy";
+import { providerBookingLinkAvailable } from "@/lib/provider-booking-link";
 import { PUBLICATION_FAQ_LIMITS, publicationContentFaqProblem, publicationFaqProblem, publicationFaqRows, withPublicationFaq, type PublicationFaqRow } from "./publication-faq";
 
 type Status = "DRAFT" | "PUBLISHED" | "STOPPED" | "RESTART_REQUIRED" | "SUSPENDED";
@@ -80,6 +82,8 @@ type Props = {
   apiBase?: string;
   experiencesBase?: string;
   createHref?: string;
+  /** 予約リンクをコピー (#531): the public site's origin the copied link points to; without it the button is not shown. */
+  publicSiteOrigin?: string;
 };
 
 const blankContent = {
@@ -111,7 +115,7 @@ const BLOCKER_COPY: Record<string, string> = {
   CONSENT_OUTDATED: "掲載条件が更新されました。最新の条件を確認して公開してください。",
   FEE_SETTINGS_REQUIRED: "運営側の手数料設定が完了するまで公開できません。",
   SUPPORT_CONSENT_REQUIRED: "NIHOサポートの利用範囲と合計手数料を確認し、現在の条件に同意してください。",
-  MANUSCRIPT_REQUIRED: "日本語原稿と確認済みの英語原稿を完成させてください。",
+  MANUSCRIPT_REQUIRED: "日本語原稿と確認済みの英語原稿を完成させてください（日本語のみで公開する場合は、日本語原稿を完成させてください）。",
   OPERATIONS_SUSPENDED: "運営停止中のため再開できません。",
   OWNER_NOT_CURRENT: "最新のOWNER権限を確認できません。ログインし直してください。",
   PAYMENT_REUSE_CONSENT_REQUIRED: "受取口座で売上を受け取ることへの同意を確認してください。",
@@ -243,6 +247,7 @@ export function HostPublicationWorkspace({
   apiBase = "/host/api/products",
   experiencesBase = "/host/experiences",
   createHref = "/host/experiences/new",
+  publicSiteOrigin,
 }: Props) {
   const router = useRouter();
   const adminDraft = mode === "admin-draft";
@@ -309,7 +314,19 @@ export function HostPublicationWorkspace({
   function updateJapanese(key: keyof LocaleManuscript, value: string | string[] | TimelineItem[]) {
     const next = { ...japaneseSourceRef.current, [key]: value } as LocaleManuscript;
     japaneseSourceRef.current = next;
+    // 日本語のみの商品は、公開上の商品名＝日本語の商品名（英語の商品名は無い）。
+    if (key === "title" && typeof value === "string" && content.japaneseOnly === true) setTitle(value);
     setContent((current) => ({ ...current, ja: next, translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } }));
+  }
+
+  /** 「日本語のみで公開する」（#59）。英語の原稿・確認が要らなくなり、英語のページは作られない。 */
+  function changeJapaneseOnly(on: boolean) {
+    if (on) setTitle(japaneseManuscript(content).title);
+    else setTitle(englishDraftRef.current.title);
+    setContent((current) => {
+      const rest = Object.fromEntries(Object.entries(current).filter(([key]) => key !== "japaneseOnly"));
+      return { ...rest, ...(on ? { japaneseOnly: true } : {}), translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } };
+    });
   }
 
   function updateFaq(locale: "en" | "ja", rows: PublicationFaqRow[]) {
@@ -945,7 +962,7 @@ export function HostPublicationWorkspace({
   if (!productId) return <HostPageBody><PageHead title={adminDraft ? "代理登録の商品" : "体験"}>{bookingGuideHref ? <Link className={consoleButtonClass("secondary")} href={bookingGuideHref}>予約後の集合案内</Link> : null}</PageHead><section className={`${HOST_SURFACE} p-4 md:p-6`}>
     <div className="mb-4 flex items-center justify-between gap-3"><p className="text-ink-soft">{adminDraft ? "事務局が作成した、一度も公開していない下書き" : "あなたが販売する体験"}</p><Link className={consoleButtonClass("primary")} href={createHref}>{adminDraft ? "商品を代理登録" : "体験を作成"}</Link></div>
     {error ? <p role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : null}
-    {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={`${experiencesBase}/${encodeURIComponent(item.id)}`}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p></div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}
+    {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={`${experiencesBase}/${encodeURIComponent(item.id)}`}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p>{!adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) ? <HostBookingLinkCopy slug={item.draft.slug} origin={publicSiteOrigin} /> : null}</div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}
   </section></HostPageBody>;
 
   if (!product) return <HostPageBody><PageHead title="体験を読み込み中" />{error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : <p>商品を読み込んでいます…</p>}<button type="button" className={consoleButtonClass("secondary")} onClick={() => void refresh().catch((reason) => setError(reason instanceof Error ? reason.message : "読み込みに失敗しました。"))}>再読み込み</button></HostPageBody>;
@@ -958,7 +975,7 @@ export function HostPublicationWorkspace({
   const canPublish = !conflictProduct && publicationCanPublish({ dirty, blockers: savedBlockers, suspended: product.status === "SUSPENDED" });
   const nextAction = publicationNextAction({ dirty, blockers: savedBlockers, published: product.status === "PUBLISHED" && !product.publicationNeedsUpdate });
   // A pending draft may have a different slug from the current publication.
-  const publicHref = product.status === "PUBLISHED" && !product.publicationNeedsUpdate ? `/experiences/${encodeURIComponent(product.draft.slug)}` : null;
+  const publicHref = product.status === "PUBLISHED" && !product.publicationNeedsUpdate ? `${product.draft.content.japaneseOnly === true ? "/ja" : ""}/experiences/${encodeURIComponent(product.draft.slug)}` : null;
   const nextActionControl = adminDraft
     ? (dirty ? <button type="button" disabled={busy || !!conflictProduct} className={consoleButtonClass("primary")} onClick={() => void saveAll()}>入力を保存</button>
       : !product.adminEnglishReview?.reviewed ? <button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void confirmAdminEnglish()}>事務局として英語原稿を確認</button>
@@ -1061,7 +1078,8 @@ export function HostPublicationWorkspace({
       knowBeforeYouGo: lines(content.knowBeforeYouGo),
       notSuitableFor: lines(content.notSuitableFor),
     };
-    const localeIsJapanese = editorLocale === "ja";
+    const japaneseOnly = content.japaneseOnly === true;
+    const localeIsJapanese = editorLocale === "ja" || japaneseOnly;
     const localeField = (key: "title" | "lead" | "description" | "language", jaLabel: string, enLabel: string, rows = 0) => {
       const value = localeIsJapanese ? japanese[key] : english[key];
       const update = (next: string) => {
@@ -1108,7 +1126,8 @@ export function HostPublicationWorkspace({
       {notice ? <p role="status" className="mb-3 rounded-xl bg-green-50 p-3 text-green-900">{notice}</p> : null}
       {product.status === "SUSPENDED" ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950">運営停止中です。入力と下書きは保存できますが、再開は運営の停止解除後に行えます。</p> : null}
     </>;
-    const languageSwitch = <div className="flex flex-wrap items-center justify-between gap-3">
+    const japaneseOnlyToggle = <label className="flex items-start gap-2 rounded-xl border border-line bg-sand/40 p-4 text-sm"><input type="checkbox" className="mt-1" checked={japaneseOnly} disabled={busy || !!conflictProduct} onChange={(event) => changeJapaneseOnly(event.target.checked)} /><span><b>日本語のみで公開する</b><span className="block text-ink-soft">英語の原稿・確認は要りません。日本語のページ（/ja）にだけ載り、英語のページ・英語の一覧・英語の検索結果には出ません。あとから英語を足したいときは事務局に連絡してください。日本語サイトが有効な環境でだけ保存できます。</span></span></label>;
+    const languageSwitch = japaneseOnly ? <p className="text-sm text-ink-soft">日本語の原稿だけを編集します。公開上の商品名は日本語の商品名と同じになります。</p> : <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="inline-flex rounded-xl border border-line bg-white p-1" role="group" aria-label="原稿の言語">
         <button type="button" aria-pressed={localeIsJapanese} className={`min-h-10 rounded-lg px-4 text-sm font-bold ${localeIsJapanese ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale("ja")}>日本語</button>
         <button type="button" aria-pressed={!localeIsJapanese} className={`min-h-10 rounded-lg px-4 text-sm font-bold ${!localeIsJapanese ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale("en")}>英語を確認</button>
@@ -1155,6 +1174,7 @@ export function HostPublicationWorkspace({
       </details>
     </section>;
     const pageSections = <div id="publication-page-panel" className="space-y-4">
+      {japaneseOnlyToggle}
       {languageSwitch}
       {translationControls}
       {photoSection}
@@ -1244,7 +1264,7 @@ export function HostPublicationWorkspace({
     {product.status === "SUSPENDED" ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950">運営停止中です。入力と下書きは保存できますが、再開は運営の停止解除後に行えます。</p> : null}
     <form id="product-editor" aria-busy={busy} onSubmit={(event) => void saveAll(event)} className="scroll-mt-24 space-y-4">
       <fieldset disabled={busy} className="space-y-4 border-0 p-0">
-      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`}><h2 className="text-base font-extrabold">商品情報・英語原稿</h2><Field label="公開URL用slug" value={slug} onChange={setSlug} /><Field label="商品名（英語・公開用）" value={title} onChange={updateEnglishTitle} /><Field label="大人1人の基本料金（税込・円）" value={unitAmount} onChange={setUnitAmount} /><p className="text-sm text-muted">販売者表示: {product.sellerDisplayName || "未設定"}</p>{textField("lead", "紹介文（英語）", typeof content.lead === "string" ? content.lead : "", 2)}{textField("description", "体験の説明（英語）", typeof content.description === "string" ? content.description : "", 7)}<Field label="当日の言語（英語）" value={isRecord(content.facts) && typeof content.facts.language === "string" ? content.facts.language : ""} onChange={(next) => updateEnglishContent("facts", { ...(isRecord(content.facts) ? content.facts : {}), language: next })} />{listField("highlights", "体験の特徴（英語・1行ごと）")}{listField("included", "料金に含まれるもの（英語・1行ごと）")}{listField("notIncluded", "料金に含まれないもの（英語・1行ごと）")}{listField("knowBeforeYouGo", "参加前に知っておくこと（英語・1行ごと）")}{listField("notSuitableFor", "参加に向かない条件（英語・1行ごと）")}<div className="rounded-xl border border-line bg-sand/40 p-4"><h3 className="font-extrabold">日本語原稿・英語翻訳</h3><p className="mt-1 text-sm text-ink-soft">{adminDraft ? "日本語と手入力の英語原稿を照合し、OWNER本人の確認とは区別された事務局レビューとして確定します。" : "英語は手入力でも翻訳案からでも準備できます。日英の内容を照合し、英語原稿を確認してから保存してください。"}</p><div className="mt-4 space-y-4"><Field label="商品名（日本語）" value={japaneseManuscript(content).title} onChange={(next) => updateJapanese("title", next)} /><Field label="紹介文（日本語）" value={japaneseManuscript(content).lead} multiline rows={2} onChange={(next) => updateJapanese("lead", next)} /><Field label="体験の説明（日本語）" value={japaneseManuscript(content).description} multiline rows={5} onChange={(next) => updateJapanese("description", next)} /><Field label="当日の言語（日本語）" value={japaneseManuscript(content).language} onChange={(next) => updateJapanese("language", next)} /><Field label="特徴（日本語・1行ごと）" value={japaneseManuscript(content).highlights.join("\n")} multiline rows={3} onChange={(next) => updateJapanese("highlights", next.split("\n").filter(Boolean))} /><Field label="含まれるもの（日本語・1行ごと）" value={japaneseManuscript(content).included.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("included", next.split("\n").filter(Boolean))} /><Field label="含まれないもの（日本語・1行ごと）" value={japaneseManuscript(content).notIncluded.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("notIncluded", next.split("\n").filter(Boolean))} /><Field label="参加前の注意（日本語・1行ごと）" value={japaneseManuscript(content).knowBeforeYouGo.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("knowBeforeYouGo", next.split("\n").filter(Boolean))} /><Field label="参加に向かない条件（日本語・1行ごと）" value={japaneseManuscript(content).notSuitableFor.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("notSuitableFor", next.split("\n").filter(Boolean))} />{!adminDraft ? <><div className="flex flex-wrap gap-2"><button type="button" disabled={translationBusy || busy} className={consoleButtonClass("secondary")} onClick={() => void generateEnglish()}>{translationBusy ? "翻訳中…" : "日本語から英語案を作成"}</button><button type="button" disabled={translationBusy || busy || englishIsConfirmed(content.translation)} className={consoleButtonClass("secondary")} onClick={confirmEnglish}>英語原稿を確認</button></div><p className="text-xs text-muted">{englishIsConfirmed(content.translation) ? "英語原稿を確認済み" : "未確認の英語原稿は公開できません。日本語を編集すると確認状態が解除されます。"}</p>{liveEnglishStaleNote(product.status, englishIsConfirmed(content.translation)) ? <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-950">{liveEnglishStaleNote(product.status, englishIsConfirmed(content.translation))}</p> : null}</> : <><button type="button" disabled={busy || dirty || product.adminEnglishReview?.reviewed === true} className={consoleButtonClass("secondary")} onClick={() => void confirmAdminEnglish()}>事務局として英語原稿を確認</button><p className="text-xs text-muted">{product.adminEnglishReview?.reviewed ? "現在の保存版の日英fingerprintを事務局レビューとして記録済みです。" : "保存後、事務局担当者が日英原稿を照合して確認してください。OWNER本人の確認としては記録されません。"}</p></>}</div></div><Field label="集合場所の公開区分" value={String(content.meetingPointDisclosure ?? "AFTER_BOOKING")} onChange={(next) => setContent((current) => ({ ...current, meetingPointDisclosure: next === "PUBLIC" ? "PUBLIC" : "AFTER_BOOKING" }))} /><Field label="予約前に公開する集合概要" value={typeof content.meetingOverview === "string" ? content.meetingOverview : ""} multiline rows={3} onChange={(next) => updateContent("meetingOverview", next || null)} /></section>
+      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`}><h2 className="text-base font-extrabold">商品情報・英語原稿</h2><label className="flex items-start gap-2 rounded-xl border border-line bg-sand/40 p-4 text-sm"><input type="checkbox" className="mt-1" checked={content.japaneseOnly === true} disabled={busy} onChange={(event) => changeJapaneseOnly(event.target.checked)} /><span><b>日本語のみで公開する</b><span className="block text-ink-soft">英語の原稿は作らず、日本語のページ（/ja）にだけ載せます。公開上の商品名は日本語の商品名と同じになります。</span></span></label><Field label="公開URL用slug" value={slug} onChange={setSlug} />{content.japaneseOnly === true ? null : <Field label="商品名（英語・公開用）" value={title} onChange={updateEnglishTitle} />}<Field label="大人1人の基本料金（税込・円）" value={unitAmount} onChange={setUnitAmount} /><p className="text-sm text-muted">販売者表示: {product.sellerDisplayName || "未設定"}</p>{content.japaneseOnly === true ? null : <>{textField("lead", "紹介文（英語）", typeof content.lead === "string" ? content.lead : "", 2)}{textField("description", "体験の説明（英語）", typeof content.description === "string" ? content.description : "", 7)}<Field label="当日の言語（英語）" value={isRecord(content.facts) && typeof content.facts.language === "string" ? content.facts.language : ""} onChange={(next) => updateEnglishContent("facts", { ...(isRecord(content.facts) ? content.facts : {}), language: next })} />{listField("highlights", "体験の特徴（英語・1行ごと）")}{listField("included", "料金に含まれるもの（英語・1行ごと）")}{listField("notIncluded", "料金に含まれないもの（英語・1行ごと）")}{listField("knowBeforeYouGo", "参加前に知っておくこと（英語・1行ごと）")}{listField("notSuitableFor", "参加に向かない条件（英語・1行ごと）")}</>}<div className="rounded-xl border border-line bg-sand/40 p-4"><h3 className="font-extrabold">{content.japaneseOnly === true ? "日本語原稿" : "日本語原稿・英語翻訳"}</h3><p className="mt-1 text-sm text-ink-soft">{adminDraft ? "日本語と手入力の英語原稿を照合し、OWNER本人の確認とは区別された事務局レビューとして確定します。" : "英語は手入力でも翻訳案からでも準備できます。日英の内容を照合し、英語原稿を確認してから保存してください。"}</p><div className="mt-4 space-y-4"><Field label="商品名（日本語）" value={japaneseManuscript(content).title} onChange={(next) => updateJapanese("title", next)} /><Field label="紹介文（日本語）" value={japaneseManuscript(content).lead} multiline rows={2} onChange={(next) => updateJapanese("lead", next)} /><Field label="体験の説明（日本語）" value={japaneseManuscript(content).description} multiline rows={5} onChange={(next) => updateJapanese("description", next)} /><Field label="当日の言語（日本語）" value={japaneseManuscript(content).language} onChange={(next) => updateJapanese("language", next)} /><Field label="特徴（日本語・1行ごと）" value={japaneseManuscript(content).highlights.join("\n")} multiline rows={3} onChange={(next) => updateJapanese("highlights", next.split("\n").filter(Boolean))} /><Field label="含まれるもの（日本語・1行ごと）" value={japaneseManuscript(content).included.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("included", next.split("\n").filter(Boolean))} /><Field label="含まれないもの（日本語・1行ごと）" value={japaneseManuscript(content).notIncluded.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("notIncluded", next.split("\n").filter(Boolean))} /><Field label="参加前の注意（日本語・1行ごと）" value={japaneseManuscript(content).knowBeforeYouGo.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("knowBeforeYouGo", next.split("\n").filter(Boolean))} /><Field label="参加に向かない条件（日本語・1行ごと）" value={japaneseManuscript(content).notSuitableFor.join("\n")} multiline rows={2} onChange={(next) => updateJapanese("notSuitableFor", next.split("\n").filter(Boolean))} />{content.japaneseOnly === true ? <p className="text-xs text-muted">日本語のみで公開します。英語の原稿・確認は要りません。{adminDraft ? "保存後、「事務局として日本語原稿を確認」を押してください。" : ""}</p> : null}{content.japaneseOnly === true && adminDraft ? <button type="button" disabled={busy || dirty || product.adminEnglishReview?.reviewed === true} className={consoleButtonClass("secondary")} onClick={() => void confirmAdminEnglish()}>事務局として日本語原稿を確認</button> : null}{content.japaneseOnly === true ? null : !adminDraft ? <><div className="flex flex-wrap gap-2"><button type="button" disabled={translationBusy || busy} className={consoleButtonClass("secondary")} onClick={() => void generateEnglish()}>{translationBusy ? "翻訳中…" : "日本語から英語案を作成"}</button><button type="button" disabled={translationBusy || busy || englishIsConfirmed(content.translation)} className={consoleButtonClass("secondary")} onClick={confirmEnglish}>英語原稿を確認</button></div><p className="text-xs text-muted">{englishIsConfirmed(content.translation) ? "英語原稿を確認済み" : "未確認の英語原稿は公開できません。日本語を編集すると確認状態が解除されます。"}</p>{liveEnglishStaleNote(product.status, englishIsConfirmed(content.translation)) ? <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-950">{liveEnglishStaleNote(product.status, englishIsConfirmed(content.translation))}</p> : null}</> : <><button type="button" disabled={busy || dirty || product.adminEnglishReview?.reviewed === true} className={consoleButtonClass("secondary")} onClick={() => void confirmAdminEnglish()}>事務局として英語原稿を確認</button><p className="text-xs text-muted">{product.adminEnglishReview?.reviewed ? "現在の保存版の日英fingerprintを事務局レビューとして記録済みです。" : "保存後、事務局担当者が日英原稿を照合して確認してください。OWNER本人の確認としては記録されません。"}</p></>}</div></div><Field label="集合場所の公開区分" value={String(content.meetingPointDisclosure ?? "AFTER_BOOKING")} onChange={(next) => setContent((current) => ({ ...current, meetingPointDisclosure: next === "PUBLIC" ? "PUBLIC" : "AFTER_BOOKING" }))} /><Field label="予約前に公開する集合概要" value={typeof content.meetingOverview === "string" ? content.meetingOverview : ""} multiline rows={3} onChange={(next) => updateContent("meetingOverview", next || null)} /></section>
       <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`}>
         <h2 className="text-base font-extrabold">料金・販売条件</h2>
         <div className="rounded-xl bg-sand/40 p-3">

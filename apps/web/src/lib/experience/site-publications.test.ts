@@ -104,6 +104,36 @@ describe("Experience site publication selection", () => {
     expect(result.claimedSlugs).toEqual([publication.slug, "stopped-experience"]);
   });
 
+  // 日本語を原文にした商品（#59）：英語側には出さず、日本語側にだけ出す。
+  describe("Japanese-only publication", () => {
+    const japaneseOnly = { ...publication, slug: "ja-first", japanese: { title: "合成の体験" }, japaneseOnly: true };
+    const translated = { ...publication, slug: "translated", japanese: { title: "合成の訳" }, japaneseOnly: false };
+
+    it("is reserved (a 404 page) in English and published in Japanese", async () => {
+      mocks.publications.getPublicBySlug.mockResolvedValue(japaneseOnly);
+      expect(await getSitePublicExperience("ja-first")).toEqual({ kind: "reserved" });
+      expect(await getSitePublicExperience("ja-first", "en")).toEqual({ kind: "reserved" });
+      expect((await getSitePublicExperience("ja-first", "ja"))?.kind).toBe("published");
+      // Sale endpoints (availability, checkout) keep working: the Japanese booking uses them.
+      expect(await publicExperienceRouteAllowedForSlug("ja-first")).toBe(true);
+    });
+
+    it("is out of the English catalog but in the Japanese one, and its slug stays claimed", async () => {
+      mocks.publications.listPublic.mockResolvedValue([japaneseOnly, translated]);
+      mocks.publications.listClaimedSlugs.mockResolvedValue(["ja-first", "translated"]);
+      const english = await listSitePublicExperiences();
+      expect(english.experiences.map((item) => item.publication.slug)).toEqual(["translated"]);
+      expect(english.claimedSlugs).toEqual(["ja-first", "translated"]);
+      const japanese = await listSitePublicExperiences("ja");
+      expect(japanese.experiences.map((item) => item.publication.slug)).toEqual(["ja-first", "translated"]);
+    });
+
+    it("a published English-only experience is not shown in Japanese", async () => {
+      mocks.publications.getPublicBySlug.mockResolvedValue({ ...publication, japanese: null, japaneseOnly: false });
+      expect(await getSitePublicExperience(publication.slug, "ja")).toEqual({ kind: "reserved" });
+    });
+  });
+
   it("keeps unpublished participation-condition text out of checkout", async () => {
     mocks.bookings.publicBookingTerms.mockResolvedValue({ ...terms, conditionsVersion: "c0".repeat(32) });
     const result = await getSitePublicExperience(publication.slug);

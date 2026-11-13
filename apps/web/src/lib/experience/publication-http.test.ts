@@ -390,6 +390,20 @@ describe("Experience owner product API", () => {
       expect(mocks.repository.saveDraft).toHaveBeenCalledWith(actor, expect.objectContaining({ content: withFaq.content }), 4, 3, expect.any(Object));
     });
 
+    // 日本語のみで公開する商品（#59）は、日本語サイトの flag が ON の環境でだけ保存できる。
+    it("saves a Japanese-only draft only while the Japanese site flag is on", async () => {
+      const japaneseOnlyDraft = { ...draft, publicTitle: japanese.title, content: { ...draft.content, japaneseOnly: true, ja: japanese } };
+      (mocks.config as Record<string, unknown>).japaneseSiteEnabled = false;
+      const off = await createProduct(request("/host/api/products", "POST", japaneseOnlyDraft));
+      expect(off.status).toBe(400);
+      expect(mocks.repository.createDraft).not.toHaveBeenCalled();
+      (mocks.config as Record<string, unknown>).japaneseSiteEnabled = true;
+      const on = await createProduct(request("/host/api/products", "POST", japaneseOnlyDraft));
+      expect(on.status).toBe(201);
+      expect(mocks.repository.createDraft).toHaveBeenCalledWith(actor, japaneseOnlyDraft);
+      (mocks.config as Record<string, unknown>).japaneseSiteEnabled = false;
+    });
+
     it.each([
       ["a blank answer", { faq: [{ question: "Q", answer: " " }] }],
       ["a repeated question", { faq: [...faq, { question: " can children JOIN? ", answer: "Again." }] }],

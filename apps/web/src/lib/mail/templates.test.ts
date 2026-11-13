@@ -8,7 +8,7 @@ const TOKEN = "sampleTokenAbcdefghijklmnopqrstuvwxyz0123456";
 
 const reply = {
   siteUrl: SITE,
-  guestName: "Sample Guest",
+  guestName: "Sample Guest", guestLanguage: "EN" as const,
   hostName: "Sample Host",
   experienceTitle: "Synthetic tea ceremony",
   reply: "Yes, we have a vegetarian option.\nSee you soon!",
@@ -19,9 +19,10 @@ const reply = {
 const confirmation: BookingConfirmationEmail = {
   publicBookingId: "0f8fad5b-d9cb-469f-a165-70867728950e",
   guestEmail: "guest@example.com",
-  guestName: "Sample Guest",
+  guestName: "Sample Guest", guestLanguage: "EN" as const,
   experienceTitle: "Synthetic tea ceremony",
   experienceSlug: "sample-tea",
+  japaneseOnly: false,
   localDate: "2026-11-14",
   localStartTime: "10:00",
   timeZone: "Asia/Tokyo",
@@ -162,12 +163,19 @@ describe("bookingConfirmationEmail", () => {
     expect(mail.html).toContain("Host &amp; Co");
     expect(linesWith(mail, "https://")).toEqual([`${SITE}/experiences/..%2Fsample%20tea%3Fx`]);
   });
+
+  it("links a Japanese-only product to its /ja page, since it has no English page (#59)", () => {
+    const mail = bookingConfirmationEmail({ ...confirmation, japaneseOnly: true }, { siteUrl: SITE, now: NOW });
+    expect(linesWith(mail, "https://")).toEqual([`${SITE}/ja/experiences/sample-tea`]);
+    expect(mail.html).toContain(`href="${SITE}/ja/experiences/sample-tea"`);
+    expect(mail.html).not.toContain(`href="${SITE}/experiences/`);
+  });
 });
 
 describe("the booking page links (#285 slice 6)", () => {
   const GRANT = "sampleGrantAbcdefghijklmnopqrstuvwxyz012345";
   const link: BookingLinkEmail = {
-    publicBookingId: confirmation.publicBookingId, guestEmail: "guest@example.com", guestName: "Sample Guest",
+    publicBookingId: confirmation.publicBookingId, guestEmail: "guest@example.com", guestName: "Sample Guest", guestLanguage: "EN" as const,
     experienceTitle: "Synthetic tea ceremony", localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo",
   };
 

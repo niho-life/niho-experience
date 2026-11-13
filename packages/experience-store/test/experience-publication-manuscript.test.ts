@@ -154,3 +154,57 @@ describe("publication FAQ public projection", () => {
     assert.equal(projectPublicExperiencePublication(publicRow({ ...englishContent, faq: [{ question: "Q", answer: "" }] })), null);
   });
 });
+
+// 日本語を原文にした商品（#59）：英語の原稿・確認なしで公開でき、英語側には出ない。
+describe("Japanese-only publication (#59)", () => {
+  const emptyEnglish = {
+    lead: "", description: "", facts: { language: "" }, highlights: [], included: [], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [],
+    meetingOverview: null, meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null,
+  };
+  const jaOnly = (overrides: Record<string, unknown> = {}) => ({ ...emptyEnglish, japaneseOnly: true, ja: japanese, ...overrides });
+
+  it("is publishable with no English and no confirmation, when the public title is the Japanese title", () => {
+    const review = publicationManuscriptReview(jaOnly(), japanese.title);
+    assert.equal(review.publicContentReady, true);
+    assert.equal(review.ownerConfirmed, true);
+    assert.equal(review.japaneseFingerprint, publicationManuscriptFingerprint(japanese));
+    // The English slot of the admin review audit holds a fixed value, not a real English manuscript's fingerprint.
+    assert.match(review.englishFingerprint ?? "", /^[0-9a-f]{64}$/);
+    assert.notEqual(review.englishFingerprint, PRE_FAQ_ENGLISH_FINGERPRINT);
+  });
+
+  it("without the mark the same content still needs a confirmed English manuscript", () => {
+    const review = publicationManuscriptReview({ ...emptyEnglish, ja: japanese }, japanese.title);
+    assert.equal(review.ownerConfirmed, false);
+  });
+
+  it("is not ready when the public title differs from the Japanese title, or a required Japanese field is blank", () => {
+    assert.equal(publicationManuscriptReview(jaOnly(), TITLE).publicContentReady, false);
+    assert.equal(publicationManuscriptReview(jaOnly({ ja: { ...japanese, lead: "  " } }), japanese.title).publicContentReady, false);
+    assert.equal(publicationManuscriptReview(jaOnly({ ja: { ...japanese, extra: 1 } }), japanese.title).publicContentReady, false);
+    assert.equal(publicationManuscriptReview({ ...emptyEnglish, japaneseOnly: true }, japanese.title).publicContentReady, false);
+  });
+
+  it("projects the Japanese manuscript as the only one and marks the publication Japanese-only", () => {
+    const projected = projectPublicExperiencePublication(publicRow(jaOnly()) as never);
+    assert.equal(projected, null, "a public row whose title is English does not match the Japanese title");
+    const row = { ...publicRow(jaOnly()), public_title: japanese.title };
+    const publication = projectPublicExperiencePublication(row as never);
+    assert.ok(publication);
+    assert.equal(publication.japaneseOnly, true);
+    assert.equal(publication.japanese?.title, japanese.title);
+    assert.equal(publication.content.lead, "");
+  });
+
+  it("fails closed when the Japanese manuscript of a Japanese-only row is unreadable", () => {
+    const row = { ...publicRow(jaOnly({ ja: { ...japanese, description: "" } })), public_title: japanese.title };
+    assert.equal(projectPublicExperiencePublication(row as never), null);
+  });
+
+  it("keeps existing bilingual publications unchanged (japaneseOnly is false)", () => {
+    const content = confirmed(englishContent, japanese, PRE_FAQ_JAPANESE_FINGERPRINT, PRE_FAQ_ENGLISH_FINGERPRINT);
+    const publication = projectPublicExperiencePublication(publicRow(content) as never);
+    assert.ok(publication);
+    assert.equal(publication.japaneseOnly, false);
+  });
+});

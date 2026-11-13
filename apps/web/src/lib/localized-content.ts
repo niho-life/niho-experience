@@ -190,7 +190,7 @@ export const getPreparedJapaneseStaticRelease = cache(async () => {
   assertSameJapaneseRelease(copy.releaseId, ...pages);
   const pageById = Object.freeze(Object.fromEntries(pages.map((page) => [page.route.pageId, page])) as Readonly<Record<keyof typeof STATIC_SOURCE_PATHS, JapanesePage>>);
   const nativeCatalog = config.apiMode === "http"
-    ? await import("./experience/site-publications").then((source) => source.listSitePublicExperiences()).catch(() => null)
+    ? await import("./experience/site-publications").then((source) => source.listSitePublicExperiences("ja")).catch(() => null)
     : null;
   const experiences = config.apiMode === "http"
     ? mapPublicationJapaneseExperiences(nativeCatalog?.experiences ?? [], config.bookingsEnabled && config.guestBookingEnabled)

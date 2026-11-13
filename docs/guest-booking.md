@@ -21,6 +21,8 @@ Experienceの公開商品は `packages/experience-store` が開催枠・予約�
 
 辞退は `PENDING` の間だけで、同じトランザクションで在庫を戻して辞退通知を積む。仮押さえ期限を過ぎた申込には、予約とStripeの状態を確認して期限切れを知らせる。処理中の支払いはStripeの結果を待ち、非同期決済の失敗が確定したときは失敗を通知する。ゲストの予約確定メールは、承認後決済・即時決済とも既存の支払い確定処理から送る。無料の即時予約では申込完了が確定となる。確定・取消は完全代行を担当する事務局と、通知先を設定した提供者へも送る。事務局用宛先は `EXPERIENCE_MAIL_REPLY_TO`、提供者用宛先は非公開の体験別設定を使う。申込状態・支払いリンクと通知の境界は #524 で検証する。
 
+承認後決済の開催回に社内の担当を1人置く仕組み（#535 v0、`EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED`）は [occurrence-assignments.md](occurrence-assignments.md)。担当が決まっても、予約者への承認・支払い・確定は済みにならず、予約者の画面・メールにも出さない。
+
 ## 再送と失敗
 
 | 場合 | 応答 |
@@ -214,13 +216,13 @@ OWNER は予約の画面と同じ二重の確認（NIHO が OWNER と言い、ex
 - **冪等と同時実行**：画面は操作ごとに UUID のコマンド ID を送る（`booking_cancellation_commands`）。同じコマンドは最初の結果を返し、Stripe がまだ受けていない返金を送り直す。同じ ID で中身が違えば拒む（経路は 409）。取消済みの予約への別のコマンドは何も変えず `NOT_CANCELLABLE` を返す。提供者の在庫ロックの下で予約の行をロックし、返金できる残り（入金 − 失敗していない返金）を数える。DB の部分一意 index で、失敗していない全額返金は 1 予約に 1 つ。
 - **予約者の画面**（`/bookings/{id}`、英語）：確定した予約に「Cancel」の欄。無料取消の期限までは期限を日本時間で書き（「You can cancel for free until Thu 12 Nov, 10:00 Japan time. We'll refund ¥7,500 in full …」）、「Cancel and get a full refund」→ 確認 → 送る。期限のあとは「Ask to cancel」→ 確認（「Your booking stays confirmed until support replies」）→ 送る。`POST /api/public/bookings/cancel`（`{ publicBookingId, commandId, choice, shownDeadlineUtc }`、same-origin、その予約の cookie のセッション）。画面が示した期限を送り、サーバーはトランザクションの中で予約・条件・期限を読み直す。違えば何も変えずに `CHANGED` を返し、画面は「This booking's cancellation options have changed」と今の選択肢を出す。答えが届かなければ同じコマンド ID で送り直せる（二重に取り消さない）。取消のあとは返金の状態をそのまま出す（向かっている・日時つきで済んだ・失敗してサポートから連絡する）。されていない返金を出さない。依頼のあとは「NIHO support will reply by email. Your booking stays confirmed until then.」、お断りのあとはサポートの言葉。セッションの無い・ほかの予約の cookie は、ページと同じ中立の 404。
 - **ホストの画面**：予約の詳細に「取り消して全額を返金する」（取消理由とメモのダイアログ。理由は「ホストの都合・雨・荒天・急病・けが・予約者からの依頼・その他」）と「一部だけの返金や返金の相談は NIHO サポートへ」。取消済みは「11/4 に取消（ホスト · 雨・荒天）」「¥7,500 を返金済み／返金中（Stripe の処理待ち）／返金に失敗しました。NIHO サポートが対応します」とメモ、時系列に「取消（ホスト）」。予約者の依頼中は「予約者が NIHO サポートに取消を依頼しています（無料取消の期限後）」。この回は開始前で確定した予約があるときだけ「この回を中止する（全員に全額返金）」（理由は「予約者からの依頼」を除いた一覧）。どちらも server action で store のコマンドを送り、store が今の予約を返す。
-- **サポートの画面**：Admin の「予約」（`/admin/site-bookings`、BFF は `/admin/api/site-bookings`）。Admin の HTTP ログイン（NIHO が専用 client と現在の ADMIN を毎回確認する `loadAdminHttpSession`）と、POST は Admin origin の same-origin だけ。store は操作した Admin の NIHO user ID を記録する。出すもの：開いている取消の依頼、確認待ちの支払い（受け取った額）、返金の要対応（Stripe が 10 分以上受けていない、7 日以上処理中のまま、失敗して閉じていない）。予約者の名前だけを出し、アドレスは出さない（返事は確認メールのスレッドで）。予約番号での取消もできる。`EXPERIENCE_GUEST_BOOKING_ENABLED` と HTTP の Admin の両方が要る（mock mode・合成 Admin では開かない）。
-  - **サポートONの予約**（#121/#128、BFF は `GET /admin/api/site-bookings/bookings?cursor=|publicBookingId=`）：要対応に載らない予約も、担当・内部メモ・予約者への連絡・操作履歴を開ける。対象は支払い済み（確定・確認待ち・取消済み）で、**予約時の snapshot** の `platformFee` が現行のサポートON同意（`supportEnabled=true`、15%、同意版あり、合意 revision が正の整数）を持つものだけ（`BookingCancellations.supportEnabledBookings`、判定は `supportEligible` と同じ）。ホストの現在の設定は見ないので、後の設定変更は旧予約に及ばず、OFF・旧同意・不整合の予約は出ない。新しい順に 50 件ずつ（「もっと見る」）、予約番号で 1 件を開ける。確定の予約は行から「この予約を取り消す」で、予約番号での取消と同じ 2 段階確認（最新の状態と金額を確認→実行）と同じ操作ロックを通る。
+- **サポートの画面**：Admin の「予約」（`/admin/site-bookings`、BFF は `/admin/api/site-bookings`）。Admin の HTTP ログイン（NIHO が専用 client と現在の ADMIN を毎回確認する `loadAdminHttpSession`）と、POST は Admin origin の same-origin だけ。store は操作した Admin の NIHO user ID を記録する。出すもの：開いている取消の依頼、確認待ちの支払い（受け取った額）、返金の要対応（Stripe が 10 分以上受けていない、7 日以上処理中のまま、失敗して閉じていない）。予約者の名前だけを出し、アドレスは出さない（返事は確認メールのスレッドで）。画面は「一覧 ＋ 開いた予約」で、一覧の切替は 要対応（承認待ちの申込・取消の依頼・確認待ちの支払い・返金）／すべて（サポートONの予約）／通知／精算。取消・返金などの操作は開いた予約の中のボタンから、確認はダイアログで行う。予約番号は画面上の検索の 1 つで開き、サポートONの予約に無い番号でも、その番号の取消はできる。`EXPERIENCE_GUEST_BOOKING_ENABLED` と HTTP の Admin の両方が要る（mock mode・合成 Admin では開かない）。
+  - **サポートONの予約**（#121/#128、BFF は `GET /admin/api/site-bookings/bookings?cursor=|publicBookingId=`）：要対応に載らない予約も、担当・内部メモ・予約者への連絡・操作履歴を開ける。対象は支払い済み（確定・確認待ち・取消済み）で、**予約時の snapshot** の `platformFee` が現行のサポートON同意（`supportEnabled=true`、15%、同意版あり、合意 revision が正の整数）を持つものだけ（`BookingCancellations.supportEnabledBookings`、判定は `supportEligible` と同じ）。ホストの現在の設定は見ないので、後の設定変更は旧予約に及ばず、OFF・旧同意・不整合の予約は出ない。新しい順に 50 件ずつ（すべての切替の「もっと見る」）、検索で予約番号から 1 件を開ける。確定の予約は開いた予約の「この予約を取り消す」で、番号だけで開いた予約の取消と同じ 2 段階確認（最新の状態と金額を確認→実行）と同じ操作ロックを通る。
   - E2E 用の合成プレビュー `ADMIN_SITE_BOOKINGS_PREVIEW_ENABLED=true`（mock mode と `ADMIN_SUPPORT_CONSOLE_ENABLED` のときだけ、HTTP では無視）：この画面を合成 fixture（`apps/web/src/admin/site-bookings-preview.ts`）で描き、API は Playwright がブラウザで stub する（`e2e/admin-site-bookings.spec.ts`、360px・320px・PC）。
 - **通知**：予約者へのメール（メール job の段 ②'、`booking.cancelled`・`booking.refunded`・`booking.cancellation_declined`、重複キーで各 1 回、8 回まで送り直す）：取消（だれが、決まった理由の英語、始めた返金の額。ホストのメモは送らない）、返金が済んだ（Stripe の成功のときだけ）、依頼へのお断り（サポートの言葉）。予約ページが開いていれば新しい grant のリンクを入れる。送る時点で中身を読み直し、成功しなかった返金のお知らせは送らない。ホストへの push `CANCELLATION`（設定 › 通知で止められない種類、`host.notify.cancellation`）は、予約者かサポートが確定した予約を取り消したときだけ（ホスト自身の取消と、確認待ちの解決では送らない）。タップで予約の画面のその予約。
 - **保存期間**：返金が済んでいない予約と開いている依頼の予約は、予約者の情報を消さない（上の「予約者へのメール」）。
 - **サポートが手で行うこと**：
-  - 「予約」の要対応を毎日見る。Stripe が受けていない返金は、自動の再送（約 3 時間・8 回）が尽きたものだけ「もう一度送る」（それまでは job が送る）、失敗した返金は「もう一度返金する」（新しい返金）か、別の方法で済ませたら「手作業で済ませた」とメモを残して閉じる。7 日以上処理中の返金は Stripe の Dashboard（販売者の口座）で確かめる。
+  - 「予約」の要対応の切替を毎日見る。Stripe が受けていない返金は、自動の再送（約 3 時間・8 回）が尽きたものだけ「もう一度送る」（それまでは job が送る）、失敗した返金は「もう一度返金する」（新しい返金）か、別の方法で済ませたら「手作業で済ませた」とメモを残して閉じる。7 日以上処理中の返金は Stripe の Dashboard（販売者の口座）で確かめる。
   - 「Ask to cancel」に答える（承認なら全額か一部、お断りなら英語の言葉）。一部返金の額を決める（NIHO の手数料は戻らない）。
   - 返金を Stripe の Dashboard で直接しない（このサービスの metadata が無く、台帳と予約に記録されない）。した場合は別に記録する。
   - 異議申し立て（dispute）はまだ扱わない。
@@ -261,6 +263,23 @@ Experience新規商品の予約フォームは`PublicBookingTerms`の取消コ�
 ### 日本語のページ
 
 日本語の予約入力は NIHO の `v1.2/ja` checkout で、まだこのサイトに無い（第10段）。ここで売る商品と「不明」の商品は、日本語の詳細・予約ページで既存の `booking.unavailableJa` の状態を出し、英語のページへのリンクを添える。日本語の残席・checkout は読まない。日本語のカードの「次の日程」はこのサイトの残席（言語によらない）を読む。日本語の詳細に出る料金・日程の要約は日本語 release のまま（第10段で揃える）。
+
+### 日本語で申し込んだ予約の通知と、日本語にしきれない画面（#59 v0）
+
+申込み時の表示言語（`booking_guests.guest_language`、`/ja` の checkout は `JA`）は予約に固定され、予約者へのメールの言語をそれで決める。後から表示言語を変えても過去の予約の言語は変わらない。
+
+- **日本語で出るメール**（`guest_language = JA`）：予約の確定、予約ページへのリンク（「Find your booking」）、取消・返金完了・取消依頼へのお断りのお知らせ、前日の集合案内（`apps/web/src/lib/mail/templates-ja.ts`、言葉は `booking-words-ja.ts`）、レビュー依頼、承認制の予約のメール（受付・承認後の支払い・お断り・失敗・期限切れ。これは従来どおり）。英語のゲストのメールは変わらない。体験の名前は、現在の公開版の日本語原稿の商品名（`content.ja.title`）があればそれを、無ければ公開上の商品名を使う（日本語のみの商品は日本語の商品名）。
+- **日本語にしきれない画面・メール**（v0。黙って英語で埋めず、日本語の連絡先＝確認メールへの返信〔NIHO事務局が日本語で対応〕を案内する）：
+
+| 画面・メール | 現状 | 日本語の案内 |
+| --- | --- | --- |
+| 予約ページ `/bookings/{id}`（内容・集合案内・ホストとのメッセージ・取消・返金の状態） | 英語のみ | 日本語で申し込んだ予約には、先頭に日本語の注意（英語のみであることと事務局の連絡先）を出す。体験へのリンクは `/ja` |
+| 予約の照会 `/bookings`・`/bookings/open` | 英語のみ | 確認メール・リンクメールの本文に、英語の表示であることと事務局の連絡先を書く |
+| ホストへの質問・予約ごとのメッセージ（ホストの返事の英語、予約者の文の日本語訳） | 英語のみ | 同上（メールの返信は事務局に届く） |
+| ホストからのメッセージ・事務局のメッセージ・質問への返事のメール | 英語のみ（ホストの英語を送る） | 未対応。次の段で `guest_language` を渡して出し分ける |
+| 取消の依頼（Ask to cancel）・取消後の返金の状態の画面 | 英語のみ | 予約ページの日本語の注意で事務局へ誘導 |
+| レビューの投稿 `/reviews/write`・プライバシー `/privacy`・質問への返事 `/questions/reply` | 英語のみ | レビュー依頼のメールに、英語の表示であることと事務局の連絡先を書く |
+| 集合案内の本文（住所・入り方・持ち物・雨天時） | ホストが書いた言語のまま | 日本語の枠組みで送り、本文はホストが書いたまま |
 
 ### 決済の取りやめ
 

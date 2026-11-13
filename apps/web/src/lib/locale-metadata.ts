@@ -13,7 +13,9 @@ async function publicationLanguagePair(slug: string): Promise<boolean> {
   if (!repository) return false;
   try {
     await getPreparedJapaneseStaticRelease();
-    return Boolean((await repository.getPublicBySlug(slug))?.japanese);
+    const publication = await repository.getPublicBySlug(slug);
+    // 日本語のみの商品に英語のページは無い。組にしない。
+    return Boolean(publication?.japanese) && !publication?.japaneseOnly;
   }
   catch { return false; }
 }

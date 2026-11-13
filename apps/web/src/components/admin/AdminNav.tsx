@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef } from "react";
 import { HostIcon, type HostIconName } from "@/components/host/HostIcon";
 import { InitialAvatar } from "@/components/host/ui";
-import { isAdminSectionActive, type AdminSection, type AdminSectionKey } from "@/lib/admin/sections";
+import { HostSubHeader } from "@/components/host/HostSubHeader";
+import { adminBackLink, isAdminSectionActive, type AdminSection, type AdminSectionKey } from "@/lib/admin/sections";
 
 /** Same frame as the host console (HostNav): the sidebar on PC, the top band and the bottom tabs on phones. */
 const NAV_LABEL = "管理メニュー";
@@ -161,6 +162,8 @@ export function AdminSidebar({ sections, actorName, accountKind, unreadCount }: 
 
 /** Phones: brand, the scope pill and the account. */
 export function AdminMobileHeader({ sections, actorName, accountKind }: Omit<AdminChromeProps, "unreadCount">) {
+  const back = adminBackLink(usePathname());
+  if (back) return <HostSubHeader backHref={back.href} backLabel={back.label} title="" />;
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-canvas md:hidden">
       <div className="flex h-[52px] items-center gap-2.5 pr-2 pl-4">
@@ -180,7 +183,7 @@ export function AdminMobileHeader({ sections, actorName, accountKind }: Omit<Adm
 export function AdminTabBar({ sections, unreadCount }: Pick<AdminChromeProps, "sections" | "unreadCount">) {
   const pathname = usePathname();
   const tabs = sections.slice(0, PHONE_TAB_LIMIT);
-  if (tabs.length === 0) return null;
+  if (tabs.length === 0 || adminBackLink(pathname)) return null;
   return (
     <>
       {/* Keeps the end of the page clear of the fixed bar. */}

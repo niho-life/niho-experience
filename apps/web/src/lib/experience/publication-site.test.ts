@@ -117,6 +117,19 @@ describe("Experience public site DTO", () => {
     expect(await listPublicationSummaries("kamakura", "ja")).toEqual([]);
   });
 
+  // 日本語を原文にした商品（#59）：日本語の一覧・詳細にだけ出る。
+  it("serves a Japanese-only publication in Japanese and never in English", async () => {
+    const japaneseOnly = { ...publication, slug: "ja-first", publicTitle: "合成ディナー", content: { ...publication.content, lead: "", description: "", highlights: [], timeline: [] }, japaneseOnly: true };
+    state.publications.getPublicBySlug.mockResolvedValue(japaneseOnly);
+    state.publications.listPublic.mockResolvedValue([japaneseOnly, { ...publication, japaneseOnly: false }]);
+    expect(await getPublicationDetail("ja-first", "en")).toBeNull();
+    const detail = await getPublicationDetail("ja-first", "ja");
+    expect(detail?.title).toBe("合成ディナー");
+    expect(detail?.lead).toBe("合成の紹介です。");
+    expect((await listPublicationSummaries("kamakura", "en")).map((item) => item.slug)).toEqual(["synthetic-dinner"]);
+    expect((await listPublicationSummaries("kamakura", "ja")).map((item) => item.slug)).toEqual(["ja-first", "synthetic-dinner"]);
+  });
+
   it("omits a sale whose participation conditions cannot be shown for consent", async () => {
     state.bookings.publicBookingTerms.mockResolvedValue({ ...SAMPLE_TERMS, conditionsVersion: "c0".repeat(32) });
     expect(await listPublicationSummaries("kamakura", "ja")).toEqual([]);

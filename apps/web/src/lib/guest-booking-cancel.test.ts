@@ -134,11 +134,19 @@ describe("the booking page's cancellation section", () => {
     publicBookingId: BOOKING, status: "CONFIRMED", experienceTitle: "Synthetic walk", experienceSlug: "sample-walk",
     localDate: "2026-11-14", localStartTime: "10:00", timeZone: "Asia/Tokyo", startUtc: "2026-11-14T01:00:00.000Z", endUtc: "2026-11-14T02:30:00.000Z",
     adultCount: 2, childCount: 1, totalAmount: 7500, currency: "JPY", cancellationPolicy: "FREE_UNTIL_48H", cancellationRefundBasisPoints: 10000, freeCancellationUntilUtc: DEADLINE,
-    hostDisplayName: "Sample Host", guestName: "Sample Guest", bookedAtUtc: "2026-10-31T01:00:00.000Z", cancelledAtUtc: null,
+    hostDisplayName: "Sample Host", guestName: "Sample Guest", guestLanguage: "EN", bookedAtUtc: "2026-10-31T01:00:00.000Z", cancelledAtUtc: null,
     cancelledBy: null, cancellationReason: null, freeCancellationOpen: true, experienceEnded: false, refunds: [], cancellationRequest: null,
   };
   const NOW = new Date("2026-11-01T00:00:00.000Z");
   const page = (booking: Partial<GuestBookingView>) => renderToStaticMarkup(createElement(GuestBookingDetails, { booking: { ...VIEW, ...booking }, now: NOW }));
+
+  it("tells a booking made in Japanese that this page is English only and where Japanese support is (#59)", () => {
+    const japanese = page({ guestLanguage: "JA" });
+    expect(japanese).toContain("この予約確認ページは現在、英語の表示のみです");
+    expect(japanese).toContain("NIHO事務局が日本語でご案内します");
+    expect(japanese).toContain("/ja/experiences/sample-walk");
+    expect(page({})).not.toContain("英語の表示のみ");
+  });
 
   it("offers a full refund before the deadline, with the deadline in Japan time", () => {
     const html = page({});

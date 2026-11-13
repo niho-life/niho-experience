@@ -92,7 +92,7 @@ test("the frame is the host console's: the menu shows only what this sign-in can
   for (const name of ["予約支援", "予約"]) await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: /通知/ })).toBeVisible();
   // Not on in this server: no dead links.
-  for (const name of ["提供者", "掲載先"]) await expect(menu.getByRole("link", { name, exact: true })).toHaveCount(0);
+  for (const name of ["掲載先"]) await expect(menu.getByRole("link", { name, exact: true })).toHaveCount(0);
   const phone = testInfo.project.name.includes("mobile");
   if (phone) {
     await expect(menu.getByRole("link")).not.toHaveCount(0);

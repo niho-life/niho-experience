@@ -45,6 +45,19 @@
 - sitemapは全件のdetailを読まない。detailが別releaseになった瞬間はページ側だけが日本語版を外し、sitemapは次の取得まで残りうる。releaseは一括で切り替わるため、この差は切替時の短い間だけ。
 - 日本語詳細から英語への言語切替は英語の一覧を確かめない。日本語catalogは英語の公開投影に重ねたものなので、英語で掲載をやめた体験は日本語catalogからも消える前提。
 
+## 日本語を原文にした商品（オーナー決定 2026-11-13、#59）
+
+英語が原文で日本語は確認済みの訳、という既存の商品は変えない。それとは別に、**日本語を原文にした商品（英語は後から、または無し）**を公開でき、`/ja` に出す。英語の原稿が無い間は、英語側の一覧・詳細・予約・sitemap・hreflang・言語切替に出さない。
+
+- **印**：公開原稿の `content.japaneseOnly === true`（draft にも公開版の snapshot にも入る。DB の列・migration は足していない）。印があるとき、日本語（`content.ja`）が唯一の原稿で、英語の原稿・「英語原稿を確認」は要らない。英語側の欄（`content` の英語の項目）は空のまま。公開上の商品名（`publicTitle`）は日本語の商品名と同じにする（サーバーが `PUBLIC_CONTENT_INVALID` で確かめる。メール・Stripe・予約画面の商品名はこれを使うため）。印が無い商品は従来どおり日本語＋確認済みの英語が要る。
+- **公開 projection**（`PublicExperiencePublication.japaneseOnly`）：`japanese` は英語との fingerprint 照合なしで読む。読めなければ公開として成立しない（英語で補わない）。事務局の代理公開レビューの監査表は英語 fingerprint が NOT NULL なので、`JAPANESE_ONLY_ENGLISH_FINGERPRINT`（`{"japaneseOnly":true}` の sha256）で埋める。
+- **公開 read**：`getSitePublicExperience(slug, locale)`・`listSitePublicExperiences(locale)`・`listPublicationSummaries`・`getPublicationDetail` は、英語では印のある商品を除く（英語の詳細・予約は「予約済みの slug」として 404。同じ slug の NIHO の体験も出さない）。日本語では出す。`publicExperienceRouteAllowedForSlug`（空き・checkout・販売条件の route）は言語によらず許す。日本語の予約がこれを使う。
+- **sitemap・hreflang・言語切替**：`mapPublicationJapaneseExperiences` は印のある商品を `japaneseOnly` として持ち（売れる状態のものだけ）、`experienceCounterparts`（言語切替）には載せず、`sitemapEntries` は日本語の URL だけを hreflang なしで出す。日本語詳細の metadata は canonical だけ（存在しない英語を指さない）。
+- **保存の条件**：`japaneseOnly` の draft は `EXPERIENCE_JAPANESE_SITE_ENABLED` が `true` の環境でだけ保存できる（host・admin の draft API が `INVALID_INPUT` で拒否する）。既定は OFF なので、この flag を入れるまで日本語のみの商品は作れない。
+- **host・admin の編集画面**：原稿の節に「日本語のみで公開する」の選択肢がある。選ぶと英語の欄・翻訳・英語の確認が消え、事務局の代理公開は「日本語原稿を確認」になる。
+- **あとから英語を足す**操作は v0 に無い（印を外して英語を確認すれば従来の商品になるが、公開上の商品名は日本語のまま残るので、英語の商品名を入れ直す）。英語を足した時点で英語側にも出す仕組みの整備は残作業。
+- **v0 の制約**：写真の説明（英語）は入力欄が必須のまま（日本語のみでも何か入れる）。`/api/public/experiences`（公開データの JSON）には印付きの商品も含まれる（`japaneseOnly: true` で区別できる。英語側の項目は空）。
+
 ## 有効化の前に確かめること
 
 `EXPERIENCE_JAPANESE_SITE_ENABLED=true` は、次がそろってから専用の変更PRで入れる。公式配備の表（`scripts/deploy/runtime-flags.mjs`）には載っており、GitHub variable `STG_JAPANESE_SITE_ENABLED` / `PROD_JAPANESE_SITE_ENABLED` を `true` にして配備すると ON になる（未設定は OFF。[production-deploy.md](production-deploy.md)「機能のフラグ」）。
