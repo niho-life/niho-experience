@@ -25,6 +25,8 @@ const state = vi.hoisted(() => ({
   cookies: {} as Record<string, string>,
   travelers: null as { signInWithNihoIdentity: ReturnType<typeof import("vitest").vi.fn>; readSession: ReturnType<typeof import("vitest").vi.fn>; revokeSession: ReturnType<typeof import("vitest").vi.fn> } | null,
   authTime: (): unknown => new Date().toISOString(),
+  /** The runtime's service ID token cannot be issued. */
+  serviceTokenFails: false,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("react", async (importOriginal) => ({ ...(await importOriginal<typeof import("react")>()), cache: (read: unknown) => read }));
@@ -34,7 +36,10 @@ vi.mock("next/navigation", () => ({
   redirect: (to: string) => { throw new Error(`redirect:${to}`); },
 }));
 vi.mock("google-auth-library", () => ({ GoogleAuth: class {
-  async getIdTokenClient() { return { getRequestHeaders: async () => ({ authorization: "Bearer synthetic-service-id-token" }) }; }
+  async getIdTokenClient() {
+    if (state.serviceTokenFails) throw new Error("metadata server unavailable: synthetic-service-id-token");
+    return { getRequestHeaders: async () => ({ authorization: "Bearer synthetic-service-id-token" }) };
+  }
 } }));
 vi.mock("@/lib/config", () => ({ config: state.config, isPreview: false }));
 vi.mock("@/lib/experience/store-server", () => ({
@@ -74,6 +79,7 @@ beforeEach(() => {
   Object.assign(state.config, { apiMode: "http", hostConsoleEnabled: true, hostAccountsEnabled: true, hostNihoLoginEnabled: false, travelerAccountsEnabled: true, termsUrl: "" });
   state.cookies = {};
   state.authTime = () => new Date().toISOString();
+  state.serviceTokenFails = false;
   state.travelers = {
     signInWithNihoIdentity: vi.fn(async (): Promise<TravelerSignInResult> => ({ kind: "ok", sessionToken: SESSION_TOKEN, sessionRef: "0f8fad5b-d9cb-469f-a165-70867728950e", travelerAccountId: TRAVELER, absoluteExpiresAtUtc: new Date(Date.now() + 30 * DAY).toISOString(), created: true })),
     readSession: vi.fn(async () => null),
@@ -174,6 +180,31 @@ describe("the return of a traveler's log in", () => {
       "POST /api/auth/app-connect/exchange", "GET /api/experience-host/identity", `DELETE /api/auth/app-connections/${CONNECTION}`,
     ]);
     expect([location(response), ...response.headers.getSetCookie()].join("\n")).not.toMatch(new RegExp(`${NIHO_USER}|${ACCESS}|${REFRESH}|${CONNECTION}`));
+  });
+
+  it("counts the NIHO calls against the Experience service: the service ID token goes on the exchange, the identity call and the connection's end", async () => {
+    await comeBack();
+    const header = (index: number) => (calls[index]!.init.headers as Record<string, string>)["x-niho-experience-service-id-token"];
+    expect(calls.map((call, index) => `${call.init.method ?? "GET"} ${call.url.pathname} ${header(index)}`)).toEqual([
+      "POST /api/auth/app-connect/exchange synthetic-service-id-token",
+      "GET /api/experience-host/identity synthetic-service-id-token",
+      `DELETE /api/auth/app-connections/${CONNECTION} synthetic-service-id-token`,
+    ]);
+  });
+
+  it("does not stop a log in when the token cannot be issued: the exchange and the end go without it (NIHO counts them by IP), and the log says so without the token", async () => {
+    state.serviceTokenFails = true;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const response = await comeBack();
+    // The identity call needs the service identity (it is the server-to-server contract), so this log in does not finish; the
+    // exchange and the connection's end still went without the header.
+    expect(location(response)).toBe("/account/sign-in?error=unavailable");
+    const exchange = calls.find((call) => call.url.pathname === "/api/auth/app-connect/exchange")!;
+    expect(JSON.stringify(exchange.init.headers)).not.toContain("service-id-token");
+    const end = calls.find((call) => call.init.method === "DELETE")!;
+    expect(JSON.stringify(end.init.headers)).not.toContain("service-id-token");
+    expect(errors.mock.calls.flat().join(" ")).toContain("service ID token not issued");
+    expect(errors.mock.calls.flat().join(" ")).not.toContain("synthetic-service-id-token");
   });
 
   it("takes the time the traveler signed in at NIHO (authTime), and opens nothing without it", async () => {

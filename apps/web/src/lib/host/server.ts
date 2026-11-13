@@ -69,7 +69,22 @@ export function hostLoginLabel(): string {
 }
 
 export function nihoAuthDeps(): NihoAuthDeps {
-  return { fetch, nihoOrigin: config.nihoWebOrigin };
+  return { fetch, nihoOrigin: config.nihoWebOrigin, serviceIdToken: serviceIdTokenOrNull };
+}
+
+/**
+ * Experience's service ID token for the NIHO calls of a log in (the exchange, the connection's end), or null: not configured
+ * (no NIHO service audience: the former token login), or not issued. An issuing failure never stops the log in (NIHO then counts
+ * the call by IP, as before) but is logged, by its class only: never the token.
+ */
+async function serviceIdTokenOrNull(): Promise<string | null> {
+  if (!isHostMock() && !config.nihoExperienceHostCommonContractAudience) return null;
+  try {
+    return await experienceHostServiceIdToken();
+  } catch (error) {
+    console.error(`[niho-auth] service ID token not issued: ${error instanceof Error ? error.name : "unknown error"}`);
+    return null;
+  }
 }
 
 /** NIHO request transport: the real origin in http mode, the synthetic one in mock mode. */

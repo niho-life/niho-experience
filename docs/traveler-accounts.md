@@ -28,8 +28,17 @@ Epic [#591](https://github.com/niho-life/niho-experience/issues/591)、[#597](ht
 
 - 予約・メッセージ・レビュー・通訳とアカウントの結び付け（予約の一覧・履歴）。いまの `/account` は何も持たない。
 - 日本語サイトの入口と並び順、サイト名「NIHO Experience」の扱い、Apple の web 対応。
-- NIHO 側の回数上限（niho-coliving/niho-app#20336）：旅行者に開くと、Experience のサーバー 1 台からの `exchange` が IP 単位の上限に当たる。NIHO が契約（サービスの ID トークンのヘッダー）をコメントしたら、NIHO を呼ぶ入口（`niho-login.ts` の `withNihoIdentity` と `nihoAuthDeps()`）の 1 箇所にトークンを足す。**それまで本番で旅行者のログインを開けない。**
+- 日本語サイトの入口と並び順、サイト名「NIHO Experience」の扱い、Apple の web 対応（上と同じ）。
 - 確認画面を省くか（NIHO の `skip-confirm`。NIHO 側のオーナー判断待ち）と、Google・LINE・Apple の同意画面に出る名前（niho-coliving/niho-app#20307 の調査）。
+
+## NIHO の回数上限（サービス単位）
+
+旅行者のログインは、Experience のサーバー（少数の egress IP）から全員分の `exchange` などが NIHO へ届く。NIHO の IP 単位の上限（`exchange` は 10 分で 20 回など）に当たると、無関係の人も含めて全員のログインが止まる。そこで、サーバー間の契約と同じ Google OIDC のサービス ID トークンを、ヘッダー `X-NIHO-Experience-Service-Id-Token` で付け、NIHO にサービス単位の枠で数えてもらう（niho-coliving/niho-app#20336・PR #20339。[契約のコメント](https://github.com/niho-life/niho-experience/issues/597#issuecomment-6859906296)）。
+
+- 付ける呼び出し：`POST /api/auth/app-connect/exchange`、`DELETE /api/auth/app-connections/{id}`、`GET /api/experience-host/identity`（もともと付いている）。ホストのログインも同じ入口（`nihoAuthDeps()`）を通るので、ホストと旅行者の両方に付く。`refresh`・`start` には付けない。
+- 付けられなくても、ログインは止めない：トークンを発行できないとき（NIHO の audience が未設定、発行の失敗）は、`exchange` と接続の解除をヘッダーなしで呼ぶ（NIHO は IP 単位で数える）。発行の失敗は `[niho-auth] service ID token not issued` として、例外の種類だけをログに残す（トークンは出さない）。ただし `identity` はサーバー間の契約でこのトークンが必須なので、発行できなければそのログインは終わらない。
+- 上限を超えると NIHO は 429 `RATE_LIMITED`（`details.reason: experience_service_rate_limited`・`Retry-After` つき）を返す。ログインの画面では「しばらくしてからもう一度」（`unavailable`）になる。
+- NIHO 側の flag `EXPERIENCE_SERVICE_RATE_LIMIT_ENABLED` は既定 OFF。**Experience のこの送信を配備したあと、NIHO の stg → 本番の順で ON にする**。旅行者のログインを開くまでに ON にしておく。
 
 ## CSP と Referrer-Policy
 
