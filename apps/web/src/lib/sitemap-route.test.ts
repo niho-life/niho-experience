@@ -12,6 +12,10 @@ vi.mock("@/lib/experience/site-publications", () => ({
   listSitePublicExperiences: async () => ({ claimedSlugs: ["tea-ceremony"], experiences: [{ publication: { slug: "tea-ceremony", publishedAtUtc: "2026-10-20T00:00:00Z", japanese: null }, saleTerms: { offers: [{}] } }] }),
 }));
 vi.mock("@/lib/guide-registry", () => ({ indexableGuides: async () => [{ slug: "rainy-day", updatedAt: "2026-10-25" }] }));
+// The Japanese site's own pages (#561): none in these fixtures.
+vi.mock("@/lib/ja-people", () => ({ loadPeople: async () => [] }));
+vi.mock("@/lib/ja-guides", () => ({ loadJapaneseGuides: async () => [] }));
+vi.mock("@/lib/ja-catalog-server", () => ({ loadJaCards: async () => [] }));
 vi.mock("@/lib/localized-content", async () => {
   const { JapaneseReleaseUnavailable } = await vi.importActual<typeof import("./localized-release")>("./localized-release");
   return {
@@ -58,7 +62,8 @@ describe("sitemap route", () => {
   it("adds the paired Japanese detail once the release is prepared", async () => {
     state.release = { pages: [], experiences: mapJapaneseExperiences("release-1", { releaseId: "release-1", experiences: [{ slug: "tea-ceremony" }] }) };
     const entries = await sitemap();
-    expect(entries.at(-1)).toStrictEqual({
+    // The Japanese site's own pages (#561) follow the details; the detail itself is exactly as before.
+    expect(entries.find((entry) => entry.url === `${SITE}/ja/experiences/tea-ceremony`)).toStrictEqual({
       url: `${SITE}/ja/experiences/tea-ceremony`,
       alternates: { languages: { en: `${SITE}/experiences/tea-ceremony`, ja: `${SITE}/ja/experiences/tea-ceremony`, "x-default": `${SITE}/experiences/tea-ceremony` } },
     });

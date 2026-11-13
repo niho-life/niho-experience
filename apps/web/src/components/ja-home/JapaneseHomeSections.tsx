@@ -4,7 +4,7 @@ import type { PublicPerson } from "@niho-experience/experience-store";
 import { EXPERIENCE_COMPANIONS, type ExperienceCategoryId } from "@niho-experience/experience-domain";
 import type { Guide } from "@/content/guides";
 import { guideLinkHref } from "@/lib/guide-markdown";
-import { JA_HOME_FEATURE, occasionHref, type HomeOccasion } from "@/lib/ja-home";
+import { occasionHref, type HomeFeature, type HomeOccasion } from "@/lib/ja-home";
 import { CategoryIcon } from "../ja/CategoryIcon";
 import { Photo } from "../Photo";
 import { buttonClass } from "../ui";
@@ -142,8 +142,7 @@ export function CategoryNav({ categories }: { categories: readonly { id: string;
 }
 
 /** 特集：1つのテーマの紹介と一覧への入口（写真は権利の確認できた既存の素材）。 */
-export function FeatureBand() {
-  const feature = JA_HOME_FEATURE;
+export function FeatureBand({ feature }: { feature: HomeFeature }) {
   return <section aria-labelledby="feature-band" className="container-page my-14 sm:my-16">
     <div className="grid items-center gap-8 md:grid-cols-2 md:gap-12">
       <div>

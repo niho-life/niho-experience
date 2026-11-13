@@ -67,4 +67,24 @@ describe("sitemap entries", () => {
     // English /help is noindex and not in the sitemap, so the Japanese help page points nowhere.
     expect(entries.find((entry) => entry.url === `${SITE}/ja/help`)).toStrictEqual({ url: `${SITE}/ja/help` });
   });
+
+  it("adds the Japanese service pages, 街の人, 読みもの and the categories that have experiences, only with a Japanese release (#561)", () => {
+    const own = { people: [{ slug: "masato" }, { slug: "haruka" }], guides: [{ slug: "rain-walk", updatedAt: "2026-11-10" }, { slug: "old", updatedAt: "2026-10-01" }], categories: ["zen", "food"] };
+    const entries = sitemapEntries({ siteUrl: SITE, experiences: [], guides: [], japanese: release("release-1"), japaneseOwn: own });
+    const urls = entries.map((entry) => entry.url);
+    for (const path of ["/ja/usage", "/ja/business", "/ja/schools", "/ja/people", "/ja/people/masato", "/ja/people/haruka", "/ja/guides", "/ja/guides/rain-walk", "/ja/guides/old", "/ja/experiences?category=zen", "/ja/experiences?category=food"]) expect(urls).toContain(`${SITE}${path}`);
+    expect(entries.find((entry) => entry.url === `${SITE}/ja/guides`)?.lastModified).toBe("2026-11-10");
+    // Never twice, and the noindex pages stay out.
+    expect(new Set(urls).size).toBe(urls.length);
+    expect(urls).not.toContain(`${SITE}/ja/inquiry`);
+    // Without a Japanese release none of it is listed.
+    expect(sitemapEntries({ siteUrl: SITE, experiences: [], guides: [], japanese: null, japaneseOwn: own }).some((entry) => entry.url.includes("/ja/"))).toBe(false);
+  });
+
+  it("does not list an empty 街の人, 読みもの or category (no empty page in search)", () => {
+    const urls = sitemapEntries({ siteUrl: SITE, experiences: [], guides: [], japanese: release("release-1"), japaneseOwn: { people: [], guides: [], categories: [] } }).map((entry) => entry.url);
+    expect(urls).toContain(`${SITE}/ja/usage`);
+    for (const path of ["/ja/people", "/ja/guides"]) expect(urls).not.toContain(`${SITE}${path}`);
+    expect(urls.some((url) => url.includes("category="))).toBe(false);
+  });
 });
