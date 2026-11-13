@@ -8,11 +8,11 @@ import { consoleButtonClass } from "./host-ui";
  * 予約リンクをコピー (#531 v0): this experience's public page with the 流入の印 for where the host will put it (their site,
  * social media, a QR in a shop). Nothing is stored or issued: the address is built in the browser and copied.
  */
-export function HostBookingLinkCopy({ slug, origin }: { slug: string; origin: string }) {
+export function HostBookingLinkCopy({ slug, origin, japaneseOnly = false }: { slug: string; origin: string; japaneseOnly?: boolean }) {
   const [placement, setPlacement] = useState<ProviderLinkPlacement>("referral");
   const [state, setState] = useState<{ tone: "ok" | "alert"; text: string; link?: string } | null>(null);
   const selectId = useId();
-  const link = providerBookingLink({ origin, slug, placement });
+  const link = providerBookingLink({ origin, slug, placement, japaneseOnly });
   if (!link) return null;
 
   async function copy() {

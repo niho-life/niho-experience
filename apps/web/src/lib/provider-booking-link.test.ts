@@ -6,6 +6,13 @@ import { PROVIDER_LINK_PLACEMENTS, providerBookingLink, providerBookingLinkAvail
 const ORIGIN = "https://experience.example";
 
 describe("providerBookingLink", () => {
+  it("points a Japanese-only product at its /ja page, the only page it has (#59)", () => {
+    expect(providerBookingLink({ origin: ORIGIN, slug: "ja-first", placement: "social", japaneseOnly: true }))
+      .toBe(`${ORIGIN}/ja/experiences/ja-first?utm_source=provider&utm_medium=social`);
+    expect(providerBookingLink({ origin: ORIGIN, slug: "ja-first", placement: "social", japaneseOnly: false }))
+      .toBe(`${ORIGIN}/experiences/ja-first?utm_source=provider&utm_medium=social`);
+  });
+
   it("is the experience's public page with the provider mark and where the link is placed, nothing else", () => {
     expect(providerBookingLink({ origin: ORIGIN, slug: "kamakura-community-dinner", placement: "referral" }))
       .toBe("https://experience.example/experiences/kamakura-community-dinner?utm_source=provider&utm_medium=referral");
