@@ -165,7 +165,7 @@ test("the provider's page: saving the public information needs the consent again
   await consent.check();
   await save.click();
   await expect(page.getByRole("status").filter({ hasText: "公開用の提供者情報と承諾確認を保存しました。" })).toBeVisible();
-  expect(backend.puts).toEqual([{ expectedVersion: 2, profile: { publicDisplayName: "サンプルの台所 本店", providerKind: "BUSINESS", consentVersion: CONSENT, consentConfirmed: true } }]);
+  expect(backend.puts).toEqual([{ expectedVersion: 2, profile: { publicDisplayName: "サンプルの台所 本店", providerKind: "BUSINESS", consentVersion: CONSENT, publicDisplayNameEn: null, consentConfirmed: true } }]);
   await expect(consent).not.toBeChecked();
   await expect(page.getByRole("heading", { level: 1, name: "サンプルの台所 本店" })).toBeVisible();
 });
