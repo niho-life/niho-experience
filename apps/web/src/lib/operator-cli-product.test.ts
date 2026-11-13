@@ -8,6 +8,10 @@ import type { Api, ApiResponse } from "../../../../scripts/experience/ops/core.t
 const NOW = Date.parse("2026-11-14T00:00:00.000Z");
 const ROOT = "/admin/api/product-workspaces";
 const CONSENT = "consent-v1";
+// Fake-API JSON has no fixed shape in these tests, so `any` is allowed for this one alias.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = Record<string, any>;
+
 const content = { japaneseOnly: true, ja: { title: "合成の体験", lead: "紹介" } };
 
 function fakeApi(blockers: string[] = []) {
@@ -37,7 +41,7 @@ function fakeApi(blockers: string[] = []) {
       if (seen.has(operationId)) return { status: 409, body: { error: "operation_already_recorded" } };
       seen.add(operationId);
       if (hooks.rejectNext) { const r = hooks.rejectNext; hooks.rejectNext = null; return r; }
-      const b = (body ?? {}) as Record<string, any>;
+      const b = (body ?? {}) as Loose;
       if (method === "POST" && path.endsWith("/calendar")) return seen.size && sentRules.has(b.commandId) ? { status: 200, body: { id: b.commandId, version: 1 } } : (sentRules.add(b.commandId), { status: 201, body: { id: b.commandId, version: 1 } });
       if (method === "POST" && path.endsWith("/media")) { product = { ...product!, media: [...(product!.media ?? []), { id: "m1", altText: raw!.headers["x-experience-photo-alt-text-utf8-base64url"] }] }; return { status: 201, body: { product: dto() } }; }
       if (method === "POST" && path.endsWith("/suspend")) return { status: 200, body: { publication: { state: "OPERATIONS_SUSPENDED", stateVersion: 3 } } };
@@ -59,7 +63,7 @@ function fakeApi(blockers: string[] = []) {
 }
 
 const exec = (api: Api, argv: string[], file?: string, bytes?: Uint8Array) => run(["product", ...argv], { environment: {}, api, now: () => NOW, readFile: () => file ?? "", readBytes: () => bytes ?? new Uint8Array() });
-const out = (outcome: Awaited<ReturnType<typeof run>>) => outcome.output as Record<string, any>;
+const out = (outcome: Awaited<ReturnType<typeof run>>) => outcome.output as Loose;
 
 describe("provider", () => {
   it("lists, and registers a provider only with the consent confirmed, once per public name", async () => {

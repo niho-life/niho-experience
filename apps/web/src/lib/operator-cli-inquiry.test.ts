@@ -31,7 +31,10 @@ function inquiryApi() {
   return { api, sent };
 }
 const exec = (target: string, api: Api, argv: string[]) => run([target, ...argv], { environment: {}, api, now: () => NOW });
-const out = (o: Awaited<ReturnType<typeof run>>) => o.output as Record<string, any>;
+// Fake-API JSON has no fixed shape in these tests, so `any` is allowed for this one alias.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = Record<string, any>;
+const out = (o: Awaited<ReturnType<typeof run>>) => o.output as Loose;
 
 describe("inquiry", () => {
   it("lists without the sender's name, address or message, and the details", async () => {
