@@ -12,6 +12,7 @@ export const NIHO_IDENTITY_OUTCOMES = {
   "last-method": { tone: "problem", text: "ほかにログインできる方法が無くなるため、解除できません。" },
   switched: { tone: "problem", text: "結び付けている間に、ログインしているアカウントが変わりました。安全のため中止しました。もう一度、結び付けるアカウントでログインして、やり直してください。" },
   reauth: { tone: "problem", text: "ログインから時間がたっています。もう一度ログインしてから、やり直してください。" },
+  unverified: { tone: "problem", text: "NIHO でログインした時刻を確認できませんでした。時間をおいて、もう一度お試しください。" },
   denied: { tone: "problem", text: "NIHO でログインが取り消されました。結び付けるには、もう一度お試しください。" },
   unavailable: { tone: "problem", text: "NIHO アカウントを結び付けられませんでした。時間をおいて、もう一度お試しください。" },
 } as const;

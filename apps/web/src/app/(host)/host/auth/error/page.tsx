@@ -22,6 +22,8 @@ const MESSAGES: Record<LoginErrorReason, string> = {
   "invite-invalid": "この招待は使えません。リンクが正しくないか、期限が切れたか、別のブラウザで開いた場合に起こります。運営に、新しい招待を依頼してください。",
   "invite-in-use": "このアカウントは、すでに別のホストに結び付いているため、この招待には使えません。招待を受けたホストの NIHO アカウントで、もう一度ログインしてください。",
   "invite-has-identity": "この招待のホストアカウントには、すでに別の NIHO アカウントが結び付いています。結び付けた NIHO アカウントでログインしてください。",
+  "invite-unavailable": "NIHO でのログインを確認できませんでした。時間をおいて、もう一度お試しください。招待のリンクはまだ使えます。",
+  unverified: "NIHO でログインした時刻を確認できませんでした。時間をおいて、もう一度お試しください。",
 };
 
 /** The invitation's reasons (Epic #591, #596): what to press next (nothing for a link that cannot be used any more). */
@@ -29,6 +31,7 @@ const INVITE_RETRY: Partial<Record<LoginErrorReason, { href: string; label: stri
   "invite-in-use": { href: withQuery(HOST_LOGIN_PATH, { invite: "1" }), label: "別の NIHO アカウントでやり直す" },
   "invite-used": { href: HOST_LOGIN_PATH, label: "NIHO アカウントでログイン" },
   "invite-has-identity": { href: HOST_LOGIN_PATH, label: "NIHO アカウントでログイン" },
+  "invite-unavailable": { href: withQuery(HOST_LOGIN_PATH, { invite: "1" }), label: "もう一度ログイン" },
 };
 
 /** NIHO's public support address (the help page uses it too). No account or NIHO user ID is put in the link. */
