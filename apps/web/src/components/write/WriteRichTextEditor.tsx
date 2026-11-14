@@ -64,6 +64,7 @@ function removeAssetFigures(editor: Editor, assetId: string) {
 
 export function WriteRichTextEditor({
   articleId,
+  language,
   initialContent,
   revokedAssetId,
   disabled,
@@ -76,6 +77,8 @@ export function WriteRichTextEditor({
   onConflict,
 }: {
   readonly articleId: string;
+  /** The article's language. The body carries it as `lang`, so an English article is shown in the English site's type (#615). */
+  readonly language: "ja" | "en";
   readonly initialContent: JSONContent;
   readonly revokedAssetId?: string | null;
   readonly disabled?: boolean;
@@ -231,7 +234,7 @@ export function WriteRichTextEditor({
         <button ref={photoOpener} type="button" className="write-tool" disabled={!editor || disabled || editor.isActive("listItem")} onClick={() => void openPhoto()}>写真</button>
       </div>
       <span id="write-body-label" className="sr-only">記事本文</span>
-      <EditorContent editor={editor} />
+      <EditorContent editor={editor} lang={language} />
       {linkOpen ? <div className="write-popover" role="dialog" aria-label="リンクを設定">
         <label>URL<input autoFocus value={linkValue} onChange={(event) => setLinkValue(event.target.value)} /></label>
         {linkError ? <p role="alert">{linkError}</p> : null}

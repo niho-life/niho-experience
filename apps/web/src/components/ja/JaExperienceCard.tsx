@@ -19,7 +19,7 @@ export function JaExperienceCard({ card, priority = false }: { card: JaCard; pri
       </Link>
       <div className="mt-3 flex flex-1 flex-col">
         {card.withLine ? <p className="text-[0.8125rem] font-bold text-moss">{card.withLine}</p> : null}
-        <h3 className="mt-0.5 font-sans text-[1.0625rem] leading-snug font-extrabold tracking-normal [overflow-wrap:anywhere]">
+        <h3 className="mt-0.5 text-[1.0625rem] leading-snug font-bold [overflow-wrap:anywhere]">
           <Link href={href} className="after:absolute after:inset-0 hover:underline focus-visible:underline">{card.title}</Link>
         </h3>
         <p className="mt-1 line-clamp-2 text-[0.875rem] leading-normal text-ink-soft">{card.lead}</p>

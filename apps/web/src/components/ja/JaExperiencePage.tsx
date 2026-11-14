@@ -22,7 +22,7 @@ import { reviewsForJsonLd, sitePublicationJsonLd } from "@/lib/structured-data";
 import { CategoryIcon } from "./CategoryIcon";
 import { JaExperienceCard } from "./JaExperienceCard";
 
-const H2 = "font-sans text-[1.375rem] leading-snug font-extrabold tracking-normal md:text-[1.5rem]";
+const H2 = "text-[1.5rem] leading-snug md:text-[1.75rem]";
 const SECTION = "border-b border-line py-8 lg:py-10";
 
 /** Cancellation lines by offer: one line when every offer says the same, else each offer's own. Always the product's own terms. */
@@ -110,7 +110,7 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
                   const photo = step.photoIndex === null ? null : photos[step.photoIndex] ?? null;
                   return <li key={`${index}-${step.title}`} className="grid gap-4 sm:grid-cols-[96px_1fr]">
                     {photo ? <Photo image={photo} alt={photo.alt || `${title}、${step.title}`} aspect="" rounded="rounded-[18px]" className="size-24" sizes="96px" /> : <span aria-hidden className="grid size-24 place-items-center rounded-[18px] bg-sand font-extrabold text-moss">{index + 1}</span>}
-                    <div>{step.time ? <p className="hand text-2xl">{step.time}</p> : null}<h3 className="mt-1 font-extrabold">{step.title}</h3><p className="mt-1 text-ink-soft">{step.text}</p></div>
+                    <div>{step.time ? <p className="text-[0.9375rem] font-bold text-moss tabular-nums">{step.time}</p> : null}<h3 className="mt-1 font-bold">{step.title}</h3><p className="mt-1 text-ink-soft">{step.text}</p></div>
                   </li>;
                 })}
               </ol>
@@ -141,8 +141,8 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
 
             {content.included.length || content.notIncluded.length ? <section className={SECTION} aria-labelledby="ja-included"><h2 id="ja-included" className={H2}>料金に含まれるもの</h2>
               <div className="mt-5 grid gap-7 sm:grid-cols-2">
-                {content.included.length ? <div><h3 className="font-extrabold">含まれるもの</h3><ul className="mt-3 space-y-2 text-ink-soft">{content.included.map((text) => <li key={text} className="flex gap-2"><HandIcon name="check" className="mt-0.5 size-5 shrink-0" />{text}</li>)}</ul></div> : null}
-                {content.notIncluded.length ? <div><h3 className="font-extrabold">含まれないもの</h3><ul className="mt-3 space-y-2 text-ink-soft">{content.notIncluded.map((text) => <li key={text} className="flex gap-2"><HandIcon name="cross" className="mt-0.5 size-5 shrink-0" />{text}</li>)}</ul></div> : null}
+                {content.included.length ? <div><h3 className="font-bold">含まれるもの</h3><ul className="mt-3 space-y-2 text-ink-soft">{content.included.map((text) => <li key={text} className="flex gap-2"><HandIcon name="check" className="mt-0.5 size-5 shrink-0" />{text}</li>)}</ul></div> : null}
+                {content.notIncluded.length ? <div><h3 className="font-bold">含まれないもの</h3><ul className="mt-3 space-y-2 text-ink-soft">{content.notIncluded.map((text) => <li key={text} className="flex gap-2"><HandIcon name="cross" className="mt-0.5 size-5 shrink-0" />{text}</li>)}</ul></div> : null}
               </div>
             </section> : null}
 
@@ -150,7 +150,7 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
 
             {content.knowBeforeYouGo.length || content.notSuitableFor.length ? <section className={SECTION} aria-labelledby="ja-know"><h2 id="ja-know" className={H2}>知っておいてほしいこと</h2>
               {content.knowBeforeYouGo.length ? <ul className="mt-4 list-disc space-y-2 pl-5 text-ink-soft">{content.knowBeforeYouGo.map((text) => <li key={text}>{text}</li>)}</ul> : null}
-              {content.notSuitableFor.length ? <><h3 className="mt-6 font-extrabold">ご参加をおすすめしにくい方</h3><ul className="mt-3 list-disc space-y-2 pl-5 text-ink-soft">{content.notSuitableFor.map((text) => <li key={text}>{text}</li>)}</ul></> : null}
+              {content.notSuitableFor.length ? <><h3 className="mt-6 font-bold">ご参加をおすすめしにくい方</h3><ul className="mt-3 list-disc space-y-2 pl-5 text-ink-soft">{content.notSuitableFor.map((text) => <li key={text}>{text}</li>)}</ul></> : null}
             </section> : null}
 
             {cancellation.length ? <section className={SECTION} aria-labelledby="ja-cancel"><h2 id="ja-cancel" className={H2}>取消について</h2>
@@ -161,7 +161,7 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
 
             {content.faq.length ? <section id="faq" aria-labelledby="ja-faq" className={`${SECTION} scroll-mt-24`}><h2 id="ja-faq" className={H2}>よくある質問</h2>
               <div className="mt-4 border-t border-line">{content.faq.map((entry, index) => <details key={`${index}-${entry.question}`} className="group border-b border-line">
-                <summary className="flex min-h-11 cursor-pointer list-none items-center py-4 [&::-webkit-details-marker]:hidden"><h3 className="flex w-full items-center justify-between gap-4 font-sans text-[1.0625rem] leading-[1.5] font-extrabold tracking-normal"><span>{entry.question}</span><span aria-hidden className="text-moss transition-transform group-open:rotate-45">＋</span></h3></summary>
+                <summary className="flex min-h-11 cursor-pointer list-none items-center py-4 [&::-webkit-details-marker]:hidden"><h3 className="flex w-full items-center justify-between gap-4 text-[1.0625rem] leading-[1.5] font-bold"><span>{entry.question}</span><span aria-hidden className="text-moss transition-transform group-open:rotate-45">＋</span></h3></summary>
                 <p className="pb-4 whitespace-pre-line text-ink-soft">{entry.answer}</p>
               </details>)}</div>
             </section> : null}
@@ -172,7 +172,7 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
               <p className="text-3xl font-extrabold">{jaYen(lowest)}<span className="ml-1 text-sm font-normal">〜 / 人（税込）</span></p>
               {nextDates.length ? <>
                 <p className="mt-4 text-[0.8125rem] font-extrabold text-ink-soft">次の開催</p>
-                <ul className="mt-2 grid grid-cols-3 gap-2">{nextDates.slice(0, 3).map((date) => { const day = dayOption(date.date, "ja"); return <li key={`${date.offerId}-${date.date}`}><Link href={bookHref} className="flex flex-col items-center rounded-xl border border-line-strong py-2 leading-tight hover:bg-sand"><small className="text-[0.6875rem] font-bold">{day.weekday.replace("曜", "")}</small><b>{day.label.replace(/（.+$/, "")}</b></Link></li>; })}</ul>
+                <ul className="mt-2 grid grid-cols-3 gap-2">{nextDates.slice(0, 3).map((date) => { const day = dayOption(date.date, "ja"); return <li key={`${date.offerId}-${date.date}`}><Link href={bookHref} className="flex flex-col items-center rounded-xl border border-line-strong py-2 leading-tight hover:bg-sand"><small className="text-[0.75rem] font-bold">{day.weekday.replace("曜", "")}</small><b>{day.label.replace(/（.+$/, "")}</b></Link></li>; })}</ul>
                 {closes ? <p className="mt-2 text-[0.8125rem] text-ink-soft">予約締切：<time dateTime={closes} className="font-bold text-ink">{dayOption(jstDateKey(closes), "ja").label} {formatTime(closes, "ja")}</time></p> : null}
               </> : null}
               {bookable ? <Link href={bookHref} className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-leaf px-6 font-extrabold text-ink hover:bg-leaf-hover">{cta}</Link> : <p className="mt-4 text-ink-soft">この体験は現在、予約を受け付けていません。</p>}

@@ -1,5 +1,6 @@
 import { HOST_PUSH_MESSAGE, HOST_SHARE_FIELD, HOST_SHARE_PHOTO_MAX_BYTES, HOST_SHARE_PHOTO_TYPES, HOST_SHARE_TAKE_MESSAGE, HOST_SHARE_WORKER_HOLD_MS } from "./display";
 import { HOST_APP_ICONS } from "./pwa";
+import { NIHO_SANS_FAMILY, NIHO_SANS_FONT_FACES } from "../niho-sans";
 import { HOST_API_PREFIX, HOST_APP_SCOPE, HOST_EXPERIENCES_PATH, HOST_HOME_PATH, HOST_SHARE_TARGET_PATH, HOST_SHARED_QUERY } from "./routes";
 
 /**
@@ -22,7 +23,8 @@ const OFFLINE_HTML = `<!doctype html>
 <meta name="robots" content="noindex, nofollow">
 <title>接続できません | NIHO 体験ホスト</title>
 <style>
-body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fff;color:#1c1c1a;font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;line-height:1.6}
+${NIHO_SANS_FONT_FACES}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fff;color:#1c1c1a;font-family:${NIHO_SANS_FAMILY};line-height:1.6}
 main{width:100%;max-width:36rem;padding:4rem 1rem;box-sizing:border-box}
 h1{margin:0;font-size:1.5rem;line-height:1.3}
 p{margin:.75rem 0 2rem;color:#4b4b47}

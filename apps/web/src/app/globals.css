@@ -35,7 +35,79 @@
   --shadow-card: 0 1px 2px rgb(28 28 26 / 0.04), 0 10px 30px rgb(28 28 26 / 0.08);
 }
 
+/*
+ * 日本語の画面の書体「NIHO Sans」(#615)。NIHO アプリ（niho-app `docs/design/font-style-guide.md` §3.1）と同じ組み方にする。
+ * 英字は Nunito、日本語は端末の書体で、日本語の Web フォントは配信しない。Apple 端末では
+ * 100–500 = ヒラギノ丸ゴ ProN W4、600–700 = ヒラギノ角ゴシック W6、800 = W7、900 = W8 の実際の太さで描き、合成太字を作らない
+ * （丸ゴ ProN は W4 しか無く、合成太字は WebKit で潰れる）。Windows / Android は local() が外れて、後ろの游ゴシック・メイリオ・Noto へ落ちる。
+ * 名前で指すだけなので、使わない英語のサイトでは何も読み込まれない。
+ */
+@font-face {
+  font-family: "NIHO Sans";
+  font-weight: 100 500;
+  src: local("Hiragino Maru Gothic ProN W4"), local("HiraMaruProN-W4");
+}
+@font-face {
+  font-family: "NIHO Sans";
+  font-weight: 600 700;
+  src: local("Hiragino Sans W6"), local("HiraginoSans-W6");
+}
+@font-face {
+  font-family: "NIHO Sans";
+  font-weight: 800;
+  src: local("Hiragino Sans W7"), local("HiraginoSans-W7");
+}
+@font-face {
+  font-family: "NIHO Sans";
+  font-weight: 900;
+  src: local("Hiragino Sans W8"), local("HiraginoSans-W8");
+}
+/*
+ * 手書き（Caveat、`.hand` / `.eyebrow`）の中の日本語。Caveat に無い日本語の字だけを、丸ゴ W4 で Caveat の見た目の大きさに縮めて描く
+ * （「お困りのときは」のような日本語の小見出しが、端末の筆記体や大きすぎる太字にならない）。英字は Caveat のまま。
+ */
+@font-face {
+  font-family: "NIHO Hand JA";
+  font-weight: 100 900;
+  size-adjust: 80%;
+  src: local("Hiragino Maru Gothic ProN W4"), local("HiraMaruProN-W4"), local("Yu Gothic Medium"), local("YuGothic-Medium"),
+    local("Meiryo"), local("Noto Sans CJK JP"), local("NotoSansCJKjp-Regular"), local("Noto Sans JP");
+  unicode-range: U+3000-30FF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FF00-FFEF;
+}
+
 @layer base {
+  /*
+   * 日本語の画面（/ja・/host・/write・/admin。どれも <html lang="ja">）は、本文も見出しも NIHO Sans。見出しの格は書体ではなく、
+   * 太さ（大見出し 400 = 丸ゴ、小見出し 700 = 角ゴ W6）と大きさで分ける。公開サイトの部品はトークンを自分のルート（.nexp-v1）に置くので、そこにも置く。
+   * `@layer base` に置く: Tailwind の utilities（画面ごとの指定）は今までどおり勝つ。
+   */
+  html[lang="ja"],
+  html[lang="ja"] .nexp-v1 {
+    --font-sans: "Nunito Variable", "NIHO Sans", "Hiragino Maru Gothic ProN", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+      "Yu Gothic", Meiryo, "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
+    --font-display: var(--font-sans);
+    --font-hand: "Caveat Variable", "NIHO Hand JA", "Bradley Hand", cursive;
+  }
+  /*
+   * 日本語の画面の中で英語サイトの見た目を見せる所（ホストの体験のプレビュー、英語の記事を書く欄）は lang="en" を付け、
+   * 英語のサイトと同じ書体（@theme の値）に戻す。
+   */
+  html[lang="ja"] [lang="en"],
+  html[lang="ja"] [lang="en"] .nexp-v1 {
+    --font-sans: "Nunito Variable", "Hiragino Sans", "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
+    --font-display: "Fraunces Variable", Georgia, "Hiragino Mincho ProN", serif;
+    --font-hand: "Caveat Variable", "Bradley Hand", cursive;
+  }
+  /* 親（body）から受け継いだ日本語の書体を、ここで英語のトークンに引き直す。 */
+  html[lang="ja"] [lang="en"] {
+    font-family: var(--font-sans);
+  }
+  /* 日本語の見出しに、英字用の詰めた字間と行間（1.12）は合わない。画面ごとの leading-* / tracking-* は今までどおり勝つ。 */
+  html[lang="ja"] :is(h1, h2, h3):not(:lang(en)) {
+    letter-spacing: 0;
+    line-height: 1.35;
+  }
+
   html {
     -webkit-text-size-adjust: 100%;
     scroll-padding-top: 5rem;
