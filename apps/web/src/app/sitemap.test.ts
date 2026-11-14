@@ -14,7 +14,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
 vi.mock("@/lib/api", () => ({ listExperiencesForSite: async () => ({ ok: true, data: { experiences: [{ slug: "synthetic-dinner", updatedAt: "2026-11-04T00:00:00.000Z" }] } }) }));
 vi.mock("@/lib/guide-registry", () => ({ indexableGuides: async () => [] }));
-vi.mock("@/lib/ja-people", () => ({ loadPeople: async () => state.people }));
+vi.mock("@/lib/ja-people", () => ({ loadPeoplePages: async () => state.people }));
 vi.mock("@/lib/ja-guides", () => ({ loadJapaneseGuides: async () => state.jaGuides }));
 vi.mock("@/lib/ja-catalog-server", () => ({ loadJaCards: async () => state.cards }));
 vi.mock("@/lib/localized-content", async () => {

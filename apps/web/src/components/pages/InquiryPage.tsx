@@ -41,7 +41,7 @@ export function InquiryPage({ locale, search }: { locale: GroupInquiryLocale; se
               <li key={example.title} className="rounded-[18px] border border-line bg-white p-5">
                 <b className="block text-[1.0625rem]">{example.title}</b>
                 <span className="mt-1 block text-ink-soft">{example.body}</span>
-                {example.href ? <a href={example.href} className="mt-3 inline-block font-extrabold underline underline-offset-4">くわしく見る</a> : null}
+                {example.href && (example.href !== "/ja/people" || config.peoplePagesEnabled) ? <a href={example.href} className="mt-3 inline-block font-extrabold underline underline-offset-4">くわしく見る</a> : null}
               </li>
             ))}
           </ul>

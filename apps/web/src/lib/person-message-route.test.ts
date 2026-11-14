@@ -3,7 +3,7 @@ import { StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from 
 
 /** The route behind 「◯◯さんにメッセージを送る」 (#589) against a stubbed experience store. */
 const state = vi.hoisted(() => ({
-  config: { personMessagesEnabled: true, japaneseSiteEnabled: true, guestQuestionsEnabled: false, siteUrl: "https://experience.example" },
+  config: { personMessagesEnabled: true, peoplePagesEnabled: true, japaneseSiteEnabled: true, guestQuestionsEnabled: false, siteUrl: "https://experience.example" },
   repository: null as null | Record<string, ReturnType<typeof vi.fn>>,
 }));
 vi.mock("server-only", () => ({}));
@@ -26,7 +26,7 @@ function post(body: unknown, headers: Record<string, string> = {}): Request {
 const params = (slug = "takuya") => ({ params: Promise.resolve({ slug }) });
 
 beforeEach(() => {
-  state.config = { personMessagesEnabled: true, japaneseSiteEnabled: true, guestQuestionsEnabled: false, siteUrl: ORIGIN };
+  state.config = { personMessagesEnabled: true, peoplePagesEnabled: true, japaneseSiteEnabled: true, guestQuestionsEnabled: false, siteUrl: ORIGIN };
   state.repository = { submitPersonMessage: vi.fn(async () => ({ status: "received" })) };
 });
 
@@ -48,7 +48,10 @@ describe("POST /api/public/people/[slug]/messages", () => {
     expect((await send(post(MESSAGE), params())).status).toBe(404);
     state.config = { ...state.config, personMessagesEnabled: true, guestQuestionsEnabled: false, japaneseSiteEnabled: false };
     expect((await send(post(MESSAGE), params())).status).toBe(404);
-    state.config = { ...state.config, japaneseSiteEnabled: true };
+    // Closed while the people pages are off (#612): there is no page to send it from.
+    state.config = { ...state.config, japaneseSiteEnabled: true, peoplePagesEnabled: false };
+    expect((await send(post(MESSAGE), params())).status).toBe(404);
+    state.config = { ...state.config, peoplePagesEnabled: true };
     expect((await send(post(MESSAGE), params(""))).status).toBe(404);
     state.repository = null;
     expect((await send(post(MESSAGE), params())).status).toBe(503);

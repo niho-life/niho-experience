@@ -76,11 +76,12 @@ describe("the links from the Japanese site", () => {
     expect(inquiryFooterLinks()).toEqual([]);
   });
 
-  it("invites from the top page to the form, the company guide and the school guide", () => {
+  it("invites from the top page to the form and to the company and school guide (the school guide is reached from there, #612)", () => {
     const html = renderToStaticMarkup(createElement(ConsultBand));
     expect(html).toContain('href="/ja/inquiry"');
     expect(html).toContain('href="/ja/business"');
-    expect(html).toContain('href="/ja/schools"');
+    expect(html).toContain("企業・学校の方へ");
+    expect(BUSINESS_GUIDE.otherLink).toEqual({ href: "/ja/schools", label: "学校の方はこちら" });
     expect(html).toContain("はじめの相談は無料です");
   });
 });

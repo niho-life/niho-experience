@@ -85,6 +85,7 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED` | `TRANSLATE_STANDALONE_API_ENABLED` | ホストの画面・DB・Experience Host Accounts、NIHO common-contract audience | — | — | — |
 | `EXPERIENCE_GUEST_QUESTIONS_ENABLED` | `GUEST_QUESTIONS_ENABLED` | ホストの画面・DB、Provider APIとは併用不可 | — | — | — |
 | `EXPERIENCE_PERSON_MESSAGES_ENABLED` | `PERSON_MESSAGES_ENABLED` | ホストの画面・DB・ゲストメール・日本語サイト、Provider APIとは併用不可 | — | — | — |
+| `EXPERIENCE_PEOPLE_PAGES_ENABLED` | `PEOPLE_PAGES_ENABLED` | DB・日本語サイト | — | — | — |
 | `EXPERIENCE_GROUP_INQUIRY_ENABLED` | `GROUP_INQUIRY_ENABLED` | DB・ゲストメール（相談の受付メール） | — | — | — |
 | `EXPERIENCE_TRANSLATION_ENABLED` | `TRANSLATION_ENABLED` | メールか質問 | — | `ANTHROPIC_API_KEY_REF` → `EXPERIENCE_ANTHROPIC_API_KEY` | — |
 | `EXPERIENCE_GUEST_REVIEWS_ENABLED` | `GUEST_REVIEWS_ENABLED` | DB | — | — | — |

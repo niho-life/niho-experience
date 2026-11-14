@@ -12,7 +12,8 @@ vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/lib/journey", () => ({ getLiveReviews: vi.fn(async () => null) }));
 vi.mock("@/lib/guest-booking-source", () => ({ siteNextDates: vi.fn(async () => []) }));
-vi.mock("@/lib/config", () => ({ config: { siteUrl: "https://experience.example.test", indexingAllowed: true, japaneseSiteEnabled: true, bookingsEnabled: true, guestBookingEnabled: true, groupInquiryEnabled: true, nihoWebOrigin: "https://niho.example.test" } }));
+const settings = vi.hoisted(() => ({ peoplePagesEnabled: true }));
+vi.mock("@/lib/config", () => ({ config: { siteUrl: "https://experience.example.test", indexingAllowed: true, japaneseSiteEnabled: true, bookingsEnabled: true, guestBookingEnabled: true, groupInquiryEnabled: true, nihoWebOrigin: "https://niho.example.test", get peoplePagesEnabled() { return settings.peoplePagesEnabled; } } }));
 vi.mock("@/components/Analytics", () => ({ TrackView: () => createElement("span") }));
 
 import { JaExperiencePage, jaCancellationLines } from "./JaExperiencePage";
@@ -91,6 +92,21 @@ describe("JaExperiencePage", () => {
     expect(none).toContain("会いにいく人");
     expect(none).toContain("鎌倉で山を案内しています。");
     expect(none).not.toContain("/ja/people/");
+  });
+
+  it("keeps a person's name and face but links no page while the people pages are off (#612)", async () => {
+    settings.peoplePagesEnabled = false;
+    try {
+      const html = await render(item(), [], [guide("suga", "菅 倫明")]);
+      expect(html).toContain("会いにいく人");
+      expect(html).toContain("菅 倫明");
+      expect(html).toContain("空手指導者・鎌倉");
+      expect(html).toContain("菅 倫明の写真");
+      expect(html).not.toContain("/ja/people/");
+      expect(html).not.toContain("さんのページ");
+    } finally {
+      settings.peoplePagesEnabled = true;
+    }
   });
 
   it("puts the booking column's price, the way to book, the other-day inquiry and the product's own cancellation deadline in one place", async () => {

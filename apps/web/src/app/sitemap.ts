@@ -5,7 +5,7 @@ import { getPreparedJapaneseStaticRelease } from "@/lib/localized-content";
 import { jaCategoryCounts } from "@/lib/ja-catalog";
 import { loadJaCards } from "@/lib/ja-catalog-server";
 import { loadJapaneseGuides } from "@/lib/ja-guides";
-import { loadPeople } from "@/lib/ja-people";
+import { loadPeoplePages } from "@/lib/ja-people";
 import { sitemapEntries, type JapaneseOwnPages, type JapaneseSitemapRelease } from "@/lib/sitemap-entries";
 import { listSitePublicExperiences } from "@/lib/experience/site-publications";
 
@@ -22,7 +22,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let japaneseOwn: JapaneseOwnPages | undefined;
   if (japanese) {
     const [people, jaGuides, cards] = await Promise.all([
-      loadPeople().catch(() => []),
+      loadPeoplePages().catch(() => []),
       loadJapaneseGuides().catch(() => []),
       loadJaCards().catch(() => []),
     ]);
