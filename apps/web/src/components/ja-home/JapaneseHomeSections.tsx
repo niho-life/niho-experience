@@ -15,7 +15,7 @@ import { inquiryHref } from "@/lib/group-inquiry-entry";
 export function JapaneseHeroCopy({ title, hand, lead }: { title: string; hand: string; lead: string }) {
   const [first, second] = title.split("、");
   return <>
-    <h1 className="text-[2.25rem] leading-[1.25] font-semibold sm:text-[3.25rem]">{second ? <>{first}、<br />{second}</> : title}<span className="hand mt-1 block text-[1.75rem] font-normal text-white/90 sm:text-[2.25rem]">{hand}</span></h1>
+    <h1 className="text-[2.25rem] leading-[1.25] font-medium sm:text-[3.25rem]">{second ? <>{first}、<br />{second}</> : title}<span className="hand mt-1 block text-[1.75rem] font-normal text-white/90 sm:text-[2.25rem]">{hand}</span></h1>
     <p className="mt-4 max-w-[34rem] text-[1.0625rem] leading-relaxed text-white [text-shadow:0_1px_10px_rgba(0,0,0,0.5)]">{lead}</p>
     <div className="mt-6"><Link href="/ja/experiences" className={buttonClass("primary")}>体験をさがす</Link></div>
   </>;

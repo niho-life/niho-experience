@@ -1,9 +1,6 @@
 import "../../globals.css";
+// 日本語の書体（NIHO Sans）は globals.css の html[lang="ja"] が持つ (#615)。日本語の Web フォントは読み込まない。
 import "@niho/experience-presentation/v1/styles.css";
-// 見出しの書体 (#612): 丸ゴシックの 700 だけ（unicode-range で分割。使う字を含む分だけ読み込まれる）。上のスタイルのあとに読む。
-// 500 は入れない: 1つの太さにそろえて、トップの初回に読み込む日本語フォントを抑える（PR #612 の測定）。
-import "@fontsource/zen-maru-gothic/700.css";
-import "./ja-type.css";
 import type { Metadata, Viewport } from "next";
 import { AttributionCapture } from "@/components/AttributionCapture";
 import { JapaneseSiteChrome } from "@/components/site/JapaneseSiteChrome";

@@ -108,6 +108,6 @@ export default function HostExperiencePreview({ endpoint, unsaved, onClose }: Ho
     {state.kind === "loading" ? <p role="status" className="mx-auto max-w-5xl px-4 py-10 text-ink-soft md:px-6">読み込み中…</p> : null}
     {state.kind === "missing" ? <p role="alert" className="mx-auto max-w-5xl px-4 py-10 md:px-6">プレビューできる状態ではありません。有効な商品を 1 つ以上保存すると表示できます。</p> : null}
     {state.kind === "error" || failed ? <div role="alert" className="mx-auto flex max-w-5xl flex-wrap items-center gap-3 px-4 py-10 md:px-6"><p>{state.kind === "error" ? state.text : "プレビューを表示できませんでした。"}</p><button type="button" onClick={retry} className={consoleButtonClass("secondary", "sm")}>読み込み直す</button></div> : null}
-    {view && booking ? <PresentationRootV1 className="pb-16"><DetailViewV1 model={{ ...view.model, booking }} primitives={PREVIEW_PRIMITIVES} copy={EN_STATIC_COPY_V1} /></PresentationRootV1> : null}
+    {view && booking ? <div lang="en"><PresentationRootV1 className="pb-16"><DetailViewV1 model={{ ...view.model, booking }} primitives={PREVIEW_PRIMITIVES} copy={EN_STATIC_COPY_V1} /></PresentationRootV1></div> : null}
   </dialog>;
 }

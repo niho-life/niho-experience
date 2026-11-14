@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { japaneseTextOutsideNihoSans } from "./support/japanese-type";
 
 const ID = "00000000-0000-4000-8000-000000000478";
 const COVER_ID = "00000000-0000-4000-8000-000000000479";
@@ -125,6 +126,20 @@ test("opening an existing article does not create an unpublished revision", asyn
   await page.waitForTimeout(1200); // Exceeds the editor's 900ms autosave debounce.
   expect(api.events.filter((event) => event.startsWith("save:"))).toEqual([]);
   expect(api.guide.revision).toBe(1);
+});
+
+test("画面の日本語は NIHO Sans、英語の記事の題と本文は英語のサイトと同じ書体（#615）", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "write-desktop", "the type is the same at every width");
+  await mockWriterApi(page);
+  await page.goto(`/write/write-e2e-fixture/edit/${ID}`);
+  await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
+  expect(await japaneseTextOutsideNihoSans(page)).toEqual([]);
+  const family = (selector: string) => page.locator(selector).first().evaluate((element) => getComputedStyle(element).fontFamily);
+  expect(await family("#write-settings-title")).toMatch(/^"Nunito Variable", "NIHO Sans"/);
+  // 英語の記事（fixture は language: "en"）は、公開される英語のページと同じ見た目で書く
+  await expect(page.locator("#write-title")).toHaveAttribute("lang", "en");
+  expect(await family("#write-title")).toMatch(/^"Fraunces Variable"/);
+  expect(await family(".write-prosemirror")).toMatch(/^"Nunito Variable", "Hiragino Sans"/);
 });
 
 test("1280px and 1024px keep the paper and publish checks aligned in two columns", async ({ page }, testInfo) => {

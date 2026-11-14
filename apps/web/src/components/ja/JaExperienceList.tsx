@@ -21,7 +21,7 @@ export function JaExperienceList({ cards, query, days, total }: { cards: readonl
     <div className="container-page py-8 lg:py-12">
       <header>
         <span className="hand text-[1.5rem]">{category ? category.hand : "find your day"}</span>
-        <h1 className="mt-1 font-sans text-[1.625rem] leading-tight font-extrabold tracking-normal md:text-[2rem]">{category ? category.label : "すべての体験"}</h1>
+        <h1 className="mt-1 text-[1.75rem] leading-tight md:text-[2.25rem]">{category ? category.label : "すべての体験"}</h1>
         <p className="mt-2 max-w-2xl text-ink-soft">{category ? category.lead : "鎌倉・逗子・葉山の人と活動に、会いにいく。料金は日本円、時刻は日本時間です。"}</p>
         <nav aria-label="カテゴリー" className="-mx-5 mt-5 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden">
           <Link href={jaListHref(query, { category: null })} aria-current={!query.category ? "page" : undefined} className={`inline-flex min-h-10 shrink-0 items-center rounded-full border px-4 text-[0.875rem] font-bold whitespace-nowrap ${!query.category ? "border-leaf bg-leaf-pale text-moss" : "border-line-strong bg-canvas text-ink-soft hover:bg-sand"}`}>すべて</Link>
@@ -38,7 +38,7 @@ export function JaExperienceList({ cards, query, days, total }: { cards: readonl
         <ul className="-mx-1 mt-1.5 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <li className="shrink-0"><Link href={jaListHref(query, { date: null })} aria-current={!query.date ? "true" : undefined} className={`inline-flex h-14 min-w-16 items-center justify-center rounded-xl border px-3 text-[0.875rem] font-bold ${!query.date ? "border-leaf bg-leaf-pale text-moss" : "border-line-strong bg-canvas hover:bg-sand"}`}>いつでも</Link></li>
           {days.map((day) => (
-            <li key={day.key} className="shrink-0"><Link href={jaListHref(query, { date: day.key })} aria-current={query.date === day.key ? "true" : undefined} aria-label={day.label} className={`flex h-14 w-12 flex-col items-center justify-center rounded-xl border leading-tight ${query.date === day.key ? "border-leaf bg-leaf-pale text-moss" : "border-line-strong bg-canvas hover:bg-sand"}`}><small className="text-[0.6875rem] font-bold">{day.weekday.replace("曜", "")}</small><b className="text-[1.0625rem]">{day.day}</b></Link></li>
+            <li key={day.key} className="shrink-0"><Link href={jaListHref(query, { date: day.key })} aria-current={query.date === day.key ? "true" : undefined} aria-label={day.label} className={`flex h-14 w-12 flex-col items-center justify-center rounded-xl border leading-tight ${query.date === day.key ? "border-leaf bg-leaf-pale text-moss" : "border-line-strong bg-canvas hover:bg-sand"}`}><small className="text-[0.75rem] font-bold">{day.weekday.replace("曜", "")}</small><b className="text-[1.0625rem]">{day.day}</b></Link></li>
           ))}
         </ul>
         <JaFilterForm query={query} />
@@ -62,7 +62,7 @@ export function JaExperienceList({ cards, query, days, total }: { cards: readonl
       )}
 
       <aside className="mt-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-sand/60 px-5 py-4">
-        <div><h2 className="font-sans text-[1rem] font-extrabold tracking-normal">探しているものが見つからないときは</h2><p className="text-[0.875rem] text-ink-soft">載っていない人や活動も、事務局が知っていることがあります。</p></div>
+        <div><h2 className="text-[1rem] font-bold">探しているものが見つからないときは</h2><p className="text-[0.875rem] text-ink-soft">載っていない人や活動も、事務局が知っていることがあります。</p></div>
         <Link href="/ja/inquiry" className="inline-flex min-h-11 items-center rounded-full border border-line-strong bg-canvas px-5 text-[0.9375rem] font-extrabold hover:bg-sand">相談する</Link>
       </aside>
     </div>

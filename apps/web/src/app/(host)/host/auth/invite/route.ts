@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { config } from "@/lib/config";
+import { NIHO_SANS_FAMILY, NIHO_SANS_FONT_FACES } from "@/lib/niho-sans";
 import { hostInvitations } from "@/lib/experience/store-server";
 import { isOpaqueSecret, linkBindingHash, newLinkBinding, nowUtc, readSingleFieldForm, setInviteBindingCookie } from "@/lib/host/accounts";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
@@ -57,7 +58,8 @@ function invitePage(): string {
 <meta name="referrer" content="no-referrer">
 <title>招待 | NIHO Experience ホスト</title>
 <style>
-body{margin:0;font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;background:#ffffff;color:#1c1c1a;line-height:1.6}
+${NIHO_SANS_FONT_FACES}
+body{margin:0;font-family:${NIHO_SANS_FAMILY};background:#ffffff;color:#1c1c1a;line-height:1.6}
 main{max-width:36rem;margin:0 auto;padding:4rem 1rem}
 h1{font-size:1.5rem;margin:0 0 .75rem}
 p{margin:0 0 1rem;color:#4b4b47}
