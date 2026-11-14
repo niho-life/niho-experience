@@ -13,7 +13,7 @@ vi.mock("@/lib/experience/site-publications", () => ({
 }));
 vi.mock("@/lib/guide-registry", () => ({ indexableGuides: async () => [{ slug: "rainy-day", updatedAt: "2026-10-25" }] }));
 // The Japanese site's own pages (#561): none in these fixtures.
-vi.mock("@/lib/ja-people", () => ({ loadPeople: async () => [] }));
+vi.mock("@/lib/ja-people", () => ({ loadPeople: async () => [], loadPeoplePages: async () => [] }));
 vi.mock("@/lib/ja-guides", () => ({ loadJapaneseGuides: async () => [] }));
 vi.mock("@/lib/ja-catalog-server", () => ({ loadJaCards: async () => [] }));
 vi.mock("@/lib/localized-content", async () => {

@@ -14,7 +14,8 @@ export const dynamic = "force-dynamic";
  * or the person is not shown: no hint which), or the closed `{ error }` body of the questions' routes. Nothing in it is logged.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }): Promise<Response> {
-  if (!config.personMessagesEnabled || !config.japaneseSiteEnabled) return guestQuestionEmpty(404);
+  // Closed while the people pages are off (#612): there is no page to send it from.
+  if (!config.personMessagesEnabled || !config.japaneseSiteEnabled || !config.peoplePagesEnabled) return guestQuestionEmpty(404);
   const { slug } = await params;
   if (slug.length < 1 || slug.length > 60) return guestQuestionEmpty(404);
   if (!fromThisSite(request)) return guestQuestionEmpty(403);

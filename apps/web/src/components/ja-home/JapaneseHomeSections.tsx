@@ -38,23 +38,22 @@ function Band({ id, hand, title, children, tone }: { id: string; hand: string; t
   </section>;
 }
 
-/** 相談：載っていないことも相談できる。学校・法人への入口を添える（#532）。 */
+/** 相談：企業・学校・グループのご相談。企業・学校のページへの入口を添える（#532、#612）。 */
 export function ConsultBand() {
-  return <Band id="consult-band" hand="ask the town" title={<>載っていないことも、<br className="sm:hidden" />相談できます。</>} tone="leaf">
+  return <Band id="consult-band" hand="ask the town" title="企業・学校・グループのご相談" tone="leaf">
     <p className="mt-3 max-w-[40rem] text-ink-soft">学校や会社、グループでの参加、探している体験や人のこと。体験を選び切れなくても、日にちが決まっていなくても大丈夫です。目的を聞かせてください。はじめの相談は無料です。</p>
     <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
       <a href={inquiryHref("ja")} className={buttonClass("primary", "w-full sm:w-auto")}>相談する</a>
-      <Link href="/ja/schools" className="font-extrabold underline underline-offset-4">学校の方へ</Link>
-      <Link href="/ja/business" className="font-extrabold underline underline-offset-4">法人・団体の方へ</Link>
+      <Link href="/ja/business" className="font-extrabold underline underline-offset-4">企業・学校の方へ</Link>
     </div>
   </Band>;
 }
 
-/** 体験を載せる：ホストの募集。 */
+/** ホストになる：ホストの募集（#612）。 */
 export function HostBand() {
-  return <Band id="host-band" hand="share your craft" title={<>あなたの体験を、<br className="sm:hidden" />街の外の人へ。</>} tone="sand">
-    <p className="mt-3 max-w-[40rem] text-ink-soft">予約の受付やお客さんとのやりとりは、事務局が引き受けます。開ける日を教えてもらえれば、あとは当日だけ。</p>
-    <div className="mt-6"><Link href="/ja/host" className={buttonClass("secondary", "w-full sm:w-auto")}>体験を載せる</Link></div>
+  return <Band id="host-band" hand="share your craft" title="ホストになる" tone="sand">
+    <p className="mt-3 max-w-[40rem] text-ink-soft">教えていること、案内していることを、体験として載せられます。予約の受付と支払いはこのサイトが引き受けます。</p>
+    <div className="mt-6"><Link href="/ja/host" className={buttonClass("secondary", "w-full sm:w-auto")}>ホストになる</Link></div>
   </Band>;
 }
 
@@ -147,7 +146,7 @@ export function FeatureBand({ feature }: { feature: HomeFeature }) {
     <div className="grid items-center gap-8 md:grid-cols-2 md:gap-12">
       <div>
         <span className="hand text-[1.5rem] text-moss">{feature.hand}</span>
-        <h2 id="feature-band" className="text-[1.75rem] leading-snug sm:text-[2.25rem]">{feature.title[0]}<br />{feature.title[1]}</h2>
+        <h2 id="feature-band" className="text-[1.75rem] leading-snug sm:text-[2.25rem]">{feature.title[0]}{feature.title[1] ? <><br />{feature.title[1]}</> : null}</h2>
         <p className="mt-3 max-w-[34rem] text-ink-soft">{feature.text}</p>
         <div className="mt-6"><Link href={`/ja/experiences?category=${feature.categoryId}`} className={buttonClass("primary", "w-full sm:w-auto")}>{feature.cta}</Link></div>
       </div>
@@ -158,11 +157,11 @@ export function FeatureBand({ feature }: { feature: HomeFeature }) {
   </section>;
 }
 
-/** どんな日に行きますか：絞り込んだ一覧への入口。該当する体験があるものだけ（呼ぶ側が絞る）。 */
+/** シーンからさがす：絞り込んだ一覧への入口。該当する体験があるものだけ（呼ぶ側が絞る）。 */
 export function OccasionStrips({ items }: { items: readonly HomeOccasion[] }) {
   return <section aria-labelledby="occasion-band" className="container-page my-14 sm:my-16">
     <span className="hand text-[1.5rem] text-moss">pick your day</span>
-    <h2 id="occasion-band" className="text-[1.75rem] sm:text-[2rem]">どんな日に行きますか</h2>
+    <h2 id="occasion-band" className="text-[1.75rem] sm:text-[2rem]">シーンからさがす</h2>
     {/* 共有の presentation の `.nexp-v1 .grid-cols-2` は特異性が高く、`sm:grid-cols-3` を打ち消す。列の数は任意値で書く。 */}
     <ul className="mt-6 grid grid-cols-[repeat(2,minmax(0,1fr))] gap-3 sm:grid-cols-[repeat(3,minmax(0,1fr))]">
       {items.map((item) => <li key={item.id}>

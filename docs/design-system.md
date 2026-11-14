@@ -19,7 +19,7 @@
 ## 1. 表現の考え方
 
 - 主役は写真と人。地は白、区切りは淡いグレーの面（sand）と細い線。色は少なく、写真の色を邪魔しない。
-- 見出しはやわらかいセリフ体（Fraunces、weight 400 中心）、本文・操作は NIHOapp と同じ Nunito。手書きの Caveat は短いアクセントだけに使う（§2.2）。
+- 見出しはやわらかいセリフ体（Fraunces、weight 400 中心。**日本語サイト `/ja` だけは、英字を Nunito・日本語を Zen Maru Gothic の丸ゴシックにする**、#612。`apps/web/src/app/(ja)/ja/ja-type.css`）、本文・操作は NIHOapp と同じ Nunito。手書きの Caveat は短いアクセントだけに使う（§2.2）。
 - NIHO のブランド緑（leaf）は主ボタンの地と下線に、深い苔色（moss）はリンク・focus・手書きの文字に使う。全面を塗らない。
 - 手描きのアイコン（`#sketch` フィルタで線を少し揺らす）、丸スタンプ（`#rubber` フィルタでかすれ）、切手の縁、アーチ形の切り抜きは装飾。意味は必ず隣の文字が持つ（`aria-hidden`）。
 - Slowhop から採り入れたのは「大きな写真・余白・人の紹介・整理されたカード」という考え方だけ。写真、ロゴ、文章、配色、ページ構成は流用していない。
@@ -47,7 +47,7 @@
 
 | 役割 | 書体 | 使いどころ |
 | --- | --- | --- |
-| 見出し | Fraunces（`--font-display`、400。数字は 300） | h1〜h3、数字の節の大きな数字 |
+| 見出し | Fraunces（`--font-display`、400。数字は 300）。`/ja` は Nunito + Zen Maru Gothic（`@fontsource/zen-maru-gothic` の 700 だけ、unicode-range で分割。`html[lang="ja"]` にだけ効く） | h1〜h3、数字の節の大きな数字 |
 | 本文・操作 | Nunito（`--font-sans`） | 本文、ボタン、フォーム、価格 |
 | 手書き | Caveat（`--font-hand`、`.hand` / `.eyebrow`、moss） | 見出し上の一言（例 "five to choose from"）、行程の時刻（"6:00 PM"）、ホスト名、数字の単位、絵はがきの地名、ヒーローの "home" |
 

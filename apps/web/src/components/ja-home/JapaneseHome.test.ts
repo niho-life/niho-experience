@@ -17,7 +17,9 @@ describe("日本語トップ（#563）", () => {
     expect(html).toContain("鎌倉の人に、");
     expect(html).toContain("会いにいく。");
     expect(html).toContain("meet the town");
-    expect(html).toContain("山を歩くガイド、台所に立つ料理家、五十年彫りつづける職人。鎌倉の街の人と、その人の時間を予約できます。");
+    expect(html).toContain("書家と筆をとる。寺で坐る。地元の台所で一緒につくって食べる。鎌倉の街の人と、その人の時間を予約できます。");
+    // 架空の人の文は残さない
+    expect(html).not.toContain("五十年彫りつづける");
     expect(html).toContain('href="/ja/experiences"');
     for (let n = 1; n <= JA_HOME_HERO_PHOTOS.length; n += 1) expect(html).toContain(`aria-label="写真 ${n}"`);
     // 文字が読めるよう、写真の上に暗い覆いがある
@@ -33,15 +35,18 @@ describe("日本語トップ（#563）", () => {
 
   it("相談と体験を載せるの節。「あいだに立ちます」のような約束は押し出さない", () => {
     const consult = renderToStaticMarkup(createElement(ConsultBand));
-    expect(consult).toContain("載っていないことも、");
-    expect(consult).toContain("相談できます。");
+    expect(consult).toContain("企業・学校・グループのご相談");
+    expect(consult).not.toContain("載っていないことも");
     expect(consult).toContain('href="/ja/inquiry"');
-    expect(consult).toContain('href="/ja/schools"');
+    expect(consult).toContain("企業・学校の方へ");
     expect(consult).toContain('href="/ja/business"');
+    expect(consult).not.toContain("法人・団体の方へ");
     const host = renderToStaticMarkup(createElement(HostBand));
-    expect(host).toContain("あなたの体験を、");
-    expect(host).toContain("街の外の人へ。");
+    expect(host).toContain("ホストになる");
+    expect(host).toContain("教えていること、案内していることを、体験として載せられます。予約の受付と支払いはこのサイトが引き受けます。");
     expect(host).toContain('href="/ja/host"');
+    // ホストに直接届く今の作りと食い違う言い方は残さない
+    for (const old of ["あなたの体験を、", "街の外の人へ", "事務局が引き受けます", "お客さんとのやりとり"]) expect(host).not.toContain(old);
     expect(`${consult}${host}`).not.toContain("あいだに立ち");
   });
 
@@ -88,17 +93,26 @@ describe("日本語トップ（#563）", () => {
     expect(html).toContain("さがす");
   });
 
-  it("カテゴリーの並び（アイコンつき）、特集、どんな日に", () => {
+  it("カテゴリーの並び（アイコンつき）、特集、シーンからさがす", () => {
     const nav = renderToStaticMarkup(createElement(CategoryNav, { categories: [{ id: "walk", label: "歩く" }, { id: "sea", label: "海" }] }));
     expect(nav).toContain('href="/ja/experiences?category=walk"');
     expect(nav).toContain("<svg");
     expect(nav).toContain("海");
     const feature = renderToStaticMarkup(createElement(FeatureBand, { feature: pickHomeFeature([{ classification: { category: "zen" } }])! }));
     expect(feature).toContain("静かな時間を、");
+    // 言葉：つくる・食べる（市場の言い回しは今の体験に無い）と、歩く（「ガイドと」を付けない）
+    const food = renderToStaticMarkup(createElement(FeatureBand, { feature: pickHomeFeature([{ classification: { category: "food" } }])! }));
+    expect(food).toContain("鎌倉の台所でつくって食べる");
+    expect(food).not.toContain("市場で食材を選び");
+    expect(food).not.toContain("台所に立って、");
+    const walk = renderToStaticMarkup(createElement(FeatureBand, { feature: pickHomeFeature([{ classification: { category: "walk" } }])! }));
+    expect(walk).toContain("鎌倉の山と切通しを歩く");
+    expect(walk).not.toContain("ガイドと歩く");
     expect(feature).toContain('href="/ja/experiences?category=zen"');
     expect(feature).toContain("禅と寺の体験を見る");
     const strips = renderToStaticMarkup(createElement(OccasionStrips, { items: JA_HOME_OCCASIONS.slice(0, 2) } as never));
-    expect(strips).toContain("どんな日に行きますか");
+    expect(strips).toContain("シーンからさがす");
+    expect(strips).not.toContain("どんな日に行きますか");
     expect(strips).toContain('href="/ja/experiences?with=solo"');
     expect(strips).toContain("ふたりで");
     expect(strips).not.toContain("雨の日に");

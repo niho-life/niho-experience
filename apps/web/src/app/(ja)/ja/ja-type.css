@@ -1,0 +1,24 @@
+/*
+ * 日本語サイトの見出しの書体 (#612). `/ja` の見出し（h1〜h3 と `font-display` を使う所）は、英字を Nunito、日本語を Zen Maru Gothic
+ * （丸ゴシック。NIHO アプリの見出しと同じ）にする。以前は英字用の Fraunces で、日本語は端末の明朝（Mac はヒラギノ明朝、
+ * Windows は游明朝、Android は明朝が無くゴシック）になり、本文のゴシックと混ざっていた。
+ *
+ * - 本文（Nunito + ヒラギノ角ゴ / Noto Sans JP）と、手書きの小見出し（Caveat、`.hand`）は変えない。
+ * - 英語のサイトは変えない: ここは日本語サイトの layout だけが読み、`html[lang="ja"]` にだけ効く。
+ * - Zen Maru Gothic は @fontsource の 700 だけ（unicode-range で分割されたファイル。使う字を含む分だけ読み込まれる）を layout が読む。
+ *   1つの太さしか無いので、見出しの太さの指定（400〜700）はどれも 700 で出る。500 まで入れると初回の日本語フォントが倍近くになる。
+ * - `@layer base` に置く: Tailwind の utilities（`leading-*`・`tracking-*` など、画面ごとの指定）は今までどおり勝つ。
+ */
+@layer base {
+  /* 公開サイトの部品（presentation v1）は、トークンを自分のルート（.nexp-v1）に置くので、そこにも置く。 */
+  html[lang="ja"],
+  html[lang="ja"] .nexp-v1 {
+    --font-display: "Nunito Variable", "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Hiragino Sans", "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
+  }
+  /* 日本語の見出しに、英字用の詰めた字間は合わない。 */
+  html[lang="ja"] h1,
+  html[lang="ja"] h2,
+  html[lang="ja"] h3 {
+    letter-spacing: 0;
+  }
+}

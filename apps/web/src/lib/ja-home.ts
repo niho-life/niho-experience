@@ -5,7 +5,8 @@
 
 export const JA_HOME_TITLE = "鎌倉の人に、会いにいく。";
 export const JA_HOME_HAND = "meet the town";
-export const JA_HOME_LEAD = "山を歩くガイド、台所に立つ料理家、五十年彫りつづける職人。鎌倉の街の人と、その人の時間を予約できます。";
+/** いちばん上の文。いまある体験に合わせている（体験が増えたら差し替える）。 */
+export const JA_HOME_LEAD = "書家と筆をとる。寺で坐る。地元の台所で一緒につくって食べる。鎌倉の街の人と、その人の時間を予約できます。";
 
 /** 検索結果に出る題と説明（日本語のトップ）。 */
 export const JA_HOME_SEO_TITLE = `${JA_HOME_TITLE} | NIHO Experience`;
@@ -56,7 +57,7 @@ export function pickHomeExperiences<T extends { slug: string }>(items: readonly 
   return chosen.slice(0, limit);
 }
 
-/* ---- カテゴリー・さがす欄・どんな日に・特集（#529・#563） ---- */
+/* ---- カテゴリー・さがす欄・シーンからさがす・特集（#529・#563） ---- */
 
 /**
  * 特集：1つのテーマの紹介と、その一覧への入口。テーマはカテゴリー（#529）で、8つぶんの紹介文をここに持つ（事務局の画面ではなく
@@ -66,7 +67,8 @@ export function pickHomeExperiences<T extends { slug: string }>(items: readonly 
 export type HomeFeature = {
   readonly categoryId: string;
   readonly hand: string;
-  readonly title: readonly [string, string];
+  /** 見出し。1行か、改行を入れる2行。 */
+  readonly title: readonly [string] | readonly [string, string];
   readonly text: string;
   readonly cta: string;
   readonly photos: readonly { readonly src: string; readonly position: string }[];
@@ -74,8 +76,8 @@ export type HomeFeature = {
 const photo = (name: string, position = "50% 50%") => ({ src: `/sample/photos/${name}.jpg`, position });
 
 export const JA_HOME_FEATURES: readonly HomeFeature[] = [
-  { categoryId: "walk", hand: "take a walk", title: ["ガイドと歩く、", "鎌倉の山と切通し"], text: "鎌倉の山は低いけれど、道が古い。地図では分からない分かれ道や切通しを、歩きなれた人と一緒に歩きます。", cta: "歩く体験を見る", photos: [photo("temple-path"), photo("bamboo"), photo("daibutsu", "40% 50%")] },
-  { categoryId: "food", hand: "cook & eat", title: ["台所に立って、", "同じ食卓を囲む"], text: "市場で食材を選び、地元の人の台所で一緒につくって、同じテーブルで食べます。レシピより、その人の手つきが残ります。", cta: "つくる・食べる体験を見る", photos: [photo("dinner-cooking-together"), photo("dinner-long-table"), photo("dinner-oden")] },
+  { categoryId: "walk", hand: "take a walk", title: ["鎌倉の山と切通しを歩く"], text: "鎌倉の山は低いけれど、道が古い。地図では分からない分かれ道や切通しを、歩きなれた人と一緒に歩きます。", cta: "歩く体験を見る", photos: [photo("temple-path"), photo("bamboo"), photo("daibutsu", "40% 50%")] },
+  { categoryId: "food", hand: "cook & eat", title: ["鎌倉の台所でつくって食べる"], text: "地元の人の台所で一緒につくって、同じテーブルで食べます。レシピより、その人の手つきが残ります。", cta: "つくる・食べる体験を見る", photos: [photo("dinner-cooking-together"), photo("dinner-long-table"), photo("dinner-oden")] },
   { categoryId: "craft", hand: "make by hand", title: ["つくり手のそばで、", "手を動かす"], text: "書く、繕う、染める。つくり手の隣で道具を持つと、うまくできるかより、手を動かす時間そのものが残ります。", cta: "手を動かす体験を見る", photos: [photo("calligraphy-brush"), photo("kintsugi-plates"), photo("mending-hands")] },
   { categoryId: "zen", hand: "sit quietly", title: ["静かな時間を、", "禅と寺で過ごす"], text: "坐る、点てる、写す。答えを持ち帰らなくても、問いがひとつ増えれば十分です。寺の静けさの入口へ。", cta: "禅と寺の体験を見る", photos: [photo("zazen-hall"), photo("zen-garden-view"), photo("temple-path")] },
   { categoryId: "time", hand: "dawn & dusk", title: ["観光客が来る前と、", "帰ったあとの鎌倉"], text: "朝の海辺や、夕暮れの路地。同じ街が、時間をずらすと別の顔を見せます。", cta: "朝と夜の体験を見る", photos: [photo("enoden-crossing"), photo("shichirigahama-fuji"), photo("kamakura-crossing")] },
@@ -98,7 +100,7 @@ export function pickHomeFeature(cards: readonly { readonly classification: { rea
   return best;
 }
 
-/** どんな日に行きますか：絞り込み（だれと／こんな日に）への入口。該当する体験が1件以上あるものだけ出す。 */
+/** シーンからさがす：絞り込み（だれと／こんな日に）への入口。該当する体験が1件以上あるものだけ出す。 */
 export const JA_HOME_OCCASIONS = [
   { param: "with", id: "solo", hand: "just me", label: "ひとりで", photo: "/sample/photos/zazen-hall.jpg" },
   { param: "with", id: "date", hand: "for two", label: "ふたりで", photo: "/sample/photos/shichirigahama-fuji.jpg" },
@@ -116,7 +118,7 @@ export function categoriesWithExperiences<C extends { id: string }>(categories: 
   return categories.filter((category) => cards.some((card) => card.classification.category === category.id));
 }
 
-/** 該当する体験が1件以上ある「どんな日に」（定義の順）。 */
+/** 該当する体験が1件以上ある「シーンからさがす」（定義の順）。 */
 export function occasionsWithExperiences(cards: readonly Classified[]): HomeOccasion[] {
   return JA_HOME_OCCASIONS.filter((item) => cards.some((card) => (item.param === "with" ? card.classification.companions : card.classification.occasions).includes(item.id)));
 }

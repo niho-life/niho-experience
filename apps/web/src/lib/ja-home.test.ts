@@ -8,7 +8,7 @@ describe("日本語トップの編集内容（#563）", () => {
   it("検索結果の題と説明が、日本語のトップの題・説明と同じ", () => {
     const { values } = localJapaneseCopy();
     expect(values["meta.siteTitle"]).toBe("鎌倉の人に、会いにいく。 | NIHO Experience");
-    expect(values["meta.description"]).toBe("山を歩くガイド、台所に立つ料理家、五十年彫りつづける職人。鎌倉の街の人と、その人の時間を予約できます。");
+    expect(values["meta.description"]).toBe("書家と筆をとる。寺で坐る。地元の台所で一緒につくって食べる。鎌倉の街の人と、その人の時間を予約できます。");
     expect(JA_HOME_SEO_TITLE).toBe(values["meta.siteTitle"]);
     expect(JA_HOME_SEO_DESCRIPTION).toBe(values["meta.description"]);
   });

@@ -11,7 +11,7 @@ import {
 } from "@/lib/ja-home";
 import { loadJaCards } from "@/lib/ja-catalog-server";
 import { loadJapaneseGuides } from "@/lib/ja-guides";
-import { loadPeople } from "@/lib/ja-people";
+import { loadPeoplePages } from "@/lib/ja-people";
 import { getJapaneseCopy } from "@/lib/localized-content";
 import { japaneseStaticMetadata } from "@/lib/locale-metadata";
 
@@ -22,8 +22,8 @@ export async function generateMetadata(): Promise<Metadata> {
 
 /**
  * 日本語のトップ（#563）。英語のトップの訳ではなく、日本語サイト独自の構成。上から：題と写真の入れ替え、さがす欄、カテゴリー、
- * おすすめの体験、特集、どんな日に、街の人、相談、読みもの、体験を載せる。中身がまだ無いまとまり（体験が0件のカテゴリー・
- * 該当の無い「どんな日に」・載っている人が0人・公開中の記事が無い）は、空の枠を見せずに出さない。体験のカードは一覧と同じ
+ * おすすめの体験、特集、シーンからさがす、街の人、相談、読みもの、体験を載せる。中身がまだ無いまとまり（体験が0件のカテゴリー・
+ * 該当の無い「シーンからさがす」・載っている人が0人・公開中の記事が無い）は、空の枠を見せずに出さない。体験のカードは一覧と同じ
  * （`JaExperienceCard`）で、予約の方式や販売者の札は並べない。
  */
 export default async function JapaneseHome() {
@@ -32,7 +32,7 @@ export default async function JapaneseHome() {
     await getJapaneseCopy();
     cards = await loadJaCards();
   } catch { return <JapaneseUnavailable />; }
-  const [people, allGuides] = await Promise.all([loadPeople(), loadJapaneseGuides()]);
+  const [people, allGuides] = await Promise.all([loadPeoplePages(), loadJapaneseGuides()]);
   const picks = pickHomeExperiences(cards);
   const categories = categoriesWithExperiences(EXPERIENCE_CATEGORIES, cards);
   const occasions = occasionsWithExperiences(cards);

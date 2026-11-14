@@ -7,42 +7,36 @@ import { PRESENTATION_PRIMITIVES_V1 } from "../PresentationV1";
 import { LanguageButton } from "./LanguageButton";
 
 /**
- * 日本語サイトのヘッダーとフッター（#562）。英語サイトの訳ではなく、日本語サイトの独自の構成を持つ。
- * 配色・書体・手描きのアイコンは公開サイトの部品（presentation v1）のまま。英語側の `SiteChrome.tsx` とは別。
+ * 日本語サイトのヘッダーとフッター（#562、#612）。英語サイトの訳ではなく、日本語サイトの独自の構成を持つ。
+ * 配色・手描きのアイコンは公開サイトの部品（presentation v1）のまま。英語側の `SiteChrome.tsx` とは別。
  *
- * ヘッダーは1行：ロゴ、ナビ、言語のボタン。スマホ幅では「さがす」「相談」と言語のボタンだけにし、ほかはフッターから行く。
- * ページが無いものへのリンクは出さない。足すときは `NAV` と `FOOTER_LINKS` に1行ずつ。
+ * ヘッダーは1行。PC 幅：ロゴの右に旅行者向け（体験をさがす・読みもの）、右端に企業・学校とホストになる（文字だけの控えめなリンク）と
+ * 言語のボタン。スマホ幅：「さがす」「相談」と言語のボタンだけにし、ほかはフッターから行く。相談は PC 幅のナビには置かず、
+ * 企業・学校のページとフッターから行く。ページが無いものへのリンクは出さない（読みものは公開中の記事があるときだけ）。
+ * 街の人はナビにもフッターにも置かない（#612: 人物ページは止めている）。
  */
 
 type Counterparts = Readonly<Record<string, string>>;
 
 const { Image } = PRESENTATION_PRIMITIVES_V1;
 
-export const JAPANESE_SITE_DESCRIPTION = "鎌倉周辺の人や活動に、会いにいくための予約窓口です。街のリビングNIHO kamakuraが運営しています";
-
-type NavItem = { href: string; label: ReactNode; mobile: boolean; needsInquiry?: boolean; needsGuides?: boolean };
-/** ヘッダーのナビ（上から順）。スマホ幅に出すのは `mobile` のものだけ。 */
-const NAV: readonly NavItem[] = [
-  { href: "/ja/experiences", label: <><span className="max-sm:hidden">体験を</span>さがす</>, mobile: true },
-  { href: "/ja/people", label: "街の人", mobile: false },
-  { href: "/ja/guides", label: "読みもの", mobile: false, needsGuides: true },
-  { href: "/ja/business", label: "法人・学校", mobile: false, needsInquiry: true },
-  { href: "/ja/inquiry", label: <>相談<span className="max-sm:hidden">する</span></>, mobile: true, needsInquiry: true },
-];
+/** フッターの説明文：だれが運営しているかと、どこにあるか。 */
+export const JAPANESE_SITE_DESCRIPTION = "運営：NIHO kamakura（鎌倉駅西口から歩いて2分）";
 
 type FooterLink = { href: string; label: string; needsInquiry?: boolean; needsGuides?: boolean };
 /** フッターの2つ目のまとまり（1つ目はカテゴリー）。読みものは公開中の記事があるときだけ。 */
 const FOOTER_LINKS: readonly FooterLink[] = [
-  { href: "/ja/people", label: "街の人" },
   { href: "/ja/guides", label: "読みもの", needsGuides: true },
-  { href: "/ja/inquiry", label: "個別の相談", needsInquiry: true },
-  { href: "/ja/business", label: "法人・団体の方へ", needsInquiry: true },
-  { href: "/ja/schools", label: "学校の方へ", needsInquiry: true },
-  { href: "/ja/host", label: "体験を載せる" },
+  { href: "/ja/inquiry", label: "ご相談", needsInquiry: true },
+  { href: "/ja/business", label: "企業・学校の方へ", needsInquiry: true },
+  { href: "/ja/host", label: "ホストになる" },
   { href: "/host/auth/sign-in", label: "ホストログイン" },
   // 「ご利用の案内」（#565）が入るまでは、いまある予約のヘルプへ。
   { href: "/ja/help", label: "予約のヘルプ" },
 ];
+
+/** 右端の控えめなリンク：文字だけ。旅行者向けのナビ（左）より弱く。 */
+const QUIET = "block rounded-full px-2.5 py-2 text-[0.875rem] whitespace-nowrap text-ink-soft hover:text-ink hover:underline hover:underline-offset-4";
 
 function HostEntry({ signedIn }: { signedIn: boolean }) {
   return signedIn
@@ -50,22 +44,25 @@ function HostEntry({ signedIn }: { signedIn: boolean }) {
         <span aria-hidden className="grid size-7 place-items-center rounded-full bg-leaf-pale"><HandIcon name="house" className="size-4 text-moss" /></span>
         <span className="max-sm:sr-only">ホスト画面</span>
       </Link>
-    : <NavLink href="/ja/host" className="rounded-full px-3 py-2 hover:bg-sand">ホストの方</NavLink>;
+    : <NavLink href="/ja/host" className={QUIET}>ホストになる</NavLink>;
 }
 
 export function JapaneseSiteHeader({ counterparts, hostSignedIn, inquiryOpen, guidesOpen = false }: { counterparts: Counterparts; hostSignedIn: boolean; inquiryOpen: boolean; guidesOpen?: boolean }) {
-  const items = NAV.filter((item) => (!item.needsInquiry || inquiryOpen) && (!item.needsGuides || guidesOpen));
   return <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur-md backdrop-saturate-[1.2]">
     <div className="container-page flex h-16 items-center gap-1.5">
       <Link href="/ja" className="flex shrink-0 items-center gap-2 font-display text-xl font-semibold tracking-[-0.01em]">
         <span aria-hidden className="relative size-7 shrink-0 sm:size-8"><Image src="/icon.svg" alt="" sizes="32px" priority className="object-contain" /></span>
         <span className="flex items-baseline gap-1.5"><span>NIHO</span><span className="font-normal text-ink-soft max-[479px]:sr-only">Experience 鎌倉</span></span>
       </Link>
-      <nav aria-label="メイン" className="ml-auto">
+      <nav aria-label="メイン" className="ml-auto sm:ml-4 sm:flex-1">
         <ul className="flex items-center gap-0.5 text-[0.9375rem] font-bold sm:gap-1">
-          {items.map((item) => <li key={item.href} className={item.mobile ? undefined : "hidden sm:block"}>
-            <NavLink href={item.href} className="block rounded-full px-2.5 py-2 whitespace-nowrap hover:bg-sand sm:px-3">{item.label}</NavLink>
-          </li>)}
+          <li><NavLink href="/ja/experiences" className="block rounded-full px-2.5 py-2 whitespace-nowrap hover:bg-sand sm:px-3"><span className="max-sm:hidden">体験を</span>さがす</NavLink></li>
+          {guidesOpen ? <li className="hidden sm:block"><NavLink href="/ja/guides" className="block rounded-full px-3 py-2 whitespace-nowrap hover:bg-sand">読みもの</NavLink></li> : null}
+          {/* スマホ幅だけ：相談は PC 幅のナビに置かず、企業・学校のページとフッターから行く。 */}
+          {inquiryOpen ? <li className="sm:hidden"><NavLink href="/ja/inquiry" className="block rounded-full px-2.5 py-2 whitespace-nowrap hover:bg-sand">相談</NavLink></li> : null}
+          {/* 右端へ寄せる（PC 幅）。 */}
+          <li aria-hidden className="hidden sm:block sm:flex-1" />
+          {inquiryOpen ? <li className="hidden sm:block"><NavLink href="/ja/business" className={QUIET}>企業・学校</NavLink></li> : null}
           <li className="hidden sm:block"><HostEntry signedIn={hostSignedIn} /></li>
           <li className="ml-1"><LanguageButton counterparts={counterparts} /></li>
         </ul>

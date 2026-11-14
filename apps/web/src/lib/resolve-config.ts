@@ -853,6 +853,10 @@ export function resolveConfig(env: Env) {
   // public route, the reply page the answer's email links to and the OWNER's メッセージ, but not "Ask the host" on the
   // English experience pages (that is guestQuestionsEnabled). The answer goes out with the mail job (guest mail).
   const personMessagesEnabled = apiMode === "http" && hostConsoleEnabled && env.EXPERIENCE_PERSON_MESSAGES_ENABLED === "true";
+  // 街の人のページ (#612, docs/people.md): `/ja/people` and `/ja/people/<slug>`, and every link to them (the home's 街の人, a person's
+  // page from an experience), and the public route that sends a message from a person's page. Off by default: the data, the Admin
+  // screen and the operator CLI stay, and turning it on brings the pages back. The people on an experience keep their name and face.
+  const peoplePagesEnabled = apiMode === "http" && env.EXPERIENCE_PEOPLE_PAGES_ENABLED === "true";
   // 団体・個別の相談 (#532, docs/group-inquiry.md): the public form, the office's inbox in /admin and the two emails of an
   // inquiry (the mail job, which needs EXPERIENCE_GUEST_MAIL_ENABLED). Kept in the experience DB (migration 0074), so
   // only http mode opens it; the mock has no such inbox. Off by default; the Admin list needs the Admin sign-in too.
@@ -1033,6 +1037,7 @@ export function resolveConfig(env: Env) {
     hostSalesPayoutsEnabled,
     guestQuestionsEnabled,
     personMessagesEnabled,
+    peoplePagesEnabled,
     groupInquiryEnabled,
     groupInquiryPreviewEnabled,
     guestReviewsEnabled,

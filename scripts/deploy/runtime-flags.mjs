@@ -228,6 +228,12 @@ export const FLAGS = Object.freeze([
     conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED"],
   },
   {
+    env: "EXPERIENCE_PEOPLE_PAGES_ENABLED",
+    variable: "PEOPLE_PAGES_ENABLED",
+    // 街の人のページ (#612): the Japanese site's /ja/people pages and the links to them. The data, the Admin screen and the CLI do not depend on it.
+    needs: ["DATABASE", "EXPERIENCE_JAPANESE_SITE_ENABLED"],
+  },
+  {
     env: "EXPERIENCE_GROUP_INQUIRY_ENABLED",
     variable: "GROUP_INQUIRY_ENABLED",
     // The two emails of an inquiry go with the mail job (guest mail); the Admin inbox needs the Admin sign-in as ever.

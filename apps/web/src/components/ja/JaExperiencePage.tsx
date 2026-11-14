@@ -56,6 +56,8 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
   const providerName = publication.providerPublicName?.trim() || null;
   const person = publication.providerKind === "PERSON";
   const identity = providerName ? publication.providerPhoto ?? (publication.providerKind === "BUSINESS" ? publication.businessLogo : null) : null;
+  // A person's name and face stay on the experience; the link to their page only while the people pages are on (#612).
+  const peopleLinks = config.peoplePagesEnabled;
   const identityPhoto = people[0] ? { url: people[0].photo.src, alt: people[0].photo.altJa } : identity ? { url: identity.src, alt: identity.altJa } : null;
   const bio = hostBio?.ja ?? null;
   const askHref = inquiryHref("ja", { from: "EXPERIENCE", experienceSlug: publication.slug, experienceTitle: title, hostName: providerName });
@@ -118,12 +120,14 @@ export async function JaExperiencePage({ item, cancelled = false, card, related,
               <ul className="mt-5 grid gap-6">
                 {people.map((entry) => (
                   <li key={entry.slug} className="flex items-start gap-4">
-                    <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} aria-label={`${entry.name}さんのページ`} className="shrink-0"><Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20" sizes="80px" /></Link>
+                    {peopleLinks
+                      ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} aria-label={`${entry.name}さんのページ`} className="shrink-0"><Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20" sizes="80px" /></Link>
+                      : <Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" />}
                     <div className="min-w-0">
                       <p className="font-extrabold">{entry.name}<span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{entry.roleJa}・{entry.areaJa}</span></p>
                       {entry.quoteJa ? <p className="mt-1.5 text-[1.0625rem] leading-snug">「{entry.quoteJa}」</p> : null}
                       {entry.introJa ? <p className="mt-2 line-clamp-3 whitespace-pre-line break-words text-ink-soft">{entry.introJa}</p> : null}
-                      <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} className="mt-2 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{entry.name}さんのページ</Link>
+                      {peopleLinks ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} className="mt-2 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{entry.name}さんのページ</Link> : null}
                     </div>
                   </li>
                 ))}

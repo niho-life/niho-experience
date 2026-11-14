@@ -20,7 +20,7 @@
 
 - Next.js 16.3.8（NIHOappと同じ）、React 19.3、TypeScript 5.9、Tailwind CSS 4.3
 - zod 4（契約の検証）、Vitest 4.1、Playwright 1.56 + axe-core（E2E・アクセシビリティ）
-- 書体は `@fontsource-variable` の Fraunces と Nunito を npm から同梱（ビルド時に外部取得しない）
+- 書体は `@fontsource-variable` の Fraunces と Nunito を npm から同梱（ビルド時に外部取得しない）。日本語サイトの見出しだけ `@fontsource/zen-maru-gothic`（丸ゴシック、#612）
 - Node 24（`.nvmrc`）。npmは workspaces を使う
 
 ## ホスティング
