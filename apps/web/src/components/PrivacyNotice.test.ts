@@ -60,19 +60,28 @@ describe("the privacy notice", () => {
     expect(text(html(POLICY))).toContain("If you booked through a partner site");
   });
 
-  it("says what the visit counts send, to whom, and what is off, only when analytics is on (#70)", () => {
+  it("explains opt-in visit counts, the data sent, and how to change the choice (#70)", () => {
     expect(text(html())).not.toContain("Google");
     expect(html()).not.toContain("privacy-analytics");
     const words = text(html("", true));
-    expect(words).toContain("We use Google Analytics (Google LLC) to count visits to our public pages");
-    expect(words).toContain("the page address and title, the site you came from, your browser and device type, an approximate location and your IP address");
-    expect(words).toContain("Nothing about your name, email address or booking is sent");
-    expect(words).toContain("turned off Google signals and ad personalization, and Google keeps this data for 2 months");
+    expect(words).toContain("Google Analytics (Google LLC) is optional and stays off unless you choose “Allow analytics”");
+    expect(words).toContain("public page path, permitted campaign tags, a general page title, the origin of the site you came from, a pseudonymous browser identifier and session details from the first-party analytics cookie, and browser and device details");
+    expect(words).toContain("a pseudonymous browser identifier and session details from the first-party analytics cookie");
+    expect(words).toContain("standard events such as first_visit and session_start for visit and session counts");
+    expect(words).toContain("Google receives the IP address used to make the connection and says it does not log or store IP addresses");
+    expect(words).toContain("We do not send your name, email address, messages, booking details or payment information");
+    expect(words).toContain("Before you allow it, no Google tag loads");
+    expect(words).toContain("After you reject or withdraw consent, the tag is disabled and no analytics is sent");
+    expect(words).toContain("do not configure custom booking or funnel events");
+    expect(words).toContain("Google Signals, User-ID and ad personalization are off");
+    expect(words).toContain("Google’s user-level and event-level data retention is set to 2 months");
+    expect(words).toContain("Change analytics settings");
     expect(words).toContain("Do Not Track");
-    expect(words).toContain("Outside the EEA, the UK and Switzerland, Google Analytics sets cookies");
-    expect(words).toContain("Advertising cookies are never set");
+    expect(words).toContain("It expires after 60 days");
+    expect(words).toContain("this browser for up to 180 days");
+    expect(words).toContain("does not affect booking");
     const headings = [...html("", true).matchAll(/<h2[^>]*>([^<]+)<\/h2>/g)].map((match) => match[1]);
-    expect(headings).toEqual(["What we keep", "If you booked through a partner site", "Why we use it", "Who sees or handles it", "How long we keep it", "Cookies", "Visit counts", "Questions or requests"]);
+    expect(headings).toEqual(["What we keep", "If you booked through a partner site", "Why we use it", "Who sees or handles it", "How long we keep it", "Cookies", "Optional visit counts", "Questions or requests"]);
   });
 
   it("sends questions to the site's own booking help", () => {

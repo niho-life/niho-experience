@@ -1,14 +1,45 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef } from "react";
-import { doNotTrackEnabled, isPrivateLandingPath, sanitizeUmamiPayload } from "@/lib/analytics";
-import { GA4_COOKIE_EXPIRES_SECONDS, ga4ConsentDefaults } from "@/lib/ga4-consent";
+import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { doNotTrackEnabled, sanitizeUmamiPayload } from "@/lib/analytics";
+import { LocalizedLink as Link } from "@/components/LocalizedLink";
+import {
+  ANALYTICS_PREFERENCES_EVENT,
+  GA4_CONSENT_STORAGE_KEY,
+  GA4_COOKIE_SETTINGS,
+  ga4ConsentDefaults,
+  ga4CookieNames,
+  isGa4ExcludedPath,
+  parseStoredGa4Consent,
+  serializeGa4Consent,
+  shouldLoadGa4,
+  shouldMeasureGa4Path,
+  type Ga4ConsentChoice,
+} from "@/lib/ga4-consent";
 import { createGtagQueue, type GtagCommand } from "@/lib/ga4-queue";
 
 const EXPERIENCE_ORIGIN = "https://experience.niho.life";
 const GA4_SCRIPT_ID = "niho-experience-ga4-tracker";
+const GA4_CONSENT_CHANGE_EVENT = "niho:ga4-consent-change";
 const MEASUREMENT_ID = /^G-[A-Za-z0-9]{4,24}$/;
+let fallbackChoice: Ga4ConsentChoice | null = null;
+
+function subscribeToBrowserReady(): () => void {
+  return () => {};
+}
+
+function getBrowserReadySnapshot(): boolean {
+  return typeof window !== "undefined";
+}
+
+function getServerBrowserReadySnapshot(): boolean {
+  return false;
+}
+
+function getServerConsentSnapshot(): null {
+  return null;
+}
 
 declare global {
   interface Window {
@@ -21,19 +52,45 @@ declare global {
 type SafePageView = Readonly<{ location: string; title: string }>;
 
 function safePageView(rawUrl: string): SafePageView | null {
-  if (window.location.origin !== EXPERIENCE_ORIGIN || isPrivateLandingPath(window.location.pathname)) return null;
+  if (window.location.origin !== EXPERIENCE_ORIGIN || isGa4ExcludedPath(window.location.pathname)) return null;
   const payload = sanitizeUmamiPayload("pageview", { url: rawUrl }, window.location.origin);
   if (!payload || typeof payload.url !== "string" || typeof payload.title !== "string") return null;
   return { location: `${EXPERIENCE_ORIGIN}${payload.url}`, title: payload.title };
 }
 
-function safeReferrer(): string {
+function safeReferrer(raw = document.referrer): string {
   try {
-    const referrer = new URL(document.referrer);
+    const referrer = new URL(raw, window.location.origin);
     return referrer.protocol === "https:" || referrer.protocol === "http:" ? referrer.origin : "";
   } catch {
     return "";
   }
+}
+
+function ga4DisabledFlag(measurementId: string): string {
+  return `ga-disable-${measurementId}`;
+}
+
+function clearGa4Cookies(): void {
+  for (const name of ga4CookieNames(document.cookie)) {
+    document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax; Secure`;
+    document.cookie = `${name}=; Max-Age=0; Path=/; Domain=experience.niho.life; SameSite=Lax; Secure`;
+  }
+}
+
+function stopGoogleTag(): void {
+  const script = document.getElementById(GA4_SCRIPT_ID) as HTMLScriptElement | null;
+  const measurementId = window.__nihoGa4MeasurementId ?? script?.dataset.measurementId;
+  if (measurementId) Reflect.set(window, ga4DisabledFlag(measurementId), true);
+  if (window.gtag) {
+    window.gtag("consent", "update", {
+      analytics_storage: "denied",
+      ad_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied",
+    });
+  }
+  clearGa4Cookies();
 }
 
 function existingGoogleTagIsCompatible(measurementId: string): boolean {
@@ -51,11 +108,19 @@ function installGoogleTag(measurementId: string, page: SafePageView, pageReferre
   if (!window.gtag) window.gtag = createGtagQueue(window.dataLayer);
 
   const gtag = window.gtag;
-  if (window.__nihoGa4MeasurementId !== measurementId) {
+  const configured = window.__nihoGa4MeasurementId === measurementId;
+  Reflect.set(window, ga4DisabledFlag(measurementId), false);
+  if (!configured) {
     window.__nihoGa4MeasurementId = measurementId;
-    // Consent defaults first (docs/growth/analytics-decision.md): no advertising storage anywhere, no analytics cookie in the EEA, UK and Switzerland.
-    for (const defaults of ga4ConsentDefaults()) gtag("consent", "default", defaults);
+    // Basic mode: set all consent defaults to denied, then grant analytics only after the visitor opted in.
+    gtag("consent", "default", ga4ConsentDefaults());
     gtag("js", new Date());
+    gtag("consent", "update", {
+      analytics_storage: "granted",
+      ad_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied",
+    });
     gtag("config", measurementId, {
       send_page_view: false,
       page_location: page.location,
@@ -63,9 +128,18 @@ function installGoogleTag(measurementId: string, page: SafePageView, pageReferre
       page_referrer: pageReferrer,
       allow_google_signals: false,
       allow_ad_personalization_signals: false,
-      cookie_expires: GA4_COOKIE_EXPIRES_SECONDS,
+      ...GA4_COOKIE_SETTINGS,
     });
+  } else {
+    gtag("consent", "update", {
+      analytics_storage: "granted",
+      ad_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied",
+    });
+  }
 
+  if (!document.getElementById(GA4_SCRIPT_ID)) {
     const script = document.createElement("script");
     script.id = GA4_SCRIPT_ID;
     script.async = true;
@@ -76,20 +150,75 @@ function installGoogleTag(measurementId: string, page: SafePageView, pageReferre
   return true;
 }
 
-function PageMeasurement({ measurementId }: { measurementId: string }) {
+function readChoice(): Ga4ConsentChoice | null {
+  try {
+    const raw = window.localStorage.getItem(GA4_CONSENT_STORAGE_KEY);
+    const choice = parseStoredGa4Consent(raw);
+    fallbackChoice = choice;
+    return choice;
+  } catch {
+    return fallbackChoice;
+  }
+}
+
+function saveChoice(choice: Ga4ConsentChoice): void {
+  fallbackChoice = choice;
+  try {
+    window.localStorage.setItem(GA4_CONSENT_STORAGE_KEY, serializeGa4Consent(choice));
+  } catch {
+    // Keep this choice for the current page even when browser storage is blocked.
+  }
+  window.dispatchEvent(new Event(GA4_CONSENT_CHANGE_EVENT));
+}
+
+function subscribeToChoice(onChange: () => void): () => void {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(GA4_CONSENT_CHANGE_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(GA4_CONSENT_CHANGE_EVENT, onChange);
+  };
+}
+
+function AnalyticsConsentAndPageMeasurement({ measurementId }: { measurementId: string }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const search = searchParams.toString();
   const lastLocation = useRef<string | null>(null);
+  const ready = useSyncExternalStore(subscribeToBrowserReady, getBrowserReadySnapshot, getServerBrowserReadySnapshot);
+  const choice = useSyncExternalStore(subscribeToChoice, readChoice, getServerConsentSnapshot);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const dnt = doNotTrackEnabled(typeof navigator === "undefined" ? undefined : navigator.doNotTrack);
 
   useEffect(() => {
-    if (!MEASUREMENT_ID.test(measurementId) || doNotTrackEnabled(navigator.doNotTrack)) return;
+    if (!shouldLoadGa4(choice, navigator.doNotTrack)) stopGoogleTag();
+  }, [choice]);
+
+  useEffect(() => {
+    const openPreferences = () => setPreferencesOpen(true);
+    window.addEventListener(ANALYTICS_PREFERENCES_EVENT, openPreferences);
+    return () => window.removeEventListener(ANALYTICS_PREFERENCES_EVENT, openPreferences);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (!MEASUREMENT_ID.test(measurementId) || !shouldMeasureGa4Path(choice, navigator.doNotTrack, pathname)) {
+      stopGoogleTag();
+      lastLocation.current = null;
+      return;
+    }
+
     const rawUrl = `${pathname}${search ? `?${search}` : ""}`;
     const page = safePageView(rawUrl);
-    if (!page || lastLocation.current === page.location || doNotTrackEnabled(navigator.doNotTrack)) return;
+    if (!page) {
+      stopGoogleTag();
+      lastLocation.current = null;
+      return;
+    }
+    if (lastLocation.current === page.location || !shouldLoadGa4(choice, navigator.doNotTrack)) return;
 
-    const pageReferrer = lastLocation.current ?? safeReferrer();
-    if (!installGoogleTag(measurementId, page, pageReferrer) || !window.gtag || doNotTrackEnabled(navigator.doNotTrack)) return;
+    const pageReferrer = lastLocation.current ? safeReferrer(lastLocation.current) : safeReferrer();
+    if (!installGoogleTag(measurementId, page, pageReferrer) || !window.gtag || !shouldLoadGa4(choice, navigator.doNotTrack)) return;
 
     window.gtag("set", {
       page_location: page.location,
@@ -102,13 +231,99 @@ function PageMeasurement({ measurementId }: { measurementId: string }) {
       page_referrer: pageReferrer,
     });
     lastLocation.current = page.location;
-  }, [measurementId, pathname, search]);
+  }, [choice, measurementId, pathname, ready, search]);
 
-  return null;
+  if (!measurementId || !ready) return null;
+
+  const allowPrompt = !dnt && !isGa4ExcludedPath(pathname);
+  const showPanel = preferencesOpen || (choice === null && allowPrompt);
+  if (!showPanel) return null;
+
+  const choose = (next: Ga4ConsentChoice) => {
+    if (next === "granted" && doNotTrackEnabled(navigator.doNotTrack)) return;
+    saveChoice(next);
+    if (next === "denied") stopGoogleTag();
+    setPreferencesOpen(false);
+  };
+
+  return (
+    <section
+      aria-labelledby="analytics-consent-title"
+      className="fixed inset-x-4 bottom-4 z-[80] mx-auto max-w-3xl rounded-2xl border border-line bg-white p-5 shadow-xl sm:p-6"
+      role="region"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 id="analytics-consent-title" className="text-lg font-extrabold">Your choice about analytics</h2>
+          <p className="mt-2 text-sm leading-relaxed text-ink-soft">
+            {dnt
+              ? "Do Not Track is enabled in this browser, so Google Analytics stays off. You can reject a saved choice here."
+              : choice === "granted"
+                ? "Optional Google Analytics is on for selected public page visits. You can turn it off at any time."
+                : choice === "denied"
+                  ? "Optional Google Analytics is off. You can allow it later from this page."
+                  : "We use Google Analytics to count visits to selected public pages. It stays off unless you allow it. Your choice is saved in this browser for up to 180 days."}
+          </p>
+          <p className="mt-2 text-sm text-ink-soft">
+            <Link href="/privacy" className="font-bold text-moss underline underline-offset-4">Read our privacy notice</Link>
+          </p>
+        </div>
+        {preferencesOpen && choice !== null ? (
+          <button type="button" className="min-h-11 shrink-0 rounded-full px-3 font-bold text-moss underline underline-offset-4" onClick={() => setPreferencesOpen(false)}>
+            Close
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
+        {dnt ? (
+          choice === "granted" ? (
+            <button type="button" className="min-h-11 rounded-full border border-line px-5 font-extrabold text-ink" onClick={() => choose("denied")}>
+              Turn analytics off
+            </button>
+          ) : (
+            <button type="button" className="min-h-11 rounded-full border border-line px-5 font-extrabold text-ink" onClick={() => setPreferencesOpen(false)}>
+              Close
+            </button>
+          )
+        ) : choice === "granted" ? (
+          <>
+            <button type="button" className="min-h-11 rounded-full border border-line px-5 font-extrabold text-ink" onClick={() => choose("denied")}>
+              Turn analytics off
+            </button>
+            <button type="button" className="min-h-11 rounded-full bg-moss px-5 font-extrabold text-white" onClick={() => choose("granted")}>
+              Keep analytics on
+            </button>
+          </>
+        ) : choice === "denied" ? (
+          <>
+            <button type="button" className="min-h-11 rounded-full border border-line px-5 font-extrabold text-ink" onClick={() => choose("denied")}>
+              Keep analytics off
+            </button>
+            <button type="button" className="min-h-11 rounded-full bg-moss px-5 font-extrabold text-white" onClick={() => choose("granted")}>
+              Allow analytics
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="min-h-11 rounded-full border border-line px-5 font-extrabold text-ink" onClick={() => choose("denied")}>
+              Reject analytics
+            </button>
+            <button type="button" className="min-h-11 rounded-full bg-moss px-5 font-extrabold text-white" onClick={() => choose("granted")}>
+              Allow analytics
+            </button>
+          </>
+        )}
+      </div>
+    </section>
+  );
 }
 
-/** GA4 pageviews only; no client-side customer, booking, or funnel properties. */
+/** GA4 page views and its standard session events load only after opt-in on eligible public pages. */
 export function ExperienceGa4Analytics({ measurementId }: { measurementId: string | null }) {
+  useEffect(() => {
+    if (!measurementId) stopGoogleTag();
+  }, [measurementId]);
+
   if (!measurementId) return null;
-  return <Suspense fallback={null}><PageMeasurement measurementId={measurementId} /></Suspense>;
+  return <Suspense fallback={null}><AnalyticsConsentAndPageMeasurement measurementId={measurementId} /></Suspense>;
 }

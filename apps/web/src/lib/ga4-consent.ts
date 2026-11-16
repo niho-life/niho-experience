@@ -1,22 +1,10 @@
-/*
- * GA4 consent defaults for the public site (owner decision 2026-11-07: set the ID and the consent handling by the usual
- * recommendation; docs/growth/analytics-decision.md「GA4 を使う条件」). The site shows no consent banner, so the defaults
- * are the whole policy:
- *
- *  - Advertising storage, advertising user data and ad personalization are denied everywhere. GA4 is a page counter here.
- *  - Analytics storage (the _ga cookies) is granted where no prior consent is required, and denied in the EEA, the UK and
- *    Switzerland. There Google tags send cookieless pings and set no cookie, and nothing can switch it on because there
- *    is no consent tool. A consent tool, when it is added, calls gtag("consent", "update", …) and this stays the starting point.
- *
- * Google applies the most specific `region` default, so the second command overrides the first for those visitors.
- */
+export type Ga4ConsentChoice = "granted" | "denied";
 
-/** ISO 3166-1 codes of the EEA (EU member states, Iceland, Liechtenstein, Norway), the United Kingdom and Switzerland. */
-export const GA4_CONSENT_DENIED_REGIONS = [
-  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
-  "IS", "LI", "NO",
-  "GB", "CH",
-] as const;
+export const GA4_CONSENT_STORAGE_KEY = "niho-experience-ga4-consent-v1";
+export const GA4_CONSENT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+export const GA4_COOKIE_EXPIRES_SECONDS = 60 * 24 * 60 * 60;
+export const GA4_COOKIE_PREFIX = "niho_experience";
+export const ANALYTICS_PREFERENCES_EVENT = "niho:open-analytics-preferences";
 
 type ConsentState = "granted" | "denied";
 export type Ga4ConsentDefault = Readonly<{
@@ -24,17 +12,75 @@ export type Ga4ConsentDefault = Readonly<{
   ad_user_data: ConsentState;
   ad_personalization: ConsentState;
   analytics_storage: ConsentState;
-  region?: readonly string[];
 }>;
 
-/** The two `gtag("consent", "default", …)` payloads, in the order they must be issued: before `config`. */
-export function ga4ConsentDefaults(): readonly [Ga4ConsentDefault, Ga4ConsentDefault] {
-  const advertising = { ad_storage: "denied", ad_user_data: "denied", ad_personalization: "denied" } as const;
-  return [
-    { ...advertising, analytics_storage: "granted" },
-    { ...advertising, analytics_storage: "denied", region: GA4_CONSENT_DENIED_REGIONS },
-  ];
+export type StoredGa4Consent = Readonly<{
+  choice: Ga4ConsentChoice;
+  expiresAt: number;
+}>;
+
+/** Basic consent mode: this is sent only after an affirmative choice and before the Google tag is loaded. */
+export function ga4ConsentDefaults(): Ga4ConsentDefault {
+  return {
+    ad_storage: "denied",
+    ad_user_data: "denied",
+    ad_personalization: "denied",
+    analytics_storage: "denied",
+  };
 }
 
-/** The _ga cookie lasts as long as GA4 keeps user data (the property's retention is 2 months): 60 days. */
-export const GA4_COOKIE_EXPIRES_SECONDS = 60 * 24 * 60 * 60;
+/** The GA4 cookie is site scoped and expires after 60 days without sliding renewal. */
+export const GA4_COOKIE_SETTINGS = {
+  cookie_domain: "experience.niho.life",
+  cookie_expires: GA4_COOKIE_EXPIRES_SECONDS,
+  cookie_path: "/",
+  cookie_prefix: GA4_COOKIE_PREFIX,
+  cookie_update: false,
+} as const;
+
+/** Return only cookies owned by this site's GA4 cookie prefix. */
+export function ga4CookieNames(cookieHeader: string): string[] {
+  const cookiePrefix = `${GA4_COOKIE_PREFIX}_ga`;
+  return [...new Set(cookieHeader.split(";").map((cookie) => cookie.split("=", 1)[0]?.trim() ?? "").filter((name) =>
+    name === cookiePrefix || name.startsWith(`${cookiePrefix}_`),
+  ))];
+}
+
+export function parseStoredGa4Consent(raw: string | null, now = Date.now()): Ga4ConsentChoice | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<StoredGa4Consent>;
+    if ((value.choice !== "granted" && value.choice !== "denied") || typeof value.expiresAt !== "number" || value.expiresAt <= now) return null;
+    return value.choice;
+  } catch {
+    return null;
+  }
+}
+
+export function serializeGa4Consent(choice: Ga4ConsentChoice, now = Date.now()): string {
+  const value: StoredGa4Consent = { choice, expiresAt: now + GA4_CONSENT_RETENTION_MS };
+  return JSON.stringify(value);
+}
+
+export function shouldLoadGa4(choice: Ga4ConsentChoice | null, doNotTrack: string | null | undefined): boolean {
+  return choice === "granted" && doNotTrack !== "1" && doNotTrack !== "yes";
+}
+
+export function shouldMeasureGa4Path(
+  choice: Ga4ConsentChoice | null,
+  doNotTrack: string | null | undefined,
+  pathname: string,
+): boolean {
+  return shouldLoadGa4(choice, doNotTrack) && !isGa4ExcludedPath(pathname);
+}
+
+/** Never collect GA4 views from booking, member, host or admin flows. */
+export function isGa4ExcludedPath(pathname: string): boolean {
+  return pathname === "/booking" || pathname.startsWith("/booking/")
+    || pathname === "/bookings" || pathname.startsWith("/bookings/")
+    || pathname === "/reviews/write"
+    || pathname === "/host" || pathname.startsWith("/host/")
+    || pathname === "/admin" || pathname.startsWith("/admin/")
+    || pathname === "/account" || pathname.startsWith("/account/")
+    || /^\/experiences\/[^/]+\/book$/.test(pathname);
+}
