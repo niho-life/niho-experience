@@ -21,6 +21,29 @@ API契約は、このリポの体験業務 v1 と、固定された NIHO host/ac
 
 Owner/Editor、project全体のRun Admin、project全体のSecret Accessor、SA鍵は付けない。deployerはSecretの値を読めず、DBにも接続しない。RuntimeのCloud SQL Clientは [Google公式のIAM条件](https://docs.cloud.google.com/sql/docs/postgres/iam-conditions) で既存instanceだけを許す。SQLのDB権限は別途制限する。
 
+### Artifact Registry image の保持
+
+`niho-app-stg/experience-host-stg` の cleanup policy は [`gcp/artifact-cleanup-policies/niho-app-stg-experience-host-stg.json`](../gcp/artifact-cleanup-policies/niho-app-stg-experience-host-stg.json) を正とする。package ごとに最新10 versionを保持し、作成から30日を超えた version を削除する。no-traffic の `cand-*` candidate も30日以内に評価・promoteし、期限後に必要なものは期限前に個別Keep policyを追加する。
+
+適用はレビュー済み main から手動で行う。まず dry-run を設定し、image inventory と Cloud Run service の `status.traffic`（0% tagged candidate を含む）・job が参照する digest が削除候補に入っていないことを確認する。
+
+```sh
+gcloud artifacts repositories set-cleanup-policies experience-host-stg \
+  --project niho-app-stg --location asia-northeast1 \
+  --policy gcp/artifact-cleanup-policies/niho-app-stg-experience-host-stg.json \
+  --dry-run
+```
+
+確認後、同じコマンドの `--dry-run` を `--no-dry-run` に置き換えて有効化する。設定と容量を読み戻し、Artifact Registry の cleanup はバックグラウンドで進むため翌日以降にも容量を再確認する。
+
+```sh
+gcloud artifacts repositories describe experience-host-stg \
+  --project niho-app-stg --location asia-northeast1 \
+  --format='yaml(cleanupPolicies,cleanupPolicyDryRun)'
+gcloud artifacts repositories list --project niho-app-stg --location asia-northeast1 \
+  --format='table(name.basename(),sizeBytes)'
+```
+
 ## 初期設定（運用担当がレビュー後に手動実施）
 
 1. GitHub Environment `host-staging` を新規作成し、deployment branchは `main` のみ、required reviewerと自己承認禁止を設定する。保護が実際に使えることを確認する。`STG_HOST_CORE_READY` は未設定または `false`、`STG_HOST_DEPLOY_ENABLED` は未設定または `false` のままにする。
