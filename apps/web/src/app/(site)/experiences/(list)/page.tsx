@@ -4,14 +4,14 @@ import { CatalogueViewV1, EN_STATIC_COPY_V1 } from "@niho/experience-presentatio
 import { TrackView } from "@/components/Analytics";
 import { ExperienceList } from "@/components/ExperienceList";
 import { ExperienceFiltersForm } from "@/components/ExperienceFiltersForm";
-import { EmptyResults, ErrorState } from "@/components/States";
+import { EmptyResults, ErrorState, StagingUnavailableState } from "@/components/States";
 import { GuideTeasers } from "@/components/GuideBlocks";
 import { getApi, listExperiencesForSite } from "@/lib/api";
 import { buildCardModels } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
 import { getReviewSummaries } from "@/lib/journey";
 import { withReviewLines } from "@/lib/reviews-ui";
-import { config, isPilotPreview, isPreview } from "@/lib/config";
+import { config, isExperienceStaging, isPilotPreview, isPreview } from "@/lib/config";
 import { dayOption, parseDateParam, parseGuestsParam, upcomingDays } from "@/lib/date-filter";
 import { filterExperienceSummaries, normalizeExperienceDate, normalizeExperienceQuery, normalizeExperienceTheme, type SearchParams } from "@/lib/filters";
 import { EXPERIENCE_LIST_DESCRIPTION, EXPERIENCE_LIST_TITLE, publicMetadata } from "@/lib/public-metadata";
@@ -40,7 +40,13 @@ const FINDER_DAYS = 14;
 export default async function ExperiencesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
   const searchQuery = normalizeExperienceQuery(query.q);
-  const [api, result, guideCatalogResult, siteCatalog] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalogForSite(), listSitePublicExperiences()]);
+  const siteCatalogPromise = listSitePublicExperiences().catch((error: unknown) => {
+    if (!isExperienceStaging) throw error;
+    console.error("[experiences] staging public catalog unavailable");
+    return null;
+  });
+  const [api, result, guideCatalogResult, siteCatalog] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalogForSite(), siteCatalogPromise]);
+  if (siteCatalog === null) return <StagingUnavailableState />;
   const copy = EN_STATIC_COPY_V1;
   // Native publications have no theme field yet; keep the unsupported filter out of the live form.
   const themesEnabled = config.apiMode === "mock" && config.publicApiVersion === "1.2";

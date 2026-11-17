@@ -5,10 +5,10 @@ import { filterJaCards, jaCategoryCounts, jaCategoryOf, jaListHref, jaQueryHasFi
 import { CatalogueViewV1 } from "@niho/experience-presentation/v1";
 import { ExperienceList } from "@/components/ExperienceList";
 import { ExperienceFiltersForm } from "@/components/ExperienceFiltersForm";
-import { EmptyResults } from "@/components/States";
+import { EmptyResults, StagingUnavailableState } from "@/components/States";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { getApi } from "@/lib/api";
-import { config } from "@/lib/config";
+import { config, isExperienceStaging } from "@/lib/config";
 import { buildCardModels } from "@/lib/card-model";
 import { loadDetails } from "@/lib/catalog";
 import { guestBookingSources } from "@/lib/guest-booking-source";
@@ -67,7 +67,7 @@ export default async function JapaneseExperiencesPage({ searchParams }: { search
       const matched = filterJaCards(all, parsed);
       result = { cards: parsed.date ? await cardsBookableOn(matched, parsed.date, parsed.guests) : matched, total: all.length };
     } catch { result = null; }
-    return result ? <JaExperienceList cards={result.cards} query={parsed} days={days} total={result.total} /> : <JapaneseUnavailable />;
+    return result ? <JaExperienceList cards={result.cards} query={parsed} days={days} total={result.total} /> : isExperienceStaging ? <StagingUnavailableState /> : <JapaneseUnavailable />;
   }
   let data;
   try {
