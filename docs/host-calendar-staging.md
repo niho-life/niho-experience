@@ -124,6 +124,12 @@ CONFIRM_EXPERIENCE_DB_MIGRATE=niho-app-stg \
 
 DB URLはExperience専用DB・限定ユーザーを使い、[Cloud RunのUnix socket接続](https://docs.cloud.google.com/sql/docs/postgres/connect-run) に合わせて `/cloudsql/niho-app-stg:asia-northeast1:niho-app-db-stg` をhostとして `pg` が解釈できる形で設定する。既存NIHO backendと同じくCloud SQL接続とDirect VPC egressを併用し、connector必須の共有instanceへ到達させる。資格情報のURL encode、DB名、socket指定、接続とDMLの可否を非公開の管理経路で確認する。workflowは値を取得・表示しない。
 
+#### Neon で候補を作る場合
+
+既定の DB は Cloud SQL。Neon を選ぶ場合は、Experience 専用の `experience_stg` を空 DB から作り、migration、架空 fixture と限定 runtime role の疎通を確認する。接続 URL は TLS を使い、`niho-app-stg` の `experience-stg-neon-database-url` に保管する。Secret の accessor は既存と同じ Experience の runtime サービスアカウントに限る。
+
+候補の作成と昇格には `STG_HOST_DB_PROVIDER=neon` と `STG_HOST_DATABASE_URL_REF=experience-stg-neon-database-url:<version>` を使う。workflow は候補から Cloud SQL attachment を外し、昇格時にも attachment が空で同じ Secret version を使うことを検査する。候補でログインと予約を確認してから昇格する。切り戻し時は DB provider を `cloudsql` に戻し、従来の `experience-stg-database-url:<version>` と既存 Cloud SQL instance の設定で候補を作る。
+
 管理者は各Secretに対して、次のresource単位のbindingを6件だけ追加する（`SECRET_NAME` は上表のいずれかへ置換）。既存NIHOのSecretへの権限は、旅行者の予約で参照する5個だけに `scripts/gcp/setup-host-staging-guest-booking.sh` がresource単位で追加する（オーナー決定 2026-10-31。それまでの「追加しない」を改めた）。ほかのNIHOのSecretとproject全体には追加しない。
 
 ```sh
