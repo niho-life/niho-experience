@@ -1718,6 +1718,8 @@ describe("PostgreSQL guest bookings for the host's 予約 (#285 slice 8)", { ski
       const { pool, guests } = context;
       assert.ok((await guests.listGuestBookingsForHost(cohostA)).bookings.some((booking) => booking.publicBookingId === tea.publicBookingId));
       assert.equal((await guests.getGuestBookingForHost(cohostA, tea.publicBookingId)).guest?.name, "Sample Guest");
+      await assert.rejects(() => guests.getGuestBookingForHost(cohostA, tea.publicBookingId, { ownerOnly: true }), StoreAccessDeniedError);
+      assert.equal((await guests.getGuestBookingForHost(ownerA, tea.publicBookingId, { ownerOnly: true })).publicBookingId, tea.publicBookingId);
       assert.ok(await guests.countGuestBookingsForHost(cohostA) > 0);
       const denied = [editorA, viewerA, { ...ownerA, calendarRoleCeiling: "EDITOR" as const }, { ...ownerA, calendarScope: "OPERATOR" as const }, { providerId: "provider-a", nihoUserId: "stranger" }];
       for (const actor of denied) {

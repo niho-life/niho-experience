@@ -190,6 +190,7 @@ export interface HostBookingDetailProps {
   feeSummaryEnabled: boolean;
   /** 通訳を始める (#181): whether the translate BFF is open (the mock always is). */
   translateEnabled: boolean;
+  translateRequiresOpenConsole?: boolean;
   /** 担当 (#535): who is on this booking's occurrence and its history; absent when it has none (not a NIHO-managed request, or the flag is off). */
   assignment?: ReactNode;
   onApprove: () => void;
@@ -209,7 +210,7 @@ export interface HostBookingDetailProps {
  * cancelled, why and where its refund is, and its 料金・精算状況 comes from the experience DB
  * (SiteFeePanel). NIHO's support and fee panels, which know NIHO's bookings only, are left out.
  */
-export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, assignment, onApprove, onDecline, onCancel, onSiteCancel, siteCancel }: HostBookingDetailProps) {
+export function HostBookingDetail({ booking, experienceTitle, today, headingId, notice, conversation, providerId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, translateRequiresOpenConsole, assignment, onApprove, onDecline, onCancel, onSiteCancel, siteCancel }: HostBookingDetailProps) {
   const [asking, setAsking] = useState<"approve" | "decline" | "cancel" | "siteCancel" | null>(null);
   const actions = bookingActions(booking.status);
   const siteTerms = booking.site;
@@ -334,7 +335,7 @@ export function HostBookingDetail({ booking, experienceTitle, today, headingId, 
           {next}
         </div>
       ) : null}
-      {translateEnabled && site ? <HostTranslatePanel key={booking.id} providerId={providerId} bookingId={booking.id} canStart={translate} className={next ? "mt-3" : "mt-3.5 border-t border-line pt-3.5"} /> : null}
+      {translateEnabled && site ? <HostTranslatePanel key={booking.id} providerId={providerId} bookingId={booking.id} canStart={translate} requiresOpenConsole={translateRequiresOpenConsole} className={next ? "mt-3" : "mt-3.5 border-t border-line pt-3.5"} /> : null}
       {conversation ? <ConversationSection conversation={conversation} /> : null}
       <DetailSection title="時系列">
         <ol>

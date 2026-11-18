@@ -64,7 +64,8 @@ export function createExperienceTranslateRoomsClient(options: BaseOptions) {
     const decoded = decode(value);
     return decoded === null ? { ok: false, kind: "unexpected_response", status } : { ok: true, data: decoded };
   }
-  const siteRoomsPath = (providerId: string, bookingId: string) => `/api/experience-providers/${encodeURIComponent(providerId)}/site-bookings/${encodeURIComponent(bookingId)}/translate-rooms`;
+  const siteProviderPath = options.auth.kind === "experience-service" ? "/api/experience-host/translate-providers" : "/api/experience-providers";
+  const siteRoomsPath = (providerId: string, bookingId: string) => `${siteProviderPath}/${encodeURIComponent(providerId)}/site-bookings/${encodeURIComponent(bookingId)}/translate-rooms`;
   const standaloneRoomsPath = (providerId: string) => options.auth.kind === "experience-service"
     ? `/api/experience-host/translate-providers/${encodeURIComponent(providerId)}/translate-rooms`
     : `/api/experience-providers/${encodeURIComponent(providerId)}/translate-rooms`;
@@ -102,13 +103,13 @@ export function createExperienceTranslateRoomsClient(options: BaseOptions) {
     },
     /** Experience DBの公開予約UUIDをopaqueな文脈として渡す。状態・言語・roleは送らない。 */
     createSiteRoom(providerId: string, bookingId: string) {
-      return options.auth.kind === "niho" && ids(providerId) && isExperienceTranslateBookingId(bookingId) ? request("POST", siteRoomsPath(providerId, bookingId), 201, schema<ExperienceTranslateRoomCreatedResponse>("ExperienceProviderTranslateRoomCreated"), {}) : invalid<ExperienceTranslateRoomCreatedResponse>();
+      return ids(providerId) && isExperienceTranslateBookingId(bookingId) ? request("POST", siteRoomsPath(providerId, bookingId), 201, schema<ExperienceTranslateRoomCreatedResponse>("ExperienceProviderTranslateRoomCreated"), {}) : invalid<ExperienceTranslateRoomCreatedResponse>();
     },
     getSiteRoom(providerId: string, bookingId: string, roomId: string) {
-      return options.auth.kind === "niho" && ids(providerId, roomId) && isExperienceTranslateBookingId(bookingId) ? request("GET", `${siteRoomsPath(providerId, bookingId)}/${encodeURIComponent(roomId)}`, 200, schema<ExperienceTranslateRoomStatusResponse>("ExperienceProviderTranslateRoomStatus")) : invalid<ExperienceTranslateRoomStatusResponse>();
+      return ids(providerId, roomId) && isExperienceTranslateBookingId(bookingId) ? request("GET", `${siteRoomsPath(providerId, bookingId)}/${encodeURIComponent(roomId)}`, 200, schema<ExperienceTranslateRoomStatusResponse>("ExperienceProviderTranslateRoomStatus")) : invalid<ExperienceTranslateRoomStatusResponse>();
     },
     endSiteRoom(providerId: string, bookingId: string, roomId: string) {
-      return options.auth.kind === "niho" && ids(providerId, roomId) && isExperienceTranslateBookingId(bookingId) ? request("POST", `${siteRoomsPath(providerId, bookingId)}/${encodeURIComponent(roomId)}/end`, 200, schema<ExperienceTranslateRoomEndResponse>("TranslateRoomStateResult"), {}) : invalid<ExperienceTranslateRoomEndResponse>();
+      return ids(providerId, roomId) && isExperienceTranslateBookingId(bookingId) ? request("POST", `${siteRoomsPath(providerId, bookingId)}/${encodeURIComponent(roomId)}/end`, 200, schema<ExperienceTranslateRoomEndResponse>("TranslateRoomStateResult"), {}) : invalid<ExperienceTranslateRoomEndResponse>();
     },
   };
 }

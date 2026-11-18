@@ -144,7 +144,7 @@ export async function loadSiteBookings(provider: HostProvider, requestedBooking:
 type OwnerReadRepository = Pick<GuestBookingRepository, "getGuestBookingForHost">;
 type OwnerCheck<T extends OwnerReadRepository = GuestBookingRepository> = { ok: true; bookings: T; actor: HostActor } | { ok: false; message: string };
 
-/** A usable session, a read repository, and NIHO saying this account owns the provider. */
+/** A usable session, a read repository, and current ownership from the session's provider directory. */
 async function ownerWithBookings<T extends OwnerReadRepository>(providerId: string, bookings: T | null): Promise<OwnerCheck<T>> {
   const session = await readHostSession();
   if (!session || !accessTokenUsable(session, Date.now())) return { ok: false, message: HOST_SESSION_ENDED_TEXT };

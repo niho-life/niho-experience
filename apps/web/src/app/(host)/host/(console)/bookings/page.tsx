@@ -15,6 +15,7 @@ import type { HostBooking } from "@/host/types";
 import { SITE_BOOKING_LOAD_FAILED_TEXT } from "@/host/site-bookings";
 import { loadSiteBookings, type HostSiteBookingsLoad } from "@/host/site-bookings-server";
 import type { HostProvider } from "@/lib/host/providers";
+import { config } from "@/lib/config";
 import { siteTranslateRoomsEnabled } from "@/lib/host/translate-rooms-server";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
 
@@ -111,7 +112,8 @@ function SiteBookings({ site, provider, linkProviderId, requested, ota, assignme
       supportPreview={false}
       supportHistoryEnabled={false}
       feeSummaryEnabled={false}
-      translateEnabled={siteTranslateRoomsEnabled()}
+      translateEnabled={provider.memberRole === "OWNER" && siteTranslateRoomsEnabled()}
+      translateRequiresOpenConsole={config.hostAccountsEnabled}
       live={{ nextCursor: site.nextCursor, messages: site.messages, preview: site.preview, readOnly: site.readOnly, canCancel: site.canCancel }}
       ota={ota}
       assignments={assignments.status === "live" ? assignments : null}

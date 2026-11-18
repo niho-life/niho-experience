@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { StoreNotFoundError } from "@niho-experience/experience-store";
+import { StoreAccessDeniedError, StoreNotFoundError } from "@niho-experience/experience-store";
 
 const mocks = vi.hoisted(() => ({
   config: { hostConsoleEnabled: true, apiMode: "http" as "http" | "mock", experienceTranslateApiEnabled: false, experienceTranslateStandaloneApiEnabled: false, hostAccountsEnabled: false, guestBookingEnabled: true, nihoWebOrigin: "https://niho.example" },
@@ -64,6 +64,9 @@ describe("translate rooms server boundary", () => {
     mocks.config.experienceTranslateApiEnabled = true;
     mocks.config.guestBookingEnabled = false;
     expect(translateRoomsEnabled()).toBe(true);
+    mocks.config.hostAccountsEnabled = true;
+    expect(translateRoomsEnabled()).toBe(false);
+    expect(translateRoomsEntry()).not.toBeNull();
     mocks.config.hostConsoleEnabled = false;
     expect(translateRoomsEnabled()).toBe(false);
     Object.assign(mocks.config, { hostConsoleEnabled: true, apiMode: "http", experienceTranslateStandaloneApiEnabled: true, experienceTranslateApiEnabled: false });
@@ -194,14 +197,14 @@ describe("translate rooms server boundary", () => {
     expect(siteTranslateBookingEligible({ ...booking, localDate: "2026-11-02" }, "2026-11-03")).toBe(false);
   });
 
-  it("site BFFはNIHO OWNERとExperience storeの所属を毎回照合し、createだけ状態を制限する", async () => {
+  it("site BFFは現在のOWNERと予約所属を毎回照合し、createだけ状態を制限する", async () => {
     mocks.config.experienceTranslateApiEnabled = true;
     mocks.readHost.mockResolvedValue({ kind: "niho", accessToken: "sealed-host-token" });
     const booking = { status: "CONFIRMED", cancelledAtUtc: null, language: "EN", localDate: "2099-01-01" };
     const getGuestBookingForHost = vi.fn().mockResolvedValue(booking);
     mocks.owner.mockResolvedValue({ ok: true, bookings: { getGuestBookingForHost }, actor: { providerId: "provider_1", nihoUserId: "owner_1", calendarRoleCeiling: "OWNER" } });
     expect((await loadSiteTranslateRoomsClient("provider_1", "booking_1", "create")).ok).toBe(true);
-    expect(getGuestBookingForHost).toHaveBeenCalledWith(expect.objectContaining({ providerId: "provider_1" }), "booking_1");
+    expect(getGuestBookingForHost).toHaveBeenCalledWith(expect.objectContaining({ providerId: "provider_1" }), "booking_1", { ownerOnly: true });
 
     getGuestBookingForHost.mockResolvedValue({ ...booking, status: "CANCELLED", cancelledAtUtc: "2026-11-01T00:00:00.000Z" });
     const rejected = await loadSiteTranslateRoomsClient("provider_1", "booking_1", "create");
@@ -231,8 +234,27 @@ describe("translate rooms server boundary", () => {
     mocks.owner.mockResolvedValue({ ok: true, bookings: { getGuestBookingForHost }, actor: { providerId: "provider_1", nihoUserId: "owner_1", calendarRoleCeiling: "OWNER" } });
     const result = await loadSiteTranslateRoomsClient("provider_1", "booking_1", "create");
     expect(result.ok).toBe(true);
-    expect(getGuestBookingForHost).toHaveBeenCalledWith(expect.objectContaining({ providerId: "provider_1" }), "booking_1");
+    expect(getGuestBookingForHost).toHaveBeenCalledWith(expect.objectContaining({ providerId: "provider_1" }), "booking_1", { ownerOnly: true });
     expect(mocks.owner).toHaveBeenCalledWith("provider_1");
+  });
+
+  it("Experience OWNERは現在の予約所属の確認後にだけサービス認証で通訳し、OWNERを外れると更新できない", async () => {
+    Object.assign(mocks.config, { experienceTranslateApiEnabled: true, hostAccountsEnabled: true, guestBookingEnabled: false });
+    mocks.readHost.mockResolvedValue({ kind: "experience", hostAccountId: "host_1" });
+    const getGuestBookingForHost = vi.fn().mockResolvedValue({ status: "CONFIRMED", cancelledAtUtc: null, language: "EN", localDate: "2099-01-01" });
+    const actor = { providerId: "provider_1", nihoUserId: "host_1", calendarRoleCeiling: "OWNER" };
+    mocks.owner.mockResolvedValue({ ok: true, bookings: { getGuestBookingForHost }, actor });
+    expect(await loadSiteTranslateRoomsClient("provider_1", "booking_1", "create")).toMatchObject({ ok: true, serviceAuth: true });
+    expect(getGuestBookingForHost).toHaveBeenCalledWith(actor, "booking_1", { ownerOnly: true });
+    expect(mocks.create).toHaveBeenCalledWith({
+      nihoWebOrigin: "https://niho.example",
+      auth: { kind: "experience-service", serviceIdToken: "service-identity-token" },
+    });
+
+    getGuestBookingForHost.mockRejectedValue(new StoreAccessDeniedError());
+    expect(await loadSiteTranslateRoomsClient("provider_1", "booking_1", "status")).toMatchObject({ ok: false, response: { status: 404 } });
+    expect(await loadSiteTranslateRoomsClient("provider_1", "booking_1", "end")).toMatchObject({ ok: false, response: { status: 404 } });
+    expect(mocks.serviceIdToken).toHaveBeenCalledTimes(1);
   });
 
   it("mock site-bookingsは合成予約の所属と条件だけでsite clientへ進む", async () => {

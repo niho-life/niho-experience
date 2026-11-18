@@ -1528,11 +1528,12 @@ export class GuestBookingRepository {
     });
   }
 
-  /** One guest booking of the provider for its OWNER. Another provider's, a hold or none is StoreNotFoundError. */
-  async getGuestBookingForHost(actor: HostActor, publicBookingId: string): Promise<HostGuestBooking> {
+  /** Read a provider's booking, with a current OWNER check for callers that control a translate room. */
+  async getGuestBookingForHost(actor: HostActor, publicBookingId: string, options: { ownerOnly?: boolean } = {}): Promise<HostGuestBooking> {
     const id = publicBookingIdOf(publicBookingId);
     return withTransaction(this.#pool, async (client) => {
-      await requireBookingsReader(client, actor);
+      const requireAccess = options.ownerOnly ? requireBookingsOwner : requireBookingsReader;
+      await requireAccess(client, actor);
       return hostGuestBookingFromRow(await selectOne(client, actor.providerId, id));
     });
   }
