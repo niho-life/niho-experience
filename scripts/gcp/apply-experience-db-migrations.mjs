@@ -2,7 +2,7 @@
 // Applies pending Experience migrations as the NOLOGIN migration role and reconciles
 // the runtime role to `experience-db-grants.mjs`. On an empty database without roles
 // it first creates both roles and stores the runtime URL in Secret Manager.
-// Run only as a child of niho-app `niho-db.sh <stg|prd> --via-bastion`.
+// Use the NIHO IAP bastion for Cloud SQL or the approved direct Neon endpoint for stg.
 // No credential, connection URL, or SQL response value is printed or written to disk.
 import { createHash, randomBytes } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import pg from "pg";
 import { MIGRATION_LEDGER_TABLE, RUNTIME_TABLE_GRANTS } from "./experience-db-grants.mjs";
+import { migrationConnection } from "./experience-migration-connection.mjs";
 import { atomicMigrationSql, pendingMigrations } from "./migration-sql.mjs";
 
 const { Client } = pg;
@@ -67,15 +68,7 @@ function createdTables(sources) {
 }
 
 const envName = process.env.NIHO_DB_ENV;
-const env = ENVIRONMENTS[envName];
-assert(env, "NIHO_DB_ENV must be stg or prd (run through niho-db.sh)");
-assert(process.env.CONFIRM_EXPERIENCE_DB_MIGRATE === env.project, `CONFIRM_EXPERIENCE_DB_MIGRATE=${env.project} is required`);
-const localUrl = new URL(process.env.DATABASE_URL || "postgresql://invalid/");
-assert(localUrl.protocol === "postgresql:" || localUrl.protocol === "postgres:", "PostgreSQL URL required");
-assert(localUrl.hostname === "127.0.0.1" && localUrl.port, "IAP bastion localhost tunnel required");
-assert(localUrl.pathname === `/${env.adminDatabase}` && decodeURIComponent(localUrl.username) === env.adminUser,
-  "NIHO administrator connection required");
-assert(localUrl.password, "Administrator password is missing");
+const { env, localUrl, neon } = migrationConnection(process.env, ENVIRONMENTS);
 
 const files = (await readdir(migrationsDir)).filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/.test(name)).sort();
 const sources = new Map();
@@ -99,9 +92,10 @@ try {
   const adminCheck = await admin.query(`
     SELECT current_database() AS db, current_user AS username,
            (SELECT rolcreaterole FROM pg_roles WHERE rolname=current_user) AS can_create_role,
-           pg_has_role(current_user, 'cloudsqlsuperuser', 'MEMBER') AS cloudsql_member`);
+           pg_has_role(current_user, $1, 'MEMBER') AS admin_member`,
+    [neon ? "neon_superuser" : "cloudsqlsuperuser"]);
   assert(adminCheck.rows[0].db === env.adminDatabase && adminCheck.rows[0].username === env.adminUser
-    && adminCheck.rows[0].can_create_role && adminCheck.rows[0].cloudsql_member, "Administrator identity check failed");
+    && adminCheck.rows[0].can_create_role && adminCheck.rows[0].admin_member, "Administrator identity check failed");
   const targetCheck = await target.query("SELECT current_database() AS db");
   assert(targetCheck.rows[0].db === env.database, "Experience database check failed");
   // Migrations may need old revisions drained (for example 0006). Nothing may be connected as the runtime.
@@ -115,11 +109,16 @@ try {
     step = "bootstrap roles";
     assert((await publicTables()).length === 0, "Roles are missing but the Experience database is not empty");
     const password = randomBytes(48).toString("base64url");
-    const cloudUrl = new URL(`postgresql://${runtime}@localhost/${env.database}`);
-    cloudUrl.password = password;
-    cloudUrl.searchParams.set("host", `/cloudsql/${env.instance}`);
+    const runtimeUrl = new URL(targetUrl);
+    runtimeUrl.username = runtime;
+    runtimeUrl.password = password;
+    const runtimeSecretUrl = neon ? new URL(runtimeUrl) : new URL(`postgresql://${runtime}@localhost/${env.database}`);
+    if (!neon) {
+      runtimeSecretUrl.password = password;
+      runtimeSecretUrl.searchParams.set("host", `/cloudsql/${env.instance}`);
+    }
     // Store the recoverable credential before the role exists, as the staging bootstrap did.
-    const versionName = await addSecretVersion(env, cloudUrl.toString());
+    const versionName = await addSecretVersion(env, runtimeSecretUrl.toString());
     const match = versionName.match(/(?:^|\/versions\/)(\d+)$/);
     assert(match, "Secret version could not be read back");
     createdSecretRef = `${env.secret}:${match[1]}`;
@@ -136,9 +135,6 @@ try {
       throw error;
     }
     // Prove the new login once, without printing it.
-    const runtimeUrl = new URL(targetUrl);
-    runtimeUrl.username = runtime;
-    runtimeUrl.password = password;
     const login = new Client({ connectionString: runtimeUrl.toString() });
     try {
       await login.connect();

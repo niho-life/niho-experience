@@ -128,6 +128,8 @@ DB URLはExperience専用DB・限定ユーザーを使い、[Cloud RunのUnix so
 
 既定の DB は Cloud SQL。Neon を選ぶ場合は、Experience 専用の `experience_stg` を空 DB から作り、migration、架空 fixture と限定 runtime role の疎通を確認する。接続 URL は TLS を使い、`niho-app-stg` の `experience-stg-neon-database-url` に保管する。Secret の accessor は既存と同じ Experience の runtime サービスアカウントに限る。
 
+移行担当は、承認済み Neon stg endpoint の `neondb` に専用の `niho_stg_migrator` として接続し、`experience_stg` を同じユーザーの所有で用意する。空の runtime Secret を作成し、管理接続の URL を Secret Manager から `DATABASE_URL` に渡す管理端末で `NIHO_DB_ENV=stg`、`EXPERIENCE_DB_PROVIDER=neon`、`CONFIRM_EXPERIENCE_DB_MIGRATE=niho-app-stg`、`EXPERIENCE_NEON_STG_HOST=<承認済みの直接接続 hostname>` を指定して `node scripts/gcp/apply-experience-db-migrations.mjs` を実行する。空 DB に旧環境の baseline 番号は渡さない。スクリプトは専用の runtime role と Secret version を作成し、migration 台帳と権限を確認する。
+
 候補の作成と昇格には `STG_HOST_DB_PROVIDER=neon` と `STG_HOST_DATABASE_URL_REF=experience-stg-neon-database-url:<version>` を使う。workflow は候補から Cloud SQL attachment を外し、昇格時にも attachment が空で同じ Secret version を使うことを検査する。候補でログインと予約を確認してから昇格する。切り戻し時は DB provider を `cloudsql` に戻し、従来の `experience-stg-database-url:<version>` と既存 Cloud SQL instance の設定で候補を作る。
 
 管理者は各Secretに対して、次のresource単位のbindingを6件だけ追加する（`SECRET_NAME` は上表のいずれかへ置換）。既存NIHOのSecretへの権限は、旅行者の予約で参照する5個だけに `scripts/gcp/setup-host-staging-guest-booking.sh` がresource単位で追加する（オーナー決定 2026-10-31。それまでの「追加しない」を改めた）。ほかのNIHOのSecretとproject全体には追加しない。
