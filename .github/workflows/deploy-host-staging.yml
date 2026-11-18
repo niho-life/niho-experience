@@ -113,6 +113,7 @@ jobs:
       SITE_URL: ${{ vars.STG_HOST_SERVICE_URL }}
       CORE_READY: ${{ vars.STG_HOST_CORE_READY }}
       CLOUDSQL: ${{ vars.STG_HOST_CLOUDSQL_INSTANCE }}
+      DB_PROVIDER: ${{ vars.STG_HOST_DB_PROVIDER }}
       SESSION_REF: ${{ vars.STG_HOST_SESSION_SECRET_REF }}
       FIREBASE_REF: ${{ vars.STG_HOST_FIREBASE_WEB_API_KEY_REF }}
       DATABASE_REF: ${{ vars.STG_HOST_DATABASE_URL_REF }}
@@ -133,10 +134,8 @@ jobs:
           test "$DEPLOYER" = experience-host-stg-deployer@niho-app-stg.iam.gserviceaccount.com
           [[ "$WIF" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/experience-host-staging/providers/github$ ]]
           test "$SITE_URL" = https://experience-stg.niho.life
-          test "$CLOUDSQL" = niho-app-stg:asia-northeast1:niho-app-db-stg
           [[ "$SESSION_REF" =~ ^experience-stg-host-session:[1-9][0-9]*$ ]]
           [[ "$FIREBASE_REF" =~ ^experience-stg-niho-firebase-web-api-key:[1-9][0-9]*$ ]]
-          [[ "$DATABASE_REF" =~ ^experience-stg-database-url:[1-9][0-9]*$ ]]
           [[ "$GOOGLE_ID_REF" =~ ^experience-stg-google-client-id:[1-9][0-9]*$ ]]
           [[ "$GOOGLE_SECRET_REF" =~ ^experience-stg-google-client-secret:[1-9][0-9]*$ ]]
           [[ "$GOOGLE_KEY_REF" =~ ^experience-stg-google-token-key:[1-9][0-9]*$ ]]
@@ -154,6 +153,9 @@ jobs:
         run: bash scripts/check-production-owner.sh
       - name: Require reviewed commit on main
         run: git merge-base --is-ancestor "$SHA" origin/main
+      - name: Resolve staging database before authentication
+        id: database
+        run: bash scripts/deploy/resolve-host-staging-db.sh
       # Feature flags (docs/host-calendar-staging.md「機能のフラグ」): each needs every setting, Secret reference and
       # flag it depends on, checked before any credential exists. Changing one after the candidate stops promotion.
       - name: Resolve feature flags before authentication
@@ -201,6 +203,7 @@ jobs:
           FLAG_EXPECTED_SECRETS: ${{ steps.flags.outputs.expected_secrets }}
           FLAG_SUMMARY: ${{ steps.flags.outputs.summary }}
           CANDIDATE_TAG: ${{ steps.candidate_tag.outputs.tag }}
+          CLOUDSQL_ATTACHMENT: ${{ steps.database.outputs.cloudsql }}
         run: |
           # The resolve step's strings: names and checked values only, never a comma inside a value.
           [[ -z "$FLAG_ENV" || "$FLAG_ENV" =~ ^[A-Z][A-Z0-9_]*=[^,]+(,[A-Z][A-Z0-9_]*=[^,]+)*$ ]]
@@ -214,6 +217,10 @@ jobs:
           traffic="$(jq -c '[.status.traffic[] | select((.percent // 0) > 0) | {revisionName,percent}] | sort_by(.revisionName)' <<< "$state")"
           jq -e 'length > 0 and (map(.percent) | add) == 100 and all(.[]; .revisionName != null)' <<< "$traffic" >/dev/null
           if [ "$ACTION" = candidate ]; then
+            sql_flags=(--clear-cloudsql-instances)
+            if [ -n "$CLOUDSQL_ATTACHMENT" ]; then
+              sql_flags=(--set-cloudsql-instances "$CLOUDSQL_ATTACHMENT")
+            fi
             image="${REGION}-docker.pkg.dev/${PROJECT}/${REPOSITORY}/web:${SHA}"
             gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
             docker tag "host-staging:${SHA}" "$image"
@@ -226,7 +233,7 @@ jobs:
               --port 8080 --cpu 1 --memory 512Mi --min-instances 0 --max-instances 2 \
               --no-traffic --tag "$CANDIDATE_TAG" --no-invoker-iam-check --ingress internal-and-cloud-load-balancing \
               --network default --subnet default --vpc-egress private-ranges-only \
-              --set-cloudsql-instances "$CLOUDSQL" \
+              "${sql_flags[@]}" \
               --set-env-vars "EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://app-stg.niho.life,SITE_URL=${SITE_URL},SITE_INDEXING=block,BOOKINGS_ENABLED=${bookings},HOST_SIGNUP_MODE=pilot,HOST_CONSOLE_ENABLED=true,NIHO_HOST_START_URL=https://app-stg.niho.life/experiences/provider,DEPLOY_COMMIT_SHA=${SHA}${FLAG_ENV:+,$FLAG_ENV}" \
               --set-secrets "HOST_SESSION_SECRET=${SESSION_REF},NIHO_FIREBASE_WEB_API_KEY=${FIREBASE_REF},EXPERIENCE_DATABASE_URL=${DATABASE_REF},EXPERIENCE_GOOGLE_CLIENT_ID=${GOOGLE_ID_REF},EXPERIENCE_GOOGLE_CLIENT_SECRET=${GOOGLE_SECRET_REF},EXPERIENCE_GOOGLE_TOKEN_KEY=${GOOGLE_KEY_REF}${FLAG_SECRETS:+,$FLAG_SECRETS}" \
               --labels "app=niho-experience,env=host-staging,commit=${SHA:0:12}" --quiet
@@ -291,9 +298,9 @@ jobs:
               exit 1
             fi
           fi
-          if ! jq -e --arg runtime "$RUNTIME" --arg sql "$CLOUDSQL" '
+          if ! jq -e --arg runtime "$RUNTIME" --arg sql "$CLOUDSQL_ATTACHMENT" '
             .spec.serviceAccountName == $runtime and
-            .metadata.annotations["run.googleapis.com/cloudsql-instances"] == $sql and
+            (.metadata.annotations["run.googleapis.com/cloudsql-instances"] // "") == $sql and
             .metadata.annotations["run.googleapis.com/vpc-access-egress"] == "private-ranges-only" and
             (.metadata.annotations["run.googleapis.com/network-interfaces"] | fromjson | any(.[]; .network == "default" and .subnetwork == "default")) and
             any(.status.conditions[]; .type == "Ready" and .status == "True")' <<< "$revision" >/dev/null; then

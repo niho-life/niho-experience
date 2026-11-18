@@ -104,6 +104,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-workspace
+      - run: bash scripts/deploy/test-resolve-host-staging-db.sh
+      - run: node --test scripts/gcp/experience-migration-connection.test.mjs
       - run: npm run check:presentation
       - run: npm run lint
       - run: npm run typecheck
