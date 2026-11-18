@@ -56,6 +56,13 @@
 
 Cloud Run側はSecretの数値versionを固定する。鍵を更新するときはSecretに新versionを作り、参照変数を更新して新しい候補revisionを作る。`PROD_HOST_CALENDAR_READY` をfalseに戻しても既存revisionの公開状態は変わらない。緊急停止は前の `enable_host_calendar=false` revisionへtrafficを戻し、NIHO側の旧枠も別途止める。
 
+### Experience guest mail feedback callback（#375 / NIHO #19312）
+
+- 本番callbackはGitHub repository variables `PROD_EXPERIENCE_MAIL_FEEDBACK_AUDIENCE` と `PROD_EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL` の両方があるときだけ有効。片側だけなら、認証情報を得る前の検査でcandidate/promoteを止める。
+- 許可値はaudience `https://experience.niho.life`、NIHO API runtime identity `nihoapp-runner@niho-app-prd.iam.gserviceaccount.com`。どちらもread-only Cloud Run revision確認で照合した値。
+- callback設定時は `PROD_GUEST_MAIL_ENABLED=true` を必須とする。workflowはcandidateへ両値を載せ、候補readbackとpromote時の再readbackで現在の設定との一致を確認する。設定後にrepository variableが変わった場合はpromoteを拒否する。
+- NIHO側は `EXPERIENCE_GUEST_MAIL_FEEDBACK_URL=https://experience.niho.life/internal/experience-mail-feedback/v1/events` と `EXPERIENCE_GUEST_MAIL_FEEDBACK_AUDIENCE=https://experience.niho.life` を同時に設定する。片側だけでは起動時validationで止まる。双方未設定時はcallbackが404で閉じる。
+
 ### 機能のフラグ（#84）
 
 mock で出している機能を http mode で開くフラグを、repository variable `PROD_*` で候補 revision に渡す。どれも**未設定か `false` なら OFF**（そのフラグの環境変数・設定・Secret の参照を revision に載せない）で、今の候補は変わらない。

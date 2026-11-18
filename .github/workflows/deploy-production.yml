@@ -122,6 +122,8 @@ jobs:
       GOOGLE_CLIENT_SECRET_REF: ${{ vars.PROD_EXPERIENCE_GOOGLE_CLIENT_SECRET_REF }}
       GOOGLE_TOKEN_KEY_SECRET_REF: ${{ vars.PROD_EXPERIENCE_GOOGLE_TOKEN_KEY_REF }}
       CLOUDSQL_INSTANCE: ${{ vars.PROD_EXPERIENCE_CLOUDSQL_INSTANCE }}
+      FEEDBACK_AUDIENCE: ${{ vars.PROD_EXPERIENCE_MAIL_FEEDBACK_AUDIENCE || '' }}
+      FEEDBACK_SERVICE_ACCOUNT_EMAIL: ${{ vars.PROD_EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL || '' }}
     steps:
       - name: Require protected production settings
         run: |
@@ -151,6 +153,14 @@ jobs:
             test "$(jq -r '.PROD_GUEST_BOOKING_ENABLED // "false"' <<< "$DEPLOY_VARS")" = true
           fi
           # BOOKING_GATE_END
+          # The guest-mail feedback callback stays closed unless its exact audience and caller are paired.
+          if [[ -n "$FEEDBACK_AUDIENCE" || -n "$FEEDBACK_SERVICE_ACCOUNT_EMAIL" ]]; then
+            test -n "$FEEDBACK_AUDIENCE"
+            test -n "$FEEDBACK_SERVICE_ACCOUNT_EMAIL"
+            test "$FEEDBACK_AUDIENCE" = "https://experience.niho.life"
+            test "$FEEDBACK_SERVICE_ACCOUNT_EMAIL" = "nihoapp-runner@niho-app-prd.iam.gserviceaccount.com"
+            test "$(jq -r '.PROD_GUEST_MAIL_ENABLED // "false"' <<< "$DEPLOY_VARS")" = true
+          fi
           node scripts/deploy/runtime-flags.mjs --target prod --host-console "$HOST_CALENDAR_ENABLED" --site-url https://experience.niho.life
       # No checkout or repository scripts run after OIDC credentials are issued.
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -195,6 +205,9 @@ jobs:
           tag="candidate-${CANDIDATE_SHA}"
           tag="${tag:0:22}"
           env_vars="EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life,SITE_URL=https://experience.niho.life,SITE_INDEXING=allow,BOOKINGS_ENABLED=${BOOKINGS},HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider"
+          if [[ -n "$FEEDBACK_AUDIENCE" ]]; then
+            env_vars+=",EXPERIENCE_MAIL_FEEDBACK_AUDIENCE=${FEEDBACK_AUDIENCE},EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL=${FEEDBACK_SERVICE_ACCOUNT_EMAIL}"
+          fi
           runtime_options=()
           if [ "$HOST_CALENDAR_ENABLED" = true ]; then
             test "$HOST_CALENDAR_READY" = true
@@ -288,6 +301,8 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_URL") | .value' <<< "$revision_json")" = https://experience.niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NEXT_PUBLIC_NIHO_WEB_ORIGIN") | .value' <<< "$revision_json")" = https://niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_CONSOLE_ENABLED") | .value' <<< "$revision_json")" = "$HOST_CALENDAR_ENABLED"
+          test "$(jq -r '[.spec.containers[0].env[]? | select(.name == "EXPERIENCE_MAIL_FEEDBACK_AUDIENCE") | .value][0] // ""' <<< "$revision_json")" = "$FEEDBACK_AUDIENCE"
+          test "$(jq -r '[.spec.containers[0].env[]? | select(.name == "EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL") | .value][0] // ""' <<< "$revision_json")" = "$FEEDBACK_SERVICE_ACCOUNT_EMAIL"
           # Feature flags: exactly the values and Secret references the resolve step expects, and no other name of its table.
           jq -e --argjson names "$FLAG_NAMES" --argjson env "$FLAG_EXPECTED_ENV" --argjson secrets "$FLAG_EXPECTED_SECRETS" '
             [.spec.containers[0].env[] | select(.name as $name | any($names[]; . == $name))] as $set |
@@ -365,6 +380,8 @@ jobs:
       BOOKINGS: ${{ vars.PROD_BOOKINGS_ENABLED || 'false' }}
       HOST_CALENDAR_READY: ${{ vars.PROD_HOST_CALENDAR_READY }}
       CLOUDSQL_INSTANCE: ${{ vars.PROD_EXPERIENCE_CLOUDSQL_INSTANCE }}
+      FEEDBACK_AUDIENCE: ${{ vars.PROD_EXPERIENCE_MAIL_FEEDBACK_AUDIENCE || '' }}
+      FEEDBACK_SERVICE_ACCOUNT_EMAIL: ${{ vars.PROD_EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL || '' }}
     steps:
       - name: Validate the selected candidate and protected settings
         run: |
@@ -398,6 +415,14 @@ jobs:
             test "$(jq -r '.PROD_GUEST_BOOKING_ENABLED // "false"' <<< "$DEPLOY_VARS")" = true
           fi
           # BOOKING_GATE_END
+          # The guest-mail feedback callback stays closed unless its exact audience and caller are paired.
+          if [[ -n "$FEEDBACK_AUDIENCE" || -n "$FEEDBACK_SERVICE_ACCOUNT_EMAIL" ]]; then
+            test -n "$FEEDBACK_AUDIENCE"
+            test -n "$FEEDBACK_SERVICE_ACCOUNT_EMAIL"
+            test "$FEEDBACK_AUDIENCE" = "https://experience.niho.life"
+            test "$FEEDBACK_SERVICE_ACCOUNT_EMAIL" = "nihoapp-runner@niho-app-prd.iam.gserviceaccount.com"
+            test "$(jq -r '.PROD_GUEST_MAIL_ENABLED // "false"' <<< "$DEPLOY_VARS")" = true
+          fi
           node scripts/deploy/runtime-flags.mjs --target prod --host-console "$HOST_CALENDAR_ENABLED" --site-url https://experience.niho.life
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
@@ -426,6 +451,8 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_API_MODE") | .value' <<< "$revision_json")" = http
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_PUBLIC_API_VERSION") | .value' <<< "$revision_json")" = 1.0
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_CONSOLE_ENABLED") | .value' <<< "$revision_json")" = "$HOST_CALENDAR_ENABLED"
+          test "$(jq -r '[.spec.containers[0].env[]? | select(.name == "EXPERIENCE_MAIL_FEEDBACK_AUDIENCE") | .value][0] // ""' <<< "$revision_json")" = "$FEEDBACK_AUDIENCE"
+          test "$(jq -r '[.spec.containers[0].env[]? | select(.name == "EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL") | .value][0] // ""' <<< "$revision_json")" = "$FEEDBACK_SERVICE_ACCOUNT_EMAIL"
           # Feature flags: exactly the values and Secret references the resolve step expects, and no other name of its table.
           jq -e --argjson names "$FLAG_NAMES" --argjson env "$FLAG_EXPECTED_ENV" --argjson secrets "$FLAG_EXPECTED_SECRETS" '
             [.spec.containers[0].env[] | select(.name as $name | any($names[]; . == $name))] as $set |
