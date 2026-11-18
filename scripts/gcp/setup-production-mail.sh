@@ -28,8 +28,9 @@ actual_runtime_sa="$(gcloud run services describe "$SERVICE" \
 gcloud secrets describe "$PASSWORD_SECRET" --project "$PROJECT_ID" >/dev/null \
   || fail "Expected existing Workspace app-password Secret was not found"
 
-password_version="$(gcloud secrets versions list "$PASSWORD_SECRET" --project "$PROJECT_ID" \
+password_version_resource="$(gcloud secrets versions list "$PASSWORD_SECRET" --project "$PROJECT_ID" \
   --filter='state=ENABLED' --sort-by='~createTime' --limit=1 --format='value(name)')"
+password_version="${password_version_resource##*/}"
 [[ "$password_version" =~ ^[1-9][0-9]*$ ]] || fail "No enabled numeric version exists for the Workspace app-password Secret"
 
 if ! gcloud secrets describe "$USER_SECRET" --project "$PROJECT_ID" >/dev/null 2>&1; then
@@ -40,8 +41,9 @@ fi
 # Keep a fixed, numeric version so candidate and promotion use the same value.
 printf '%s' "$SMTP_USER_EMAIL" | gcloud secrets versions add "$USER_SECRET" \
   --project "$PROJECT_ID" --data-file=- --quiet >/dev/null
-user_version="$(gcloud secrets versions list "$USER_SECRET" --project "$PROJECT_ID" \
+user_version_resource="$(gcloud secrets versions list "$USER_SECRET" --project "$PROJECT_ID" \
   --filter='state=ENABLED' --sort-by='~createTime' --limit=1 --format='value(name)')"
+user_version="${user_version_resource##*/}"
 [[ "$user_version" =~ ^[1-9][0-9]*$ ]] || fail "Could not resolve a numeric SMTP user Secret version"
 
 member="serviceAccount:${RUNTIME_SA}"
