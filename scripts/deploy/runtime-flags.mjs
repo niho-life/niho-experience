@@ -96,7 +96,7 @@ export const FLAGS = Object.freeze([
       { env: "NIHO_ARTICLE_AUTHORITY_ORIGIN", variable: "NIHO_ARTICLE_AUTHORITY_ORIGIN", shape: "httpsOrigin" },
       { env: "NIHO_ARTICLE_AUTHORITY_AUDIENCE", variable: "NIHO_ARTICLE_AUTHORITY_AUDIENCE", shape: "httpsUrl" },
     ],
-    fixed: { EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE: siteUrl },
+    fixed: { EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE: ({ articleAuthorityAudience }) => articleAuthorityAudience },
   },
   {
     env: "GUIDE_ADMIN_API_ENABLED",
@@ -105,6 +105,16 @@ export const FLAGS = Object.freeze([
     settings: [
       { env: "GUIDE_ADMIN_AUDIENCE", variable: "GUIDE_ADMIN_AUDIENCE", shape: "cloudRunServiceUrl" },
       { env: "GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL", variable: "GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL", shape: "serviceAccountEmail" },
+    ],
+  },
+  {
+    env: "EXPERIENCE_NIHO_WRITER_ENABLED",
+    variable: "NIHO_WRITER_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED", "DATABASE_GUIDE_PUBLICATIONS", "EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED", "GUIDE_ADMIN_API_ENABLED"],
+    settings: [
+      { env: "NIHO_ARTICLE_AUTHORITY_ORIGIN", variable: "NIHO_ARTICLE_AUTHORITY_ORIGIN", shape: "httpsOrigin" },
+      { env: "NIHO_ARTICLE_AUTHORITY_AUDIENCE", variable: "NIHO_ARTICLE_AUTHORITY_AUDIENCE", shape: "httpsUrl" },
+      { env: "NIHO_ARTICLE_LINKS_AUDIENCE", variable: "NIHO_ARTICLE_LINKS_AUDIENCE", shape: "httpsUrl" },
     ],
   },
   {
@@ -450,7 +460,8 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
   }
   const env = {};
   const secrets = {};
-  const context = { project: settings.project, siteUrl: url };
+  const articleAuthorityAudience = on.has("GUIDE_ADMIN_API_ENABLED") ? value("GUIDE_ADMIN_AUDIENCE") : url;
+  const context = { project: settings.project, siteUrl: url, articleAuthorityAudience };
   if (hostConsole) {
     for (const setting of HOST_CONSOLE_SETTINGS) {
       const text = value(setting.variable);

@@ -4,11 +4,11 @@
 
 オーナー判断で、記事は experience.niho.life の `/write` で書き、正本は Experience DB に戻す。editor.niho.life から Experience への公開は止める。体験の OWNER は NIHO のライター権限なしで書ける。OWNER 以外のライターは NIHO のライター権限と記事連携を使う。決定の全体は [ADR 0002 ガイド記事](adr/0002-guide-content.md)の「2026-11-07」を正とする。
 
-Store の書込みは #477、`/write` の画面と入口は #478 で追加済み。#479 で公開元をExperience DBへ切り替える配備境界と旧静的記事の移行手順を確定した。#480 では旧Editor公開API・プレビュー・関連設定を撤去し、保存済みDBデータは保持する。非OWNER writerの権限と招待同意フローは #481 が残っている。
+Store の書込みは #477、`/write` の画面と入口は #478 で追加済み。#479 で公開元をExperience DBへ切り替える配備境界と旧静的記事の移行手順を確定した。#480 では旧Editor公開API・プレビュー・関連設定を撤去し、保存済みDBデータは保持する。#481 でNIHOの現在writer権限と記事連携をS2Sで接続し、非OWNER writerも本人作成の記事だけを扱える。
 
 ## Store の現行書込み境界（#477）
 
-`GuideRepository` の下書き・公開・停止・非公開写真操作は、記事が属する提供者の **現在 active な OWNER** だけに許す。作成者 ID と封印済み公開版の発行者 ID は履歴として固定し、別の OWNER が編集・写真追加しても書き換えない。旧 writer grant、記事連携の招待、EDITOR/VIEWER はこの書込み権限にも公開関連記事の権限にも使わない。将来の本人 ID 移行では確認済みの ID 対応を経由し、メールアドレスだけで履歴を統合しない。
+`GuideRepository` の提供者記事は、その提供者の **現在 active な OWNER** だけに許す。個人記事（subject `WRITER`）は作成した現在の `hst_` actorだけに固定し、各書込みでNIHOの現在writer権限を再確認する。作成者 ID と封印済み公開版の発行者 ID は履歴として固定し、subjectは変更しない。旧 writer grant、旧招待台帳、EDITOR/VIEWER は現在権限にも公開関連記事の権限にも使わない。本人 ID は `host_account_identities` の確認済み対応を使い、メールアドレスだけで履歴を統合しない。
 
 下書きは空のタイトル・未完成の表紙・日本語メモを保存できる。公開時だけ英語宣言、タイトル、見出し・本文、カテゴリ、写真の Web 掲載確認を検査し、封印済み版を新規に作る。公開済み記事の下書きを更新しても表示中の版は変わらない。公開処理の同一 OWNER・同一 revision・同一公開範囲での直後の再送は同じ版を返す。運営停止 `OPS_STOPPED` は通常の停止と別状態で、監査付き運用手順による解除までは OWNER が公開できない。詳細は [Store README](../packages/experience-store/README.md) を参照。
 
@@ -16,7 +16,7 @@ Store の書込みは #477、`/write` の画面と入口は #478 で追加済み
 
 記事は Experience の `/write` と現行 `GuideRepository` で作成・公開し、Experience DB の current sealed publication を旅行者向けSSRの正本にする。`/write` はホスト画面と同じ現行ログインを使い、毎操作で記事提供者の active OWNER membershipを確認する。旧writer grantや招待台帳、editor app-connect、静的モジュールを現在権限や公開のfallbackにしない。
 
-非OWNER writerと記事連携の招待・同意・取消はNIHOが正本であり #481 で接続する。#479 の切替では現在OWNERだけをwriterとして受け入れる。OWNER変更・体験停止では関連表示を次要求から隠すが、封印済み記事本文は保持する。商品・予約・顧客・売上への権限は生まれない。
+非OWNER writerと記事連携の招待・同意・取消はNIHOが正本であり、#481のserver-to-server契約で接続する。writerの関連体験は、現在の承諾、招待者の現在active OWNER、現在公開中の商品を保存・公開時と公開読取の両方で確認する。権限照会障害、writer取消、OWNER変更、体験停止では関連表示を次要求から隠すが、封印済み記事本文は保持する。商品・予約・顧客・売上への権限は生まれない。
 
 現在activeなカテゴリは`/write`で選ぶ。公開直前にも現在性を確認し、表示名・順序を公開snapshotへ固定する。停止済みカテゴリの過去記事は残す。カバー写真とリードは任意で、入力された値の長さ・画像形式・掲載許諾は検証する。
 
@@ -70,7 +70,7 @@ bucket の CORS や公開 CDN は設定しない。#189 で public SSR/画像配
 
 ## 非OWNER writerとの記事連携（#481）
 
-記事連携の正本はNIHO。ホストのExperience画面から現在のNIHO権限へ招待・取消を中継し、writerはNIHOログイン後に `/write` で承諾・辞退する。#481ではこの非OWNER経路を実装する。Experience DBのcurrent OWNER確認は引き続き `/write` の権限境界とし、writer権限を体験の予約・顧客・売上へ広げない。旧`guide_writer_grants`と`guide_link_invitations`は履歴として残し、現在権限には使わない。
+記事連携の正本はNIHO。ホストのExperience画面は、現行 `hst_` sessionからserverだけでNIHO identityを解決し、current OWNERを確認してからNIHOのhost S2S provider APIへ招待・取消を中継する。writerはNIHOログイン後に `/write` の受信箱で承諾・辞退する。初回だけwriter認可成功後にメールなし `hst_` accountを原子的に作り、NIHO tokenは保存しない。writer-only sessionにはホスト機能を見せず、本人作成の `WRITER` 記事だけを扱う。旧`guide_writer_grants`と`guide_link_invitations`は履歴として残し、現在権限には使わない。
 
 ## database flagを開く前のゲート
 

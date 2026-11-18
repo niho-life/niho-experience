@@ -6,6 +6,7 @@ import { useMemo, useRef, useState } from "react";
 import { hasSavedChangesSincePublication, writeStatusLabel, type WriteCategory, type WriteGuide } from "@/lib/write/client-types";
 import { WriteNewGuideDialog, type WriteNewGuideDialogHandle } from "./WriteNewGuideDialog";
 import { WriteWorkspace, type WriteChromeProps } from "./WriteWorkspace";
+import { WriterLinkInbox } from "./WriterLinkInbox";
 
 type Filter = "ALL" | "DRAFT" | "PUBLISHED" | "STOPPED";
 const FILTERS: readonly { value: Filter; label: string }[] = [
@@ -19,6 +20,11 @@ function matchesFilter(guide: WriteGuide, filter: Filter) {
   if (filter === "ALL") return true;
   if (filter === "STOPPED") return guide.status === "STOPPED" || guide.status === "OPS_STOPPED";
   return guide.status === filter;
+}
+
+function subjectLabel(guide: WriteGuide, providers: WriteChromeProps["providers"]): string | undefined {
+  const subject = guide.subject;
+  return subject.kind === "WRITER" ? "自分の記事" : providers.find((provider) => provider.id === subject.providerId)?.displayName;
 }
 
 export function WriteList({ chrome, categories, experience, autoOpenNew = false, editPath = "/write" }: {
@@ -37,7 +43,8 @@ export function WriteList({ chrome, categories, experience, autoOpenNew = false,
   const returnPath = experience ? `/write?experience=${encodeURIComponent(experience)}` : "/write";
   return <WriteWorkspace chrome={chrome} writePath={returnPath} onNewArticle={(event) => newGuideDialog.current?.open(event.currentTarget)}>
     <main id="main" className="write-list-page">
-      <header className="write-page-head"><div><h1>記事</h1><p>鎌倉の暮らしや体験の背景を、英語で旅行者へ届けます。</p></div><WriteNewGuideDialog ref={newGuideDialog} providers={chrome.providers} experience={experience} autoOpen={autoOpenNew} returnPath={returnPath} editPath={editPath} /></header>
+      <header className="write-page-head"><div><h1>記事</h1><p>鎌倉の暮らしや体験の背景を、英語で旅行者へ届けます。</p></div><WriteNewGuideDialog ref={newGuideDialog} providers={chrome.providers} writerStatus={chrome.writerStatus} experience={experience} autoOpen={autoOpenNew} returnPath={returnPath} editPath={editPath} /></header>
+      {chrome.writerStatus === "authorized" ? <WriterLinkInbox /> : null}
       {chrome.articles.length ? <>
         <div className="write-list-tools">
           <div className="write-filter-chips" role="group" aria-label="状態で絞り込む">
@@ -52,7 +59,7 @@ export function WriteList({ chrome, categories, experience, autoOpenNew = false,
         {visible.length ? <ul className="write-guide-list">
           {visible.map((guide) => <li key={guide.id}><Link href={`/write/${encodeURIComponent(guide.id)}${experience ? `?experience=${encodeURIComponent(experience)}` : ""}`}>
             <span className="write-list-thumb">{guide.cover ? <img src={`/write/api/guides/${encodeURIComponent(guide.id)}/media/${encodeURIComponent(guide.cover.assetId)}`} alt="" /> : <span aria-hidden="true">記事</span>}</span>
-            <span className="write-list-copy"><b>{guide.title || "無題の記事"}</b><small>{[guide.categorySlug ? categoryLabels.get(guide.categorySlug) ?? "カテゴリ未設定" : "カテゴリ未設定", `更新 ${new Date(guide.updatedAtUtc).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })}`, guide.draftProductLinks.length ? `関連体験 ${guide.draftProductLinks.length}` : null].filter(Boolean).join(" · ")}</small>{guide.status === "PUBLISHED" ? <small className="write-list-url">/guides/{guide.slug}</small> : null}</span>
+            <span className="write-list-copy"><b>{guide.title || "無題の記事"}</b><small>{[subjectLabel(guide, chrome.providers), guide.categorySlug ? categoryLabels.get(guide.categorySlug) ?? "カテゴリ未設定" : "カテゴリ未設定", `更新 ${new Date(guide.updatedAtUtc).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })}`, guide.draftProductLinks.length ? `関連体験 ${guide.draftProductLinks.length}` : null].filter(Boolean).join(" · ")}</small>{guide.status === "PUBLISHED" ? <small className="write-list-url">/guides/{guide.slug}</small> : null}</span>
             <span className="write-list-pills"><em>{writeStatusLabel(guide)}</em>{hasSavedChangesSincePublication(guide) ? <em className="write-list-change">未公開の変更</em> : null}</span>
           </Link></li>)}
         </ul> : <section className="write-no-results" role="status"><h2>条件に合う記事はありません</h2><p>検索語または状態の絞り込みを変えてください。</p></section>}

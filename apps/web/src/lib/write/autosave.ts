@@ -1,6 +1,6 @@
 import { WriteApiError } from "./api";
 
-export type AutosavePhase = "saved" | "editing" | "saving" | "failed" | "signed-out" | "conflict";
+export type AutosavePhase = "saved" | "editing" | "saving" | "failed" | "signed-out" | "permission-denied" | "conflict";
 export type AutosaveState = {
   readonly phase: AutosavePhase;
   readonly dirty: boolean;
@@ -72,7 +72,7 @@ export class WriteAutosaveQueue<T> {
   }
 
   async retry(): Promise<boolean> {
-    if (this.#state.phase === "conflict") return false;
+    if (this.#state.phase === "conflict" || this.#state.phase === "permission-denied") return false;
     this.#frozen = false;
     return this.flush();
   }
@@ -99,8 +99,9 @@ export class WriteAutosaveQueue<T> {
     } catch (error) {
       const phase = error instanceof WriteApiError && error.kind === "unauthenticated"
         ? "signed-out"
+        : error instanceof WriteApiError && error.kind === "forbidden" ? "permission-denied"
         : error instanceof WriteApiError && error.kind === "conflict" ? "conflict" : "failed";
-      this.#frozen = phase === "conflict" || phase === "signed-out";
+      this.#frozen = phase === "conflict" || phase === "signed-out" || phase === "permission-denied";
       this.#set({ phase, dirty: true, revision: this.#revision });
       return false;
     }

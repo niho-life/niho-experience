@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
     try {
       const signedIn = await store.readSession({ sessionToken: opened.sessionToken, nowUtc: nowUtc(now) });
       const returnTo = returnPathFromCookie(request.cookies.get(RETURN_PATH_COOKIE)?.value);
-      if (signedIn) await recordHostAccountLoginEmail({ hostAccountId: signedIn.hostAccountId, email: signedIn.email, invitation: returnTo?.startsWith(`${HOST_INVITATIONS_PATH}/`) === true });
+      if (signedIn?.email) await recordHostAccountLoginEmail({ hostAccountId: signedIn.hostAccountId, email: signedIn.email, invitation: returnTo?.startsWith(`${HOST_INVITATIONS_PATH}/`) === true });
     } catch (error) {
       console.error(`[host-auth] sign-in address not copied: ${error instanceof Error ? error.name : "unknown error"}`);
     }

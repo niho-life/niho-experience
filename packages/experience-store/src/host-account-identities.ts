@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { StoreConflictError, StoreError, StoreValidationError } from "./errors.ts";
 import { HOST_ACCOUNT_LIMITS, isHostAccountId, openHostSessionIn, type HostLoginResult } from "./host-accounts.ts";
@@ -24,7 +25,7 @@ import { assertCanonicalInstant } from "./validation.ts";
  * Every time is the caller's `nowUtc` (a canonical UTC instant), as in HostAccounts.
  */
 
-export type NihoIdentityRoute = "INVITATION" | "SETTINGS" | "OPS";
+export type NihoIdentityRoute = "INVITATION" | "SETTINGS" | "OPS" | "WRITER";
 
 /** What allows a binding or an unbinding: the host's own session in 設定, or Admin/ops by hand. */
 export type NihoIdentityLinkProof =
@@ -121,7 +122,7 @@ function text(row: DbRow, key: string): string {
 
 function routeOf(row: DbRow): NihoIdentityRoute {
   const via = row.linked_via;
-  if (via !== "INVITATION" && via !== "SETTINGS" && via !== "OPS") throw new StoreError("Database returned an invalid linked_via.");
+  if (via !== "INVITATION" && via !== "SETTINGS" && via !== "OPS" && via !== "WRITER") throw new StoreError("Database returned an invalid linked_via.");
   return via;
 }
 
@@ -306,6 +307,103 @@ export class HostAccountIdentities {
         authenticatedAtUtc: input.authenticatedAtUtc,
       });
     });
+  }
+
+  /**
+   * First /write sign-in for a current NIHO writer. The web layer calls this only after the just-verified NIHO identity
+   * passed the current writer-authority check. Provisioning the email-less hst_ actor, its immutable NIHO binding and the
+   * first session is one idempotent transaction. A pre-existing host/writer binding is preserved and reused.
+   */
+  async startWriterSessionForNihoIdentity(input: { readonly nihoUserId: string; readonly authenticatedAtUtc: string; readonly nowUtc: string }): Promise<NihoSessionResult> {
+    const subject = subjectOf(input?.nihoUserId);
+    const at = nowOf(input.nowUtc);
+    if (typeof input.authenticatedAtUtc !== "string") throw new StoreValidationError("authenticatedAtUtc must be a canonical UTC instant.");
+    assertCanonicalInstant(input.authenticatedAtUtc, "authenticatedAtUtc");
+    const authenticated = Date.parse(input.authenticatedAtUtc);
+    const current = Date.parse(at);
+    if (authenticated > current || authenticated < current - NIHO_AUTH_MAX_AGE_DAYS * 86_400_000) {
+      throw new StoreValidationError("authenticatedAtUtc must not be in the future or older than 400 days.");
+    }
+    return withTransaction(this.#pool, async (client) => {
+      // All identity writers take the subject lock first. Once the target account is known, take its account lock too
+      // and re-read: unlinking is account-locked, so this prevents provisioning beside a concurrent unlink/relink.
+      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${SUBJECT_LOCK_SEED}))`, [`niho-identity-subject:${subject}`]);
+      let existing = await client.query<DbRow>(
+        `SELECT i.id::text AS id, i.host_account_id, a.status, a.session_version
+           FROM host_account_identities i
+           JOIN host_accounts a ON a.id=i.host_account_id
+          WHERE i.provider='NIHO' AND i.subject=$1 AND i.unlinked_at IS NULL
+          FOR SHARE OF a`,
+        [subject],
+      );
+      let binding = existing.rows[0];
+      if (binding) {
+        await lockBindings(client, text(binding, "host_account_id"), subject);
+        existing = await client.query<DbRow>(
+          `SELECT i.id::text AS id, i.host_account_id, a.status, a.session_version
+             FROM host_account_identities i
+             JOIN host_accounts a ON a.id=i.host_account_id
+            WHERE i.provider='NIHO' AND i.subject=$1 AND i.unlinked_at IS NULL
+            FOR UPDATE OF i FOR SHARE OF a`,
+          [subject],
+        );
+        binding = existing.rows[0];
+      }
+      if (binding) {
+        if (binding.status !== "ACTIVE") return { kind: "account-suspended" } as const;
+        await client.query(
+          "UPDATE host_account_identities SET last_login_at=GREATEST(last_login_at, linked_at, $2::timestamptz) WHERE id=$1::uuid",
+          [binding.id, at],
+        );
+        return openHostSessionIn(client, {
+          hostAccountId: text(binding, "host_account_id"),
+          sessionVersion: Number(binding.session_version),
+          createdAtUtc: at,
+          authenticatedAtUtc: input.authenticatedAtUtc,
+        });
+      }
+      const hostAccountId = `hst_${randomBytes(16).toString("hex")}`;
+      await lockBindings(client, hostAccountId, subject);
+      const raced = await client.query<DbRow>(
+        `SELECT i.id::text AS id, i.host_account_id, a.status, a.session_version
+           FROM host_account_identities i
+           JOIN host_accounts a ON a.id=i.host_account_id
+          WHERE i.provider='NIHO' AND i.subject=$1 AND i.unlinked_at IS NULL
+          FOR UPDATE OF i FOR SHARE OF a`,
+        [subject],
+      );
+      if (raced.rows[0] !== undefined) throw new StoreConflictError("NIHO identity binding changed while the writer account was being provisioned.");
+      await client.query(
+        `INSERT INTO host_accounts (id,email,email_key,created_at,updated_at)
+         VALUES ($1,NULL,NULL,$2::timestamptz,$2::timestamptz)`,
+        [hostAccountId, at],
+      );
+      await client.query(
+        `INSERT INTO host_account_identities (host_account_id,provider,subject,linked_via,linked_at,last_login_at)
+         VALUES ($1,'NIHO',$2,'WRITER',$3::timestamptz,$3::timestamptz)`,
+        [hostAccountId, subject, at],
+      );
+      await recordEvent(client, { hostAccountId, kind: "LINKED", subject, via: "WRITER", at });
+      return openHostSessionIn(client, {
+        hostAccountId,
+        sessionVersion: 1,
+        createdAtUtc: at,
+        authenticatedAtUtc: input.authenticatedAtUtc,
+      });
+    });
+  }
+
+  /** Trusted server-side resolution for NIHO S2S calls. The NIHO subject never enters a browser projection. */
+  async readNihoUserId(input: { readonly hostAccountId: string }, queryable: Pool | PoolClient = this.#pool): Promise<string | null> {
+    const hostAccountId = accountOf(input?.hostAccountId);
+    const found = await queryable.query<DbRow>(
+      `SELECT i.subject
+         FROM host_account_identities i
+         JOIN host_accounts a ON a.id=i.host_account_id AND a.status='ACTIVE'
+        WHERE i.host_account_id=$1 AND i.provider='NIHO' AND i.unlinked_at IS NULL`,
+      [hostAccountId],
+    );
+    return found.rows[0] ? text(found.rows[0], "subject") : null;
   }
 
   /**

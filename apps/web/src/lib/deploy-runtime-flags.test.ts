@@ -80,6 +80,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED: "articleAuthorityApiEnabled",
   GUIDE_ADMIN_API_ENABLED: "guideAdminApiEnabled",
   EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED: "hostArticleLinksEnabled",
+  EXPERIENCE_NIHO_WRITER_ENABLED: "nihoWriterEnabled",
   DATABASE_GUIDE_PUBLICATIONS: "guidePublicSource",
   EXPERIENCE_GUEST_BOOKING_ENABLED: "guestBookingEnabled",
   EXPERIENCE_MANAGED_SALES_ENABLED: "managedSalesEnabled",
@@ -206,6 +207,17 @@ describe("the deploy workflows' feature flags", () => {
     ]);
     vars.PROD_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS += ";EDITOR_AUTH_MODE=stub";
     expect(resolve("prod", vars).problems.join(" ")).toContain("PROD_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS");
+  });
+
+  it("uses the shared Cloud Run service audience when NIHO calls both article APIs", () => {
+    const vars = closure("prod", "EXPERIENCE_NIHO_WRITER_ENABLED");
+    vars.PROD_GUIDE_ADMIN_AUDIENCE = "https://niho-experience-sample-an.a.run.app";
+    const resolved = resolve("prod", vars);
+    expect(resolved.problems).toEqual([]);
+    expect(resolved.env.EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE).toBe(resolved.env.GUIDE_ADMIN_AUDIENCE);
+    expect(resolveConfig(revision("prod", resolved)).nihoWriterEnabled).toBe(true);
+    delete vars.PROD_GUIDE_ADMIN_API_ENABLED;
+    expect(resolve("prod", vars).problems.join(" ")).toContain("needs GUIDE_ADMIN_API_ENABLED");
   });
 
   it("configures the private Guide Admin API for one service account and a Cloud Run service URL audience", () => {

@@ -244,7 +244,7 @@ export function hostLandingPath(providerId: string | null, connect: unknown): st
  * so no recent sign-in can be judged and nothing was opened or bound.
  */
 export const LOGIN_ERROR_REASONS = [
-  "expired", "state", "denied", "rejected", "unavailable", "link", "unregistered", "suspended",
+  "expired", "state", "denied", "rejected", "unavailable", "link", "unregistered", "suspended", "writer-revoked", "writer-unavailable",
   "invite-expired", "invite-used", "invite-browser", "invite-invalid", "invite-in-use", "invite-has-identity", "invite-unavailable",
   "unverified",
 ] as const;

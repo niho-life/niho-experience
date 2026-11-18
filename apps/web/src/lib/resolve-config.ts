@@ -94,19 +94,27 @@ function serviceAccountAllowlist(value: string | undefined, setting: string): re
 function articleAuthoritySettings(apiMode: "mock" | "http", env: Env) {
   const enabled = apiMode === "http" && env.EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED === "true";
   const hostLinksEnabled = apiMode === "http" && env.EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED === "true";
-  if (!enabled && !hostLinksEnabled) {
-    return { enabled: false, audience: "", serviceAccountEmails: [] as readonly string[], nihoOrigin: "", nihoAudience: "", nihoLinksAudience: "", hostLinksEnabled: false };
+  const nihoWriterEnabled = apiMode === "http" && env.EXPERIENCE_NIHO_WRITER_ENABLED === "true";
+  if (!enabled && !hostLinksEnabled && !nihoWriterEnabled) {
+    return { enabled: false, audience: "", serviceAccountEmails: [] as readonly string[], nihoOrigin: "", nihoAudience: "", nihoLinksAudience: "", hostLinksEnabled: false, nihoWriterEnabled: false };
   }
   const nihoOrigin = deploymentOrigin(env.NIHO_ARTICLE_AUTHORITY_ORIGIN?.trim() ?? "", "NIHO_ARTICLE_AUTHORITY_ORIGIN");
-  const nihoAudience = enabled ? env.NIHO_ARTICLE_AUTHORITY_AUDIENCE?.trim() ?? "" : "";
-  const nihoLinksAudience = hostLinksEnabled ? env.NIHO_ARTICLE_LINKS_AUDIENCE?.trim() ?? "" : "";
-  if (enabled && !nihoAudience) throw new Error("article authority needs NIHO_ARTICLE_AUTHORITY_AUDIENCE in http mode");
-  if (hostLinksEnabled && !nihoLinksAudience) throw new Error("host article links need NIHO_ARTICLE_LINKS_AUDIENCE in http mode");
+  const nihoAudience = enabled || nihoWriterEnabled ? env.NIHO_ARTICLE_AUTHORITY_AUDIENCE?.trim() ?? "" : "";
+  const nihoLinksAudience = hostLinksEnabled || nihoWriterEnabled ? env.NIHO_ARTICLE_LINKS_AUDIENCE?.trim() ?? "" : "";
+  if ((enabled || nihoWriterEnabled) && !nihoAudience) throw new Error("article authority needs NIHO_ARTICLE_AUTHORITY_AUDIENCE in http mode");
+  if ((hostLinksEnabled || nihoWriterEnabled) && !nihoLinksAudience) throw new Error("article links need NIHO_ARTICLE_LINKS_AUDIENCE in http mode");
   if (hostLinksEnabled && env.HOST_CONSOLE_ENABLED !== "true") {
     throw new Error("EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED=true needs HOST_CONSOLE_ENABLED=true in http mode");
   }
+  if (nihoWriterEnabled && (
+    env.HOST_CONSOLE_ENABLED !== "true"
+    || env.EXPERIENCE_HOST_ACCOUNTS_ENABLED !== "true"
+    || env.EXPERIENCE_HOST_NIHO_LOGIN_ENABLED !== "true"
+    || env.EXPERIENCE_GUIDE_PUBLIC_SOURCE !== "database"
+    || !env.EXPERIENCE_DATABASE_URL?.trim()
+  )) throw new Error("EXPERIENCE_NIHO_WRITER_ENABLED=true needs HOST_CONSOLE_ENABLED, HOST_ACCOUNTS, HOST_NIHO_LOGIN, database guide publications, and EXPERIENCE_DATABASE_URL");
   if (!enabled) {
-    return { enabled: false, audience: "", serviceAccountEmails: [] as readonly string[], nihoOrigin, nihoAudience, nihoLinksAudience, hostLinksEnabled };
+    return { enabled: false, audience: "", serviceAccountEmails: [] as readonly string[], nihoOrigin, nihoAudience, nihoLinksAudience, hostLinksEnabled, nihoWriterEnabled };
   }
   if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error("EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED=true needs EXPERIENCE_DATABASE_URL");
   const audience = env.EXPERIENCE_ARTICLE_AUTHORITY_AUDIENCE?.trim() ?? "";
@@ -119,6 +127,7 @@ function articleAuthoritySettings(apiMode: "mock" | "http", env: Env) {
     nihoAudience,
     nihoLinksAudience,
     hostLinksEnabled,
+    nihoWriterEnabled,
   };
 }
 
@@ -976,6 +985,7 @@ export function resolveConfig(env: Env) {
     nihoArticleAuthorityAudience: articleAuthority.nihoAudience,
     nihoArticleLinksAudience: articleAuthority.nihoLinksAudience,
     hostArticleLinksEnabled: articleAuthority.hostLinksEnabled,
+    nihoWriterEnabled: articleAuthority.nihoWriterEnabled,
     siteUrl: (env.SITE_URL ?? "http://localhost:3000").replace(/\/$/, ""),
     // Synthetic data must never be indexed, even if SITE_INDEXING is set by mistake.
     indexingAllowed: env.SITE_INDEXING === "allow" && apiMode === "http",

@@ -102,7 +102,7 @@ export interface ExperienceHostSession {
   readonly sessionToken: string;
   /** `hst_` + 32 hex. It goes where a NIHO user ID went (`*_niho_user_id` columns) until they are renamed. */
   readonly hostAccountId: string;
-  readonly email: string;
+  readonly email: string | null;
   /** Not a secret: names this session for push subscriptions and "sign out that device". */
   readonly sessionRef: string;
   /** When the host last proved the address with a link (sensitive changes ask for a recent one). */

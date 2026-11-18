@@ -2,7 +2,7 @@ import "server-only";
 import { config } from "@/lib/config";
 import { parseChannelAdapters } from "./channel-adapters";
 import { Pool } from "pg";
-import { AdminSessions, OperatorCliRequests, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GroupInquiryRepository, PeopleListingRepository, GuideRepository, HostAccountIdentities, HostAccounts, HostInvitations, TravelerAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedBookingApprovalRepository, ManagedExperienceSalesRepository, OccurrenceAssignmentRepository, ProductClassificationRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { AdminSessions, OperatorCliRequests, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GroupInquiryRepository, PeopleListingRepository, GuideRepository, HostAccountIdentities, HostAccounts, HostInvitations, TravelerAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedBookingApprovalRepository, ManagedExperienceSalesRepository, OccurrenceAssignmentRepository, ProductClassificationRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, isHostAccountId, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -107,7 +107,19 @@ export function guideOfficeRepository(): GuideRepository | null {
 
 export function guideRepository(): GuideRepository | null {
   const pool = experiencePool();
-  return pool ? new GuideRepository(pool) : null;
+  if (!pool) return null;
+  return new GuideRepository(pool, config.nihoWriterEnabled ? {
+    writerAuthority: async (actorId, providerIds, queryable) => {
+      // Store callers may already hold a transaction connection. Resolve the actor on it.
+      const nihoUserId = isHostAccountId(actorId)
+        ? await new HostAccountIdentities(pool).readNihoUserId({ hostAccountId: actorId }, queryable)
+        : actorId;
+      if (!nihoUserId) return { writer: false, links: [] };
+      const { checkNihoArticleAuthority } = await import("@/lib/article-authority/server");
+      const result = await checkNihoArticleAuthority(nihoUserId, providerIds);
+      return { writer: result.writer, links: result.links };
+    },
+  } : {});
 }
 
 export function guideAdminRepository(): GuideAdminRepository | null {

@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import { useRouter } from "next/navigation";
-import type { WriteProviderChoice } from "@/lib/write/client-types";
+import type { WriteProviderChoice, WriteWriterStatus } from "@/lib/write/client-types";
 import { NewGuideForm } from "./NewGuideForm";
 
 export interface WriteNewGuideDialogHandle {
@@ -16,7 +16,8 @@ export const WriteNewGuideDialog = forwardRef<WriteNewGuideDialogHandle, {
   readonly returnPath?: string;
   readonly editPath?: string;
   readonly showTrigger?: boolean;
-}>(function WriteNewGuideDialog({ providers, experience, autoOpen = false, returnPath = "/write", editPath = "/write", showTrigger = true }, ref) {
+  readonly writerStatus?: WriteWriterStatus;
+}>(function WriteNewGuideDialog({ providers, experience, autoOpen = false, returnPath = "/write", editPath = "/write", showTrigger = true, writerStatus = "disabled" }, ref) {
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -43,7 +44,7 @@ export const WriteNewGuideDialog = forwardRef<WriteNewGuideDialogHandle, {
       >
         <div className="write-new-dialog-card">
           <header><div><h2 id="write-new-dialog-title">新しい記事</h2><p>題名だけで下書きを始められます。作成するまで記事は保存されません。</p></div><button type="button" className="write-dialog-close" onClick={close} aria-label="新しい記事を閉じる">×</button></header>
-          <NewGuideForm providers={providers} experience={experience} editPath={editPath} />
+          <NewGuideForm providers={providers} writerStatus={writerStatus} experience={experience} editPath={editPath} />
         </div>
       </dialog>
     </>

@@ -146,7 +146,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
           providerId={provider.id}
           role={provider.memberRole}
           deviceEnabled={config.hostPwaEnabled}
-          articlesEnabled={config.hostArticleLinksEnabled}
+          articlesEnabled={config.hostArticleLinksEnabled || config.nihoWriterEnabled}
         />
       </HostPageBody>
     );
@@ -188,7 +188,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   const showAccountSection = (part: HostSettingsSection) => section === "all" || section === part;
   const accountContent = <div className="grid gap-3.5">
     {showAccountSection("team") ? <HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} mode={teamMode} /> : null}
-    {showAccountSection("articles") && provider.memberRole === "OWNER" && config.hostArticleLinksEnabled ? <HostArticleLinksPanel providerId={provider.id} /> : null}
+    {showAccountSection("articles") && provider.memberRole === "OWNER" && (config.hostArticleLinksEnabled || config.nihoWriterEnabled) ? <HostArticleLinksPanel providerId={provider.id} /> : null}
     {showAccountSection("support") ? <HostSupportSettingsPanel providerId={provider.id} role={provider.memberRole} preview={isHostMock()} /> : null}
     {showAccountSection("device") ? devicePanel : null}
     {showAccountSection("account") ? accountPanel : null}

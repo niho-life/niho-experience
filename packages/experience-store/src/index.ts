@@ -6,6 +6,7 @@ export {
   StoreConflictError,
   StoreError,
   StoreNotFoundError,
+  StorePermissionDeniedError,
   StoreRateLimitedError,
   StoreValidationError,
 } from "./errors.ts";
@@ -476,6 +477,9 @@ export type {
   GuideMediaAssetState,
   GuideProductLinkInput,
   GuidePublicationVisibility,
+  GuideWriterAuthority,
+  GuideWriterAuthorityCheck,
+  GuideWriterAuthorityLink,
   SaveGuideDraftInput,
   GuideSubject,
   PublicGuideArticle,

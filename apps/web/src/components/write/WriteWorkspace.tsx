@@ -2,7 +2,7 @@
 
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { HostSidebar, type HostWriterArticle } from "@/components/host/HostNav";
-import type { WriteGuide, WriteProviderChoice } from "@/lib/write/client-types";
+import type { WriteGuide, WriteProviderChoice, WriteWriterStatus } from "@/lib/write/client-types";
 import { writeStatusLabel } from "@/lib/write/client-types";
 
 export interface WriteChromeProps {
@@ -11,6 +11,7 @@ export interface WriteChromeProps {
   readonly nihoAppUrl: string;
   readonly articles: readonly WriteGuide[];
   readonly articlesAvailable?: boolean;
+  readonly writerStatus?: WriteWriterStatus;
 }
 
 function articleNavigation(articles: readonly WriteGuide[], current?: WriteGuide): HostWriterArticle[] {
@@ -36,7 +37,7 @@ export function WriteWorkspace({ chrome, current, collapsed = false, onNavigate,
         providers={providers}
         nihoAppUrl={chrome.nihoAppUrl}
         writePath={writePath}
-        providerIdOverride={current?.subject.providerId}
+        providerIdOverride={current?.subject.kind === "PROVIDER" ? current.subject.providerId : undefined}
         writerNavigation={{
           articles: articleNavigation(chrome.articles, current),
           articlesAvailable: chrome.articlesAvailable,

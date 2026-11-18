@@ -8,7 +8,7 @@ export type WriteProductLink = { readonly providerId: string; readonly productId
 export type WriteGuide = {
   readonly id: string;
   readonly slug: string;
-  readonly subject: { readonly kind: "PROVIDER"; readonly providerId: string };
+  readonly subject: { readonly kind: "WRITER" } | { readonly kind: "PROVIDER"; readonly providerId: string };
   readonly title: string;
   readonly description: string;
   readonly categorySlug?: string;
@@ -44,6 +44,7 @@ export type WriteCategory = { readonly slug: string; readonly labelEn: string; r
 export type WriteProductChoice = { readonly id: string; readonly providerId: string; readonly slug: string; readonly title: string };
 export type WriteMediaAsset = { readonly id: string; readonly width: number; readonly height: number; readonly publicCredit?: string; readonly webConfirmed: boolean; readonly previewUrl?: string };
 export type WriteProviderChoice = { readonly id: string; readonly displayName: string };
+export type WriteWriterStatus = "disabled" | "authorized" | "revoked" | "unavailable";
 
 export function hasSavedChangesSincePublication(guide: Pick<WriteGuide, "revision" | "currentPublication">): boolean {
   return guide.currentPublication !== undefined && guide.revision > guide.currentPublication.sourceRevision + 1;

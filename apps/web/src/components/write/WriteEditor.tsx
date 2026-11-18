@@ -48,6 +48,7 @@ function saveLabel(state: AutosaveState): string {
   if (state.phase === "saving") return "保存中…";
   if (state.phase === "failed") return "保存できませんでした";
   if (state.phase === "signed-out") return "ログインの更新が必要です";
+  if (state.phase === "permission-denied") return "権限が取り消されています（入力は保持中）";
   if (state.phase === "conflict") return "別の画面の変更と競合しました";
   return state.savedAt ? `保存済み ${state.savedAt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}` : "保存済み";
 }
@@ -286,19 +287,22 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
 
   const completedRequirements = requirements.filter((requirement) => requirement.ok).length;
   const listPath = experience ? `/write?experience=${encodeURIComponent(experience)}` : "/write";
+  const writerBlocked = guide.subject.kind === "WRITER" && chrome.writerStatus !== "authorized";
   return <WriteWorkspace chrome={chrome} current={guide} collapsed={sidebarClosed} onNavigate={confirmNavigation} onNewArticle={openNewGuide} writePath={listPath}>
     <main id="main" className="write-editor-page">
       <header className="write-editor-header">
         <div className="write-editor-title"><button type="button" className="write-sidebar-toggle" onClick={() => setSidebarClosed((value) => !value)} aria-label={sidebarClosed ? "サイドバーを開く" : "サイドバーを閉じる"}><HostIcon name="menu" className="size-5" /></button><Link href={listPath} onClick={confirmNavigation}>記事</Link><span aria-hidden="true">›</span><b>{draft.title || "無題の記事"}</b></div>
         <div className="write-status-group"><span className="write-publication-status">{writeStatusLabel(guide)}</span><span className={`write-save-status write-save-${autosave.phase}`} role="status" aria-live="polite">{saveLabel(autosave)}</span></div>
-        <div className="write-header-actions"><button type="button" className="write-secondary" disabled={actionBusy || mediaBusy} onClick={() => void preview()}>プレビュー</button><button ref={publishButton} type="button" className="write-primary" disabled={actionBusy || mediaBusy || guide.status === "OPS_STOPPED"} onClick={() => setPublishOpen(true)}>{guide.status === "PUBLISHED" ? (publishedChanged ? "変更を公開" : "公開設定") : guide.status === "STOPPED" ? "再公開" : "公開する"}</button>{guide.status === "PUBLISHED" ? <details className="write-more-menu"><summary aria-label="記事のその他の操作">…</summary><div><button type="button" disabled={actionBusy} onClick={() => void stop()}>公開を停止</button></div></details> : null}</div>
+        <div className="write-header-actions"><button type="button" className="write-secondary" disabled={actionBusy || mediaBusy} onClick={() => void preview()}>プレビュー</button><button ref={publishButton} type="button" className="write-primary" disabled={actionBusy || mediaBusy || writerBlocked || guide.status === "OPS_STOPPED"} onClick={() => setPublishOpen(true)}>{guide.status === "PUBLISHED" ? (publishedChanged ? "変更を公開" : "公開設定") : guide.status === "STOPPED" ? "再公開" : "公開する"}</button>{guide.status === "PUBLISHED" ? <details className="write-more-menu"><summary aria-label="記事のその他の操作">…</summary><div><button type="button" disabled={actionBusy || writerBlocked} onClick={() => void stop()}>公開を停止</button></div></details> : null}</div>
       </header>
 
       {guide.status === "PUBLISHED" ? <aside className="write-public-bar"><span>{guide.currentPublication?.visibility === "UNLISTED" ? "限定公開URL" : "公開URL"}</span><a href={publicPath} target="_blank" rel="noreferrer">{publicPath}</a>{publishedChanged ? <b>未公開の変更があります。</b> : <span>公開内容は最新です。</span>}</aside> : null}
       {guide.status === "OPS_STOPPED" ? <aside className="write-ops-stop" role="alert"><b>運営により公開が停止されています。再公開はできません。</b><p>{guide.opsStopReason ?? "停止理由は運営へお問い合わせください。"}</p>{guide.opsStopContact ? <p>連絡先: {guide.opsStopContact}</p> : null}</aside> : null}
+      {writerBlocked ? <aside className="write-alert" role="alert">{chrome.writerStatus === "revoked" ? "記事ライター権限が取り消されています。保存・公開・停止はできません。" : "記事ライター権限を現在確認できません。保存・公開・停止は再開までできません。"} このタブの入力と保存済み下書きは残ります。</aside> : null}
       {autosave.phase === "failed" ? <aside className="write-alert" role="alert">通信できず保存できませんでした。入力はこのタブに残っています。オンライン復帰後に自動再試行します。<button type="button" onClick={() => void queue.retry()}>今すぐ再試行</button></aside> : null}
       {autosave.phase === "signed-out" ? <aside className="write-alert" role="alert">ログインの有効期限が切れました。編集内容はこのタブに残っています。<a href={`/host/auth/write-bridge?returnTo=${encodeURIComponent(`/write/${guide.id}`)}`} target="_blank" rel="noreferrer">別タブで再ログイン</a><button type="button" onClick={() => void queue.retry()}>再ログイン後に保存を再試行</button></aside> : null}
       {autosave.phase === "conflict" ? <aside className="write-alert write-conflict" role="alert"><b>別の画面で記事が更新されました。</b><p>自動保存を停止しました。このタブの入力を上書きせず、古いrevisionも再送しません。</p><div><button type="button" onClick={() => void inspectLatest()}>サーバーの最新版を確認</button><button type="button" onClick={() => void copyLocal()}>このタブのタイトルと本文をコピー</button></div>{serverLatest ? <p>最新版: revision {serverLatest.revision}・「{serverLatest.title || "無題の記事"}」・{new Date(serverLatest.updatedAtUtc).toLocaleString("ja-JP")}</p> : null}</aside> : null}
+      {autosave.phase === "permission-denied" && !writerBlocked ? <aside className="write-alert" role="alert">記事ライター権限または記事連携が取り消されたため、自動保存を停止しました。このタブの入力と保存済み下書きは残っています。</aside> : null}
       {actionError ? <p className="write-action-error" role="alert">{actionError}</p> : null}
       {actionNotice ? <p className="write-action-notice" role="status">{actionNotice.message}{actionNotice.url ? <> <a href={actionNotice.url} target="_blank" rel="noreferrer">公開ページを見る</a></> : null}</p> : null}
       {!categoriesAvailable || !assetsAvailable || !productsAvailable ? <p className="write-auxiliary-warning" role="status">一部の設定を読み込めませんでした。本文の編集は続けられます。読み込めない設定は変更できません。</p> : null}
@@ -329,7 +333,7 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
         </aside>
       </div>
 
-      <WriteNewGuideDialog ref={newGuideDialog} providers={chrome.providers} experience={experience} returnPath={listPath} showTrigger={false} />
+      <WriteNewGuideDialog ref={newGuideDialog} providers={chrome.providers} writerStatus={chrome.writerStatus} experience={experience} returnPath={listPath} showTrigger={false} />
       <dialog ref={publishDialog} className="write-modal write-publish-sheet" aria-labelledby="write-publish-title" onCancel={(event) => { if (actionBusy) event.preventDefault(); else setPublishOpen(false); }} onClose={() => { setPublishOpen(false); publishButton.current?.focus(); }}>
         <h2 id="write-publish-title">記事を公開</h2>
         {missingRequirements.length ? <><p>公開前に次の項目を整えてください。</p><ul>{missingRequirements.map((requirement, index) => <li key={requirement.id}><span>{requirement.label}</span><button autoFocus={index === 0} type="button" onClick={() => fixRequirement(requirement.id)}>直す</button></li>)}</ul></> : <p>保存を完了してから、この記事を公開します。</p>}

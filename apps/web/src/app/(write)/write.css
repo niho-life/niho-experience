@@ -30,6 +30,14 @@
 .write-empty { margin-top: 3rem; border: 1px dashed var(--color-line-strong); border-radius: 1.5rem; padding: clamp(1.5rem, 5vw, 3rem); text-align: center; }
 .write-empty h2 { font-size: 2rem; }
 .write-empty p { margin: .75rem auto 1.5rem; max-width: 38rem; color: var(--color-ink-soft); }
+.write-inbox { display: grid; gap: .75rem; margin-top: 1.5rem; border: 1px solid var(--color-line); border-radius: 1rem; background: var(--color-leaf-pale); padding: 1rem 1.25rem; }
+.write-inbox h2 { font-family: var(--font-sans); font-size: 1rem; font-weight: 900; }
+.write-inbox > p { color: var(--color-danger); font-size: .875rem; font-weight: 800; }
+.write-inbox ul { display: grid; gap: .6rem; }
+.write-inbox li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--color-line); padding-top: .6rem; }
+.write-inbox li > span:last-child { display: flex; flex: none; gap: .4rem; }
+.write-inbox button { min-height: 2.25rem; border: 1px solid var(--color-line-strong); border-radius: 999px; background: var(--color-canvas); padding: .4rem .75rem; font-size: .8125rem; font-weight: 900; }
+.write-inbox button:disabled { opacity: .5; }
 
 .write-new-page { max-width: 42rem; }
 .write-new-page header { margin-block: 2rem; }
@@ -302,6 +310,8 @@
   .write-guide-list a { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); }
   .write-list-thumb { width: 4.5rem; height: 3.25rem; }
   .write-list-pills { grid-column: 2; flex-wrap: wrap; }
+  .write-inbox li { align-items: stretch; flex-direction: column; }
+  .write-inbox li > span:last-child { flex-wrap: wrap; }
   .write-empty ol { grid-template-columns: 1fr 1fr; }
   .write-new-dialog { width: 100%; max-height: 92dvh; margin: auto 0 0; border-radius: 1.25rem 1.25rem 0 0; }
   .write-editor-header { padding-inline: .5rem; }

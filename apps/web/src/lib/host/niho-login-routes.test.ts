@@ -12,21 +12,24 @@ const state = vi.hoisted(() => ({
     hostConsoleEnabled: true,
     hostAccountsEnabled: true,
     hostNihoLoginEnabled: true,
+    nihoWriterEnabled: false,
     hostPwaEnabled: false,
     hostPushEnabled: false,
     hostSessionSecret: "synthetic-route-test-secret-0123456789abcdef",
     nihoWebOrigin: "https://niho.example.test",
     nihoExperienceHostCommonContractAudience: "https://api.niho.example.test",
+    nihoArticleAuthorityOrigin: "https://api.niho.example.test",
+    nihoArticleAuthorityAudience: "https://api.niho.example.test",
     siteUrl: "https://experience.example.test",
   },
   cookies: {} as Record<string, string>,
-  identities: null as { startSessionForNihoIdentity: ReturnType<typeof import("vitest").vi.fn> } | null,
+  identities: null as { startSessionForNihoIdentity: ReturnType<typeof import("vitest").vi.fn>; startWriterSessionForNihoIdentity: ReturnType<typeof import("vitest").vi.fn> } | null,
   accounts: null as { readSession: ReturnType<typeof import("vitest").vi.fn>; revokeSession: ReturnType<typeof import("vitest").vi.fn> } | null,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("react", () => ({ cache: (read: unknown) => read }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name in state.cookies ? { name, value: state.cookies[name] } : undefined) }) }));
-vi.mock("google-auth-library", () => ({ GoogleAuth: class {
+vi.mock("google-auth-library", () => ({ OAuth2Client: class {}, GoogleAuth: class {
   async getIdTokenClient() { return { getRequestHeaders: async () => ({ authorization: "Bearer synthetic-service-id-token" }) }; }
 } }));
 vi.mock("@/lib/config", () => ({ config: state.config, isPreview: false }));
@@ -60,9 +63,10 @@ const calls: { url: URL; init: RequestInit }[] = [];
 
 beforeEach(() => {
   calls.length = 0;
-  Object.assign(state.config, { hostConsoleEnabled: true, hostAccountsEnabled: true, hostNihoLoginEnabled: true, apiMode: "http" });
+  Object.assign(state.config, { hostConsoleEnabled: true, hostAccountsEnabled: true, hostNihoLoginEnabled: true, nihoWriterEnabled: false, apiMode: "http" });
   state.cookies = {};
-  state.identities = { startSessionForNihoIdentity: vi.fn(async (): Promise<NihoSessionResult> => ({ kind: "ok", sessionToken: SESSION_TOKEN, sessionRef: "0f8fad5b-d9cb-469f-a165-70867728950e", hostAccountId: HOST, absoluteExpiresAtUtc: new Date(Date.now() + 30 * DAY).toISOString() })) };
+  const opened = async (): Promise<NihoSessionResult> => ({ kind: "ok", sessionToken: SESSION_TOKEN, sessionRef: "0f8fad5b-d9cb-469f-a165-70867728950e", hostAccountId: HOST, absoluteExpiresAtUtc: new Date(Date.now() + 30 * DAY).toISOString() });
+  state.identities = { startSessionForNihoIdentity: vi.fn(opened), startWriterSessionForNihoIdentity: vi.fn(opened) };
   state.accounts = { readSession: vi.fn(async () => null), revokeSession: vi.fn(async () => true) };
   handler = niho();
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -81,7 +85,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const exchangeBody = (extra: Record<string, unknown> = {}) => ({ accessToken: ACCESS, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: REFRESH, connectionId: CONNECTION, connectionExpiresAt: new Date(Date.now() + 90 * DAY).toISOString(), user: { displayName: "合成 ホスト", iconImage: null }, authTime: new Date().toISOString(), ...extra });
 
 /** A NIHO that exchanges the code, answers `identity` for the access token and ends the connection. */
-function niho(overrides: { exchange?: () => Response; identity?: () => Response; remove?: () => Response } = {}): Handler {
+function niho(overrides: { exchange?: () => Response; identity?: () => Response; authority?: () => Response; remove?: () => Response } = {}): Handler {
   return (url, init) => {
     if (url.pathname === "/api/auth/app-connect/exchange") {
       return overrides.exchange?.() ?? json(200, exchangeBody());
@@ -90,6 +94,11 @@ function niho(overrides: { exchange?: () => Response; identity?: () => Response;
       expect((init.headers as Record<string, string>).authorization).toBe(`Bearer ${ACCESS}`);
       expect((init.headers as Record<string, string>)["x-niho-experience-service-id-token"]).toBe("synthetic-service-id-token");
       return overrides.identity?.() ?? json(200, { nihoUserId: NIHO_USER, accountStatus: "ACTIVE" });
+    }
+    if (url.pathname === "/api/internal/editor-article-authority/check") {
+      expect((init.headers as Record<string, string>).authorization).toBe("Bearer synthetic-service-id-token");
+      expect(JSON.parse(String(init.body))).toEqual({ writerNihoUserId: NIHO_USER, providerIds: [] });
+      return overrides.authority?.() ?? json(200, { version: 1, writer: true, links: [] });
     }
     if (init.method === "DELETE" && url.pathname === `/api/auth/app-connections/${CONNECTION}`) return overrides.remove?.() ?? new Response(null, { status: 204 });
     return json(404, { error: "not_found" });
@@ -255,6 +264,27 @@ describe("the callback", () => {
     expect(setCookies(response).get(LOGIN_COOKIE)?.attributes).toMatch(/Max-Age=0/);
     expect(deleteCalls()).toHaveLength(1);
     expect(state.accounts!.revokeSession).not.toHaveBeenCalled();
+  });
+
+  it("provisions an email-less hst only for a current writer returning to /write, and distinguishes revoke from outage", async () => {
+    state.config.nihoWriterEnabled = true;
+    state.identities!.startSessionForNihoIdentity.mockResolvedValue({ kind: "not-linked" });
+    let result = await signIn(`?returnTo=${encodeURIComponent("/write")}`);
+    expect(result.response.headers.get("location")).toBe("/write");
+    expect(state.identities!.startWriterSessionForNihoIdentity).toHaveBeenCalledWith(expect.objectContaining({ nihoUserId: NIHO_USER }));
+    expect(calls.some((call) => call.url.pathname === "/api/internal/editor-article-authority/check")).toBe(true);
+
+    state.identities!.startWriterSessionForNihoIdentity.mockClear(); calls.length = 0;
+    handler = niho({ authority: () => json(200, { version: 1, writer: false, links: [] }) });
+    result = await signIn(`?returnTo=${encodeURIComponent("/write")}`);
+    expect(result.response.headers.get("location")).toBe("/host/auth/error?reason=writer-revoked");
+    expect(state.identities!.startWriterSessionForNihoIdentity).not.toHaveBeenCalled();
+
+    calls.length = 0;
+    handler = niho({ authority: () => json(503, { private: NIHO_USER }) });
+    result = await signIn(`?returnTo=${encodeURIComponent("/write")}`);
+    expect(result.response.headers.get("location")).toBe("/host/auth/error?reason=writer-unavailable");
+    expect(result.response.headers.get("location")).not.toContain(NIHO_USER);
   });
 
   it("tells a suspended host account apart", async () => {

@@ -11,14 +11,14 @@ test("candidate query excludes globally ambiguous published slugs before applyin
       sql = text;
       params = values;
       return {
-        rows: [{ provider_id: "provider-a", slug: "safe-trip", public_title: "Safe trip", seller_display_name: "Synthetic Provider" }],
+        rows: [{ provider_id: "provider-a", product_id: "product-a", slug: "safe-trip", public_title: "Safe trip", seller_display_name: "Synthetic Provider" }],
       };
     },
   } as unknown as Pool;
 
   const result = await new ArticleAuthorityRepository(pool).listPublishedCandidates({ afterSlug: "earlier-trip", limit: 96 });
 
-  assert.deepEqual(result, [{ providerId: "provider-a", slug: "safe-trip", title: "Safe trip", providerName: "Synthetic Provider" }]);
+  assert.deepEqual(result, [{ providerId: "provider-a", productId: "product-a", slug: "safe-trip", title: "Safe trip", providerName: "Synthetic Provider" }]);
   assert.deepEqual(params, ["", "earlier-trip", 96]);
   assert.match(sql, /NOT EXISTS\s*\([\s\S]*duplicate\.status='PUBLISHED'[\s\S]*duplicate\.slug=p\.slug/);
   assert.match(sql, /duplicate\.provider_id<>p\.provider_id\s+OR\s+duplicate\.id<>p\.id/);

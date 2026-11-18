@@ -185,7 +185,19 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
     try {
       // The session's `authenticated_at` is when the person signed in at NIHO (`authTime`), so the sensitive changes that
       // ask for a recent sign-in read NIHO's time, not the time of this return.
-      return { now, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) }) };
+      let opened = await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) });
+      const writerReturn = config.nihoWriterEnabled && hostReturnPathOrNull(login.returnPath)?.startsWith("/write") === true;
+      if (opened.kind === "not-linked" && writerReturn) {
+        let authority;
+        try {
+          const { checkNihoArticleAuthority } = await import("@/lib/article-authority/server");
+          authority = await checkNihoArticleAuthority(nihoUserId, []);
+        }
+        catch { return { now, opened, writerFailure: "writer-unavailable" as const }; }
+        if (!authority.writer) return { now, opened, writerFailure: "writer-revoked" as const };
+        opened = await identities.startWriterSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) });
+      }
+      return { now, opened };
     } catch (error) {
       console.error(`[host-auth] NIHO sign-in not opened: ${error instanceof Error ? error.name : "unknown error"}`);
       return null;
@@ -193,6 +205,7 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
   });
   if (!verified.ok) return failed(verified.reason, login);
   if (verified.value === null) return failed("unavailable", login);
+  if ("writerFailure" in verified.value && verified.value.writerFailure) return failed(verified.value.writerFailure, login);
   const { now, opened } = verified.value;
   if (opened.kind === "not-linked") return failed("unregistered", login);
   if (opened.kind === "account-suspended") return failed("suspended", login);

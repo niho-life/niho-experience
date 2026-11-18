@@ -12,6 +12,14 @@ export class StoreAccessDeniedError extends StoreError {
   }
 }
 
+/** The caller owns the resource, but a current external permission was explicitly revoked. */
+export class StorePermissionDeniedError extends StoreError {
+  constructor() {
+    super("The current permission required for this operation was revoked.");
+    this.name = "StorePermissionDeniedError";
+  }
+}
+
 export class StoreNotFoundError extends StoreError {
   constructor(resource: string) {
     super(`${resource} was not found in the requested provider scope.`);
