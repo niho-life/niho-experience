@@ -14,7 +14,8 @@ export function NewGuideForm({ providers, writerStatus = "disabled", experience,
   const articleId = useRef<string | null>(null);
   const router = useRouter();
   const fallback = useRef<string | null>(null);
-  const choices = [...(writerStatus === "authorized" ? [{ value: "WRITER", label: "自分の記事（記事ライター）" }] : []), ...providers.map((provider) => ({ value: `PROVIDER:${provider.id}`, label: provider.displayName }))];
+  const canWritePersonal = writerStatus === "authorized";
+  const choices = [...(canWritePersonal ? [{ value: "WRITER", label: "自分の記事（記事ライター）" }] : []), ...providers.map((provider) => ({ value: `PROVIDER:${provider.id}`, label: provider.displayName }))];
   const [subject, setSubject] = useState(choices.length === 1 ? choices[0]!.value : "");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,7 +36,9 @@ export function NewGuideForm({ providers, writerStatus = "disabled", experience,
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           id: articleId.current,
-          subject: subject === "WRITER" ? { kind: "WRITER" } : { kind: "PROVIDER", providerId: subject.slice("PROVIDER:".length) },
+          ...(subject === "WRITER"
+            ? { subject: { kind: "WRITER" } }
+            : { providerId: subject.slice("PROVIDER:".length) }),
           slug: slugFromTitle(title, fallback.current),
           title,
           description: "",
@@ -51,7 +54,18 @@ export function NewGuideForm({ providers, writerStatus = "disabled", experience,
 
   return (
     <form className="write-new-card" onSubmit={(event) => void create(event)}>
-      {choices.length > 1 ? <label>記事の主体<select required value={subject} onChange={(event) => setSubject(event.target.value)}><option value="">選択してください</option>{choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select><span className="write-help">作成後に主体は変更できません。</span></label> : <p className="write-help">{choices[0]?.label}</p>}
+      {choices.length > 1 ? (
+        <>
+          <label>
+            {canWritePersonal ? "記事を書く名義" : "記事を書く提供者"}
+            <select required value={subject} onChange={(event) => setSubject(event.target.value)}>
+              <option value="">選択してください</option>
+              {choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+            </select>
+          </label>
+          {canWritePersonal ? <p className="write-help">作成後に名義は変更できません。</p> : null}
+        </>
+      ) : <p className="write-help">{choices[0]?.label}</p>}
       {writerStatus === "revoked" ? <p className="write-error" role="status">記事ライター権限が現在ありません。既存の入力は保持されますが、自分の記事の保存・公開はできません。</p> : null}
       {writerStatus === "unavailable" ? <p className="write-error" role="status">記事ライター権限を確認できません。提供者の記事は続けられますが、自分の記事の新規作成は一時停止しています。</p> : null}
       <fieldset className="write-language-choice">
