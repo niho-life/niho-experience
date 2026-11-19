@@ -408,7 +408,8 @@ export class HostAccountIdentities {
 
   /**
    * Unbinds a host account's NIHO account (the row stays, marked). `SESSION`: the host's own recent session, and not
-   * when nothing else would let them in (`emailSignInAvailable` false → `last-sign-in-method`, recorded); `OPS`: always.
+   * when nothing else would let them in (the email-link method must be enabled and the account must have an address);
+   * `OPS`: always.
    * `not-linked` when no binding is active.
    */
   async unlinkNihoIdentity(input: { readonly hostAccountId: string; readonly proof: NihoIdentityUnlinkProof; readonly nowUtc: string }): Promise<UnlinkNihoIdentityResult> {
@@ -421,8 +422,10 @@ export class HostAccountIdentities {
     return withTransaction(this.#pool, async (client) => {
       await lockBindings(client, hostAccountId, null);
       const active = await client.query<DbRow>(
-        `SELECT id::text AS id, subject FROM host_account_identities
-          WHERE host_account_id = $1 AND provider = 'NIHO' AND unlinked_at IS NULL FOR UPDATE`,
+        `SELECT i.id::text AS id, i.subject, a.email IS NOT NULL AS email_sign_in_available
+           FROM host_account_identities i JOIN host_accounts a ON a.id = i.host_account_id
+          WHERE i.host_account_id = $1 AND i.provider = 'NIHO' AND i.unlinked_at IS NULL
+          FOR UPDATE OF i`,
         [hostAccountId],
       );
       const binding = active.rows[0];
@@ -433,7 +436,7 @@ export class HostAccountIdentities {
           await recordEvent(client, { hostAccountId, kind: "UNLINK_REFUSED", subject, via, reason: "RECENT_AUTHENTICATION_REQUIRED", at });
           return { kind: "recent-authentication-required" } as const;
         }
-        if (!proof.emailSignInAvailable) {
+        if (!proof.emailSignInAvailable || binding.email_sign_in_available !== true) {
           await recordEvent(client, { hostAccountId, kind: "UNLINK_REFUSED", subject, via, reason: "LAST_SIGN_IN_METHOD", at });
           return { kind: "last-sign-in-method" } as const;
         }

@@ -88,6 +88,21 @@ describe("host account NIHO identities", () => {
     });
   });
 
+  it("does not let an email-less writer unlink their only NIHO sign-in method", async () => {
+    await withIdentities(async ({ identities }) => {
+      const opened = await identities.startWriterSessionForNihoIdentity({ nihoUserId: NIHO_A, authenticatedAtUtc: at(0), nowUtc: at(MINUTE) });
+      assert.equal(opened.kind, "ok");
+      if (opened.kind !== "ok") return;
+
+      assert.deepEqual(await identities.unlinkNihoIdentity({
+        hostAccountId: opened.hostAccountId,
+        proof: { kind: "SESSION", sessionRef: opened.sessionRef, emailSignInAvailable: true },
+        nowUtc: at(2 * MINUTE),
+      }), { kind: "last-sign-in-method" });
+      assert.equal(await identities.readNihoUserId({ hostAccountId: opened.hostAccountId }), NIHO_A);
+    });
+  });
+
   it("binds a NIHO account, opens a session for it, and leaves the host account's roles and history as they were", async () => {
     await withIdentities(async ({ pool, accounts, identities }) => {
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-synthetic')");

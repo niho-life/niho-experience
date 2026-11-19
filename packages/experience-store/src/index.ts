@@ -5,6 +5,7 @@ export {
   StoreAccessDeniedError,
   StoreConflictError,
   StoreError,
+  StoreGuideProductLinkUnavailableError,
   StoreNotFoundError,
   StorePermissionDeniedError,
   StoreRateLimitedError,

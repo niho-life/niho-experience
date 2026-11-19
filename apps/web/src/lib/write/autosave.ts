@@ -1,6 +1,6 @@
 import { WriteApiError } from "./api";
 
-export type AutosavePhase = "saved" | "editing" | "saving" | "failed" | "signed-out" | "permission-denied" | "conflict";
+export type AutosavePhase = "saved" | "editing" | "saving" | "failed" | "signed-out" | "permission-denied" | "guide-link-unavailable" | "conflict";
 export type AutosaveState = {
   readonly phase: AutosavePhase;
   readonly dirty: boolean;
@@ -99,6 +99,7 @@ export class WriteAutosaveQueue<T> {
     } catch (error) {
       const phase = error instanceof WriteApiError && error.kind === "unauthenticated"
         ? "signed-out"
+        : error instanceof WriteApiError && error.kind === "guide-link-unavailable" ? "guide-link-unavailable"
         : error instanceof WriteApiError && error.kind === "forbidden" ? "permission-denied"
         : error instanceof WriteApiError && error.kind === "conflict" ? "conflict" : "failed";
       this.#frozen = phase === "conflict" || phase === "signed-out" || phase === "permission-denied";

@@ -55,10 +55,10 @@ export default async function WriteE2EFixture({ params }: { readonly params: Pro
   const step = (await params).step ?? [];
   if (step[0] === "new") return <main id="main" className="write-new-page"><h1>新しい記事</h1><NewGuideForm providers={[{ id: "provider-e2e", displayName: "Synthetic Owner" }]} experience="tea-walk" editPath="/write/write-e2e-fixture/edit" /></main>;
   if (["list", "list-empty", "list-multi", "new-direct"].includes(step[0] ?? "")) return <WriteList chrome={{ ...CHROME, providers: step[0] === "list-multi" ? [...CHROME.providers, { id: "provider-two", displayName: "Second Owner" }] : CHROME.providers, articles: step[0] === "list-empty" ? [] : LIST_ARTICLES }} categories={CATEGORIES} experience="tea-walk" autoOpenNew={step[0] === "new-direct"} editPath="/write/write-e2e-fixture/edit" />;
-  if (!["edit", "edit-photo", "edit-ops", "edit-aux", "edit-list-error", "edit-multi-provider"].includes(step[0] ?? "") || step[1] !== ARTICLE_ID) return <main id="main" className="write-state"><h1>Writer browser fixture</h1><Link href="/write/write-e2e-fixture/new">NIHOでログインして記事を書く</Link></main>;
+  if (!["edit", "edit-photo", "edit-ops", "edit-aux", "edit-list-error", "edit-multi-provider", "edit-revoked-link"].includes(step[0] ?? "") || step[1] !== ARTICLE_ID) return <main id="main" className="write-state"><h1>Writer browser fixture</h1><Link href="/write/write-e2e-fixture/new">NIHOでログインして記事を書く</Link></main>;
   const withCover = step[0] === "edit-photo";
   const multiProvider = step[0] === "edit-multi-provider";
-  const editorGuide = multiProvider ? { ...GUIDE, subject: { kind: "PROVIDER" as const, providerId: "provider-two" } } : GUIDE;
+  const editorGuide = step[0] === "edit-revoked-link" ? { ...GUIDE, draftProductLinks: [{ providerId: "provider-revoked", productId: "product-revoked" }] } : multiProvider ? { ...GUIDE, subject: { kind: "PROVIDER" as const, providerId: "provider-two" } } : GUIDE;
   return <WriteEditor
     guide={step[0] === "edit-ops" ? { ...editorGuide, status: "OPS_STOPPED", opsStopReason: "Synthetic policy review", opsStopContact: "support@example.invalid" } : withCover ? { ...editorGuide, content: { ...editorGuide.content, markdown: `${editorGuide.content.markdown}\n\n![A table at NIHO](niho-guide-asset:${COVER_ID})` }, cover: { assetId: COVER_ID, alt: "A table at NIHO", credit: "NIHO", webConfirmed: true } } : editorGuide}
     categories={CATEGORIES}

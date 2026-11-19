@@ -37,12 +37,13 @@ function initialGuide(): SyntheticGuide {
   };
 }
 
-async function mockWriterApi(page: Page, withCover = false) {
+async function mockWriterApi(page: Page, withCover = false, withUnavailableLink = false) {
   let guide: SyntheticGuide = withCover ? {
     ...initialGuide(),
     content: { ...initialGuide().content, markdown: `${initialGuide().content.markdown}\n\n![A table at NIHO](niho-guide-asset:${COVER_ID})` },
     cover: { assetId: COVER_ID, alt: "A table at NIHO", credit: "NIHO", webConfirmed: true },
   } : initialGuide();
+  if (withUnavailableLink) guide = { ...guide, draftProductLinks: [{ providerId: "provider-revoked", productId: "product-revoked" }] };
   let createAttempts = 0;
   const createIds: string[] = [];
   const events: string[] = [];
@@ -77,6 +78,10 @@ async function mockWriterApi(page: Page, withCover = false) {
       const body = request.postDataJSON() as Record<string, unknown> & { expectedRevision: number; content: SyntheticGuide["content"] };
       const { expectedRevision, ...draft } = body;
       expect(expectedRevision).toBe(guide.revision);
+      if (withUnavailableLink && Array.isArray(draft.draftProductLinks) && draft.draftProductLinks.length > 0) {
+        await route.fulfill({ status: 422, json: { error: "guide_product_link_unavailable" } });
+        return;
+      }
       guide = { ...guide, ...draft, cover: draft.cover === null ? undefined : draft.cover as SyntheticGuide["cover"], revision: guide.revision + 1, updatedAtUtc: UPDATED };
       events.push(`save:${guide.revision}`);
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ guide }) }); return;
@@ -126,6 +131,21 @@ test("opening an existing article does not create an unpublished revision", asyn
   await page.waitForTimeout(1200); // Exceeds the editor's 900ms autosave debounce.
   expect(api.events.filter((event) => event.startsWith("save:"))).toEqual([]);
   expect(api.guide.revision).toBe(1);
+});
+
+test("lets a writer remove a saved experience link that is no longer available", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "write-desktop", "desktop editor interaction");
+  const api = await mockWriterApi(page, false, true);
+  await page.goto(`/write/write-e2e-fixture/edit-revoked-link/${ID}`);
+  await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
+  await page.getByLabel("タイトル", { exact: true }).fill("Text saved after removing the expired link");
+  await expect(page.getByRole("status").filter({ hasText: "関連体験を確認してください" })).toBeVisible();
+  await page.getByText("関連する体験", { exact: true }).click();
+  await expect(page.getByText("利用できない関連体験")).toBeVisible();
+  await page.getByRole("button", { name: "関連を解除" }).click();
+  await expect.poll(() => api.guide.title).toBe("Text saved after removing the expired link");
+  expect(api.guide.draftProductLinks).toEqual([]);
+  expect(api.events.some((event) => event.startsWith("save:"))).toBe(true);
 });
 
 test("画面の日本語は NIHO Sans、英語の記事の題と本文は英語のサイトと同じ書体（#615）", async ({ page }, testInfo) => {

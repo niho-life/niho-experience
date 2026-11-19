@@ -1,6 +1,6 @@
 import type { WriteGuide } from "./client-types";
 
-export type WriteApiErrorKind = "unauthenticated" | "forbidden" | "conflict" | "invalid" | "not-found" | "unavailable";
+export type WriteApiErrorKind = "unauthenticated" | "forbidden" | "guide-link-unavailable" | "conflict" | "invalid" | "not-found" | "unavailable";
 
 export class WriteApiError extends Error {
   constructor(readonly kind: WriteApiErrorKind, readonly status: number) {
@@ -14,6 +14,7 @@ function kindForStatus(status: number): WriteApiErrorKind {
   if (status === 403) return "forbidden";
   if (status === 404) return "not-found";
   if (status === 409) return "conflict";
+  if (status === 422) return "guide-link-unavailable";
   if (status >= 400 && status < 500) return "invalid";
   return "unavailable";
 }

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import {
   StoreAccessDeniedError,
   StoreConflictError,
+  StoreGuideProductLinkUnavailableError,
   StoreNotFoundError,
   StorePermissionDeniedError,
   StoreValidationError,
@@ -150,6 +151,7 @@ export function writeApiError(error: unknown): NextResponse {
   if (error instanceof StoreValidationError) return writeJson({ error: "invalid_input" }, 400);
   if (error instanceof StoreConflictError) return writeJson({ error: "conflict" }, 409);
   if (error instanceof StorePermissionDeniedError) return writeJson({ error: "forbidden" }, 403);
+  if (error instanceof StoreGuideProductLinkUnavailableError) return writeJson({ error: "guide_product_link_unavailable" }, 422);
   // An article outside this actor's current OWNER scope is indistinguishable
   // from a missing one. Provider selection is rejected earlier with 403.
   if (error instanceof StoreAccessDeniedError || error instanceof StoreNotFoundError) return writeJson({ error: "not_found" }, 404);

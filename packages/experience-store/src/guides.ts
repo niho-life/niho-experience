@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import {
   StoreAccessDeniedError,
   StoreConflictError,
+  StoreGuideProductLinkUnavailableError,
   StoreNotFoundError,
   StorePermissionDeniedError,
   StoreValidationError,
@@ -885,7 +886,7 @@ async function authorizeCurrentProductLink(
     if (link.providerId !== article.subject.providerId) throw new StoreAccessDeniedError();
   } else {
     const authority = writerAuthority?.links.find((candidate) => candidate.providerId === link.providerId);
-    if (!authority) throw new StorePermissionDeniedError();
+    if (!authority) throw new StoreGuideProductLinkUnavailableError();
     const owner = await client.query(
       `SELECT 1
          FROM provider_memberships membership
@@ -902,7 +903,7 @@ async function authorizeCurrentProductLink(
         LIMIT 1 FOR SHARE`,
       [link.providerId, authority.inviterNihoUserId],
     );
-    if (owner.rows[0] === undefined) throw new StorePermissionDeniedError();
+    if (owner.rows[0] === undefined) throw new StoreGuideProductLinkUnavailableError();
   }
   const result = await client.query<DbRow>(
     `SELECT slug FROM experience_products
@@ -911,7 +912,10 @@ async function authorizeCurrentProductLink(
     [link.providerId, link.productId],
   );
   const row = result.rows[0];
-  if (row === undefined) throw new StoreNotFoundError("published product for guide link");
+  if (row === undefined) {
+    if (article.subject.kind === "WRITER") throw new StoreGuideProductLinkUnavailableError();
+    throw new StoreNotFoundError("published product for guide link");
+  }
   return { productSlug: stringValue(row, "slug") };
 }
 

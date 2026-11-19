@@ -20,6 +20,13 @@ export class StorePermissionDeniedError extends StoreError {
   }
 }
 
+export class StoreGuideProductLinkUnavailableError extends StoreError {
+  constructor() {
+    super("The current relationship or product status no longer allows this guide link.");
+    this.name = "StoreGuideProductLinkUnavailableError";
+  }
+}
+
 export class StoreNotFoundError extends StoreError {
   constructor(resource: string) {
     super(`${resource} was not found in the requested provider scope.`);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ArticleAuthorityRepository } from "../src/article-authority.ts";
 import { HostAccountIdentities } from "../src/host-account-identities.ts";
-import { StoreAccessDeniedError, StorePermissionDeniedError } from "../src/errors.ts";
+import { StoreAccessDeniedError, StoreGuideProductLinkUnavailableError, StorePermissionDeniedError } from "../src/errors.ts";
 import { GuideRepository, type GuideWriterAuthority } from "../src/guides.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
@@ -123,6 +123,18 @@ describe("NIHO-authorized personal guide writer", { skip: databaseUrl === undefi
       await pool.query("UPDATE provider_memberships SET active=true WHERE provider_id='provider-a' AND niho_user_id=$1", [ownerActor]);
       await pool.query("UPDATE experience_products SET status='ARCHIVED' WHERE provider_id='provider-a' AND id='tea'");
       assert.deepEqual((await repository.getPublicArticleBySlug(created.slug))?.productLinks, []);
+      const latest = await repository.getArticle(writerActor, created.id);
+      const edit = {
+        slug: latest.slug, title: "Updated after unlink", description: latest.description,
+        categorySlug: "culture", content: latest.content,
+      };
+      await assert.rejects(
+        () => repository.saveDraft(writerActor, created.id, { ...edit, draftProductLinks: latest.draftProductLinks }, latest.revision),
+        StoreGuideProductLinkUnavailableError,
+      );
+      const updated = await repository.saveDraft(writerActor, created.id, { ...edit, draftProductLinks: [] }, latest.revision);
+      assert.equal(updated.title, edit.title);
+      assert.deepEqual(updated.draftProductLinks, []);
     } finally {
       await database.dispose();
     }
