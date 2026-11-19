@@ -277,6 +277,30 @@ describe("runExperienceJobs", () => {
     expect(experienceJobActivity(counts)).toEqual({ failed: false, active: true });
   });
 
+  it("retries after SMTP accepted but the outbox completion write failed, with the same delivery ref", async () => {
+    const confirmation = confirmationFor(6);
+    const claimedAgain = [confirmation, confirmation];
+    s.confirmations.claimBookingConfirmations.mockImplementation(async () => ({
+      confirmations: claimedAgain.splice(0, 1),
+      abandoned: 0,
+    }));
+    s.confirmations.completeBookingConfirmation.mockRejectedValueOnce(new Error("synthetic database outage"));
+
+    const firstRun = await runExperienceJobs(s.deps);
+    expect(firstRun.bookingConfirmations).toEqual({ error: "unavailable" });
+    expect(s.sent).toHaveLength(1);
+    expect(s.confirmations.retryBookingConfirmation).not.toHaveBeenCalled();
+
+    // The row is still unprocessed, so a later run can send it again after the SMTP success
+    // could not be recorded. Retries keep the same opaque feedback reference for correlation.
+    const secondRun = await runExperienceJobs(s.deps);
+    expect(secondRun.bookingConfirmations).toEqual({ claimed: 1, sent: 1, skipped: 0, retried: 0, failed: 0, abandoned: 0 });
+    expect(s.sent).toHaveLength(2);
+    expect(s.sent[0]?.deliveryRef).toBe(confirmation.deliveryRef);
+    expect(s.sent[1]?.deliveryRef).toBe(confirmation.deliveryRef);
+    expect(s.confirmations.completeBookingConfirmation).toHaveBeenCalledTimes(2);
+  });
+
   it("retrieves a MANAGED_20 payment link at send time and keeps office/provider role delivery independent", async () => {
     const booking = {
       publicBookingId: facts(1).publicBookingId,

@@ -77,6 +77,10 @@ IP制限の拒否は429 RATE_LIMITEDとRetry-Afterで返し、予約やメール
 - **設定**：`EXPERIENCE_GUEST_MAIL_ENABLED=true`（http mode だけ）のとき、`EXPERIENCE_DATABASE_URL`、`EXPERIENCE_SMTP_HOST`・`EXPERIENCE_SMTP_PORT`・`EXPERIENCE_SMTP_USER`・`EXPERIENCE_SMTP_PASSWORD`、`EXPERIENCE_MAIL_FROM`・`EXPERIENCE_MAIL_REPLY_TO`、`EXPERIENCE_JOBS_AUDIENCE`・`EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL` と https の `SITE_URL` が無いとサーバーは起動しない（誤りのメッセージは設定の名前だけで、値を出さない）。SMTP のユーザーとパスワードは使う場所で読み、`config` に置かない。
 - **配備時の作業（この PR では行わない）**：`0050_booking_meeting_guides.sql`、`0051_checkout_ip_rate_limit.sql`、`0057_guest_mail_delivery_feedback.sql`、`0063_guest_message_mail_delivery_ref.sql`（`guest_question_messages` への列と一意indexの追加だけで権限は変わらない。新しい版より先に適用する）を適用し、`scripts/gcp/experience-db-grants.mjs` のruntime role権限を反映する。メールjobのCloud Scheduler（毎分・POST・OIDC token）とサービスアカウントを用意し、NIHOの既存共有SMTP SecretをExperience実行環境へ参照配線する（専用資格情報や事業者は追加しない）。予約flagを開く前に32 byte以上の `EXPERIENCE_CHECKOUT_IP_HMAC_KEY` とCloudflare以外からCloud Run originへ到達できない入口制限を確認する。#376 の前日案内producerにはhost push Scheduler/service accountも要る。#375 callback の実行identityとURL/audience、実送信メールのFrom/Return-Path・認証alignment・受信箱到達は未確認。
 
+### SMTP受付後の結果不明・DB記録停止（#375）
+
+SMTPがメールを受け付けた直後に応答が失われるケースと、SMTP成功後にoutbox完了記録が失敗するケースは、SMTPとDBを1トランザクションにできないためat-least-onceで扱う。leaseの期限後に再送され、受信箱で同じ案内が重複する可能性がある。Experienceのguest mail retryは同じ `X-NIHO-Mail-Ref` を維持し、DSNの相関・callbackは冪等にする。これは送信のexactly-onceを保証するものではない。今回のsynthetic job検証では、SMTP成功後の完了記録失敗でjob stepがunavailableを返し、次回runで同じrefを付けた再送になることを確認する。
+
 ## 予約者の予約ページ（第6段）
 
 オーナー決定（2026-10-27）：旅行者は体験サイトで完結し、会話と取消のある予約ページは `/bookings/{publicBookingId}` に置く。旅行者のアカウントと「すべての予約の一覧」は作らない。オーナー決定（2026-10-31、#285）：確認メールのリンクから、その 1 件の予約のセッションに入る（設計 v1）。この段の前半（6a）は読むだけのページで、メッセージは 6b。取消は第7段で足した（下の「取消と返金（第7段）」）。
