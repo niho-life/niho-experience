@@ -8,13 +8,13 @@ import {
   ANALYTICS_PREFERENCES_EVENT,
   GA4_CONSENT_STORAGE_KEY,
   GA4_COOKIE_SETTINGS,
+  createGa4ConsentChoiceStore,
   ga4ConsentDefaults,
   ga4CookieNames,
   isGa4ExcludedPath,
-  parseStoredGa4Consent,
-  serializeGa4Consent,
   shouldLoadGa4,
   shouldMeasureGa4Path,
+  shouldStopGa4,
   type Ga4ConsentChoice,
 } from "@/lib/ga4-consent";
 import { createGtagQueue, type GtagCommand } from "@/lib/ga4-queue";
@@ -23,7 +23,10 @@ const EXPERIENCE_ORIGIN = "https://experience.niho.life";
 const GA4_SCRIPT_ID = "niho-experience-ga4-tracker";
 const GA4_CONSENT_CHANGE_EVENT = "niho:ga4-consent-change";
 const MEASUREMENT_ID = /^G-[A-Za-z0-9]{4,24}$/;
-let fallbackChoice: Ga4ConsentChoice | null = null;
+const consentChoiceStore = createGa4ConsentChoiceStore({
+  getItem: (key) => window.localStorage.getItem(key),
+  setItem: (key, value) => window.localStorage.setItem(key, value),
+});
 
 function subscribeToBrowserReady(): () => void {
   return () => {};
@@ -151,31 +154,23 @@ function installGoogleTag(measurementId: string, page: SafePageView, pageReferre
 }
 
 function readChoice(): Ga4ConsentChoice | null {
-  try {
-    const raw = window.localStorage.getItem(GA4_CONSENT_STORAGE_KEY);
-    const choice = parseStoredGa4Consent(raw);
-    fallbackChoice = choice;
-    return choice;
-  } catch {
-    return fallbackChoice;
-  }
+  return consentChoiceStore.read();
 }
 
 function saveChoice(choice: Ga4ConsentChoice): void {
-  fallbackChoice = choice;
-  try {
-    window.localStorage.setItem(GA4_CONSENT_STORAGE_KEY, serializeGa4Consent(choice));
-  } catch {
-    // Keep this choice for the current page even when browser storage is blocked.
-  }
+  consentChoiceStore.save(choice);
   window.dispatchEvent(new Event(GA4_CONSENT_CHANGE_EVENT));
 }
 
 function subscribeToChoice(onChange: () => void): () => void {
-  window.addEventListener("storage", onChange);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === GA4_CONSENT_STORAGE_KEY || event.key === null) consentChoiceStore.syncFromStorage();
+    onChange();
+  };
+  window.addEventListener("storage", onStorage);
   window.addEventListener(GA4_CONSENT_CHANGE_EVENT, onChange);
   return () => {
-    window.removeEventListener("storage", onChange);
+    window.removeEventListener("storage", onStorage);
     window.removeEventListener(GA4_CONSENT_CHANGE_EVENT, onChange);
   };
 }
@@ -191,8 +186,8 @@ function AnalyticsConsentAndPageMeasurement({ measurementId }: { measurementId: 
   const dnt = doNotTrackEnabled(typeof navigator === "undefined" ? undefined : navigator.doNotTrack);
 
   useEffect(() => {
-    if (!shouldLoadGa4(choice, navigator.doNotTrack)) stopGoogleTag();
-  }, [choice]);
+    if (shouldStopGa4(choice, ready, navigator.doNotTrack)) stopGoogleTag();
+  }, [choice, ready]);
 
   useEffect(() => {
     const openPreferences = () => setPreferencesOpen(true);

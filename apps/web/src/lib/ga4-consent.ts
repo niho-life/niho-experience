@@ -19,6 +19,41 @@ export type StoredGa4Consent = Readonly<{
   expiresAt: number;
 }>;
 
+export type Ga4ConsentStorage = Pick<Storage, "getItem" | "setItem">;
+
+/** Keep the current tab's explicit choice usable when browser storage rejects a write. */
+export function createGa4ConsentChoiceStore(storage: Ga4ConsentStorage) {
+  let fallbackChoice: Ga4ConsentChoice | null = null;
+  let writeFailed = false;
+
+  return {
+    read(now = Date.now()): Ga4ConsentChoice | null {
+      try {
+        const choice = parseStoredGa4Consent(storage.getItem(GA4_CONSENT_STORAGE_KEY), now);
+        if (writeFailed) return fallbackChoice;
+        fallbackChoice = choice;
+        return choice;
+      } catch {
+        return fallbackChoice;
+      }
+    },
+    save(choice: Ga4ConsentChoice, now = Date.now()): void {
+      fallbackChoice = choice;
+      try {
+        storage.setItem(GA4_CONSENT_STORAGE_KEY, serializeGa4Consent(choice, now));
+        writeFailed = false;
+      } catch {
+        writeFailed = true;
+      }
+    },
+    /** Another tab changed or cleared localStorage; let that persisted value take precedence. */
+    syncFromStorage(): void {
+      fallbackChoice = null;
+      writeFailed = false;
+    },
+  };
+}
+
 /** Basic consent mode: this is sent only after an affirmative choice and before the Google tag is loaded. */
 export function ga4ConsentDefaults(): Ga4ConsentDefault {
   return {
@@ -64,6 +99,15 @@ export function serializeGa4Consent(choice: Ga4ConsentChoice, now = Date.now()):
 
 export function shouldLoadGa4(choice: Ga4ConsentChoice | null, doNotTrack: string | null | undefined): boolean {
   return choice === "granted" && doNotTrack !== "1" && doNotTrack !== "yes";
+}
+
+/** Cookie deletion must wait until the browser's persisted consent has hydrated. */
+export function shouldStopGa4(
+  choice: Ga4ConsentChoice | null,
+  ready: boolean,
+  doNotTrack: string | null | undefined,
+): boolean {
+  return ready && !shouldLoadGa4(choice, doNotTrack);
 }
 
 export function shouldMeasureGa4Path(

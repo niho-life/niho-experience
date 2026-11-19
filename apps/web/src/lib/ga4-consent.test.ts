@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   GA4_CONSENT_RETENTION_MS,
+  GA4_CONSENT_STORAGE_KEY,
   GA4_COOKIE_EXPIRES_SECONDS,
   GA4_COOKIE_PREFIX,
   GA4_COOKIE_SETTINGS,
+  createGa4ConsentChoiceStore,
   ga4ConsentDefaults,
   ga4CookieNames,
   isGa4ExcludedPath,
@@ -11,6 +13,7 @@ import {
   serializeGa4Consent,
   shouldLoadGa4,
   shouldMeasureGa4Path,
+  shouldStopGa4,
 } from "./ga4-consent";
 
 describe("GA4 basic consent", () => {
@@ -30,6 +33,38 @@ describe("GA4 basic consent", () => {
     expect(shouldLoadGa4("granted", "yes")).toBe(false);
     expect(shouldLoadGa4("granted", "0")).toBe(true);
     expect(shouldLoadGa4("granted", undefined)).toBe(true);
+  });
+
+  it("does not stop the tag before the browser's saved consent has hydrated", () => {
+    expect(shouldStopGa4(null, false, undefined)).toBe(false);
+    expect(shouldStopGa4(null, true, undefined)).toBe(true);
+    expect(shouldStopGa4("denied", true, undefined)).toBe(true);
+    expect(shouldStopGa4("granted", true, undefined)).toBe(false);
+    expect(shouldStopGa4("granted", true, "1")).toBe(true);
+  });
+
+  it("keeps an explicit choice for this tab when localStorage writes fail", () => {
+    const values = new Map<string, string>([
+      [GA4_CONSENT_STORAGE_KEY, serializeGa4Consent("denied", 1_800_000_000_000)],
+    ]);
+    let failWrites = true;
+    const store = createGa4ConsentChoiceStore({
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        if (failWrites) throw new Error("storage is full");
+        values.set(key, value);
+      },
+    });
+
+    store.save("granted", 1_800_000_000_000);
+    expect(store.read(1_800_000_000_001)).toBe("granted");
+    store.save("denied", 1_800_000_000_000);
+    expect(store.read(1_800_000_000_001)).toBe("denied");
+
+    failWrites = false;
+    store.save("granted", 1_800_000_000_000);
+    expect(values.has(GA4_CONSENT_STORAGE_KEY)).toBe(true);
+    expect(store.read(1_800_000_000_001)).toBe("granted");
   });
 
   it("stops analytics on booking and private paths even after consent", () => {
