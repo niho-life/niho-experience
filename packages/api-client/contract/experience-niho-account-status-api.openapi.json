@@ -1,0 +1,107 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NIHO Experience account status API",
+    "version": "1.0.0",
+    "x-niho-contract-status": "proposed",
+    "x-niho-source-contract-version": "2.2.0",
+    "x-niho-source-contract-sha256": "e80a1e9db760f73f51ca5076e64232af0bd80250f0f6baf0989521117b1dd7bf",
+    "description": "Experience consumer contract proposal aligned to niho-coliving/niho-app#21003 (head e0f6b4ee9174b45398d9921e0e41856676f470ef), for issue #20988. Keep disabled until NIHO merges and deploys this source contract and staging accepts it."
+  },
+  "paths": {
+    "/api/experience-host/account-statuses": {
+      "post": {
+        "operationId": "getExperienceAccountStatuses",
+        "summary": "Read current status for previously connected NIHO users",
+        "description": "Uses the Experience Google service ID token only; no NIHO app-connect user token is sent. IDs without niho-experience AppConnection history return unknown. Results follow input order and currentUserId is null unless status is merged.",
+        "security": [{ "ExperienceServiceIdToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AccountStatusRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One current state per requested NIHO user ID, in request order",
+            "headers": {
+              "Cache-Control": { "schema": { "const": "private, no-store" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountStatusResponse" }
+              }
+            }
+          },
+          "400": { "description": "Invalid request" },
+          "403": { "description": "Service identity is not allowed" },
+          "404": { "description": "NIHO common contract is disabled" },
+          "429": { "description": "Status lookup is rate limited" },
+          "503": { "description": "NIHO status could not be read" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ExperienceServiceIdToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-NIHO-Experience-Service-Id-Token"
+      }
+    },
+    "schemas": {
+      "AccountStatusRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["nihoUserIds"],
+        "properties": {
+          "nihoUserIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        }
+      },
+      "AccountStatusResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["results"],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AccountStatus" }
+          }
+        }
+      },
+      "AccountStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["nihoUserId", "status", "currentUserId"],
+            "properties": {
+              "nihoUserId": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "status": { "enum": ["active", "inactive", "unknown"] },
+              "currentUserId": { "type": "null" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["nihoUserId", "status", "currentUserId"],
+            "properties": {
+              "nihoUserId": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "status": { "const": "merged" },
+              "currentUserId": { "type": "string", "minLength": 1, "maxLength": 256 }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

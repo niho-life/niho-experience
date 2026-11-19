@@ -624,6 +624,28 @@ describe("admin support console settings", () => {
     expect(() => resolveConfig({ EXPERIENCE_TERMS_URL: "not a url" })).toThrow("EXPERIENCE_TERMS_URL must be an absolute https URL");
   });
 
+  it("keeps periodic NIHO status checks off until HTTP, Experience accounts, and the NIHO service audience are ready (#627)", () => {
+    const base = {
+      EXPERIENCE_API_MODE: "http", SITE_URL: "https://experience.example", EXPERIENCE_GUEST_MAIL_ENABLED: "true",
+      EXPERIENCE_DATABASE_URL: "postgresql://synthetic@127.0.0.1/unused", EXPERIENCE_SMTP_HOST: "smtp.example.com", EXPERIENCE_SMTP_PORT: "587",
+      EXPERIENCE_SMTP_USER: "sample-smtp-user", EXPERIENCE_SMTP_PASSWORD: "sample-smtp-password",
+      EXPERIENCE_MAIL_FROM: "NIHO Experiences <experiences@example.com>", EXPERIENCE_MAIL_REPLY_TO: "support@example.com",
+      EXPERIENCE_JOBS_AUDIENCE: "https://experience.example/internal/experience-jobs",
+      EXPERIENCE_JOBS_SERVICE_ACCOUNT_EMAIL: "experience-jobs@example.iam.gserviceaccount.com",
+      HOST_CONSOLE_ENABLED: "true", HOST_SESSION_SECRET: "s".repeat(32), NIHO_FIREBASE_WEB_API_KEY: "key",
+      EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true",
+    };
+    expect(resolveConfig({}).nihoAccountStatusCheckEnabled).toBe(false);
+    const withoutAudience = { ...base, EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "true" };
+    expect(() => resolveConfig(withoutAudience)).toThrow("EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
+    const on = { ...withoutAudience, NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" };
+    expect(resolveConfig(on).nihoAccountStatusCheckEnabled).toBe(true);
+    expect(resolveConfig({ ...on, EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "1" }).nihoAccountStatusCheckEnabled).toBe(false);
+    expect(() => resolveConfig({ ...base, EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
+    expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true", EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "true" }).nihoAccountStatusCheckEnabled).toBe(false);
+  });
+
   it("offers LINE on the traveler entrance only with its own flag, which needs the traveler accounts (NIHO's LINE provider moves 2027-01)", () => {
     const preview = { EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "true" };
     expect(resolveConfig({}).travelerLineEnabled).toBe(false);

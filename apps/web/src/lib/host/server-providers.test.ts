@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
-  config: { apiMode: "http", hostConsoleEnabled: true, experienceHostPublicationApiEnabled: true },
+  config: {
+    apiMode: "http",
+    hostConsoleEnabled: true,
+    experienceHostPublicationApiEnabled: true,
+    nihoExperienceHostCommonContractAudience: "https://niho.example.test",
+    nihoAccountStatusCheckEnabled: false,
+  },
   session: vi.fn(), usable: vi.fn(), identity: vi.fn(), list: vi.fn(), bind: vi.fn(),
 }));
 
@@ -21,10 +27,14 @@ vi.mock("./session", async (importOriginal) => ({
 vi.mock("@niho-experience/api-client/host", () => ({
   createExperienceHostApiClient: () => ({ getIdentity: state.identity }),
 }));
-vi.mock("@/lib/experience/store-server", () => ({ experiencePublicationRepository: () => ({
-  listHostProviders: state.list,
-  ensureMappedOwnerMembership: state.bind,
-}) }));
+vi.mock("@/lib/experience/store-server", () => ({
+  experiencePublicationRepository: () => ({
+    listHostProviders: state.list,
+    ensureMappedOwnerMembership: state.bind,
+  }),
+  hostAccounts: () => null,
+  nihoAccountStatusStore: () => null,
+}));
 
 import { loadHostProviders } from "./server";
 

@@ -118,6 +118,10 @@
       "types": "./src/experience-translate-rooms/schema.ts",
       "default": "./src/experience-translate-rooms/schema.ts"
     },
+    "./niho-account-status": {
+      "types": "./src/niho-account-status/index.ts",
+      "default": "./src/niho-account-status/index.ts"
+    },
     "./contract/experience-public-api.openapi.json": "./contract/experience-public-api.openapi.json",
     "./contract/experience-host-api.openapi.json": "./contract/experience-host-api.openapi.json",
     "./contract/experience-legacy-host-api.openapi.json": "./contract/experience-legacy-host-api.openapi.json",
@@ -130,7 +134,8 @@
     "./contract/experience-fee-summary-api.openapi.json": "./contract/experience-fee-summary-api.openapi.json",
     "./contract/experience-preparations-api.openapi.json": "./contract/experience-preparations-api.openapi.json",
     "./contract/experience-provider-operations-api.openapi.json": "./contract/experience-provider-operations-api.openapi.json",
-    "./contract/experience-translate-rooms-api.openapi.json": "./contract/experience-translate-rooms-api.openapi.json"
+    "./contract/experience-translate-rooms-api.openapi.json": "./contract/experience-translate-rooms-api.openapi.json",
+    "./contract/experience-niho-account-status-api.openapi.json": "./contract/experience-niho-account-status-api.openapi.json"
   },
   "scripts": {
     "gen:types": "node ./scripts/gen-types.ts",

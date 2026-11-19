@@ -2,7 +2,7 @@ import "server-only";
 import { config } from "@/lib/config";
 import { parseChannelAdapters } from "./channel-adapters";
 import { Pool } from "pg";
-import { AdminSessions, OperatorCliRequests, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GroupInquiryRepository, PeopleListingRepository, GuideRepository, HostAccountIdentities, HostAccounts, HostInvitations, TravelerAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedBookingApprovalRepository, ManagedExperienceSalesRepository, OccurrenceAssignmentRepository, ProductClassificationRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, isHostAccountId, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { AdminSessions, OperatorCliRequests, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GroupInquiryRepository, PeopleListingRepository, GuideRepository, HostAccountIdentities, HostAccounts, HostInvitations, NihoAccountStatusStore, TravelerAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedBookingApprovalRepository, ManagedExperienceSalesRepository, OccurrenceAssignmentRepository, ProductClassificationRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, isHostAccountId, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -198,6 +198,12 @@ export function travelerAccounts(): TravelerAccounts | null {
   if (!config.travelerAccountsEnabled) return null;
   const pool = experiencePool();
   return pool ? new TravelerAccounts(pool) : null;
+}
+
+/** The NIHO identity-state checker shared by host, writer and traveler session entry points. */
+export function nihoAccountStatusStore(): NihoAccountStatusStore | null {
+  const pool = experiencePool();
+  return pool ? new NihoAccountStatusStore(pool) : null;
 }
 
 /** Native provider team and access-fingerprint repository. Closed unless every native boundary is enabled. */
