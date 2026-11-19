@@ -117,6 +117,16 @@ export const EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT = {
   deploymentStatus: "not-deployed",
 } as const;
 
+/** S1b account status consumer proposal. Keep its runtime flag off until NIHO fixes the source SHA and staging accepts it. */
+export const EXPERIENCE_NIHO_ACCOUNT_STATUS_API_CONTRACT = {
+  version: "1.0.0",
+  sourceIssue: "niho-coliving/niho-app#20988",
+  sourceCommit: null,
+  sha256: "da4818d97658d65698f7bc7b1566f3a1320f387f2beb592e869885c09408bf7c",
+  status: "proposed",
+  deploymentStatus: "not-deployed",
+} as const;
+
 /** 予約に関わる時刻の基準。表示も日本時間（Asia/Tokyo）で行う。 */
 export const EXPERIENCE_TIME_ZONE = "Asia/Tokyo";
 

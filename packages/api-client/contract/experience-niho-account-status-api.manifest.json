@@ -1,0 +1,22 @@
+{
+  "name": "experience-niho-account-status-api",
+  "version": "1.0.0",
+  "sourceRepository": "niho-app",
+  "sourceIssue": "niho-coliving/niho-app#20988",
+  "sourceCommit": null,
+  "sha256": "da4818d97658d65698f7bc7b1566f3a1320f387f2beb592e869885c09408bf7c",
+  "status": "proposed",
+  "deploymentStatus": "not-deployed",
+  "deploymentNote": "Consumer proposal only. Do not enable EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED until NIHO fixes the matching source SHA/hash and staging accepts the batch API.",
+  "openapiFile": "experience-niho-account-status-api.openapi.json",
+  "sha256File": "experience-niho-account-status-api.openapi.json.sha256",
+  "scope": [
+    "Batch read active, inactive, unknown, or merged status for previously connected NIHO IDs",
+    "Resolve merged source IDs to the current NIHO user ID"
+  ],
+  "excludedScope": [
+    "NIHO user tokens or browser calls",
+    "Status lookups for IDs never connected to this service",
+    "Session storage, authorization or content migration outside current NIHO ID bindings"
+  ]
+}

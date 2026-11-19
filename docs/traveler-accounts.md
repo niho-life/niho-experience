@@ -2,6 +2,8 @@
 
 Epic [#591](https://github.com/niho-life/niho-experience/issues/591)、[#597](https://github.com/niho-life/niho-experience/issues/597)、[ADR 0004](adr/0004-niho-account-login.md) §8。旅行者が、NIHO の名前を見ずに、Google のボタン（LINE は NIHO の LINE プロバイダー切替のあと）から Experience のアカウントを作り、ログイン・ログアウトできる。フラグ `EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED`（既定 OFF）。ゲスト予約と、予約ごとのセッションは変えない。アカウントは任意。
 
+`EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED`（既定OFF）が有効な場合、ログイン済み旅行者は利用時に15分以上経ったNIHO状態確認を受ける。`inactive` / `unknown`で全旅行者セッションを失効させても、`trv_`アカウントとデータは残す。`merged`は既存`trv_`を保って`traveler_accounts.subject`を統合先へ移す。NIHO APIが利用できない間はセッションを失効させず、次の利用時に再確認する。ゲスト予約との紐付けは行わない。
+
 ## 画面（英語）
 
 - `/account/sign-in`：見出し「Log in or sign up」、方法別のボタン（Google。LINE はフラグが ON のときだけ）、利用規約・プライバシーの同意の一文、「You can still book as a guest without an account.」、一番下に小さく「Log in with a NIHO account」（すでに NIHO アカウントを持つ人向け）。画面に「NIHO アカウント」「接続」の文言を出すのは、その一番下のボタンだけ（サイト名の「NIHO Experience」は別判断）。`?error=expired|denied|unavailable|suspended` が、ログインが終わらなかった理由を言葉で出す（アカウントも NIHO の ID も出さない）。

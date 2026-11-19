@@ -12,6 +12,14 @@
 2. NIHO から `/host/auth/callback?code&state`：state を照合 → code を交換（`exchange`）→ Host v1 `identity` で NIHO user ID（Experience のサービス ID トークンを添える）→ `HostAccountIdentities.startSessionForNihoIdentity`（結び付け済みで `ACTIVE` の `hst_` のときだけ、Experience のセッションを開く）→ **結果にかかわらず**、NIHO の接続をすぐ解除（`DELETE /api/auth/app-connections/{id}`、理由なし）。NIHO のトークンは cookie にも DB にもログにも残さない（`niho-login.ts`）。
 3. セッションは上の「cookie」の表と同じ（`__Host-niho_host_account_session`・Path=/）。`/host` と `/write` の両方に届く。このブラウザの前のセッションは失効させる。`authenticated_at` は、NIHO にログインした時刻（`exchange` の答えの `authTime`。niho-coliving/niho-app#20305）。戻った時刻より後（時計のずれ）なら戻った時刻にする。**`authTime` が無い・読めないときは、セッションを作らず、結び付けも招待の消費もしない**（fail closed。`/host/auth/error?reason=unverified`、設定では `?niho=unverified`、招待では `invite-unavailable`）。NIHO の接続は、そのときも解除する。時刻が分からないと、「直近のログインか」も、URL から外せる `max_age` の再認証も判定できないため。NIHO 側（niho-coliving/niho-app#20317）は web の接続先で常に `authTime` を返す。
 
+### セッション中のNIHO状態確認（#627）
+
+- `EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED`（既定OFF）が有効なとき、`/host` と `/write` でNIHOに結び付いたExperienceセッションを使う際、前回の状態確認から15分以上経っていればNIHOに現在状態を聞く。確認時刻は各サーバーセッションに保存する。Writer専用アカウントも`host_account_identities.linked_via='WRITER'`で同じ扱い。
+- NIHOの応答が`active`なら続行する。`inactive`または`unknown`なら対象NIHO IDの全ホスト・Writer・旅行者セッションを失効し、結び付け・アカウント・記事・予約などのデータは残す。復帰してNIHOへログインすると既存の結び付けを再利用できる。
+- `merged`では`host_account_identities`と`traveler_accounts`の現在IDを統合先へ移す。過去の`host_account_identity_events`は統合元と先を追記で記録し、記事・写真・公開版などの`hst_`作成者IDや他の監査履歴は更新しない。旅行者の`trv_`と予約データも同じまま。
+- 統合先に別の有効なホストまたは旅行者の結び付けがある場合、その衝突する結び付けは移さず、該当する旧IDセッションを失効させる。NIHO user IDをログに出さず、運営向けログに衝突種別を記録して手動照合を求める。
+- API・OIDC・時間切れ・不正応答ではセッションを失効させず、確認時刻も進めない。次の利用時に再試行する。状態API契約 `experience-niho-account-status-api` v1.0.0 はniho-app #20988向け提案で、NIHOのsource SHA固定とstg受入までflagを開かない。
+
 失敗は `/host/auth/error?reason=` の固定の理由だけを運ぶ。`expired`（10 分の cookie が切れた）・`state`・`denied`（NIHO で取り消した）・`rejected`（code が無効・期限切れ、`identity` が 4xx）・`unavailable`（NIHO や DB に届かない、`identity` の形が違う）。NIHO の障害は「権限がない」と断定しない。
 
 - `unregistered`：NIHO には入れたが、その NIHO アカウントに結び付いたホストアカウントが無い（運営が登録した人と別の方法で入ったときが多い。NIHO は LINE・Google・Apple をメールの一致で統合しない）。「このアカウントは、ホストに登録されていません」と、原因の見当（別の方法でログインしていませんか？）、「別の方法でやり直す」（ログインをやり直す。NIHO の確認画面の「別のアカウントで続ける」から選び直す）、運営への連絡（`info@niho.life`）を出す。Experience のデータには触れず、ほかのアカウントの有無も示さない。拒否は監査に書かない（`hst_` が決まらず、誰でも書き込めてしまうため）。

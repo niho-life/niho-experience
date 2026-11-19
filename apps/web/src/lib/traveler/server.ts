@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import type { NextResponse } from "next/server";
 import { config } from "@/lib/config";
 import { travelerAccounts } from "@/lib/experience/store-server";
+import { checkNihoAccountStatusSession } from "@/lib/niho/account-status";
 import { hostCookieOptions } from "@/lib/host/session";
 import { MOCK_TRAVELER_SESSION, TRAVELER_LOGIN_HINT_COOKIE, TRAVELER_SESSION_COOKIE, TRAVELER_SESSION_COOKIE_PATH } from "./session";
 
@@ -30,6 +31,7 @@ export const readTravelerSession = cache(async (): Promise<TravelerSessionView |
   const store = travelerAccounts();
   if (!store) return null;
   const session = await store.readSession({ sessionToken: token, nowUtc: new Date().toISOString() });
+  if (session && !await checkNihoAccountStatusSession("traveler", token)) return null;
   return session ? { mock: false, sessionRef: session.sessionRef } : null;
 });
 

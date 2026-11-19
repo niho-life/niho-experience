@@ -1,0 +1,99 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NIHO Experience account status API",
+    "version": "1.0.0",
+    "x-niho-contract-status": "proposed",
+    "description": "Proposed consumer contract for niho-coliving/niho-app#20988. The endpoint remains closed behind an Experience flag until the matching NIHO source export is fixed and deployed."
+  },
+  "paths": {
+    "/api/experience-host/account-status": {
+      "post": {
+        "operationId": "getExperienceAccountStatuses",
+        "summary": "Read current status for previously connected NIHO users",
+        "security": [{ "ExperienceServiceIdToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AccountStatusRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One current state per requested NIHO user ID",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountStatusResponse" }
+              }
+            }
+          },
+          "401": { "description": "Service identity is missing or invalid" },
+          "403": { "description": "Service identity is not allowed" },
+          "429": { "description": "Status lookup is rate limited" },
+          "503": { "description": "NIHO status could not be read" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ExperienceServiceIdToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-NIHO-Experience-Service-Id-Token"
+      }
+    },
+    "schemas": {
+      "AccountStatusRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["nihoUserIds"],
+        "properties": {
+          "nihoUserIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        }
+      },
+      "AccountStatusResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["statuses"],
+        "properties": {
+          "statuses": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AccountStatus" }
+          }
+        }
+      },
+      "AccountStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["nihoUserId", "status"],
+            "properties": {
+              "nihoUserId": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "status": { "enum": ["active", "inactive", "unknown"] }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["nihoUserId", "status", "currentUserId"],
+            "properties": {
+              "nihoUserId": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "status": { "const": "merged" },
+              "currentUserId": { "type": "string", "minLength": 1, "maxLength": 256 }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

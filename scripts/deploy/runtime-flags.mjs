@@ -336,6 +336,12 @@ export const FLAGS = Object.freeze([
     // The terms of service a traveler agrees to by logging in: linked beside the privacy notice while set.
     settings: [{ env: "EXPERIENCE_TERMS_URL", variable: "TERMS_URL", shape: "httpsUrl", optional: true }],
   },
+  // S1b. NIHO's status API contract is proposed but not deployed; keep this off until its fixed source SHA is accepted in staging.
+  {
+    env: "EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED",
+    variable: "NIHO_ACCOUNT_STATUS_CHECK_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
+  },
   // 旅行者の入口の LINE (Epic #591, #597): LINE のボタンと `method=line`。**NIHO の LINE プロバイダーの切替（2027-01）のあとに ON にする。**
   // 今は LINE の同意画面に切替前のプロバイダー名が出て、LINE の `sub` はプロバイダーごとに違うので、いま作った旅行者のアカウントは
   // 切替後に別人扱いになりやすい（オーナー決定 2026-11-14、niho-coliving/niho-app#20307）。

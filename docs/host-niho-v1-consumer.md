@@ -14,6 +14,10 @@
 
 NIHOapp PR #19712 とstaging manifest #19784 はmerge済み。2026-11-05に公式配備から本人の接続・Experience OWNER照合・Connect限定readまで確認した。配備source、契約hash、runtimeと各操作の証跡は[staging受入記録](acceptance/2026-11-05-host-staging.md)を参照する。stagingの公開・host API flagはONだが、本人の再利用／手数料／掲載同意、公開・停止・予約・決済の実環境受入は継続中。productionはOFFで、NIHOapp #19121/#19278やExperienceの受入Issueをこの部分確認だけで完了扱いにしない。
 
+### NIHOアカウント状態API（#627、別契約）
+
+`experience-niho-account-status-api` v1.0.0 は、NIHO側の [niho-app #20988](https://github.com/niho-coliving/niho-app/issues/20988) に対するExperience consumer提案。`POST /api/experience-host/account-status` にExperienceのサービスID tokenだけを付け、`nihoUserIds`（1〜100件）を送り、各IDの`active` / `inactive` / `merged`（`currentUserId`付き）/ `unknown`を受け取る。Host v1.0.0のidentity/Connect契約は変更しない。NIHO側の固定source SHA/hashとschemaが確定するまでは`EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED`をOFFのままにする。
+
 ExperienceがNIHO Host v1から消費するのは、現在本人の読取と既存Connect口座の限定readiness／再利用同意projectionだけである。提供者一覧・作成・更新、Connect口座の作成・接続・変更、Experienceの商品・公開APIは含まれない。NIHOの禁止APIを復活させたり、権限やscopeを広げたりしない。
 
 ### 本人の口座再利用同意（stagingで確認した残条件）

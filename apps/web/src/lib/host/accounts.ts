@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { NextResponse } from "next/server";
 import type { HostAccounts } from "@niho-experience/experience-store";
 import { hostAccounts } from "@/lib/experience/store-server";
+import { checkNihoAccountStatusSession } from "@/lib/niho/account-status";
 import { usableProviders, type HostProvider } from "./providers";
 import { hostReturnPathOrNull } from "./routes";
 import {
@@ -51,6 +52,7 @@ export async function readExperienceHostSession(token: string | undefined, store
   if (!isOpaqueSecret(token) || !store) return null;
   const session = await store.readSession({ sessionToken: token, nowUtc: nowUtc() });
   if (!session) return null;
+  if (!await checkNihoAccountStatusSession("host", token)) return null;
   return {
     kind: "experience",
     sessionToken: token,

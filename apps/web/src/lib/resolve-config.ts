@@ -296,6 +296,16 @@ function travelerAccountsSetting(apiMode: "mock" | "http", env: Env, hostConsole
   return true;
 }
 
+/** S1b: Experience's existing host/writer/traveler sessions can opt into the fixed service-identity status contract. */
+function nihoAccountStatusCheckSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, hostAccountsEnabled: boolean): boolean {
+  const name = "EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (!hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
+  if (!hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
+  if (!env.NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE?.trim()) throw new Error(`${name}=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE in http mode`);
+  return true;
+}
+
 /**
  * 旅行者の入口の LINE (Epic #591, #597): the LINE button of the traveler entrance, and a post for `method=line`, only once NIHO's LINE
  * provider has moved (2027-01). Until then LINE's consent screen shows the former provider's name, and a LINE `sub` belongs to its
@@ -914,6 +924,7 @@ export function resolveConfig(env: Env) {
   const hostTeamEnabled = hostTeamSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const hostNihoLoginEnabled = hostNihoLoginSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const travelerAccountsEnabled = travelerAccountsSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
+  const nihoAccountStatusCheckEnabled = nihoAccountStatusCheckSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const travelerLineEnabled = travelerLineSetting(env, travelerAccountsEnabled);
   const occurrenceAssignmentEnabled = occurrenceAssignmentSetting(apiMode, env, hostConsoleEnabled);
   // After host accounts: with them, the host publication API reads Stripe and the experience DB instead of NIHO.
@@ -1084,6 +1095,8 @@ export function resolveConfig(env: Env) {
     hostNihoLoginEnabled,
     // 旅行者のアカウント (Epic #591, #597): log in or sign up with Google, Apple or LINE; an account of their own.
     travelerAccountsEnabled,
+    // S1b: off until NIHO's matching v1 status contract is fixed and deployed.
+    nihoAccountStatusCheckEnabled,
     // 旅行者の入口の LINE: after NIHO's LINE provider moves (2027-01); off until then.
     travelerLineEnabled,
     // Experience-native COHOST membership, independent from the legacy provider-operations consumer.

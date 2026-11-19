@@ -3,7 +3,6 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { NextResponse } from "next/server";
-import { GoogleAuth } from "google-auth-library";
 import { createExperienceHostApiClient as createLegacyExperienceHostApiClient, type ExperienceHostApiClient } from "@niho-experience/api-client/legacy-host";
 import { createExperienceHostApiClient as createSelectedExperienceHostApiClient, type ExperienceHostApiClient as SelectedExperienceHostApiClient } from "@niho-experience/api-client/host";
 import { createMockExperienceHostFetch, MOCK_EXPERIENCE_HOST_SERVICE_TOKEN } from "@niho-experience/api-client/host/mock";
@@ -33,9 +32,7 @@ import {
   type NihoHostSession,
 } from "./session";
 import { experiencePublicationRepository } from "@/lib/experience/store-server";
-import { parseBearerToken } from "./bearer-token";
-
-const serviceAuth = new GoogleAuth();
+import { experienceHostServiceIdToken as issueExperienceHostServiceIdToken } from "@/lib/niho/service-identity";
 
 export const isHostMock = () => config.apiMode === "mock";
 export const siteOrigin = () => new URL(config.siteUrl).origin;
@@ -95,11 +92,7 @@ export function nihoApiFetch(session: NihoHostSession): typeof fetch {
 /** Fixed-audience Google identity for the Experience BFF; never contains a host's NIHO access token. */
 export async function experienceHostServiceIdToken(): Promise<string> {
   if (isHostMock()) return MOCK_EXPERIENCE_HOST_SERVICE_TOKEN;
-  const client = await serviceAuth.getIdTokenClient(config.nihoExperienceHostCommonContractAudience);
-  const headers = await client.getRequestHeaders();
-  const token = parseBearerToken(headers.authorization ?? headers.Authorization);
-  if (token === null) throw new Error("Experience service identity is unavailable");
-  return token;
+  return issueExperienceHostServiceIdToken();
 }
 
 export type NihoIdentityLookup = { ok: true; nihoUserId: string } | { ok: false; reason: "rejected" | "unavailable" };

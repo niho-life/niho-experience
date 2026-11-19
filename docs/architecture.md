@@ -38,6 +38,8 @@ flowchart LR
 
 提供者（ホスト）は `/host` へNIHOでログインする。Experience serverが一度きりのコードをNIHO専用Web access tokenへ交換し、tokenはsealed server-side sessionだけに保持する。NIHO cookieは共有せず、ブラウザーへtokenを渡さない。現在のNIHO Host v1.0.0は本人IDとACTIVE状態、明示指定したlegacy Connect readだけを提供し、provider一覧・登録・更新・Connect変更やExperience商品APIは持たない。契約のsource SHA、認証headers、response schema、配備条件は[NIHO Host v1 consumer contract](host-niho-v1-consumer.md)を参照する。
 
+NIHO IDに結び付いたExperience host/writer/traveler sessionは、利用時に15分以上経っていれば別のサービス認証status APIで状態を確認する（#627）。停止・退会・`unknown`は対応する全セッションを失効するが、結び付けとデータを残す。統合では`host_account_identities` / `traveler_accounts`だけを統合先IDへ移し、`hst_` / `trv_`と過去の作成者・監査履歴を保持する。NIHO障害・時間切れでは締め出さず、次の利用時に再試行する。
+
 Experienceの商品APIは各要求でNIHOの現在本人IDを取得し、運営登録済みのseller profileにあるNIHO account referenceと完全一致するExperienceの有効OWNER membershipだけを許可する。初回ログインは一致するprofileが一つあり競合membershipがない場合だけExperience OWNER membershipを結ぶ。NIHOが返さないroleを推測せず、`ownerUserId`や旧provider IDで本人を代用しない。Connectはprofileで固定したlegacy lookup keyで読み、返却Stripe account IDの完全一致・readiness・NIHO payment reuse consentを公開前に確認する。商品原稿・写真・販売条件・公開・Experience予約と返金はExperienceが所有し、旧NIHO予約の照会・履行・取消／返金はNIHOが保持する。
 
 NIHO名義の一商品だけを担当する講師は、NIHO provider memberへ昇格させず、Experience内の[商品限定運営者](product-operators.md) grantでカレンダーだけを扱う。NIHOのfresh identityとhost API接続確認は省略せず、予約・売上・Google管理などprovider-wide情報は公開しない。
