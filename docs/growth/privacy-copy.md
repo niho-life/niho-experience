@@ -1,6 +1,6 @@
 # 体験サイトのアクセス計測に関する公開文案
 
-更新：2026-10-19。#14の決定済み範囲に限る文案。**まだ公開・適用していない。** オーナーがNIHOの既存プライバシーポリシーとの整合を確認し、本番で `UMAMI_WEBSITE_ID` を設定して送信を始める前に掲載する。
+更新：2026-11-16。この文書はUmamiのファネル計測だけを説明する#14用の文案で、GA4の説明には使わない。**Umami文案は未公開・未適用。** GA4の現行方針と利用者向け文面は [`analytics-decision.md`](analytics-decision.md) とExperience `/privacy` の [`PrivacyNotice.tsx`](../../apps/web/src/components/PrivacyNotice.tsx) を参照する。
 
 ## 日本語案
 
@@ -16,7 +16,7 @@ This measurement does not use cookies or store an identifier on your device. We 
 
 ## 掲載前の照合
 
-- [ ] 本番 `experience.niho.life` の送信先がUmami Cloudだけである。previewやmockからは送らない。
+- [ ] この文案はUmamiの送信だけを説明している。ExperienceのGA4は別の明示同意後だけに限定し、previewやmockからは送らない。
 - [ ] 実際の送信内容が[`analytics-decision.md`](analytics-decision.md)と[`funnel-measurement.md`](funnel-measurement.md)の許可範囲に収まる。URLのqueryは許可したUTMだけ、予約関連のquery・hash・referrerのpath/queryは送らない。
 - [ ] 計測イベントに自由記述、健康情報、予約token、StripeセッションID、個人の連絡先が入らない。計測を遮断しても予約操作が動く。
 - [ ] Umamiのプランと保存期間を公開時に再確認する。広告タグ・cookie・session replay・個人単位の流入突合を追加するなら、この文案をそのまま流用しない。

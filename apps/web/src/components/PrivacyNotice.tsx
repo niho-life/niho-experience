@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AnalyticsPrivacyControl } from "./AnalyticsPrivacyControl";
 import { LocalizedLink as Link } from "./LocalizedLink";
 
 const LINK = "font-bold text-moss underline underline-offset-4";
@@ -102,23 +103,30 @@ export function PrivacyNotice({ policyUrl, analytics = false, inquiry = false }:
           </p>
           {analytics ? (
             <p>
-              Outside the EEA, the UK and Switzerland, Google Analytics sets cookies on our public pages to tell visits apart. They last up to 60 days. In
-              the EEA, the UK and Switzerland it sets none. Advertising cookies are never set.
+              If you allow Google Analytics, it sets a first-party analytics cookie for this site only. It expires after 60 days. We save your choice in
+              this browser for up to 180 days so we can remember whether you allowed or rejected analytics. You can change or withdraw your choice at any
+              time using the settings below. Your choice does not affect booking.
             </p>
           ) : null}
           <p>Your booking page and the reply page don&apos;t send anything to our analytics.</p>
         </Section>
         {analytics ? (
-          <Section id="privacy-analytics" title="Visit counts">
+          <Section id="privacy-analytics" title="Optional visit counts">
             <p>
-              We use Google Analytics (Google LLC) to count visits to our public pages, so we can see which pages travelers read. When you open a
-              public page, your browser sends Google the page address and title, the site you came from, your browser and device type, an approximate
-              location and your IP address. We use this only to count visits. Nothing about your name, email address or booking is sent.
+              Google Analytics (Google LLC) is optional and stays off unless you choose “Allow analytics”. If you allow it, your browser sends Google the
+              public page path, permitted campaign tags, a general page title, the origin of the site you came from, a pseudonymous browser identifier and
+              session details from the first-party analytics cookie, and browser and device details. Google may also automatically receive standard events
+              such as first_visit and session_start for visit and session counts. Google receives the IP address used to make the connection and says it does
+              not log or store IP addresses. We use this only to understand visits to selected public pages and improve those pages.
             </p>
             <p>
-              We have turned off Google signals and ad personalization, and Google keeps this data for 2 months. If your browser sends a Do Not Track
-              signal, we send nothing.
+              We do not send your name, email address, messages, booking details or payment information, and do not configure custom booking or funnel events.
+              Booking, member, host and admin pages are excluded. Before you allow it, no Google tag loads. After you reject or withdraw consent, the tag is
+              disabled and no analytics is sent. If your browser sends a Do Not Track signal, analytics stays off.
+              Google Signals, User-ID and ad personalization are off. Google’s user-level and event-level data retention is set to 2 months; standard
+              aggregated reports are not removed by that setting.
             </p>
+            <p><AnalyticsPrivacyControl /></p>
           </Section>
         ) : null}
         <Section id="privacy-contact" title="Questions or requests">
