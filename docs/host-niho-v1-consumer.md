@@ -16,7 +16,7 @@ NIHOapp PR #19712 とstaging manifest #19784 はmerge済み。2026-11-05に公�
 
 ### NIHOアカウント状態API（#627、別契約）
 
-`experience-niho-account-status-api` v1.0.0 は、NIHO側の [niho-app #20988](https://github.com/niho-coliving/niho-app/issues/20988) に対するExperience consumer提案。`POST /api/experience-host/account-status` にExperienceのサービスID tokenだけを付け、`nihoUserIds`（1〜100件）を送り、各IDの`active` / `inactive` / `merged`（`currentUserId`付き）/ `unknown`を受け取る。Host v1.0.0のidentity/Connect契約は変更しない。NIHO側の固定source SHA/hashとschemaが確定するまでは`EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED`をOFFのままにする。
+`experience-niho-account-status-api` v1.0.0 は、NIHO側の [niho-app #20988](https://github.com/niho-coliving/niho-app/issues/20988) / [PR #21003](https://github.com/niho-coliving/niho-app/pull/21003) の Host common contract v2.2.0 に合わせたExperience consumer提案。`POST /api/experience-host/account-statuses` にExperienceのGoogle service ID tokenだけを付け、`nihoUserIds`（1〜100件）を送り、入力順の`results`（`active` / `inactive` / `merged` / `unknown`）を受け取る。各結果には`currentUserId`を必須で含め、`merged`以外は`null`。接続履歴が無いNIHO IDは`unknown`。Host v1.0.0のidentity/Connect契約は変更しない。NIHO PR #21003のsource SHA `e0f6b4ee9174b45398d9921e0e41856676f470ef` / export hash `e80a1e9db760f73f51ca5076e64232af0bd80250f0f6baf0989521117b1dd7bf` を記録し、NIHO側でマージ・配備されstg受入するまでは`EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED`をOFFのままにする。
 
 ExperienceがNIHO Host v1から消費するのは、現在本人の読取と既存Connect口座の限定readiness／再利用同意projectionだけである。提供者一覧・作成・更新、Connect口座の作成・接続・変更、Experienceの商品・公開APIは含まれない。NIHOの禁止APIを復活させたり、権限やscopeを広げたりしない。
 

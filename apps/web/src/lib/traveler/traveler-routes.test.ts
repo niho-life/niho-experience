@@ -45,6 +45,7 @@ vi.mock("google-auth-library", () => ({ GoogleAuth: class {
 vi.mock("@/lib/config", () => ({ config: state.config, isPreview: false }));
 vi.mock("@/lib/experience/store-server", () => ({
   travelerAccounts: () => state.travelers,
+  nihoAccountStatusStore: () => null,
   hostAccounts: () => null,
   hostAccountIdentities: () => null,
   hostInvitations: () => null,

@@ -13,13 +13,13 @@ const respond = (status: number, body: unknown): FetchLike => vi.fn(async () => 
 
 describe("NIHO account status client", () => {
   it("uses only the Experience service identity and strictly matches one response per requested ID", async () => {
-    const fetcher = respond(200, { statuses: [
-      { nihoUserId: NIHO_A, status: "active" },
+    const fetcher = respond(200, { results: [
+      { nihoUserId: NIHO_A, status: "active", currentUserId: null },
       { nihoUserId: NIHO_B, status: "merged", currentUserId: "niho-user-synthetic-current" },
     ] });
     const client = createNihoAccountStatusClient({ nihoWebOrigin: ORIGIN, serviceIdToken: SERVICE_TOKEN, fetch: fetcher });
-    expect(await client.getStatuses([NIHO_A, NIHO_B])).toEqual({ ok: true, statuses: [
-      { nihoUserId: NIHO_A, status: "active" },
+    expect(await client.getStatuses([NIHO_A, NIHO_B])).toEqual({ ok: true, results: [
+      { nihoUserId: NIHO_A, status: "active", currentUserId: null },
       { nihoUserId: NIHO_B, status: "merged", currentUserId: "niho-user-synthetic-current" },
     ] });
     expect(fetcher).toHaveBeenCalledWith(`${ORIGIN}${NIHO_ACCOUNT_STATUS_PATH}`, expect.objectContaining({
@@ -38,11 +38,15 @@ describe("NIHO account status client", () => {
     const client = (body: unknown, status = 200) => createNihoAccountStatusClient({
       nihoWebOrigin: ORIGIN, serviceIdToken: SERVICE_TOKEN, fetch: respond(status, body),
     });
-    expect(await client({ statuses: [{ nihoUserId: NIHO_A, status: "active" }] }).getStatuses([NIHO_A, NIHO_B]))
+    expect(await client({ results: [{ nihoUserId: NIHO_A, status: "active", currentUserId: null }] }).getStatuses([NIHO_A, NIHO_B]))
       .toEqual({ ok: false, kind: "unexpected_response", status: 200 });
-    expect(await client({ statuses: [{ nihoUserId: NIHO_A, status: "suspended" }] }).getStatuses([NIHO_A]))
+    expect(await client({ results: [
+      { nihoUserId: NIHO_B, status: "active", currentUserId: null },
+      { nihoUserId: NIHO_A, status: "active", currentUserId: null },
+    ] }).getStatuses([NIHO_A, NIHO_B])).toEqual({ ok: false, kind: "unexpected_response", status: 200 });
+    expect(await client({ results: [{ nihoUserId: NIHO_A, status: "suspended", currentUserId: null }] }).getStatuses([NIHO_A]))
       .toEqual({ ok: false, kind: "unexpected_response", status: 200 });
-    expect(await client({ statuses: [{ nihoUserId: NIHO_A, status: "merged", currentUserId: `trv_${"a".repeat(32)}` }] }).getStatuses([NIHO_A]))
+    expect(await client({ results: [{ nihoUserId: NIHO_A, status: "merged", currentUserId: `trv_${"a".repeat(32)}` }] }).getStatuses([NIHO_A]))
       .toEqual({ ok: false, kind: "unexpected_response", status: 200 });
     expect(await client({}, 503).getStatuses([NIHO_A])).toEqual({ ok: false, kind: "unavailable", status: 503 });
     expect(await createNihoAccountStatusClient({ nihoWebOrigin: ORIGIN, serviceIdToken: SERVICE_TOKEN, fetch: vi.fn(async () => { throw new Error("offline"); }) }).getStatuses([NIHO_A]))
@@ -50,7 +54,7 @@ describe("NIHO account status client", () => {
   });
 
   it("rejects malformed requests before calling NIHO", async () => {
-    const fetcher = respond(200, { statuses: [] });
+    const fetcher = respond(200, { results: [] });
     const client = createNihoAccountStatusClient({ nihoWebOrigin: ORIGIN, serviceIdToken: SERVICE_TOKEN, fetch: fetcher });
     expect(await client.getStatuses([])).toEqual({ ok: false, kind: "invalid_request" });
     expect(await client.getStatuses(["hst_" + "0".repeat(32)])).toEqual({ ok: false, kind: "invalid_request" });

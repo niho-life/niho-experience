@@ -18,7 +18,7 @@
 - NIHOの応答が`active`なら続行する。`inactive`または`unknown`なら対象NIHO IDの全ホスト・Writer・旅行者セッションを失効し、結び付け・アカウント・記事・予約などのデータは残す。復帰してNIHOへログインすると既存の結び付けを再利用できる。
 - `merged`では`host_account_identities`と`traveler_accounts`の現在IDを統合先へ移す。過去の`host_account_identity_events`は統合元と先を追記で記録し、記事・写真・公開版などの`hst_`作成者IDや他の監査履歴は更新しない。旅行者の`trv_`と予約データも同じまま。
 - 統合先に別の有効なホストまたは旅行者の結び付けがある場合、その衝突する結び付けは移さず、該当する旧IDセッションを失効させる。NIHO user IDをログに出さず、運営向けログに衝突種別を記録して手動照合を求める。
-- API・OIDC・時間切れ・不正応答ではセッションを失効させず、確認時刻も進めない。次の利用時に再試行する。状態API契約 `experience-niho-account-status-api` v1.0.0 はniho-app #20988向け提案で、NIHOのsource SHA固定とstg受入までflagを開かない。
+- API・OIDC・時間切れ・不正応答ではセッションを失効させず、確認時刻も進めない。次の利用時に再試行する。状態API契約 `experience-niho-account-status-api` v1.0.0 はniho-app #20988 / PR #21003のHost common contract v2.2.0に合わせた提案で、NIHOのmerge・stg配備・受入までflagを開かない。
 
 失敗は `/host/auth/error?reason=` の固定の理由だけを運ぶ。`expired`（10 分の cookie が切れた）・`state`・`denied`（NIHO で取り消した）・`rejected`（code が無効・期限切れ、`identity` が 4xx）・`unavailable`（NIHO や DB に届かない、`identity` の形が違う）。NIHO の障害は「権限がない」と断定しない。
 

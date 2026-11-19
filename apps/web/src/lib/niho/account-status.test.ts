@@ -49,7 +49,7 @@ describe("NIHO account status check", () => {
 
   it("ends the current session when NIHO confirms it is inactive", async () => {
     const store = fakeStore({ kind: "ended", conflicts: [] });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ statuses: [{ nihoUserId: NIHO_ID, status: "inactive" }] }), {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ results: [{ nihoUserId: NIHO_ID, status: "inactive", currentUserId: null }] }), {
       status: 200,
       headers: { "content-type": "application/json" },
     })));

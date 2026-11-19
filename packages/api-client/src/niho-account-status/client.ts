@@ -1,15 +1,15 @@
 import "server-only";
 import { normalizeOrigin, type FetchLike } from "../client.ts";
 
-export const NIHO_ACCOUNT_STATUS_PATH = "/api/experience-host/account-status";
+export const NIHO_ACCOUNT_STATUS_PATH = "/api/experience-host/account-statuses";
 export const NIHO_ACCOUNT_STATUS_BATCH_LIMIT = 100;
 
 export type NihoAccountStatusEntry =
-  | { readonly nihoUserId: string; readonly status: "active" | "inactive" | "unknown" }
+  | { readonly nihoUserId: string; readonly status: "active" | "inactive" | "unknown"; readonly currentUserId: null }
   | { readonly nihoUserId: string; readonly status: "merged"; readonly currentUserId: string };
 
 export type NihoAccountStatusResult =
-  | { readonly ok: true; readonly statuses: readonly NihoAccountStatusEntry[] }
+  | { readonly ok: true; readonly results: readonly NihoAccountStatusEntry[] }
   | { readonly ok: false; readonly kind: "invalid_request" | "unavailable" | "unexpected_response"; readonly status?: number };
 
 type Options = { readonly nihoWebOrigin: string; readonly serviceIdToken: string; readonly fetch?: FetchLike; readonly timeoutMs?: number };
@@ -21,24 +21,26 @@ const isNihoUserId = (value: unknown): value is string =>
 
 function decode(value: unknown, requested: readonly string[]): readonly NihoAccountStatusEntry[] | null {
   if (typeof value !== "object" || value === null || Array.isArray(value) || Object.keys(value).length !== 1) return null;
-  const statuses = (value as { statuses?: unknown }).statuses;
-  if (!Array.isArray(statuses) || statuses.length !== requested.length) return null;
-  const found = new Map<string, NihoAccountStatusEntry>();
-  for (const item of statuses) {
+  const results = (value as { results?: unknown }).results;
+  if (!Array.isArray(results) || results.length !== requested.length) return null;
+  const parsedResults: NihoAccountStatusEntry[] = [];
+  const found = new Set<string>();
+  for (const [index, item] of results.entries()) {
     if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
     const row = item as Record<string, unknown>;
     if (!isNihoUserId(row.nihoUserId) || found.has(row.nihoUserId)) return null;
+    if (row.nihoUserId !== requested[index]) return null;
     let parsed: NihoAccountStatusEntry;
     if (row.status === "active" || row.status === "inactive" || row.status === "unknown") {
-      if (Object.keys(row).length !== 2) return null;
-      parsed = { nihoUserId: row.nihoUserId, status: row.status };
+      if (Object.keys(row).length !== 3 || row.currentUserId !== null) return null;
+      parsed = { nihoUserId: row.nihoUserId, status: row.status, currentUserId: null };
     } else if (row.status === "merged" && isNihoUserId(row.currentUserId) && row.currentUserId !== row.nihoUserId && Object.keys(row).length === 3) {
       parsed = { nihoUserId: row.nihoUserId, status: "merged", currentUserId: row.currentUserId };
     } else return null;
-    found.set(parsed.nihoUserId, parsed);
+    found.add(parsed.nihoUserId);
+    parsedResults.push(parsed);
   }
-  if (requested.some((id) => !found.has(id))) return null;
-  return requested.map((id) => found.get(id)!);
+  return parsedResults;
 }
 
 /** NIHO account status is read server-to-server with Experience's fixed-audience identity, never a user bearer. */
@@ -73,10 +75,10 @@ export function createNihoAccountStatusClient(options: Options) {
       let value: unknown;
       try { value = await response.json() as unknown; }
       catch { return { ok: false, kind: "unexpected_response", status: response.status }; }
-      const statuses = decode(value, nihoUserIds);
-      return statuses === null
+      const results = decode(value, nihoUserIds);
+      return results === null
         ? { ok: false, kind: "unexpected_response", status: response.status }
-        : { ok: true, statuses };
+        : { ok: true, results };
     },
   };
 }

@@ -12,16 +12,17 @@ import { experienceHostServiceIdToken } from "./service-identity";
 export async function checkNihoAccountStatusSession(
   kind: NihoAccountStatusSessionKind,
   sessionToken: string,
-  store: NihoAccountStatusStore | null = nihoAccountStatusStore(),
+  store?: NihoAccountStatusStore | null,
 ): Promise<boolean> {
   if (!config.nihoAccountStatusCheckEnabled) return true;
-  if (!store) return true;
+  const statusStore = store === undefined ? nihoAccountStatusStore() : store;
+  if (!statusStore) return true;
   const nowUtc = new Date().toISOString();
-  const check = await store.prepareCheck({ kind, sessionToken, nowUtc });
+  const check = await statusStore.prepareCheck({ kind, sessionToken, nowUtc });
   if (check.kind === "session-ended") return false;
   if (check.kind !== "check") return true;
 
-  let statuses;
+  let response;
   try {
     const serviceIdToken = await experienceHostServiceIdToken();
     const client = createNihoAccountStatusClient({
@@ -29,14 +30,14 @@ export async function checkNihoAccountStatusSession(
       serviceIdToken,
       fetch,
     });
-    statuses = await client.getStatuses([check.nihoUserId]);
+    response = await client.getStatuses([check.nihoUserId]);
   } catch {
     return true;
   }
-  if (!statuses.ok) return true;
-  const result = statuses.statuses[0];
+  if (!response.ok) return true;
+  const result = response.results[0];
   if (!result || result.nihoUserId !== check.nihoUserId) return true;
-  const applied = await store.applyStatus({
+  const applied = await statusStore.applyStatus({
     kind,
     sessionToken,
     nihoUserId: check.nihoUserId,
@@ -51,7 +52,7 @@ export async function checkNihoAccountStatusSession(
   if (applied.kind === "ended") return false;
   if (applied.kind === "stale") {
     // A parallel request may have completed this same transition while NIHO was responding.
-    return (await store.prepareCheck({ kind, sessionToken, nowUtc: new Date().toISOString() })).kind !== "session-ended";
+    return (await statusStore.prepareCheck({ kind, sessionToken, nowUtc: new Date().toISOString() })).kind !== "session-ended";
   }
   return true;
 }
