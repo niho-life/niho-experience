@@ -62,4 +62,14 @@ describe("WriteAutosaveQueue", () => {
     expect(queue.state).toMatchObject({ phase: "conflict", dirty: true, revision: 8 });
     expect(save).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps the latest draft in memory and freezes when current writer authority was revoked", async () => {
+    const save = vi.fn().mockRejectedValue(new WriteApiError("forbidden", 403));
+    const queue = new WriteAutosaveQueue<string>("initial", 2, save, () => undefined, 60_000);
+    queue.update("kept draft");
+    await expect(queue.flush()).resolves.toBe(false);
+    expect(queue.latest).toBe("kept draft");
+    expect(queue.state).toMatchObject({ phase: "permission-denied", dirty: true, revision: 2 });
+    await expect(queue.retry()).resolves.toBe(false);
+  });
 });

@@ -60,7 +60,7 @@ export async function readExperienceHostSession(token: string | undefined, store
     authenticatedAtUtc: session.authenticatedAtUtc,
     idleExpiresAtUtc: session.idleExpiresAtUtc,
     absoluteExpiresAtUtc: session.absoluteExpiresAtUtc,
-    displayName: session.email,
+    displayName: session.email ?? "NIHO アカウント",
     iconUrl: null,
   };
 }

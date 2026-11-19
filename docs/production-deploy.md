@@ -112,6 +112,7 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED` | `TRAVELER_ACCOUNTS_ENABLED` | ホストの画面・DB・Experienceホストアカウント（`HOST_ACCOUNTS_ENABLED`）。NIHO の audience は host console の基礎設定 | `TERMS_URL`（任意）→ `EXPERIENCE_TERMS_URL` | — | — |
 | `EXPERIENCE_TRAVELER_LINE_ENABLED` | `TRAVELER_LINE_ENABLED` | `TRAVELER_ACCOUNTS_ENABLED`。**NIHO の LINE プロバイダーの切替（2027-01）のあとに ON**（いまは LINE の同意画面に切替前のプロバイダー名が出て、LINE の `sub` はプロバイダーごとに違うので、いま作ったアカウントが切替後に別人扱いになりやすい） | — | — | — |
 | `EXPERIENCE_HOST_NIHO_LOGIN_ENABLED` | `HOST_NIHO_LOGIN_ENABLED` | ホストの画面・DB・Experienceホストアカウント（`HOST_ACCOUNTS_ENABLED`）。NIHO の audience は host console の基礎設定 | — | — | — |
+| `EXPERIENCE_NIHO_WRITER_ENABLED` | `NIHO_WRITER_ENABLED` | ホストの画面・DB・Experienceホストアカウント・NIHOログイン・DB記事公開元・記事認可API・Guide Admin API | `NIHO_ARTICLE_AUTHORITY_ORIGIN`、`NIHO_ARTICLE_AUTHORITY_AUDIENCE`、`NIHO_ARTICLE_LINKS_AUDIENCE` | — | — |
 | `EXPERIENCE_HOST_TEAM_ENABLED` | `HOST_TEAM_ENABLED` | ホストの画面・DB・Experienceホストアカウント | — | — | — |
 | `EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED` | `OCCURRENCE_ASSIGNMENT_ENABLED` | ホストの画面・DB・完全代行の販売 | — | — | — |
 | `EXPERIENCE_JAPANESE_SITE_ENABLED` | `JAPANESE_SITE_ENABLED` | ホストの画面・DB（配線のため。機能は公開サイト） | — | — | — |
@@ -224,10 +225,11 @@ Admin代理公開は、現在のAdmin session検証とExperience migration `0058
 | `ARTICLE_AUTHORITY_API_ENABLED` | 現在OWNER確認API | DB、`ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS`、`NIHO_ARTICLE_AUTHORITY_ORIGIN` / `AUDIENCE` |
 | `GUIDE_ADMIN_API_ENABLED` | NIHO Admin BFFからの限定writer/category管理API | ホストの画面・DB、`GUIDE_ADMIN_AUDIENCE`（Cloud Run service URL）、`GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL`（NIHO API runtime SA 1つ） |
 | `HOST_ARTICLE_LINKS_ENABLED` | ホスト設定のNIHO正本への招待・取消 | ホスト画面、`NIHO_ARTICLE_AUTHORITY_ORIGIN`、`NIHO_ARTICLE_LINKS_AUDIENCE` |
+| `NIHO_WRITER_ENABLED` | NIHO writerの初回hst作成、`/write`、writer/host双方の記事連携S2S | ホスト画面、DB、ホストアカウント、NIHOログイン、DB記事公開元、`NIHO_ARTICLE_AUTHORITY_ORIGIN` / `AUDIENCE`、`NIHO_ARTICLE_LINKS_AUDIENCE`。migration `0086` とNIHO #20737およびhost S2S provider routeを先行配備 |
 | `DATABASE_GUIDE_PUBLICATIONS_ENABLED` | 公開元をExperience DBへ切替 | DB、専用private bucket名の`GUIDE_MEDIA_BUCKET` |
 
 
-許可サービスアカウントはセミコロン区切りで複数を指定する。gcloudのカンマ区切りと衝突せず、単一のenv値として渡し、runtimeでも同じリストを解釈する。サービス専用APIのaudienceは配備先の固定site URL。ホスト用`NIHO_ARTICLE_LINKS_AUDIENCE`はNIHOの既存writer resolver用audienceと一致させ、サービス専用の`NIHO_ARTICLE_AUTHORITY_AUDIENCE`と混同しない。
+許可サービスアカウントはセミコロン区切りで複数を指定する。gcloudのカンマ区切りと衝突せず、単一のenv値として渡し、runtimeでも同じリストを解釈する。NIHOが記事認可APIとGuide Admin APIを利用する配備では、両APIの受信audienceに同じCloud Run URL（`GUIDE_ADMIN_AUDIENCE`）を使う。記事認可APIのみを配備する場合の受信audienceは固定site URL。ホスト用`NIHO_ARTICLE_LINKS_AUDIENCE`はNIHOの既存writer resolver用audienceと一致させ、サービス専用の`NIHO_ARTICLE_AUTHORITY_AUDIENCE`と混同しない。
 
 NIHO API → Experience API → 相互認証と合成の負例確認 → ホスト入口 → 公開元切替の順で開く。カテゴリ/writer管理には、NIHO Admin BFFが配備済みでExperienceの限定Guide Admin APIを呼べる状態を先に確認し、`GUIDE_ADMIN_API_ENABLED` はNIHOの正規runtime service accountだけを許可してから開く。writer解除・取消・OWNER変更・体験停止の次読取、既存カテゴリ停止後の記事維持、公開停止後の写真404、依存障害での関連表示非表示を確認する。owner指示により画面受入・実機操作は省略できる。Secret値の用意は各repoのowner専用手順に従い、AIが値を取得・表示しない。
 

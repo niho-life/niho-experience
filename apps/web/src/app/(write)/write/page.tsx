@@ -16,12 +16,12 @@ export default async function WriteIndexPage({ searchParams }: { readonly search
   if (!query.ok) return <State message="URL の体験指定が正しくありません。" />;
   const returnPath = query.experience ? `/write?experience=${encodeURIComponent(query.experience)}` : "/write";
   const access = await loadWritePageAccess(returnPath);
-  if (!access.ok) return <State message={access.reason === "forbidden" ? "記事を書ける提供者 OWNER がありません。ホスト画面で権限を確認してください。" : access.reason === "preparing" ? "記事機能を準備中です。公開サイトのデータ切替が完了するまで、保存や公開は受け付けません。" : "記事を読み込めません。時間をおいてお試しください。"} />;
+  if (!access.ok) return <State message={access.reason === "forbidden" ? "現在の記事ライター権限、または記事を書ける提供者 OWNER 権限がありません。招待・権限の状態を確認してください。" : access.reason === "preparing" ? "記事機能を準備中です。公開サイトのデータ切替が完了するまで、保存や公開は受け付けません。" : "記事の権限を確認できません。入力や下書きは変更されていません。時間をおいてお試しください。"} />;
   let guides: ReturnType<typeof privateGuideArticle>[] | null = null;
   let categories: Awaited<ReturnType<typeof access.context.repository.listActiveCategories>> = [];
   try {
     guides = (await access.context.repository.listArticles(access.context.actorId)).map(privateGuideArticle);
   } catch { return <State message="記事を読み込めません。時間をおいてお試しください。" />; }
   try { categories = await access.context.repository.listActiveCategories(); } catch { /* category labels are optional list chrome */ }
-  return <WriteList chrome={{ account: access.context.account, providers: access.context.ownerProviders, nihoAppUrl: config.nihoWebOrigin, articles: guides ?? [] }} categories={categories} experience={query.experience} />;
+  return <WriteList chrome={{ account: access.context.account, providers: access.context.ownerProviders, writerStatus: access.context.writerStatus, nihoAppUrl: config.nihoWebOrigin, articles: guides ?? [] }} categories={categories} experience={query.experience} />;
 }

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StoreConflictError } from "@niho-experience/experience-store";
 
 const state = vi.hoisted(() => ({
-  config: { apiMode: "mock", guidePublicSource: "static", siteUrl: "https://experience.example.test" },
+  config: { apiMode: "mock", guidePublicSource: "static", siteUrl: "https://experience.example.test", nihoWriterEnabled: false },
   providers: { status: "signed-out" } as unknown,
   repository: {
     listActiveCategories: vi.fn(), createArticle: vi.fn(), listArticles: vi.fn(), getArticle: vi.fn(), saveDraft: vi.fn(),
@@ -10,6 +10,8 @@ const state = vi.hoisted(() => ({
     getReadyMediaAsset: vi.fn(), listReadyMediaAssets: vi.fn(), confirmMediaAssetWebRights: vi.fn(), revokeMediaAsset: vi.fn(),
   },
   products: { listProducts: vi.fn() },
+  readNihoUserId: vi.fn(),
+  checkAuthority: vi.fn(),
   storage: null as null | { write: ReturnType<typeof vi.fn>; read: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> },
 }));
 
@@ -23,7 +25,9 @@ vi.mock("@/lib/host/server", () => ({
 vi.mock("@/lib/experience/store-server", () => ({
   guideRepository: () => state.repository,
   experiencePublicationRepository: () => state.products,
+  hostAccountIdentities: () => ({ readNihoUserId: state.readNihoUserId }),
 }));
+vi.mock("@/lib/article-authority/server", () => ({ checkNihoArticleAuthority: state.checkAuthority }));
 vi.mock("@/lib/guide-cover-storage", () => ({ guideCoverStorage: () => state.storage }));
 vi.mock("@/lib/guide-cover-image", () => ({
   GuideCoverImageError: class extends Error { readonly code = "invalid_image"; },
@@ -75,6 +79,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.config.apiMode = "mock";
   state.config.guidePublicSource = "static";
+  state.config.nihoWriterEnabled = false;
   state.providers = { status: "signed-out" };
   state.storage = { write: vi.fn().mockResolvedValue(undefined), read: vi.fn(), remove: vi.fn().mockResolvedValue(undefined) };
   state.repository.createArticle.mockResolvedValue(ARTICLE);
@@ -86,6 +91,8 @@ beforeEach(() => {
   state.repository.commitPublication.mockResolvedValue({ slug: ARTICLE.slug, visibility: "PUBLIC" });
   state.repository.stopPublication.mockResolvedValue({ ...ARTICLE, status: "STOPPED", revision: 3 });
   state.products.listProducts.mockResolvedValue([]);
+  state.readNihoUserId.mockResolvedValue("niho-writer-a");
+  state.checkAuthority.mockResolvedValue({ version: 1, writer: true, links: [] });
 });
 
 describe("/write API authority and optimistic writes", () => {
@@ -99,6 +106,27 @@ describe("/write API authority and optimistic writes", () => {
 
   it("accepts the bounded client create contract", () => {
     expect(parseWriteCreate(createBody)).not.toBeNull();
+    expect(parseWriteCreate({ ...createBody, subject: { kind: "WRITER" } })).toBeNull();
+    expect(parseWriteCreate({ id: ID, subject: { kind: "WRITER" }, slug: "morning-guide", title: "Morning guide" })).not.toBeNull();
+  });
+
+  it("creates a personal WRITER article only from the linked hst actor with current NIHO writer authority", async () => {
+    const actorId = `hst_${"a".repeat(32)}`;
+    state.config.nihoWriterEnabled = true;
+    state.providers = { status: "ok", nihoUserId: actorId, providers: [] };
+    const writerArticle = { ...ARTICLE, subject: { kind: "WRITER" as const } };
+    state.repository.createArticle.mockResolvedValue(writerArticle);
+    state.repository.getArticle.mockResolvedValue(writerArticle);
+    const body = { id: ID, subject: { kind: "WRITER" }, slug: "morning-guide", title: "Morning guide" };
+    const created = await createGuide(jsonRequest("https://experience.example.test/write/api/guides", body));
+    expect(created.status).toBe(201);
+    expect(state.repository.createArticle).toHaveBeenCalledWith(actorId, expect.objectContaining({ subject: { kind: "WRITER" } }));
+
+    state.repository.createArticle.mockClear();
+    state.checkAuthority.mockResolvedValueOnce({ version: 1, writer: false, links: [] });
+    const revoked = await createGuide(jsonRequest("https://experience.example.test/write/api/guides", { ...body, id: "00000000-0000-4000-8000-000000000002" }));
+    expect(revoked.status).toBe(403);
+    expect(state.repository.createArticle).not.toHaveBeenCalled();
   });
   it("answers 401 before parsing a signed-out mutation", async () => {
     const response = await createGuide(jsonRequest("https://experience.example.test/write/api/guides", createBody));

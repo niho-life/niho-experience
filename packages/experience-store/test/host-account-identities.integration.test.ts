@@ -54,6 +54,55 @@ const events = async (pool: Pool, hostAccountId: string): Promise<readonly strin
     .rows.map((row) => `${row.event_kind}/${row.via}${row.reason ? `/${row.reason}` : ""}`);
 
 describe("host account NIHO identities", () => {
+  it("atomically provisions one email-less hst writer and reuses an existing linked host account", async () => {
+    await withIdentities(async ({ pool, accounts, identities }) => {
+      const [first, second] = await Promise.all([
+        identities.startWriterSessionForNihoIdentity({ nihoUserId: NIHO_A, authenticatedAtUtc: at(0), nowUtc: at(MINUTE) }),
+        identities.startWriterSessionForNihoIdentity({ nihoUserId: NIHO_A, authenticatedAtUtc: at(0), nowUtc: at(MINUTE) }),
+      ]);
+      assert.equal(first.kind, "ok");
+      assert.equal(second.kind, "ok");
+      if (first.kind !== "ok" || second.kind !== "ok") return;
+      const firstSession = await accounts.readSession({ sessionToken: first.sessionToken, nowUtc: at(2 * MINUTE) });
+      const secondSession = await accounts.readSession({ sessionToken: second.sessionToken, nowUtc: at(2 * MINUTE) });
+      assert.equal(firstSession?.hostAccountId, secondSession?.hostAccountId);
+      assert.equal(firstSession?.email, null);
+      assert.equal(await identities.readNihoUserId({ hostAccountId: firstSession!.hostAccountId }), NIHO_A);
+      assert.deepEqual(await events(pool, firstSession!.hostAccountId), ["LINKED/WRITER"]);
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM host_accounts WHERE email IS NULL")).rows[0]!.n, 1);
+
+      const existing = await provision(accounts, "existing-writer@example.com");
+      assert.deepEqual(await identities.linkNihoIdentity({ hostAccountId: existing, nihoUserId: NIHO_B, proof: { kind: "OPS" }, nowUtc: at(3 * MINUTE) }), { kind: "linked" });
+      const opened = await identities.startWriterSessionForNihoIdentity({ nihoUserId: NIHO_B, authenticatedAtUtc: at(3 * MINUTE), nowUtc: at(4 * MINUTE) });
+      assert.equal(opened.kind, "ok");
+      if (opened.kind === "ok") {
+        assert.equal((await accounts.readSession({ sessionToken: opened.sessionToken, nowUtc: at(5 * MINUTE) }))?.hostAccountId, existing);
+      }
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM host_accounts")).rows[0]!.n, 2);
+
+      await pool.query("UPDATE host_accounts SET status='SUSPENDED', suspended_at=$2, updated_at=$2 WHERE id=$1", [existing, at(6 * MINUTE)]);
+      assert.deepEqual(
+        await identities.startWriterSessionForNihoIdentity({ nihoUserId: NIHO_B, authenticatedAtUtc: at(6 * MINUTE), nowUtc: at(7 * MINUTE) }),
+        { kind: "account-suspended" },
+      );
+    });
+  });
+
+  it("does not let an email-less writer unlink their only NIHO sign-in method", async () => {
+    await withIdentities(async ({ identities }) => {
+      const opened = await identities.startWriterSessionForNihoIdentity({ nihoUserId: NIHO_A, authenticatedAtUtc: at(0), nowUtc: at(MINUTE) });
+      assert.equal(opened.kind, "ok");
+      if (opened.kind !== "ok") return;
+
+      assert.deepEqual(await identities.unlinkNihoIdentity({
+        hostAccountId: opened.hostAccountId,
+        proof: { kind: "SESSION", sessionRef: opened.sessionRef, emailSignInAvailable: true },
+        nowUtc: at(2 * MINUTE),
+      }), { kind: "last-sign-in-method" });
+      assert.equal(await identities.readNihoUserId({ hostAccountId: opened.hostAccountId }), NIHO_A);
+    });
+  });
+
   it("binds a NIHO account, opens a session for it, and leaves the host account's roles and history as they were", async () => {
     await withIdentities(async ({ pool, accounts, identities }) => {
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-synthetic')");

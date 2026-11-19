@@ -188,7 +188,8 @@ describe("PostgreSQL OWNER guide writes", { skip: databaseUrl === undefined ? "T
       assert.equal((await repository.listArticles(secondOwnerId)).some((article) => article.id === created.id), true);
       assert.deepEqual(await repository.listArticles(editorId), []);
       assert.deepEqual(await repository.listArticles(viewerId), []);
-      assert.equal((await repository.getArticle(actorId, created.id)).subject.providerId, "provider-a");
+      const owned = await repository.getArticle(actorId, created.id);
+      assert.equal(owned.subject.kind === "PROVIDER" && owned.subject.providerId, "provider-a");
       await assert.rejects(() => repository.getArticle(editorId, created.id), StoreAccessDeniedError);
       await assert.rejects(() => repository.getArticle(viewerId, created.id), StoreAccessDeniedError);
       await assert.rejects(() => repository.getArticle("hst_other_owner", created.id), StoreAccessDeniedError);

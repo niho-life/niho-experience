@@ -4,7 +4,9 @@ import { NextResponse } from "next/server";
 import {
   StoreAccessDeniedError,
   StoreConflictError,
+  StoreGuideProductLinkUnavailableError,
   StoreNotFoundError,
+  StorePermissionDeniedError,
   StoreValidationError,
   type ExperiencePublicationRepository,
   type GuideArticleRecord,
@@ -18,7 +20,8 @@ import {
 import { config } from "@/lib/config";
 import { OPERATOR_ASSERTION_HEADER, openOperatorAssertion, operatorMutationAllowed } from "@/lib/admin/operator-cli";
 import { adminEmailAllowed } from "@/lib/admin/google-login";
-import { experiencePublicationRepository, guideOfficeRepository, guideRepository } from "@/lib/experience/store-server";
+import { experiencePublicationRepository, guideOfficeRepository, guideRepository, hostAccountIdentities } from "@/lib/experience/store-server";
+import { checkNihoArticleAuthority } from "@/lib/article-authority/server";
 import { clearSessionCookie, loadHostProvidersFresh, siteOrigin } from "@/lib/host/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { readBoundedJson, ResponseBodyTooLarge } from "@/lib/read-bounded-json";
@@ -48,6 +51,7 @@ export type WriteContext = {
   /** Safe client-facing identity projection. Private NIHO ids and email stay outside /write UI. */
   readonly ownerProviders: readonly { readonly id: string; readonly displayName: string }[];
   readonly ownerProviderIds: readonly string[];
+  readonly writerStatus: "disabled" | "authorized" | "revoked" | "unavailable";
   readonly repository: WriteGuideRepository;
   readonly products: WriteProductRepository;
 };
@@ -100,7 +104,7 @@ export async function loadWriteContext(providerId?: string): Promise<
       const repository = guideOfficeRepository();
       const products = experiencePublicationRepository();
       if (!repository || !products) return { ok: false, response: writeJson({ error: "unavailable" }, 503) };
-      return { ok: true, value: { actorId: assertion.actorId, office: true, ownerProviders: [], ownerProviderIds: [], repository, products } };
+      return { ok: true, value: { actorId: assertion.actorId, office: true, ownerProviders: [], ownerProviderIds: [], writerStatus: "disabled", repository, products } };
     }
   }
   const providers = await loadHostProvidersFresh();
@@ -113,7 +117,18 @@ export async function loadWriteContext(providerId?: string): Promise<
   }
   if (providers.status === "error") return { ok: false, response: writeJson({ error: "unavailable" }, 503) };
   const owners = providers.providers.filter((provider) => provider.memberRole === "OWNER");
-  if (owners.length === 0 || (providerId !== undefined && !owners.some((provider) => provider.id === providerId))) {
+  let writerStatus: WriteContext["writerStatus"] = "disabled";
+  if (config.nihoWriterEnabled) {
+    try {
+      const identities = hostAccountIdentities();
+      const nihoUserId = providers.nihoUserId.startsWith("hst_") && identities
+        ? await identities.readNihoUserId({ hostAccountId: providers.nihoUserId })
+        : providers.nihoUserId;
+      writerStatus = nihoUserId && (await checkNihoArticleAuthority(nihoUserId, [])).writer ? "authorized" : "revoked";
+    } catch { writerStatus = "unavailable"; }
+  }
+  if ((owners.length === 0 && writerStatus !== "authorized") || (providerId !== undefined && !owners.some((provider) => provider.id === providerId))) {
+    if (owners.length === 0 && writerStatus === "unavailable") return { ok: false, response: writeJson({ error: "authority_unavailable" }, 503) };
     return { ok: false, response: writeJson({ error: "forbidden" }, 403) };
   }
   const repository = guideRepository();
@@ -125,6 +140,7 @@ export async function loadWriteContext(providerId?: string): Promise<
       actorId: providers.nihoUserId,
       ownerProviders: owners.map((provider) => ({ id: provider.id, displayName: provider.displayName })),
       ownerProviderIds: owners.map((provider) => provider.id),
+      writerStatus,
       repository,
       products,
     },
@@ -134,6 +150,8 @@ export async function loadWriteContext(providerId?: string): Promise<
 export function writeApiError(error: unknown): NextResponse {
   if (error instanceof StoreValidationError) return writeJson({ error: "invalid_input" }, 400);
   if (error instanceof StoreConflictError) return writeJson({ error: "conflict" }, 409);
+  if (error instanceof StorePermissionDeniedError) return writeJson({ error: "forbidden" }, 403);
+  if (error instanceof StoreGuideProductLinkUnavailableError) return writeJson({ error: "guide_product_link_unavailable" }, 422);
   // An article outside this actor's current OWNER scope is indistinguishable
   // from a missing one. Provider selection is rejected earlier with 403.
   if (error instanceof StoreAccessDeniedError || error instanceof StoreNotFoundError) return writeJson({ error: "not_found" }, 404);
@@ -214,7 +232,7 @@ function parseLinks(value: unknown): readonly GuideProductLinkInput[] | null {
 
 export type WriteCreateInput = {
   readonly id: string;
-  readonly providerId: string;
+  readonly subject: { readonly kind: "WRITER" } | { readonly kind: "PROVIDER"; readonly providerId: string };
   readonly slug: string;
   readonly title: string;
   readonly description: string;
@@ -223,16 +241,26 @@ export type WriteCreateInput = {
 };
 
 export function parseWriteCreate(value: unknown): WriteCreateInput | null {
-  const body = objectWithOnly(value, ["id", "providerId", "slug", "title", "description", "categorySlug", "content"]);
-  if (!body || !UUID_V4.test(typeof body.id === "string" ? body.id : "") || typeof body.providerId !== "string"
+  const body = objectWithOnly(value, ["id", "providerId", "subject", "slug", "title", "description", "categorySlug", "content"]);
+  if (!body || !UUID_V4.test(typeof body.id === "string" ? body.id : "")
     || typeof body.slug !== "string" || typeof body.title !== "string"
     || (body.description !== undefined && typeof body.description !== "string")
     || (body.categorySlug !== undefined && typeof body.categorySlug !== "string")) return null;
   const content = body.content === undefined ? { markdown: "", language: "en" as const } : parseContent(body.content);
   if (!content) return null;
+  let subject: WriteCreateInput["subject"] | null = null;
+  if (body.subject !== undefined) {
+    const parsed = objectWithOnly(body.subject, ["kind", "providerId"]);
+    if (parsed?.kind === "WRITER" && Object.keys(parsed).length === 1) subject = { kind: "WRITER" };
+    else if (parsed?.kind === "PROVIDER" && typeof parsed.providerId === "string" && Object.keys(parsed).length === 2) subject = { kind: "PROVIDER", providerId: parsed.providerId };
+  } else if (typeof body.providerId === "string") {
+    // Backwards compatibility for the operator CLI and the OWNER-only client deployed before #481.
+    subject = { kind: "PROVIDER", providerId: body.providerId };
+  }
+  if (!subject || (body.subject !== undefined && body.providerId !== undefined)) return null;
   return {
     id: body.id as string,
-    providerId: body.providerId,
+    subject,
     slug: body.slug,
     title: body.title,
     description: (body.description as string | undefined) ?? "",
@@ -298,8 +326,9 @@ export function privateGuideArticle(article: GuideArticleRecord) {
 }
 
 function createFieldsMatch(article: GuideArticleRecord, input: WriteCreateInput): boolean {
-  return article.id === input.id && article.slug === input.slug && article.subject.kind === "PROVIDER"
-    && article.subject.providerId === input.providerId && article.title === input.title
+  const sameSubject = article.subject.kind === input.subject.kind
+    && (article.subject.kind !== "PROVIDER" || (input.subject.kind === "PROVIDER" && article.subject.providerId === input.subject.providerId));
+  return article.id === input.id && article.slug === input.slug && sameSubject && article.title === input.title
     && article.description === input.description && article.categorySlug === input.categorySlug
     && JSON.stringify(article.content) === JSON.stringify(input.content);
 }
@@ -316,9 +345,11 @@ export async function createGuideIdempotently(
 ): Promise<{ readonly article: GuideArticleRecord; readonly created: boolean; readonly experienceLinked: boolean }> {
   let link: GuideProductLinkInput | null = null;
   if (experienceSlug) {
-    const products = await context.products.listProducts({ providerId: input.providerId, nihoUserId: context.actorId });
-    const product = products.find((candidate) => candidate.slug === experienceSlug && candidate.status === "PUBLISHED");
-    if (product) link = { providerId: input.providerId, productId: product.id };
+    if (input.subject.kind === "PROVIDER") {
+      const products = await context.products.listProducts({ providerId: input.subject.providerId, nihoUserId: context.actorId });
+      const product = products.find((candidate) => candidate.slug === experienceSlug && candidate.status === "PUBLISHED");
+      if (product) link = { providerId: input.subject.providerId, productId: product.id };
+    }
   }
 
   let article: GuideArticleRecord;
@@ -327,7 +358,7 @@ export async function createGuideIdempotently(
     article = await context.repository.createArticle(context.actorId, {
       id: input.id,
       slug: input.slug,
-      subject: { kind: "PROVIDER", providerId: input.providerId },
+      subject: input.subject,
       title: input.title,
       description: input.description,
       ...(input.categorySlug === undefined ? {} : { categorySlug: input.categorySlug }),

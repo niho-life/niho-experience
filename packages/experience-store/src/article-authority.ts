@@ -15,6 +15,7 @@ export interface ArticleAuthorityCategory {
 
 export interface ArticleAuthorityCandidate {
   readonly providerId: string;
+  readonly productId: string;
   readonly slug: string;
   readonly title: string;
   readonly providerName: string;
@@ -61,11 +62,19 @@ export class ArticleAuthorityRepository {
          FROM experience_products p
          JOIN provider_memberships m
            ON m.provider_id=p.provider_id
-          AND m.niho_user_id=$2
           AND m.role='OWNER'
           AND m.active
         WHERE p.provider_id=$1
           AND p.status='PUBLISHED'
+          AND (
+            m.niho_user_id=$2
+            OR EXISTS (
+              SELECT 1 FROM host_account_identities identity
+                JOIN host_accounts account ON account.id=identity.host_account_id AND account.status='ACTIVE'
+               WHERE identity.host_account_id=m.niho_user_id
+                 AND identity.provider='NIHO' AND identity.subject=$2 AND identity.unlinked_at IS NULL
+            )
+          )
         HAVING count(*) > 0`,
       [providerId, ownerNihoUserId],
     );
@@ -101,7 +110,16 @@ export class ArticleAuthorityRepository {
       `SELECT DISTINCT m.provider_id
          FROM provider_memberships m
          JOIN experience_products p ON p.provider_id=m.provider_id AND p.status='PUBLISHED'
-        WHERE m.niho_user_id=$1 AND m.role='OWNER' AND m.active
+        WHERE m.role='OWNER' AND m.active
+          AND (
+            m.niho_user_id=$1
+            OR EXISTS (
+              SELECT 1 FROM host_account_identities identity
+                JOIN host_accounts account ON account.id=identity.host_account_id AND account.status='ACTIVE'
+               WHERE identity.host_account_id=m.niho_user_id
+                 AND identity.provider='NIHO' AND identity.subject=$1 AND identity.unlinked_at IS NULL
+            )
+          )
         ORDER BY m.provider_id`,
       [ownerNihoUserId],
     );
@@ -113,9 +131,15 @@ export class ArticleAuthorityRepository {
     if (providerIds.length > 32) throw new StoreValidationError("providerIds has too many entries.");
     providerIds.forEach(assertProviderId);
     const result = await this.pool.query<DbRow>(
-      `SELECT provider_id, niho_user_id
-         FROM provider_memberships
-        WHERE provider_id=ANY($1::text[]) AND role='OWNER' AND active`,
+      `SELECT membership.provider_id,
+              coalesce(identity.subject, membership.niho_user_id) AS niho_user_id
+         FROM provider_memberships membership
+         LEFT JOIN host_account_identities identity
+           ON identity.host_account_id=membership.niho_user_id
+          AND identity.provider='NIHO' AND identity.unlinked_at IS NULL
+         LEFT JOIN host_accounts account ON account.id=identity.host_account_id
+        WHERE membership.provider_id=ANY($1::text[]) AND membership.role='OWNER' AND membership.active
+          AND (identity.subject IS NULL OR account.status='ACTIVE')`,
       [providerIds],
     );
     const owners = new Map<string, Set<string>>();
@@ -135,7 +159,7 @@ export class ArticleAuthorityRepository {
     const query = input.query?.trim() ?? "";
     if (query.length > 100) throw new StoreValidationError("query is too long.");
     const result = await this.pool.query<DbRow>(
-      `SELECT p.provider_id, p.slug, p.public_title, p.seller_display_name
+      `SELECT p.provider_id, p.id AS product_id, p.slug, p.public_title, p.seller_display_name
          FROM experience_products p
         WHERE p.status='PUBLISHED'
           AND ($1::text='' OR p.public_title ILIKE '%' || $1 || '%' OR p.seller_display_name ILIKE '%' || $1 || '%')
@@ -158,6 +182,7 @@ export class ArticleAuthorityRepository {
       assertSlug(slug);
       return {
         providerId,
+        productId: stringValue(row, "product_id", 256),
         slug,
         title: stringValue(row, "public_title", 300),
         providerName: stringValue(row, "seller_display_name", 300),
@@ -170,7 +195,7 @@ export class ArticleAuthorityRepository {
     if (slugs.length > 32 || new Set(slugs).size !== slugs.length) throw new StoreValidationError("slugs is invalid.");
     slugs.forEach(assertSlug);
     const result = await this.pool.query<DbRow>(
-      `SELECT p.provider_id, p.slug, p.public_title, p.seller_display_name
+      `SELECT p.provider_id, p.id AS product_id, p.slug, p.public_title, p.seller_display_name
          FROM experience_products p
         WHERE p.status='PUBLISHED' AND p.slug=ANY($1::text[])
         ORDER BY p.slug, p.provider_id, p.id`,
@@ -183,6 +208,7 @@ export class ArticleAuthorityRepository {
       assertSlug(slug);
       return {
         providerId,
+        productId: stringValue(row, "product_id", 256),
         slug,
         title: stringValue(row, "public_title", 300),
         providerName: stringValue(row, "seller_display_name", 300),

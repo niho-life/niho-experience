@@ -3,7 +3,9 @@ import type { Pool, PoolClient } from "pg";
 import {
   StoreAccessDeniedError,
   StoreConflictError,
+  StoreGuideProductLinkUnavailableError,
   StoreNotFoundError,
+  StorePermissionDeniedError,
   StoreValidationError,
 } from "./errors.ts";
 import { isAdminActorId } from "./admin-sessions.ts";
@@ -49,7 +51,7 @@ export interface GuideCategory {
 export interface CreateGuideArticleInput {
   readonly id: string;
   readonly slug: string;
-  readonly subject: { readonly kind: "PROVIDER"; readonly providerId: string };
+  readonly subject: GuideSubject;
   readonly title: string;
   readonly description?: string;
   readonly categorySlug?: string;
@@ -107,7 +109,7 @@ export interface GuideProductLinkInput {
 export interface GuideArticleRecord {
   readonly id: string;
   readonly slug: string;
-  readonly subject: { readonly kind: "PROVIDER"; readonly providerId: string };
+  readonly subject: GuideSubject;
   readonly title: string;
   readonly description: string;
   readonly categorySlug?: string;
@@ -178,6 +180,22 @@ export interface PublicGuideFigure {
   readonly credit: string;
 }
 
+export interface GuideWriterAuthorityLink {
+  readonly providerId: string;
+  readonly inviterNihoUserId: string;
+}
+
+export interface GuideWriterAuthority {
+  readonly writer: boolean;
+  readonly links: readonly GuideWriterAuthorityLink[];
+}
+
+export type GuideWriterAuthorityCheck = (
+  actorId: GuideActorId,
+  providerIds: readonly string[],
+  queryable: Pool | PoolClient,
+) => Promise<GuideWriterAuthority>;
+
 const GUIDE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_MARKDOWN_LENGTH = 500_000;
@@ -205,7 +223,7 @@ const PUBLICATION_COLUMNS = `
   p.slug, p.subject_kind, p.subject_provider_id, p.category_slug,
   p.category_label_en, p.category_label_ja, p.category_display_order,
   p.title, p.description, p.content,
-  p.visibility, p.published_at`;
+  p.visibility, p.published_at, p.published_by_niho_user_id`;
 const FIRST_PUBLICATION_COLUMN = `
   (SELECT min(first_publication.published_at)
      FROM guide_publications first_publication
@@ -387,9 +405,8 @@ function draftProductLinksFromRow(row: DbRow): readonly GuideProductLinkInput[] 
 }
 
 function articleFromRow(row: DbRow): GuideArticleRecord {
-  if (stringValue(row, "subject_kind") !== "PROVIDER") {
-    throw new StoreAccessDeniedError();
-  }
+  const subjectKind = stringValue(row, "subject_kind");
+  if (subjectKind !== "PROVIDER" && subjectKind !== "WRITER") throw new StoreAccessDeniedError();
   const categorySlug = optionalString(row, "category_slug");
   const currentPublicationId = row.current_publication_id === null || row.current_publication_id === undefined
     ? undefined
@@ -399,7 +416,7 @@ function articleFromRow(row: DbRow): GuideArticleRecord {
   return {
     id: stringValue(row, "id"),
     slug: stringValue(row, "slug"),
-    subject: { kind: "PROVIDER", providerId: stringValue(row, "subject_provider_id") },
+    subject: subjectKind === "PROVIDER" ? { kind: "PROVIDER", providerId: stringValue(row, "subject_provider_id") } : { kind: "WRITER" },
     title: stringValue(row, "title"),
     description: stringValue(row, "description"),
     ...(categorySlug === undefined ? {} : { categorySlug }),
@@ -814,13 +831,14 @@ async function selectOwnedArticle(
     `SELECT ${ARTICLE_COLUMNS}
       FROM guide_articles a
        LEFT JOIN guide_publications p ON p.id=a.current_publication_id
-      WHERE a.id=$1 AND a.subject_kind='PROVIDER'`,
+      WHERE a.id=$1`,
     [articleId],
   );
   const row = result.rows[0];
   if (row === undefined) throw new StoreAccessDeniedError();
   const article = articleFromRow(row);
-  await requireCurrentOwner(client, article.subject.providerId, actorId, office);
+  if (article.subject.kind === "PROVIDER") await requireCurrentOwner(client, article.subject.providerId, actorId, office);
+  else if (stringValue(row, "creator_niho_user_id") !== actorId || office) throw new StoreAccessDeniedError();
   return article;
 }
 
@@ -834,24 +852,58 @@ async function getOwnedArticleForUpdate(
     `SELECT ${ARTICLE_COLUMNS}
       FROM guide_articles a
        LEFT JOIN guide_publications p ON p.id=a.current_publication_id
-      WHERE a.id=$1 AND a.subject_kind='PROVIDER'
+      WHERE a.id=$1
       FOR UPDATE OF a`,
     [articleId],
   );
   const row = result.rows[0];
   if (row === undefined) throw new StoreAccessDeniedError();
   const article = articleFromRow(row);
-  await requireCurrentOwner(client, article.subject.providerId, actorId, office);
+  if (article.subject.kind === "PROVIDER") await requireCurrentOwner(client, article.subject.providerId, actorId, office);
+  else if (stringValue(row, "creator_niho_user_id") !== actorId || office) throw new StoreAccessDeniedError();
   return article;
+}
+
+async function currentWriterAuthority(
+  check: GuideWriterAuthorityCheck | undefined,
+  actorId: GuideActorId,
+  providerIds: readonly string[],
+  queryable: Pool | PoolClient,
+): Promise<GuideWriterAuthority> {
+  if (!check) throw new StorePermissionDeniedError();
+  const authority = await check(actorId, [...new Set(providerIds)].sort(), queryable);
+  if (!authority.writer) throw new StorePermissionDeniedError();
+  return authority;
 }
 
 async function authorizeCurrentProductLink(
   client: PoolClient,
   article: GuideArticleRecord,
   link: GuideProductLinkInput,
+  writerAuthority?: GuideWriterAuthority,
 ): Promise<{ readonly productSlug: string }> {
-  if (link.providerId !== article.subject.providerId) {
-    throw new StoreAccessDeniedError();
+  if (article.subject.kind === "PROVIDER") {
+    if (link.providerId !== article.subject.providerId) throw new StoreAccessDeniedError();
+  } else {
+    const authority = writerAuthority?.links.find((candidate) => candidate.providerId === link.providerId);
+    if (!authority) throw new StoreGuideProductLinkUnavailableError();
+    const owner = await client.query(
+      `SELECT 1
+         FROM provider_memberships membership
+        WHERE membership.provider_id=$1 AND membership.role='OWNER' AND membership.active
+          AND (
+            membership.niho_user_id=$2
+            OR EXISTS (
+              SELECT 1 FROM host_account_identities identity
+                JOIN host_accounts account ON account.id=identity.host_account_id AND account.status='ACTIVE'
+               WHERE identity.host_account_id=membership.niho_user_id
+                 AND identity.provider='NIHO' AND identity.subject=$2 AND identity.unlinked_at IS NULL
+            )
+          )
+        LIMIT 1 FOR SHARE`,
+      [link.providerId, authority.inviterNihoUserId],
+    );
+    if (owner.rows[0] === undefined) throw new StoreGuideProductLinkUnavailableError();
   }
   const result = await client.query<DbRow>(
     `SELECT slug FROM experience_products
@@ -860,7 +912,10 @@ async function authorizeCurrentProductLink(
     [link.providerId, link.productId],
   );
   const row = result.rows[0];
-  if (row === undefined) throw new StoreNotFoundError("published product for guide link");
+  if (row === undefined) {
+    if (article.subject.kind === "WRITER") throw new StoreGuideProductLinkUnavailableError();
+    throw new StoreNotFoundError("published product for guide link");
+  }
   return { productSlug: stringValue(row, "slug") };
 }
 
@@ -907,13 +962,17 @@ function markdownReferencesAsset(markdown: string, assetId: string): boolean {
 async function activePublicLinksByPublication(
   client: PoolClient,
   publicationIds: readonly number[],
+  writerAuthorityCheck?: GuideWriterAuthorityCheck,
 ): Promise<ReadonlyMap<number, readonly PublicGuideProductLink[]>> {
   const links = new Map<number, PublicGuideProductLink[]>();
   for (const publicationId of publicationIds) links.set(publicationId, []);
   if (publicationIds.length === 0) return links;
   const result = await client.query<DbRow>(
-    `SELECT l.publication_id, l.provider_id, l.product_id, product.slug AS product_slug
+    `SELECT l.publication_id, l.provider_id, l.product_id, product.slug AS product_slug,
+            publication.subject_kind, article.creator_niho_user_id
        FROM guide_publication_product_links l
+       JOIN guide_publications publication ON publication.id=l.publication_id
+       JOIN guide_articles article ON article.id=publication.article_id
        JOIN experience_products product
          ON product.provider_id=l.provider_id AND product.id=l.product_id AND product.status='PUBLISHED'
       WHERE l.publication_id=ANY($1::bigint[])
@@ -925,14 +984,13 @@ async function activePublicLinksByPublication(
            WHERE other_product.slug=product.slug
              AND (other_product.provider_id, other_product.id)<>(l.provider_id, l.product_id)
         )
-        AND l.permission_basis='PROVIDER_MEMBERSHIP'
-        AND EXISTS (
-          SELECT 1 FROM guide_publications publication
-           WHERE publication.id=l.publication_id
-             AND publication.subject_kind='PROVIDER'
-             AND publication.subject_provider_id=l.provider_id
-        )
         AND (
+          (l.permission_basis='GUIDE_PRODUCT_LINK_MEMBERSHIP' AND publication.subject_kind='WRITER')
+          OR (
+            l.permission_basis='PROVIDER_MEMBERSHIP'
+            AND publication.subject_kind='PROVIDER'
+            AND publication.subject_provider_id=l.provider_id
+            AND (
           -- 運営の CLI (#576 ⑤): a link made when the office published (the creator is an Admin actor ID, which only a verified
           -- Admin session and the office repository can write, and no provider membership carries) stays with that publication.
           l.link_created_by_niho_user_id ~ '^adm_[0-9a-f]{32}$'
@@ -943,12 +1001,52 @@ async function activePublicLinksByPublication(
                AND membership.active=true
                AND membership.role='OWNER'
           )
+            )
+          )
         )
       ORDER BY l.publication_id, l.display_order NULLS LAST, l.provider_id, l.product_id`,
     [publicationIds],
   );
+  const writerRows = new Map<number, DbRow[]>();
   for (const row of result.rows) {
-    links.get(integerValue(row, "publication_id"))!.push({
+    if (row.subject_kind !== "WRITER") continue;
+    const publicationId = integerValue(row, "publication_id");
+    const rows = writerRows.get(publicationId) ?? [];
+    rows.push(row);
+    writerRows.set(publicationId, rows);
+  }
+  const writerAuthorities = new Map<number, GuideWriterAuthority>();
+  if (writerAuthorityCheck) {
+    for (const [publicationId, rows] of writerRows) {
+      try {
+        const actorId = stringValue(rows[0]!, "creator_niho_user_id");
+        const authority = await writerAuthorityCheck(actorId, [...new Set(rows.map((row) => stringValue(row, "provider_id")))].sort(), client);
+        if (authority.writer) writerAuthorities.set(publicationId, authority);
+      } catch {
+        // Public article text remains available; an unavailable/revoked authority hides only its experience association.
+      }
+    }
+  }
+  for (const row of result.rows) {
+    const publicationId = integerValue(row, "publication_id");
+    if (row.subject_kind === "WRITER") {
+      const providerId = stringValue(row, "provider_id");
+      const authority = writerAuthorities.get(publicationId)?.links.find((candidate) => candidate.providerId === providerId);
+      if (!authority) continue;
+      const currentOwner = await client.query(
+        `SELECT 1 FROM provider_memberships membership
+          WHERE membership.provider_id=$1 AND membership.role='OWNER' AND membership.active
+            AND (membership.niho_user_id=$2 OR EXISTS (
+              SELECT 1 FROM host_account_identities identity
+                JOIN host_accounts account ON account.id=identity.host_account_id AND account.status='ACTIVE'
+               WHERE identity.host_account_id=membership.niho_user_id AND identity.provider='NIHO'
+                 AND identity.subject=$2 AND identity.unlinked_at IS NULL
+            )) LIMIT 1`,
+        [providerId, authority.inviterNihoUserId],
+      );
+      if (currentOwner.rows[0] === undefined) continue;
+    }
+    links.get(publicationId)!.push({
       providerId: stringValue(row, "provider_id"),
       productId: stringValue(row, "product_id"),
       productSlug: stringValue(row, "product_slug"),
@@ -1010,14 +1108,16 @@ async function activePublicMediaByPublication(
 export class GuideRepository {
   readonly #pool: Pool;
   readonly #office: boolean;
+  readonly #writerAuthority: GuideWriterAuthorityCheck | undefined;
 
   /**
    * `office: true` (運営の CLI, #576 ⑤) is for code that has verified an Admin session: the actor is an `adm_` ID and writes for
    * any provider's articles instead of a provider OWNER's own. The host-facing repository is never built with it.
    */
-  constructor(pool: Pool, options: { readonly office?: boolean } = {}) {
+  constructor(pool: Pool, options: { readonly office?: boolean; readonly writerAuthority?: GuideWriterAuthorityCheck } = {}) {
     this.#pool = pool;
     this.#office = options.office === true;
+    this.#writerAuthority = options.writerAuthority;
   }
 
   async listActiveCategories(): Promise<readonly GuideCategory[]> {
@@ -1037,8 +1137,9 @@ export class GuideRepository {
     validateActorId(actorId);
     assertStoreIdentifier(input.id, "guide.id");
     validateSlug(input.slug);
-    if (input.subject.kind !== "PROVIDER") throw new StoreValidationError("Guide articles must have a PROVIDER subject.");
-    assertStoreIdentifier(input.subject.providerId, "guide.subject.providerId");
+    if (input.subject.kind !== "PROVIDER" && input.subject.kind !== "WRITER") throw new StoreValidationError("Guide article subject is invalid.");
+    if (input.subject.kind === "PROVIDER") assertStoreIdentifier(input.subject.providerId, "guide.subject.providerId");
+    else await currentWriterAuthority(this.#writerAuthority, actorId, [], this.#pool);
     assertDraftText(input.title, "guide.title", 110);
     const description = input.description ?? "";
     if (description.length > 160) throw new StoreValidationError("guide.description must be at most 160 characters.");
@@ -1049,19 +1150,21 @@ export class GuideRepository {
     }
     try {
       return await withTransaction(this.#pool, async (client) => {
-        await requireCurrentOwner(client, input.subject.providerId, actorId, this.#office);
+        if (input.subject.kind === "PROVIDER") await requireCurrentOwner(client, input.subject.providerId, actorId, this.#office);
+        else if (this.#office) throw new StoreAccessDeniedError();
         const inserted = await client.query(
           `INSERT INTO guide_articles (
              id, slug, creator_niho_user_id, subject_kind, subject_provider_id,
              category_slug, title, description, content
-           ) VALUES ($1,$2,$3,'PROVIDER',$4,$5,$6,$7,$8::jsonb)
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
            ON CONFLICT DO NOTHING
            RETURNING id`,
           [
             input.id,
             input.slug,
             actorId,
-            input.subject.providerId,
+            input.subject.kind,
+            input.subject.kind === "PROVIDER" ? input.subject.providerId : null,
             input.categorySlug ?? null,
             input.title,
             description,
@@ -1101,15 +1204,14 @@ export class GuideRepository {
         [actorId],
       );
       const providerIds = owners.rows.map((row) => stringValue(row, "provider_id"));
-      if (providerIds.length === 0) return [];
       const result = await client.query<DbRow>(
         `SELECT ${ARTICLE_COLUMNS}
            FROM guide_articles a
            LEFT JOIN guide_publications p ON p.id=a.current_publication_id
-          WHERE a.subject_kind='PROVIDER'
-            AND a.subject_provider_id=ANY($1::text[])
+          WHERE (a.subject_kind='PROVIDER' AND a.subject_provider_id=ANY($1::text[]))
+             OR (a.subject_kind='WRITER' AND a.creator_niho_user_id=$2)
           ORDER BY a.updated_at DESC, a.id`,
-        [providerIds],
+        [providerIds, actorId],
       );
       return result.rows.map(articleFromRow);
     });
@@ -1135,10 +1237,13 @@ export class GuideRepository {
     try {
       return await withTransaction(this.#pool, async (client) => {
         const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
+        const writerAuthority = article.subject.kind === "WRITER"
+          ? await currentWriterAuthority(this.#writerAuthority, actorId, input.draftProductLinks?.map((link) => link.providerId) ?? article.draftProductLinks.map((link) => link.providerId), client)
+          : undefined;
         if (article.revision !== expectedRevision) throw new StoreConflictError("Guide draft revision mismatch.");
         const cover = input.cover === undefined ? article.cover : input.cover ?? undefined;
         if (input.draftProductLinks !== undefined) {
-          for (const link of input.draftProductLinks) await authorizeCurrentProductLink(client, article, link);
+          for (const link of input.draftProductLinks) await authorizeCurrentProductLink(client, article, link, writerAuthority);
         }
         await lockReadyAssets(client, article, review.figures, "SHARE", false, cover === undefined ? [] : [cover.assetId]);
         if (article.slug !== input.slug) {
@@ -1198,6 +1303,9 @@ export class GuideRepository {
     }
     return withTransaction(this.#pool, async (client) => {
       const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
+      const writerAuthority = article.subject.kind === "WRITER"
+        ? await currentWriterAuthority(this.#writerAuthority, actorId, article.draftProductLinks.map((link) => link.providerId), client)
+        : undefined;
       if (article.status === "OPS_STOPPED") {
         throw new StoreConflictError("An operations-stopped guide must be released before publication.");
       }
@@ -1220,7 +1328,7 @@ export class GuideRepository {
           if (publication !== undefined) {
             const publicationId = integerValue(publication, "publication_id");
             const [links, media] = await Promise.all([
-              activePublicLinksByPublication(client, [publicationId]),
+              activePublicLinksByPublication(client, [publicationId], this.#writerAuthority),
               activePublicMediaByPublication(client, [publicationId]),
             ]);
             const publicationMedia = media.get(publicationId)!;
@@ -1284,7 +1392,7 @@ export class GuideRepository {
 
       const links: Array<GuideProductLinkInput & { readonly productSlug: string }> = [];
       for (const link of article.draftProductLinks) {
-        links.push({ ...link, ...await authorizeCurrentProductLink(client, article, link) });
+        links.push({ ...link, ...await authorizeCurrentProductLink(client, article, link, writerAuthority) });
       }
 
       const numberResult = await client.query<DbRow>(
@@ -1297,14 +1405,15 @@ export class GuideRepository {
            article_id, publication_number, source_revision, slug, subject_kind, subject_provider_id,
            category_slug, category_label_en, category_label_ja, category_display_order,
            title, description, content, visibility, published_by_niho_user_id
-         ) VALUES ($1,$2,$3,$4,'PROVIDER',$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15)
          RETURNING ${PUBLICATION_COLUMNS.replaceAll("p.", "")}`,
         [
           articleId,
           publicationNumber,
           article.revision,
           article.slug,
-          article.subject.providerId,
+          article.subject.kind,
+          article.subject.kind === "PROVIDER" ? article.subject.providerId : null,
           article.categorySlug,
           stringValue(category, "label_en"),
           stringValue(category, "label_ja"),
@@ -1324,8 +1433,8 @@ export class GuideRepository {
           `INSERT INTO guide_publication_product_links (
              article_id, publication_id, provider_id, product_id, display_order,
              link_created_by_niho_user_id, permission_basis
-           ) VALUES ($1,$2,$3,$4,$5,$6,'PROVIDER_MEMBERSHIP')`,
-          [articleId, publicationId, link.providerId, link.productId, index + 1, actorId],
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [articleId, publicationId, link.providerId, link.productId, index + 1, actorId, article.subject.kind === "WRITER" ? "GUIDE_PRODUCT_LINK_MEMBERSHIP" : "PROVIDER_MEMBERSHIP"],
         );
       }
       if (article.cover !== undefined) {
@@ -1389,6 +1498,7 @@ export class GuideRepository {
     validateRevision(expectedRevision);
     return withTransaction(this.#pool, async (client) => {
       const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
+      if (article.subject.kind === "WRITER") await currentWriterAuthority(this.#writerAuthority, actorId, [], client);
       if (article.revision !== expectedRevision) throw new StoreConflictError("Guide draft revision mismatch.");
       if (article.status !== "PUBLISHED") throw new StoreConflictError("The guide has no current publication to stop.");
       await client.query(
@@ -1413,7 +1523,8 @@ export class GuideRepository {
     assertNonEmptyText(input.objectKey, "guide media objectKey", 512);
     if (/[\u0000-\u001f\u007f]/.test(input.objectKey)) throw new StoreValidationError("guide media objectKey contains control characters.");
     return withTransaction(this.#pool, async (client) => {
-      await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
+      const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
+      if (article.subject.kind === "WRITER") await currentWriterAuthority(this.#writerAuthority, actorId, [], client);
       const result = await client.query<DbRow>(
         `INSERT INTO guide_media_assets (
            id, article_id, creator_niho_user_id, uploaded_by_actor_id, object_key
@@ -1443,7 +1554,8 @@ export class GuideRepository {
       || !Number.isSafeInteger(input.byteSize) || input.byteSize < 1 || input.byteSize > 10 * 1024 * 1024
     ) throw new StoreValidationError("guide media output dimensions or size are invalid.");
     return withTransaction(this.#pool, async (client) => {
-      await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
+      const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
+      if (article.subject.kind === "WRITER") await currentWriterAuthority(this.#writerAuthority, actorId, [], client);
       const result = await client.query<DbRow>(
         `UPDATE guide_media_assets
             SET state='READY', width=$3, height=$4, byte_size=$5, ready_at=clock_timestamp()
@@ -1521,7 +1633,8 @@ export class GuideRepository {
     assertNonEmptyText(publicCredit, "guide media publicCredit", 300);
     const normalizedCredit = publicCredit.trim();
     return withTransaction(this.#pool, async (client) => {
-      await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
+      const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
+      if (article.subject.kind === "WRITER") await currentWriterAuthority(this.#writerAuthority, actorId, [], client);
       const currentResult = await client.query<DbRow>(
         `SELECT ${MEDIA_ASSET_COLUMNS}
            FROM guide_media_assets
@@ -1571,6 +1684,7 @@ export class GuideRepository {
     if (expectedRevision !== undefined) validateRevision(expectedRevision);
     return withTransaction(this.#pool, async (client) => {
       const article = await getOwnedArticleForUpdate(client, actorId, articleId, this.#office);
+      if (article.subject.kind === "WRITER") await currentWriterAuthority(this.#writerAuthority, actorId, [], client);
       if (expectedRevision !== undefined && article.revision !== expectedRevision) {
         throw new StoreConflictError("Guide draft revision mismatch.");
       }
@@ -1625,7 +1739,7 @@ export class GuideRepository {
       if (row === undefined) return null;
       const publicationId = integerValue(row, "publication_id");
       const [links, media] = await Promise.all([
-        activePublicLinksByPublication(client, [publicationId]),
+        activePublicLinksByPublication(client, [publicationId], this.#writerAuthority),
         activePublicMediaByPublication(client, [publicationId]),
       ]);
       const articleMedia = media.get(publicationId)!;
@@ -1649,7 +1763,7 @@ export class GuideRepository {
       );
       const publicationIds = result.rows.map((row) => integerValue(row, "publication_id"));
       const [links, media] = await Promise.all([
-        activePublicLinksByPublication(client, publicationIds),
+        activePublicLinksByPublication(client, publicationIds, this.#writerAuthority),
         activePublicMediaByPublication(client, publicationIds),
       ]);
       return result.rows.map((row) => {

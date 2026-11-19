@@ -4,11 +4,14 @@ const mocks = vi.hoisted(() => ({
   config: {
     hostConsoleEnabled: true,
     hostArticleLinksEnabled: true,
+    nihoWriterEnabled: false,
     nihoArticleAuthorityOrigin: "https://niho.example.invalid",
     nihoArticleAuthorityAudience: "synthetic-audience",
     nihoArticleLinksAudience: "synthetic-host-links-audience",
   },
   readSession: vi.fn(),
+  loadProviders: vi.fn(),
+  readNihoUserId: vi.fn(),
   clearSession: vi.fn(),
   getIdTokenClient: vi.fn(),
 }));
@@ -18,13 +21,15 @@ vi.mock("google-auth-library", () => ({ GoogleAuth: class { getIdTokenClient = m
 vi.mock("@/lib/config", () => ({ config: mocks.config }));
 vi.mock("@/lib/host/server", () => ({
   readHostSession: mocks.readSession,
+  loadHostProvidersFresh: mocks.loadProviders,
   nihoApiFetch: () => fetch,
   clearSessionCookie: mocks.clearSession,
   noStoreJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store" } }),
 }));
+vi.mock("@/lib/experience/store-server", () => ({ hostAccountIdentities: () => ({ readNihoUserId: mocks.readNihoUserId }) }));
 
 import type { NihoHostSession } from "./session";
-import { HostArticleLinkClient, hostArticleLinkFailure, loadHostGuideLinkContext } from "./guide-link-api-server";
+import { HostArticleLinkClient, ModernHostArticleLinkClient, hostArticleLinkFailure, loadHostGuideLinkContext } from "./guide-link-api-server";
 
 const SESSION = {
   accessToken: "opaque-host-token",
@@ -40,33 +45,49 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.config.hostConsoleEnabled = true;
   mocks.config.hostArticleLinksEnabled = true;
+  mocks.config.nihoWriterEnabled = false;
   mocks.readSession.mockResolvedValue(SESSION);
+  mocks.loadProviders.mockResolvedValue({ status: "ok", providers: [{ id: "provider-a", memberRole: "OWNER" }] });
+  mocks.readNihoUserId.mockResolvedValue("niho-owner-a");
   mocks.getIdTokenClient.mockResolvedValue({ getRequestHeaders: async () => ({ authorization: "Bearer google-service-token" }) });
 });
 
 describe("host article-link context", () => {
   it("uses the current host session without inferring a NIHO actor from provider data", async () => {
-    const loaded = await loadHostGuideLinkContext();
+    const loaded = await loadHostGuideLinkContext("provider-a");
     expect(loaded.ok).toBe(true);
     if (loaded.ok) {
-      expect(loaded.value.session).toBe(SESSION);
-      expect(loaded.value).not.toHaveProperty("actor");
-      expect(loaded.value).not.toHaveProperty("repository");
+      expect(loaded.value.client).toBeInstanceOf(HostArticleLinkClient);
+      expect(loaded.value).not.toHaveProperty("session");
     }
+  });
+
+  it("uses the linked NIHO identity and current OWNER for modern hst sessions without a user bearer", async () => {
+    mocks.config.hostArticleLinksEnabled = false;
+    mocks.config.nihoWriterEnabled = true;
+    mocks.readSession.mockResolvedValue({ kind: "experience", hostAccountId: `hst_${"a".repeat(32)}` });
+    const loaded = await loadHostGuideLinkContext("provider-a");
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) expect(loaded.value.client).toBeInstanceOf(ModernHostArticleLinkClient);
+    expect(mocks.readNihoUserId).toHaveBeenCalledWith({ hostAccountId: `hst_${"a".repeat(32)}` });
+
+    mocks.loadProviders.mockResolvedValueOnce({ status: "ok", providers: [{ id: "provider-a", memberRole: "EDITOR" }] });
+    const forbidden = await loadHostGuideLinkContext("provider-a");
+    expect(!forbidden.ok && forbidden.response.status).toBe(403);
   });
 
   it("fails closed while disabled, signed out, expired, or session storage is unavailable", async () => {
     mocks.config.hostArticleLinksEnabled = false;
-    expect((await loadHostGuideLinkContext()).ok).toBe(false);
+    expect((await loadHostGuideLinkContext("provider-a")).ok).toBe(false);
     mocks.config.hostArticleLinksEnabled = true;
     mocks.readSession.mockResolvedValueOnce(null);
-    const signedOut = await loadHostGuideLinkContext();
+    const signedOut = await loadHostGuideLinkContext("provider-a");
     expect(!signedOut.ok && signedOut.response.status).toBe(401);
     mocks.readSession.mockResolvedValueOnce({ ...SESSION, accessTokenExpiresAt: 0 });
-    const expired = await loadHostGuideLinkContext();
+    const expired = await loadHostGuideLinkContext("provider-a");
     expect(!expired.ok && expired.response.status).toBe(401);
     mocks.readSession.mockRejectedValueOnce(new Error("storage unavailable"));
-    const unavailable = await loadHostGuideLinkContext();
+    const unavailable = await loadHostGuideLinkContext("provider-a");
     expect(!unavailable.ok && unavailable.response.status).toBe(503);
   });
 });
@@ -110,5 +131,25 @@ describe("HostArticleLinkClient", () => {
     const response = hostArticleLinkFailure(error);
     expect(response.status).toBe(401);
     expect(mocks.clearSession).toHaveBeenCalledWith(response);
+  });
+});
+
+describe("ModernHostArticleLinkClient", () => {
+  it("uses only the service identity and the strict host S2S contract", async () => {
+    const calls: { path: string; authorization: string | null; body: unknown }[] = [];
+    const fetchImpl = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      calls.push({ path: new URL(String(input)).pathname, authorization: headers.get("authorization"), body: JSON.parse(String(init?.body)) });
+      return Response.json(new URL(String(input)).pathname.endsWith("/list") ? { items: [LINK] } : new URL(String(input)).pathname.endsWith("/revoke") ? { state: "REVOKED" } : LINK);
+    }) as unknown as typeof fetch;
+    const client = new ModernHostArticleLinkClient("niho-owner-a", fetchImpl, async () => "service-token");
+    await client.list("provider-a");
+    await client.invite("provider-a", "writer@example.test");
+    await client.revoke("provider-a", ID);
+    expect(calls).toEqual([
+      { path: "/api/internal/experience-article-link-hosts/providers/provider-a/list", authorization: null, body: { hostNihoUserId: "niho-owner-a" } },
+      { path: "/api/internal/experience-article-link-hosts/providers/provider-a/invite", authorization: null, body: { hostNihoUserId: "niho-owner-a", email: "writer@example.test" } },
+      { path: `/api/internal/experience-article-link-hosts/providers/provider-a/${ID}/revoke`, authorization: null, body: { hostNihoUserId: "niho-owner-a" } },
+    ]);
   });
 });

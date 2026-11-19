@@ -83,7 +83,8 @@ export type HostLoginResult =
 
 export interface HostSession {
   readonly hostAccountId: string;
-  readonly email: string;
+  /** Null only for a NIHO-authorized writer account, which can never use the email-link login. */
+  readonly email: string | null;
   readonly sessionRef: string;
   /** When the host last proved the address with a link. */
   readonly authenticatedAtUtc: string;
@@ -366,7 +367,7 @@ export class HostAccounts {
     }
     return {
       hostAccountId: text(row, "host_account_id"),
-      email: text(row, "email"),
+      email: typeof row.email === "string" ? row.email : null,
       sessionRef: text(row, "session_ref"),
       authenticatedAtUtc: isoValue(row, "authenticated_at"),
       idleExpiresAtUtc,

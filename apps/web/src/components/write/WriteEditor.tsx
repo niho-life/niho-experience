@@ -48,6 +48,8 @@ function saveLabel(state: AutosaveState): string {
   if (state.phase === "saving") return "保存中…";
   if (state.phase === "failed") return "保存できませんでした";
   if (state.phase === "signed-out") return "ログインの更新が必要です";
+  if (state.phase === "guide-link-unavailable") return "関連体験を確認してください";
+  if (state.phase === "permission-denied") return "権限が取り消されています（入力は保持中）";
   if (state.phase === "conflict") return "別の画面の変更と競合しました";
   return state.savedAt ? `保存済み ${state.savedAt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}` : "保存済み";
 }
@@ -281,24 +283,32 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
   };
   const toggleProduct = (product: WriteProductChoice, selected: boolean) => {
     const current = draftRef.current.draftProductLinks;
-    patchDraft({ draftProductLinks: selected ? [...current, { providerId: product.providerId, productId: product.id }].slice(0, 3) : current.filter((link) => link.productId !== product.id) });
+    patchDraft({ draftProductLinks: selected ? [...current, { providerId: product.providerId, productId: product.id }].slice(0, 3) : current.filter((link) => link.productId !== product.id || link.providerId !== product.providerId) });
+  };
+  const unavailableProductLinks = draft.draftProductLinks.filter((link) => !products.some((product) => product.id === link.productId && product.providerId === link.providerId));
+  const removeUnavailableProductLink = (link: WriteDraft["draftProductLinks"][number]) => {
+    patchDraft({ draftProductLinks: draftRef.current.draftProductLinks.filter((current) => current.productId !== link.productId || current.providerId !== link.providerId) });
   };
 
   const completedRequirements = requirements.filter((requirement) => requirement.ok).length;
   const listPath = experience ? `/write?experience=${encodeURIComponent(experience)}` : "/write";
+  const writerBlocked = guide.subject.kind === "WRITER" && chrome.writerStatus !== "authorized";
   return <WriteWorkspace chrome={chrome} current={guide} collapsed={sidebarClosed} onNavigate={confirmNavigation} onNewArticle={openNewGuide} writePath={listPath}>
     <main id="main" className="write-editor-page">
       <header className="write-editor-header">
         <div className="write-editor-title"><button type="button" className="write-sidebar-toggle" onClick={() => setSidebarClosed((value) => !value)} aria-label={sidebarClosed ? "サイドバーを開く" : "サイドバーを閉じる"}><HostIcon name="menu" className="size-5" /></button><Link href={listPath} onClick={confirmNavigation}>記事</Link><span aria-hidden="true">›</span><b>{draft.title || "無題の記事"}</b></div>
         <div className="write-status-group"><span className="write-publication-status">{writeStatusLabel(guide)}</span><span className={`write-save-status write-save-${autosave.phase}`} role="status" aria-live="polite">{saveLabel(autosave)}</span></div>
-        <div className="write-header-actions"><button type="button" className="write-secondary" disabled={actionBusy || mediaBusy} onClick={() => void preview()}>プレビュー</button><button ref={publishButton} type="button" className="write-primary" disabled={actionBusy || mediaBusy || guide.status === "OPS_STOPPED"} onClick={() => setPublishOpen(true)}>{guide.status === "PUBLISHED" ? (publishedChanged ? "変更を公開" : "公開設定") : guide.status === "STOPPED" ? "再公開" : "公開する"}</button>{guide.status === "PUBLISHED" ? <details className="write-more-menu"><summary aria-label="記事のその他の操作">…</summary><div><button type="button" disabled={actionBusy} onClick={() => void stop()}>公開を停止</button></div></details> : null}</div>
+        <div className="write-header-actions"><button type="button" className="write-secondary" disabled={actionBusy || mediaBusy} onClick={() => void preview()}>プレビュー</button><button ref={publishButton} type="button" className="write-primary" disabled={actionBusy || mediaBusy || writerBlocked || guide.status === "OPS_STOPPED"} onClick={() => setPublishOpen(true)}>{guide.status === "PUBLISHED" ? (publishedChanged ? "変更を公開" : "公開設定") : guide.status === "STOPPED" ? "再公開" : "公開する"}</button>{guide.status === "PUBLISHED" ? <details className="write-more-menu"><summary aria-label="記事のその他の操作">…</summary><div><button type="button" disabled={actionBusy || writerBlocked} onClick={() => void stop()}>公開を停止</button></div></details> : null}</div>
       </header>
 
       {guide.status === "PUBLISHED" ? <aside className="write-public-bar"><span>{guide.currentPublication?.visibility === "UNLISTED" ? "限定公開URL" : "公開URL"}</span><a href={publicPath} target="_blank" rel="noreferrer">{publicPath}</a>{publishedChanged ? <b>未公開の変更があります。</b> : <span>公開内容は最新です。</span>}</aside> : null}
       {guide.status === "OPS_STOPPED" ? <aside className="write-ops-stop" role="alert"><b>運営により公開が停止されています。再公開はできません。</b><p>{guide.opsStopReason ?? "停止理由は運営へお問い合わせください。"}</p>{guide.opsStopContact ? <p>連絡先: {guide.opsStopContact}</p> : null}</aside> : null}
+      {writerBlocked ? <aside className="write-alert" role="alert">{chrome.writerStatus === "revoked" ? "記事ライター権限が取り消されています。保存・公開・停止はできません。" : "記事ライター権限を現在確認できません。保存・公開・停止は再開までできません。"} このタブの入力と保存済み下書きは残ります。</aside> : null}
       {autosave.phase === "failed" ? <aside className="write-alert" role="alert">通信できず保存できませんでした。入力はこのタブに残っています。オンライン復帰後に自動再試行します。<button type="button" onClick={() => void queue.retry()}>今すぐ再試行</button></aside> : null}
       {autosave.phase === "signed-out" ? <aside className="write-alert" role="alert">ログインの有効期限が切れました。編集内容はこのタブに残っています。<a href={`/host/auth/write-bridge?returnTo=${encodeURIComponent(`/write/${guide.id}`)}`} target="_blank" rel="noreferrer">別タブで再ログイン</a><button type="button" onClick={() => void queue.retry()}>再ログイン後に保存を再試行</button></aside> : null}
       {autosave.phase === "conflict" ? <aside className="write-alert write-conflict" role="alert"><b>別の画面で記事が更新されました。</b><p>自動保存を停止しました。このタブの入力を上書きせず、古いrevisionも再送しません。</p><div><button type="button" onClick={() => void inspectLatest()}>サーバーの最新版を確認</button><button type="button" onClick={() => void copyLocal()}>このタブのタイトルと本文をコピー</button></div>{serverLatest ? <p>最新版: revision {serverLatest.revision}・「{serverLatest.title || "無題の記事"}」・{new Date(serverLatest.updatedAtUtc).toLocaleString("ja-JP")}</p> : null}</aside> : null}
+      {autosave.phase === "guide-link-unavailable" ? <aside className="write-alert" role="alert">現在は関連付けられない体験があります。「関連する体験」で解除すると、このタブの入力を保存できます。</aside> : null}
+      {autosave.phase === "permission-denied" && !writerBlocked ? <aside className="write-alert" role="alert">記事ライター権限が取り消されたため、自動保存を停止しました。このタブの入力と保存済み下書きは残っています。</aside> : null}
       {actionError ? <p className="write-action-error" role="alert">{actionError}</p> : null}
       {actionNotice ? <p className="write-action-notice" role="status">{actionNotice.message}{actionNotice.url ? <> <a href={actionNotice.url} target="_blank" rel="noreferrer">公開ページを見る</a></> : null}</p> : null}
       {!categoriesAvailable || !assetsAvailable || !productsAvailable ? <p className="write-auxiliary-warning" role="status">一部の設定を読み込めませんでした。本文の編集は続けられます。読み込めない設定は変更できません。</p> : null}
@@ -323,13 +333,16 @@ export function WriteEditor({ guide: initialGuide, categories, products, assets,
           <section className="write-settings-panel" aria-labelledby="write-settings-title"><h2 id="write-settings-title">記事の設定</h2><fieldset disabled={actionBusy} className="write-settings-fields"><legend className="sr-only">記事の設定項目</legend>
             <details ref={basicDetailsRef} open><summary>基本情報</summary><div><label>カテゴリ<select ref={categoryRef} disabled={!categoriesAvailable} value={draft.categorySlug ?? ""} onChange={(event) => patchDraft({ categorySlug: event.target.value || undefined })}><option value="">選択してください</option>{!categoriesAvailable && draft.categorySlug ? <option value={draft.categorySlug}>{draft.categorySlug}</option> : null}{categories.map((category) => <option key={category.slug} value={category.slug}>{category.labelJa} / {category.labelEn}</option>)}</select>{!categoriesAvailable ? <span className="write-help">カテゴリを読み込めないため変更できません。</span> : null}</label><label>記事URL<input ref={slugRef} value={draft.slug} readOnly={guide.status !== "DRAFT"} maxLength={160} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" onChange={(event) => patchDraft({ slug: event.target.value.toLowerCase() })} />{guide.status !== "DRAFT" ? <span className="write-help">初回公開後のURLは変更できません。</span> : null}</label><label>短い紹介（任意）<textarea ref={descriptionRef} value={draft.description} maxLength={160} rows={3} onChange={(event) => patchDraft({ description: event.target.value })} /></label></div></details>
             <details ref={authorDetailsRef}><summary>著者</summary><div><p className="write-help">非公開のログインメールは使いません。読者に見せる情報だけを入力してください。</p><label>名前<input ref={authorRef} maxLength={120} value={authorFields.name} onChange={(event) => setAuthor("name", event.target.value)} /></label><label>肩書き<input maxLength={160} value={authorFields.role} onChange={(event) => setAuthor("role", event.target.value)} /></label><label>紹介<textarea maxLength={500} rows={3} value={authorFields.bio} onChange={(event) => setAuthor("bio", event.target.value)} /></label>{authorInvalid ? <p className="write-error" role="alert">著者の3項目をすべて入力すると保存します。入力はこのタブに残っています。</p> : null}</div></details>
-            <details><summary>関連する体験</summary><div>{!productsAvailable ? <p className="write-help">関連する体験を読み込めないため、現在の関連付けを保持して変更できません。</p> : products.length ? products.map((product) => <label key={product.id} className="write-check"><input type="checkbox" checked={draft.draftProductLinks.some((link) => link.productId === product.id)} disabled={!draft.draftProductLinks.some((link) => link.productId === product.id) && draft.draftProductLinks.length >= 3} onChange={(event) => toggleProduct(product, event.target.checked)} />{product.title}</label>) : <p className="write-help">関連付けられる公開中の体験はありません。記事だけでも公開できます。</p>}</div></details>
+            <details><summary>関連する体験</summary><div>
+              {unavailableProductLinks.length ? <div className="write-help"><p>{productsAvailable ? "公開中の一覧または現在の権限で確認できない関連体験があります。" : "関連する体験を読み込めていません。保存済みの関連付けは解除できます。"}本文を保存できるよう、必要に応じて解除してください。</p>{unavailableProductLinks.map((link) => <p key={`${link.providerId}:${link.productId}`}><span>利用できない関連体験</span> <button type="button" onClick={() => removeUnavailableProductLink(link)}>関連を解除</button></p>)}</div> : null}
+              {!productsAvailable ? <p className="write-help">新しい関連体験を読み込めないため追加できません。</p> : products.length ? products.map((product) => <label key={`${product.providerId}:${product.id}`} className="write-check"><input type="checkbox" checked={draft.draftProductLinks.some((link) => link.productId === product.id && link.providerId === product.providerId)} disabled={!draft.draftProductLinks.some((link) => link.productId === product.id && link.providerId === product.providerId) && draft.draftProductLinks.length >= 3} onChange={(event) => toggleProduct(product, event.target.checked)} />{product.title}</label>) : <p className="write-help">関連付けられる公開中の体験はありません。記事だけでも公開できます。</p>}
+            </div></details>
           </fieldset></section>
         </section>
         </aside>
       </div>
 
-      <WriteNewGuideDialog ref={newGuideDialog} providers={chrome.providers} experience={experience} returnPath={listPath} showTrigger={false} />
+      <WriteNewGuideDialog ref={newGuideDialog} providers={chrome.providers} writerStatus={chrome.writerStatus} experience={experience} returnPath={listPath} showTrigger={false} />
       <dialog ref={publishDialog} className="write-modal write-publish-sheet" aria-labelledby="write-publish-title" onCancel={(event) => { if (actionBusy) event.preventDefault(); else setPublishOpen(false); }} onClose={() => { setPublishOpen(false); publishButton.current?.focus(); }}>
         <h2 id="write-publish-title">記事を公開</h2>
         {missingRequirements.length ? <><p>公開前に次の項目を整えてください。</p><ul>{missingRequirements.map((requirement, index) => <li key={requirement.id}><span>{requirement.label}</span><button autoFocus={index === 0} type="button" onClick={() => fixRequirement(requirement.id)}>直す</button></li>)}</ul></> : <p>保存を完了してから、この記事を公開します。</p>}

@@ -3,7 +3,8 @@ import { GoogleAuth } from "google-auth-library";
 import { NextResponse } from "next/server";
 import { config } from "@/lib/config";
 import { readBoundedJson } from "@/lib/read-bounded-json";
-import { clearSessionCookie, nihoApiFetch, noStoreJson, readHostSession } from "./server";
+import { clearSessionCookie, loadHostProvidersFresh, nihoApiFetch, noStoreJson, readHostSession } from "./server";
+import { hostAccountIdentities } from "@/lib/experience/store-server";
 import { accessTokenUsable, type NihoHostSession } from "./session";
 
 const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -16,7 +17,7 @@ export interface HostArticleLink {
   readonly writerName: string; readonly writerLabel: string; readonly expiresAt: string; readonly acceptedAt: string | null; readonly createdAt: string;
 }
 
-function link(value: unknown): HostArticleLink {
+export function parseHostArticleLink(value: unknown): HostArticleLink {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid NIHO response");
   const item = value as Record<string, unknown>;
   if (Object.keys(item).sort().join(",") !== "acceptedAt,createdAt,expiresAt,id,inviterName,providerName,state,writerLabel,writerName"
@@ -55,11 +56,11 @@ export class HostArticleLinkClient {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid NIHO response");
     const body = value as Record<string, unknown>;
     if (Object.keys(body).length !== 1 || !Array.isArray(body.items)) throw new Error("Invalid NIHO response");
-    return body.items.map(link);
+    return body.items.map(parseHostArticleLink);
   }
   invite(providerId: string, email: string): Promise<HostArticleLink> {
     if (!PROVIDER_ID.test(providerId) || email.length > 320 || !/^[^\s@]+@[^\s@]+$/.test(email)) throw new Error("Invalid invitation");
-    return this.call(`/api/experience-guide-links/providers/${encodeURIComponent(providerId)}`, { method: "POST", body: JSON.stringify({ email }) }).then(link);
+    return this.call(`/api/experience-guide-links/providers/${encodeURIComponent(providerId)}`, { method: "POST", body: JSON.stringify({ email }) }).then(parseHostArticleLink);
   }
   async revoke(providerId: string, invitationId: string): Promise<void> {
     if (!PROVIDER_ID.test(providerId) || !UUID.test(invitationId)) throw new Error("Invalid invitation");
@@ -68,14 +69,61 @@ export class HostArticleLinkClient {
   }
 }
 
-export async function loadHostGuideLinkContext(): Promise<{ ok: true; value: { session: NihoHostSession; client: HostArticleLinkClient } } | { ok: false; response: NextResponse }> {
-  if (!config.hostConsoleEnabled || !config.hostArticleLinksEnabled) return { ok: false, response: noStoreJson({ error: "not_found" }, 404) };
-  let session: NihoHostSession | null;
-  // NIHO's API with the host's NIHO token: an Experience host account reads as signed out (its flag is refused with them).
-  try { const current = await readHostSession(); session = current?.kind === "experience" ? null : current; } catch { return { ok: false, response: noStoreJson({ error: "unavailable" }, 503) }; }
-  if (!session) return { ok: false, response: noStoreJson({ error: "signed_out" }, 401) };
+/** Modern host-account path: the browser session has no NIHO OAuth token; the verified linked identity is sent S2S. */
+export class ModernHostArticleLinkClient {
+  constructor(private readonly hostNihoUserId: string, private readonly fetchImpl: typeof fetch = fetch, private readonly token = serviceToken) {}
+  private async call(path: string, body: Record<string, string>): Promise<unknown> {
+    const identity = await this.token();
+    const response = await this.fetchImpl(new URL(path, config.nihoArticleAuthorityOrigin), {
+      method: "POST",
+      headers: { "x-niho-experience-service-id-token": identity, accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify(body), cache: "no-store", credentials: "omit", redirect: "error", signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok || response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") {
+      await response.body?.cancel().catch(() => undefined);
+      const error = new Error("NIHO article links unavailable") as Error & { status?: number }; error.status = response.status; throw error;
+    }
+    return readBoundedJson(response, 64 * 1024, { fatalUtf8: true });
+  }
+  async list(providerId: string): Promise<readonly HostArticleLink[]> {
+    if (!PROVIDER_ID.test(providerId)) throw new Error("Invalid provider");
+    const value = await this.call(`/api/internal/experience-article-link-hosts/providers/${encodeURIComponent(providerId)}/list`, { hostNihoUserId: this.hostNihoUserId });
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1 || !Array.isArray((value as { items?: unknown }).items)) throw new Error("Invalid NIHO response");
+    return ((value as { items: unknown[] }).items).map(parseHostArticleLink);
+  }
+  invite(providerId: string, email: string): Promise<HostArticleLink> {
+    if (!PROVIDER_ID.test(providerId) || email.length > 320 || !/^[^\s@]+@[^\s@]+$/.test(email)) throw new Error("Invalid invitation");
+    return this.call(`/api/internal/experience-article-link-hosts/providers/${encodeURIComponent(providerId)}/invite`, { hostNihoUserId: this.hostNihoUserId, email }).then(parseHostArticleLink);
+  }
+  async revoke(providerId: string, invitationId: string): Promise<void> {
+    if (!PROVIDER_ID.test(providerId) || !UUID.test(invitationId)) throw new Error("Invalid invitation");
+    const value = await this.call(`/api/internal/experience-article-link-hosts/providers/${encodeURIComponent(providerId)}/${invitationId}/revoke`, { hostNihoUserId: this.hostNihoUserId });
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1 || (value as Record<string, unknown>).state !== "REVOKED") throw new Error("Invalid NIHO response");
+  }
+}
+
+export async function loadHostGuideLinkContext(providerId: string): Promise<{ ok: true; value: { client: Pick<HostArticleLinkClient, "list" | "invite" | "revoke"> } } | { ok: false; response: NextResponse }> {
+  if (!config.hostConsoleEnabled || (!config.hostArticleLinksEnabled && !config.nihoWriterEnabled)) return { ok: false, response: noStoreJson({ error: "not_found" }, 404) };
+  if (!PROVIDER_ID.test(providerId)) return { ok: false, response: noStoreJson({ error: "invalid_input" }, 400) };
+  let current;
+  try { current = await readHostSession(); } catch { return { ok: false, response: noStoreJson({ error: "unavailable" }, 503) }; }
+  if (!current) return { ok: false, response: noStoreJson({ error: "signed_out" }, 401) };
+  if (current.kind === "experience") {
+    if (!config.nihoWriterEnabled) return { ok: false, response: noStoreJson({ error: "not_found" }, 404) };
+    try {
+      const providers = await loadHostProvidersFresh();
+      if (providers.status !== "ok") return { ok: false, response: noStoreJson({ error: providers.status === "signed-out" ? "signed_out" : "unavailable" }, providers.status === "signed-out" ? 401 : 503) };
+      if (!providers.providers.some((provider) => provider.id === providerId && provider.memberRole === "OWNER")) return { ok: false, response: noStoreJson({ error: "forbidden" }, 403) };
+      const nihoUserId = await hostAccountIdentities()?.readNihoUserId({ hostAccountId: current.hostAccountId });
+      if (!nihoUserId) return { ok: false, response: noStoreJson({ error: "forbidden" }, 403) };
+      return { ok: true, value: { client: new ModernHostArticleLinkClient(nihoUserId) } };
+    } catch {
+      return { ok: false, response: noStoreJson({ error: "unavailable" }, 503) };
+    }
+  }
+  const session = current;
   if (!accessTokenUsable(session, Date.now())) return { ok: false, response: noStoreJson({ error: "refresh_required" }, 401) };
-  return { ok: true, value: { session, client: new HostArticleLinkClient(session) } };
+  return { ok: true, value: { client: new HostArticleLinkClient(session) } };
 }
 
 export function hostArticleLinkFailure(error: unknown): NextResponse {

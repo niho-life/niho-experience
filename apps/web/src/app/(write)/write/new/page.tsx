@@ -12,11 +12,11 @@ export default async function WriteNewPage({ searchParams }: { readonly searchPa
   const experience = query.experience;
   const returnPath = experience ? `/write/new?experience=${encodeURIComponent(experience)}` : "/write/new";
   const access = await loadWritePageAccess(returnPath);
-  if (!access.ok) return <main id="main" className="write-state"><h1>新しい記事</h1><p>{access.reason === "forbidden" ? "記事を書ける提供者 OWNER がありません。ホスト画面で権限を確認してください。" : access.reason === "preparing" ? "記事機能を準備中です。公開サイトの切替が完了するまで、下書きは作成されません。" : "現在、記事機能を利用できません。"}</p><Link href="/host">ホスト画面へ戻る</Link></main>;
+  if (!access.ok) return <main id="main" className="write-state"><h1>新しい記事</h1><p>{access.reason === "forbidden" ? "現在の記事ライター権限、または記事を書ける提供者 OWNER 権限がありません。" : access.reason === "preparing" ? "記事機能を準備中です。公開サイトの切替が完了するまで、下書きは作成されません。" : "記事の権限を確認できません。入力は変更されていません。"}</p><Link href="/host">ホスト画面へ戻る</Link></main>;
   let articles: ReturnType<typeof privateGuideArticle>[] = [];
   let categories: Awaited<ReturnType<typeof access.context.repository.listActiveCategories>> = [];
   try { articles = (await access.context.repository.listArticles(access.context.actorId)).map(privateGuideArticle); }
   catch { return <main id="main" className="write-state"><h1>新しい記事</h1><p>記事一覧を確認できないため、誤った状態で作成を続けられません。時間をおいてお試しください。</p><Link href={experience ? `/write?experience=${encodeURIComponent(experience)}` : "/write"}>記事一覧へ戻る</Link></main>; }
   try { categories = await access.context.repository.listActiveCategories(); } catch { /* category labels are optional list chrome */ }
-  return <WriteList chrome={{ account: access.context.account, providers: access.context.ownerProviders, nihoAppUrl: config.nihoWebOrigin, articles }} categories={categories} experience={experience} autoOpenNew />;
+  return <WriteList chrome={{ account: access.context.account, providers: access.context.ownerProviders, writerStatus: access.context.writerStatus, nihoAppUrl: config.nihoWebOrigin, articles }} categories={categories} experience={experience} autoOpenNew />;
 }
