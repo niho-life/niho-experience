@@ -16,10 +16,9 @@ import { clearSessionCookie, experienceHostServiceIdToken, isHostMock, loadHostP
 import { accessTokenUsable } from "./session";
 
 /*
- * Server boundary of 対面通訳 (#181), after provider-operations-server.ts: the host's sealed
- * session is the only credential, NIHO decides membership and role on every call, and the
- * browser only ever sees the projected DTOs (src/host/translate.ts). Every answer is
- * private, no-store: an invite URL must not land in a cache.
+ * The host's session authenticates the browser. For an Experience Host Account,
+ * this BFF verifies current OWNER membership and uses the NIHO service identity.
+ * Every response is private, no-store because it may contain an invite URL.
  */
 
 const HEADERS = { "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" };
@@ -63,12 +62,14 @@ async function readBoundedTranslateBody(request: Request, limit = MAX_BODY_BYTES
   }
 }
 
-/** The mock always has synthetic rooms; http opens the selected NIHO translate API behind its own flag. */
+/** The reservation-free console follows the flag for its configured host session type. */
 export function translateRoomsEnabled(): boolean {
-  return config.hostConsoleEnabled && (config.apiMode === "mock" || config.experienceTranslateApiEnabled || config.experienceTranslateStandaloneApiEnabled);
+  return config.hostConsoleEnabled && (config.apiMode === "mock"
+    || config.experienceTranslateStandaloneApiEnabled
+    || (!config.hostAccountsEnabled && config.experienceTranslateApiEnabled));
 }
 
-/** Booking screens keep their existing NIHO-session API gate. */
+/** Booking translation is independent of the reservation-free console. */
 export function siteTranslateRoomsEnabled(): boolean {
   return config.hostConsoleEnabled && (config.apiMode === "mock" || config.experienceTranslateApiEnabled);
 }
@@ -181,11 +182,10 @@ export function siteTranslateBookingEligible(booking: Pick<HostGuestBooking, "st
     && booking.localDate >= today;
 }
 
-/** NIHO OWNERとExperience DBの予約所属を毎回照合してからsite-booking用NIHO clientを返す。 */
+/** 現在のOWNERとExperience DBの予約所属を毎回照合してからNIHO clientを返す。 */
 export async function loadSiteTranslateRoomsClient(providerId: string, bookingId: string, action: SiteTranslateRoomAction) {
   if (!siteTranslateRoomsEnabled()) return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
-  const current = await readHostSession();
-  const session = current?.kind === "experience" ? null : current;
+  const session = await readHostSession();
   if (!session) return { ok: false as const, response: translateRoomsJson({ error: "unauthenticated" }, 401) };
   if (!accessTokenUsable(session, Date.now())) return { ok: false as const, response: translateRoomsJson({ error: "session_refresh_required" }, 401) };
 
@@ -207,7 +207,7 @@ export async function loadSiteTranslateRoomsClient(providerId: string, bookingId
       return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
     }
     try {
-      booking = await owner.bookings.getGuestBookingForHost(owner.actor, bookingId);
+      booking = await owner.bookings.getGuestBookingForHost(owner.actor, bookingId, { ownerOnly: true });
     } catch (error) {
       if (error instanceof StoreNotFoundError || error instanceof StoreValidationError || error instanceof StoreAccessDeniedError) {
         return { ok: false as const, response: translateRoomsJson({ error: "not_found" }, 404) };
@@ -220,8 +220,20 @@ export async function loadSiteTranslateRoomsClient(providerId: string, bookingId
     return { ok: false as const, response: translateRoomsJson({ error: "booking_not_eligible" }, 409) };
   }
   try {
+    if (session.kind === "experience") {
+      const serviceIdToken = await experienceHostServiceIdToken();
+      return {
+        ok: true as const,
+        serviceAuth: true,
+        client: createExperienceTranslateRoomsClient({
+          nihoWebOrigin: config.nihoWebOrigin,
+          auth: { kind: "experience-service", serviceIdToken },
+        }),
+      };
+    }
     return {
       ok: true as const,
+      serviceAuth: false,
       client: createExperienceTranslateRoomsClient({
         nihoWebOrigin: config.nihoWebOrigin,
         auth: { kind: "niho", accessToken: session.accessToken },

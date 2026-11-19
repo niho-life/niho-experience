@@ -269,6 +269,13 @@ describe("the deploy workflows' feature flags", () => {
     expect(resolved.env).toEqual({ NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.stg, EXPERIENCE_TRANSLATE_API_ENABLED: "true", HOST_PWA_ENABLED: "true" });
     expect(resolved.secrets).toEqual({});
     expect(resolveConfig(revision("stg", resolved))).toMatchObject({ guestBookingEnabled: false, experienceTranslateApiEnabled: true });
+    const withAccounts = resolve("stg", { ...vars, ...closure("stg", "EXPERIENCE_HOST_ACCOUNTS_ENABLED") });
+    expect(withAccounts.problems).toEqual([]);
+    expect(resolveConfig(revision("stg", withAccounts))).toMatchObject({
+      hostAccountsEnabled: true,
+      experienceTranslateApiEnabled: true,
+      experienceTranslateStandaloneApiEnabled: false,
+    });
   });
   it("opens reservation-free translation only with the Host Account session and the NIHO service audience", () => {
     const vars = closure("stg", "EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED");
@@ -476,7 +483,7 @@ describe("the deploy workflows' feature flags", () => {
   it("refuses Experience host accounts with a flag that sends the NIHO host access token, as resolve-config does (ADR 0003)", () => {
     const accounts = byId.get("EXPERIENCE_HOST_ACCOUNTS_ENABLED")!;
     expect(accounts.conflicts).toEqual(expect.arrayContaining([
-      "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_TRANSLATE_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED",
+      "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED",
     ]));
     for (const target of ["stg", "prod"] as const) {
       for (const conflict of accounts.conflicts!) {

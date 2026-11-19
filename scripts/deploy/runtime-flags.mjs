@@ -215,7 +215,7 @@ export const FLAGS = Object.freeze([
   {
     env: "EXPERIENCE_TRANSLATE_API_ENABLED",
     variable: "TRANSLATE_API_ENABLED",
-    // NIHO予約はNIHO APIで検証する。site予約は販売ONなら通常表示し、販売OFFでも通訳flagでread-only表示する。
+    // Experience Host Account sessions use service identity for booking translation.
     needs: ["HOST_CONSOLE", "DATABASE"],
   },
   {
@@ -313,7 +313,7 @@ export const FLAGS = Object.freeze([
     env: "EXPERIENCE_HOST_ACCOUNTS_ENABLED",
     variable: "HOST_ACCOUNTS_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_GUEST_MAIL_ENABLED"],
-    conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_TRANSLATE_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED"],
+    conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED"],
     secrets: [{ env: "EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", variable: "STRIPE_PLATFORM_SECRET_KEY_REF", stg: "STRIPE_CONNECT_PLATFORM_SECRET_KEY" }],
     settings: [{ env: "EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION", variable: "PAYOUT_ACCOUNT_CONSENT_VERSION", shape: "consentVersion" }],
   },
@@ -350,7 +350,7 @@ export const FLAGS = Object.freeze([
     variable: "HOST_TEAM_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
     // The dependency opens the native account mode, so the team switch has the same incompatible legacy consumers.
-    conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_TRANSLATE_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED"],
+    conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED"],
   },
   // 開催回の担当 (#535 v0, docs/occurrence-assignments.md): 承認後決済の開催回に1人の内部担当。報酬の計算・送金はしない。
   {

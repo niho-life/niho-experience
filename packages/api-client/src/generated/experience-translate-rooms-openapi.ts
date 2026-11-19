@@ -1,12 +1,95 @@
 // このファイルは scripts/gen-types.ts が contract/experience-translate-rooms-api.openapi.json から生成する。手で編集しない。
 // 更新: npm -C packages/api-client run gen:types
 export type paths = {
+    "/api/experience-host/translate-providers/{experienceProviderId}/site-bookings/{bookingId}/translate-rooms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Experience DBが発行する外部公開予約UUID。NIHOの予約IDや旅行者PIIではない。 */
+                bookingId: components["parameters"]["TranslateExperienceBookingId"];
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
+                experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Experience-native予約から日英通訳ルームを作る
+         * @description Experience runtime service ID tokenだけで認証する専用route。Experience BFFが毎回live host session、現在OWNER、
+         *     providerへの予約所属、create eligibilityを検証する。NIHOは予約metadata・旅行者PII・NIHO userを複製せず、
+         *     `experience:<experienceProviderId>`名義とcanonical lowercaseの外部公開booking UUIDだけを保存する。
+         *     legacy NIHO provider、provider map、standalone flag/allowlistは使わず、共通Host gateと`TRANSLATE_ENABLED`を要求する。
+         *     queryは受け取らず、bodyは空だけ。同じ名義とbooking UUIDの有効roomは409。
+         */
+        post: operations["postExperienceHostBookingTranslateRoom"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experience-host/translate-providers/{experienceProviderId}/site-bookings/{bookingId}/translate-rooms/{roomId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Experience DBが発行する外部公開予約UUID。NIHOの予約IDや旅行者PIIではない。 */
+                bookingId: components["parameters"]["TranslateExperienceBookingId"];
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
+                experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Experience-native予約roomの状態を取得してhost authorization leaseを更新する
+         * @description queryは受け取らない。service actor・namespaced provider・booking UUID・roomを照合後、未終了roomだけ15秒leaseを更新する。
+         */
+        get: operations["getExperienceHostBookingTranslateRoom"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/experience-host/translate-providers/{experienceProviderId}/site-bookings/{bookingId}/translate-rooms/{roomId}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Experience DBが発行する外部公開予約UUID。NIHOの予約IDや旅行者PIIではない。 */
+                bookingId: components["parameters"]["TranslateExperienceBookingId"];
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
+                experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Experience-native予約roomを終了する
+         * @description queryと非空bodyは受け取らない。scope照合後はhost authorization leaseが失効済みでも終了でき、両方の招待と接続資格を失効する。
+         */
+        post: operations["postExperienceHostBookingTranslateRoomEnd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/experience-host/translate-providers/{experienceProviderId}/translate-rooms": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
             };
             cookie?: never;
@@ -32,7 +115,7 @@ export type paths = {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
                 /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
                 roomId: components["parameters"]["TranslateRoomId"];
@@ -54,7 +137,7 @@ export type paths = {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
                 /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
                 roomId: components["parameters"]["TranslateRoomId"];
@@ -76,7 +159,7 @@ export type paths = {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
                 /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
                 roomId: components["parameters"]["TranslateRoomId"];
@@ -98,7 +181,7 @@ export type paths = {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
                 /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
                 roomId: components["parameters"]["TranslateRoomId"];
@@ -120,7 +203,7 @@ export type paths = {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
             };
             cookie?: never;
@@ -523,7 +606,7 @@ export type components = {
         TranslateBookingRequestId: string;
         /** @description Experience DBが発行する外部公開予約UUID。NIHOの予約IDや旅行者PIIではない。 */
         TranslateExperienceBookingId: string;
-        /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+        /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
         TranslateExperienceHostProviderId: string;
         /** @description 体験の提供者（ExperienceProvider）のID。 */
         TranslateExperienceProviderId: string;
@@ -536,12 +619,218 @@ export type components = {
 };
 export type $defs = Record<string, never>;
 export interface operations {
+    postExperienceHostBookingTranslateRoom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Experience DBが発行する外部公開予約UUID。NIHOの予約IDや旅行者PIIではない。 */
+                bookingId: components["parameters"]["TranslateExperienceBookingId"];
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
+                experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyObject"];
+            };
+        };
+        responses: {
+            /** @description 作成済み */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperienceProviderTranslateRoomCreated"];
+                };
+            };
+            /** @description NIHO API error (400) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (403) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (404) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (409) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (413) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (429) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (503) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getExperienceHostBookingTranslateRoom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Experience DBが発行する外部公開予約UUID。NIHOの予約IDや旅行者PIIではない。 */
+                bookingId: components["parameters"]["TranslateExperienceBookingId"];
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
+                experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperienceProviderTranslateRoomStatus"];
+                };
+            };
+            /** @description NIHO API error (403) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (404) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (429) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (503) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    postExperienceHostBookingTranslateRoomEnd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Experience DBが発行する外部公開予約UUID。NIHOの予約IDや旅行者PIIではない。 */
+                bookingId: components["parameters"]["TranslateExperienceBookingId"];
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
+                experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
+                /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
+                roomId: components["parameters"]["TranslateRoomId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EmptyObject"];
+            };
+        };
+        responses: {
+            /** @description 終了済み */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslateRoomStateResult"];
+                };
+            };
+            /** @description NIHO API error (400) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (403) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (404) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (413) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (429) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description NIHO API error (503) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     postExperienceHostStandaloneTranslateRoom: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
             };
             cookie?: never;
@@ -617,7 +906,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
                 /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
                 roomId: components["parameters"]["TranslateRoomId"];
@@ -670,7 +959,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
                 /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
                 roomId: components["parameters"]["TranslateRoomId"];
@@ -741,7 +1030,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
                 /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
                 roomId: components["parameters"]["TranslateRoomId"];
@@ -819,7 +1108,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
                 /** @description 対面通訳ルームの仮ID。NIHO user IDではない。 */
                 roomId: components["parameters"]["TranslateRoomId"];
@@ -897,7 +1186,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。 */
+                /** @description Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。 */
                 experienceProviderId: components["parameters"]["TranslateExperienceHostProviderId"];
             };
             cookie?: never;

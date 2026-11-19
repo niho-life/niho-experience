@@ -69,6 +69,7 @@ export interface HostTranslatePanelProps {
   bookingId: string;
   /** Booking eligibility gates new rooms; an existing room must remain controllable after cancellation. */
   canStart?: boolean;
+  requiresOpenConsole?: boolean;
   /** While another action on the booking is running. */
   disabled?: boolean;
   className?: string;
@@ -76,7 +77,7 @@ export interface HostTranslatePanelProps {
   onAuthorizationEnded?: (status: 401 | 403) => void;
 }
 
-export function HostTranslatePanel({ providerId, bookingId, canStart = true, disabled = false, className = "", onAuthorizationEnded }: HostTranslatePanelProps) {
+export function HostTranslatePanel({ providerId, bookingId, canStart = true, requiresOpenConsole = false, disabled = false, className = "", onAuthorizationEnded }: HostTranslatePanelProps) {
   const base = translateRoomsBffPath(providerId, bookingId);
   const [room, setRoom] = useState<Room | null>(null);
   const [status, setStatus] = useState<RoomStatus | null>(null);
@@ -210,7 +211,10 @@ export function HostTranslatePanel({ providerId, bookingId, canStart = true, dis
           <button type="button" disabled={disabled || busy} onClick={() => void start()} className={consoleButtonClass("primary")}>
             {busy ? "準備しています…" : "通訳を始める"}
           </button>
-          <p className="text-[0.78125rem] leading-normal text-muted">日英の対面通訳。2 人とも iPhone とマイク付きイヤフォンを使います。</p>
+          <p className="text-[0.78125rem] leading-normal text-muted">
+            日英の対面通訳。2 人とも iPhone とマイク付きイヤフォンを使います。
+            {requiresOpenConsole ? " 通訳中は別の端末でこの予約画面を開いておいてください。" : null}
+          </p>
         </div>
       ) : live ? (
         <section aria-labelledby={headingId} className="rounded-xl border border-line p-3.5">
@@ -233,12 +237,13 @@ export function HostTranslatePanel({ providerId, bookingId, canStart = true, dis
                 {ownQr ? "読み取ると、あなたの iPhone で通訳の画面が開きます。" : "読み取ると、相手の iPhone で参加の画面が開きます。アプリのインストールは要りません。"}
               </p>
               <p className="mt-1 text-xs text-muted">QR は {timeInJapan(room.expiresAt)} まで使えます</p>
+              {requiresOpenConsole ? <p className="mt-1 text-xs text-ink-soft">通訳中は、この予約画面を開いたままにしてください。</p> : null}
               <div className="mt-2.5 flex flex-wrap gap-2">
-                {onIphone ? (
+                {onIphone && !requiresOpenConsole ? (
                   <a href={room.hostInviteUrl} rel="noreferrer" className={consoleButtonClass("primary")}>自分の iPhone で開く</a>
                 ) : (
                   <button type="button" aria-pressed={ownQr} onClick={() => setOwnQr((value) => !value)} className={consoleButtonClass(ownQr ? "secondary" : "primary")}>
-                    {ownQr ? "ゲスト用 QR に戻す" : "自分の iPhone で開く"}
+                    {ownQr ? "ゲスト用 QR に戻す" : requiresOpenConsole ? "自分用の QR を表示" : "自分の iPhone で開く"}
                   </button>
                 )}
               </div>

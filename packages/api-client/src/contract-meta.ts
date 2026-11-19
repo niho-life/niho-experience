@@ -105,14 +105,14 @@ export const EXPERIENCE_PROVIDER_OPERATIONS_API_CONTRACT = {
 } as const;
 
 /**
- * 対面通訳の部屋（#181）。Experience Host service ID token専用の予約なしAPIを含む固定export。
+ * 対面通訳の部屋（#181）。Experience Host service ID token専用の予約付き・予約なしAPIを含む固定export。
  * API先行配備、runtime read-back、実機受入まではHTTP flagを開かない。
  */
 export const EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT = {
-  version: "1.2.0",
-  sourceIssue: "niho-coliving/niho-app#19797",
-  sourceCommit: "5e173637cb623be4400babc48bb2d5fa14cf7038",
-  sha256: "07b43aeb03f354738820e8557dc6b83e7e17a72b2dd4ed8f4b4ec46a17ad8466",
+  version: "1.3.0",
+  sourceIssue: "niho-coliving/niho-app#19672",
+  sourceCommit: "94badd30579a38320d914124814147cee2813b16",
+  sha256: "db5323e556752445ec5702ebecd16cda96883052fd881ca92c14f2e47aff0fe5",
   status: "agreed-not-deployed",
   deploymentStatus: "not-deployed",
 } as const;

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "NIHO Experience Translate Rooms API",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "予約なし・Host Account・旧NIHO予約・Experience予約UUIDから使う日英2人通訳の最小契約。旅行者PII・NIHO private sourceは含めない。",
     "x-niho-contract-status": "agreed-not-deployed",
     "x-niho-contract-source": "niho-app contracts/openapi.yaml (source commit not fixed yet)",
@@ -680,6 +680,188 @@
           "Translate"
         ],
         "summary": "現在OWNER向け予約なしroomを終了する",
+        "security": [
+          {
+            "ExperienceHostTranslateServiceIdToken": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "終了済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslateRoomStateResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-host/translate-providers/{experienceProviderId}/site-bookings/{bookingId}/translate-rooms": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceHostProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateExperienceBookingId"
+        }
+      ],
+      "post": {
+        "operationId": "postExperienceHostBookingTranslateRoom",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "Experience-native予約から日英通訳ルームを作る",
+        "description": "Experience runtime service ID tokenだけで認証する専用route。Experience BFFが毎回live host session、現在OWNER、\nproviderへの予約所属、create eligibilityを検証する。NIHOは予約metadata・旅行者PII・NIHO userを複製せず、\n`experience:<experienceProviderId>`名義とcanonical lowercaseの外部公開booking UUIDだけを保存する。\nlegacy NIHO provider、provider map、standalone flag/allowlistは使わず、共通Host gateと`TRANSLATE_ENABLED`を要求する。\nqueryは受け取らず、bodyは空だけ。同じ名義とbooking UUIDの有効roomは409。\n",
+        "security": [
+          {
+            "ExperienceHostTranslateServiceIdToken": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyObject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "作成済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceProviderTranslateRoomCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "NIHO API error (400)"
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "409": {
+            "description": "NIHO API error (409)"
+          },
+          "413": {
+            "description": "NIHO API error (413)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-host/translate-providers/{experienceProviderId}/site-bookings/{bookingId}/translate-rooms/{roomId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceHostProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateExperienceBookingId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "get": {
+        "operationId": "getExperienceHostBookingTranslateRoom",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "Experience-native予約roomの状態を取得してhost authorization leaseを更新する",
+        "description": "queryは受け取らない。service actor・namespaced provider・booking UUID・roomを照合後、未終了roomだけ15秒leaseを更新する。",
+        "security": [
+          {
+            "ExperienceHostTranslateServiceIdToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceProviderTranslateRoomStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "NIHO API error (403)"
+          },
+          "404": {
+            "description": "NIHO API error (404)"
+          },
+          "429": {
+            "description": "NIHO API error (429)"
+          },
+          "503": {
+            "description": "NIHO API error (503)"
+          }
+        }
+      }
+    },
+    "/api/experience-host/translate-providers/{experienceProviderId}/site-bookings/{bookingId}/translate-rooms/{roomId}/end": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TranslateExperienceHostProviderId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateExperienceBookingId"
+        },
+        {
+          "$ref": "#/components/parameters/TranslateRoomId"
+        }
+      ],
+      "post": {
+        "operationId": "postExperienceHostBookingTranslateRoomEnd",
+        "tags": [
+          "Translate"
+        ],
+        "summary": "Experience-native予約roomを終了する",
+        "description": "queryと非空bodyは受け取らない。scope照合後はhost authorization leaseが失効済みでも終了でき、両方の招待と接続資格を失効する。",
         "security": [
           {
             "ExperienceHostTranslateServiceIdToken": []
@@ -1408,7 +1590,7 @@
           "maxLength": 200,
           "pattern": "^[A-Za-z0-9_-]+$"
         },
-        "description": "Experience Host Account DBのprovider ID。NIHO runtime mapでNIHO provider IDへ変換する。"
+        "description": "Experience Host Account DBのprovider ID。予約なしrouteはNIHO runtime mapでlegacy providerへ変換し、Experience-native予約routeは`experience:` namespaceへ格納する。"
       },
       "TranslateExperienceProviderId": {
         "name": "providerId",
@@ -1446,7 +1628,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "X-NIHO-Experience-Service-Id-Token",
-        "description": "固定audienceと許可されたExperience runtimeだけ。Host Accountの予約なし通訳専用routeはこのID tokenだけを受け付け、host bearerは送らない。"
+        "description": "固定audienceと許可されたExperience runtimeだけ。Host Accountの予約なし・Experience-native予約通訳routeはこのID tokenだけを受け付け、host bearerは送らない。"
       }
     }
   }
