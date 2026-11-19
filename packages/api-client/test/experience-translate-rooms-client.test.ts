@@ -29,7 +29,7 @@ function respond(status: number, body: unknown): ReturnType<typeof vi.fn<FetchLi
 }
 
 describe("experience translate rooms transport", () => {
-  it("Host Accountの予約なしAPIはfixed-audience service tokenだけを送り、予約APIは使えない", async () => {
+  it("Host Accountの予約なしAPIはfixed-audience service tokenだけを送る", async () => {
     const serviceToken = "service.header.signature";
     const fetcher = respond(201, standaloneCreated);
     const api = createExperienceTranslateRoomsClient({
@@ -43,7 +43,6 @@ describe("experience translate rooms transport", () => {
     }));
     const headers = (fetcher.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
     expect(headers.authorization).toBeUndefined();
-    expect(await api.createSiteRoom("provider_1", "00000000-0000-4000-8000-00000000b101")).toEqual({ ok: false, kind: "invalid_request" });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -114,6 +113,30 @@ describe("experience translate rooms transport", () => {
     const end = respond(200, { roomId: "room_1", state: "ended" });
     await createExperienceTranslateRoomsClient({ nihoWebOrigin: ORIGIN, auth: { kind: "niho", accessToken: TOKEN }, fetch: end }).endSiteRoom("provider_1", "00000000-0000-4000-8000-00000000b101", "room_1");
     expect(end).toHaveBeenCalledWith(`${SITE_ROOMS}/room_1/end`, expect.objectContaining({ method: "POST", body: "{}" }));
+  });
+
+  it("Host Accountの予約通訳は専用pathにサービス認証だけを送る", async () => {
+    const serviceIdToken = "service.header.signature";
+    const bookingId = "00000000-0000-4000-8000-00000000b101";
+    const path = `${ORIGIN}/api/experience-host/translate-providers/provider_1/site-bookings/${bookingId}/translate-rooms`;
+    const client = (fetch: FetchLike) => createExperienceTranslateRoomsClient({
+      nihoWebOrigin: ORIGIN,
+      auth: { kind: "experience-service", serviceIdToken },
+      fetch,
+    });
+    const create = respond(201, created);
+    expect(await client(create).createSiteRoom("provider_1", bookingId)).toEqual({ ok: true, data: created });
+    expect(create).toHaveBeenCalledWith(path, expect.objectContaining({ method: "POST", body: "{}" }));
+    const headers = create.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers["x-niho-experience-service-id-token"]).toBe(serviceIdToken);
+    expect(headers.authorization).toBeUndefined();
+
+    const read = respond(200, status);
+    expect((await client(read).getSiteRoom("provider_1", bookingId, "room_1")).ok).toBe(true);
+    expect(read).toHaveBeenCalledWith(`${path}/room_1`, expect.objectContaining({ method: "GET" }));
+    const end = respond(200, { roomId: "room_1", state: "ended" });
+    expect((await client(end).endSiteRoom("provider_1", bookingId, "room_1")).ok).toBe(true);
+    expect(end).toHaveBeenCalledWith(`${path}/room_1/end`, expect.objectContaining({ method: "POST", body: "{}" }));
   });
 
   it("rejects invalid ids before fetch", async () => {

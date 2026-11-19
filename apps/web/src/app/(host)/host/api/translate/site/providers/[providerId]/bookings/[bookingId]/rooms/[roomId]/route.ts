@@ -11,5 +11,5 @@ export async function GET(request: Request, context: Context) {
   const loaded = await loadSiteTranslateRoomsClient(providerId, bookingId, "status");
   if (!loaded.ok) return loaded.response;
   const result = await loaded.client.getSiteRoom(providerId, bookingId, roomId);
-  return result.ok ? translateRoomsJson(projectTranslateRoomStatus(result.data)) : translateRoomsFailure(result);
+  return result.ok ? translateRoomsJson(projectTranslateRoomStatus(result.data)) : translateRoomsFailure(result, { serviceAuth: loaded.serviceAuth });
 }

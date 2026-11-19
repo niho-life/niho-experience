@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   loadOtaBookings: null as null | Load,
   calendarChoice: null as null | Record<string, unknown>,
   translateEnabled: false,
+  hostAccountsEnabled: false,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", async (importActual) => ({
@@ -39,6 +40,10 @@ vi.mock("@/lib/experience/calendar-actor", () => ({ resolveCalendarContext: asyn
 vi.mock("@/lib/host/support-history-server", () => ({ isHostSupportHistoryEnabled: () => false }));
 vi.mock("@/lib/host/fee-summary-server", () => ({ isHostFeeSummaryUiEnabled: () => false }));
 vi.mock("@/lib/host/translate-rooms-server", () => ({ siteTranslateRoomsEnabled: () => state.translateEnabled, translateRoomsEntry: () => state.translateEnabled ? { today: "2026-10-31" } : null }));
+vi.mock("@/lib/config", async (importActual) => {
+  const original = await importActual<typeof import("@/lib/config")>();
+  return { ...original, config: { ...original.config, get hostAccountsEnabled() { return state.hostAccountsEnabled; } } };
+});
 
 import HostBookingsPage from "./page";
 import { HostBookings } from "@/components/host/HostBookings";
@@ -53,6 +58,7 @@ beforeEach(() => {
   state.otaShown = false;
   state.calendarChoice = null;
   state.translateEnabled = false;
+  state.hostAccountsEnabled = false;
   state.loadSiteBookings = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.site);
   state.loadOtaBookings = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => state.ota);
 });
@@ -82,6 +88,15 @@ describe("Experience bookings", () => {
     expect((await page()).props).toEqual({});
     state.site = { status: "error" };
     expect((await page()).props).toMatchObject({ title: "予約を読み込めませんでした" });
+  });
+
+  it("shows the booking interpreter only to the current OWNER and keeps the Host Account console open", async () => {
+    state.site = LIVE;
+    state.translateEnabled = true;
+    state.hostAccountsEnabled = true;
+    expect((await page()).props).toMatchObject({ translateEnabled: true, translateRequiresOpenConsole: true });
+    state.memberRole = "COHOST";
+    expect((await page()).props).toMatchObject({ translateEnabled: false });
   });
 
   it("does not hide an Experience booking read failure behind OTA rows", async () => {

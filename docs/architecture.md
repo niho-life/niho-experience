@@ -50,14 +50,15 @@ NIHO名義の一商品だけを担当する講師は、NIHO provider memberへ�
 
 | 担当 | 持つもの |
 | --- | --- |
-| NIHO API（Authority） | 部屋、host / guest の participant と招待 code、relay の入室券（EdDSA JWT・60 秒）と JWKS、presence・control・lease、名義（体験提供者）ごとの予算と使用量 |
-| relay（NIHO が運用） | iPhone と OpenAPI の音声の中継。OpenAI の鍵は relay だけが持つ |
+| NIHO API（Authority） | 部屋、host / guest の participant と招待 code、relay の入室券（EdDSA JWT・45 秒）と JWKS、presence・control・lease、名義（体験提供者）ごとの予算と使用量 |
+| relay（NIHO が運用） | iPhone と OpenAI の音声の中継。OpenAI の鍵は relay だけが持つ |
 | iPhone（NIHO アプリ・App Clip） | 招待 URL `https://niho.life/t#<code>`（stg は `app-stg.niho.life`）を開き、同意・イヤフォンの確認・開始・終了 |
 | niho-experience | Experience Storeの予約を正本にしたホスト画面とBFF。Experience DB予約は `/host/api/translate/site/providers/{providerId}/bookings/{bookingId}/rooms[/{roomId}[/end]]`。旧NIHO予約の表示・通訳経路は撤去済み |
 
-- 流れ：英語圏のゲストの確定予約（EN、または未記録）で、当日以降に「通訳を始める」を出す。Experience DB予約はBFFが現在のNIHO OWNERとExperience storeのOWNER+予約所属を毎回照合し、create時だけ確定・未取消・当日以降を確認して、NIHOの`site-bookings/{publicBookingId}/translate-rooms`へopaqueなUUIDだけを送る。status/endは取消・日付変更後も所属を再確認して自分のroomを終了できる。NIHO側の固定export contractに旧予約pathが残っていても、Experienceは呼び出さない。
-- 境界：NIHO の access tokenはサーバーのsealed HttpOnly cookieに留まり、ブラウザは `/host/api/translate/*` だけを呼ぶ。旅行者の氏名・メール・状態・言語・role・budgetはNIHOへ送らない。BFF は `participantId`・`inviteCode` を落とし、招待 URL・状態・参加状況だけを `private, no-store` / `noindex` / `no-referrer` で返す。HTTP失敗をmockへ差し替えない。
-- 契約：`packages/api-client/contract/experience-translate-rooms-api.openapi.json` v1.0.0（source契約は`agreed-not-deployed`）。NIHOのselected exportとsha256を同期し、source commitを`5ed6ebac62b5f14dd0d114d7893bc0099d9df776`へ固定。stg候補sourceと固定contract hashの一致は確認済みだが、runtime read-backと実予約create/poll/endは未受入。公開状態は`waiting | active | paused | ended`、endは`{roomId,state}`。受入までは`EXPERIENCE_TRANSLATE_API_ENABLED`をOFFに保つ。httpの通訳flagはホスト画面とDBを前提にguest sales flagから独立する。guest salesがOFFの場合もOWNERの予約一覧/詳細と通訳だけをread-onlyで開き、guest checkout・予約更新・取消/返金・メールを開かない。mockはExperience予約とstandalone pathだけを合成する。
+- 流れ：英語圏のゲストの確定予約（EN、または未記録）で、当日以降に「通訳を始める」を出す。Experience DB予約は、BFFが現在のExperience OWNERと予約所属を毎回照合する。create時だけ確定・未取消・当日以降を確認する。Host Accountからはサービス認証で、Experience提供者IDと予約の公開UUIDをNIHOの予約通訳APIに渡す。status/endは取消・日付変更後も所属を再確認して自分のroomを終了できる。NIHO側の固定export contractに旧予約pathが残っていても、Experienceは呼び出さない。
+- 境界：Host AccountではGoogleのサービスIDトークンを使い、NIHOユーザーのトークンやHost Account IDは転送しない。ブラウザは `/host/api/translate/*` だけを呼ぶ。旅行者の氏名・メール・状態・言語・role・budgetはNIHOへ送らない。BFF は `participantId`・`inviteCode` を落とし、招待 URL・状態・参加状況だけを `private, no-store` / `noindex` / `no-referrer` で返す。HTTP失敗をmockへ差し替えない。
+- Host Accountで通訳するときは、別の端末で予約画面を開いておく。画面が見えている間は3秒ごとに現在のOWNERを再確認し、NIHOの15秒の操作資格を更新する。更新が止まると、新規参加や音声の継続ができなくなる。
+- 契約：`packages/api-client/contract/experience-translate-rooms-api.openapi.json` はNIHOの選別契約と固定SHA・ハッシュを同期する。版とsource commitは同ディレクトリのmanifestで管理する。公開状態は`waiting | active | paused | ended`、endは`{roomId,state}`。受入までは`EXPERIENCE_TRANSLATE_API_ENABLED`をOFFに保つ。httpの通訳flagはホスト画面とDBを前提にguest sales flagから独立する。guest salesがOFFの場合もOWNERの予約一覧/詳細と通訳だけをread-onlyで開き、guest checkout・予約更新・取消/返金・メールを開かない。mockはExperience予約とstandalone pathだけを合成する。
 - 保存しないもの：音声・字幕・ゲストの個人情報。体験サイトは部屋や使用量の記録も持たず、必要なら NIHO から読む。
 
 ## API契約

@@ -53,6 +53,7 @@ describe("experience translate rooms selected contract", () => {
     const legacy = "/api/experience-providers/{providerId}/bookings/{requestId}/translate-rooms";
     const site = "/api/experience-providers/{providerId}/site-bookings/{bookingId}/translate-rooms";
     const hostService = "/api/experience-host/translate-providers/{experienceProviderId}/translate-rooms";
+    const hostSiteService = "/api/experience-host/translate-providers/{experienceProviderId}/site-bookings/{bookingId}/translate-rooms";
     expect(Object.keys(document.paths).sort()).toEqual([
       legacy, `${legacy}/{roomId}`, `${legacy}/{roomId}/end`, site, `${site}/{roomId}`, `${site}/{roomId}/end`,
       "/api/experience-providers/{providerId}/translate-rooms",
@@ -67,8 +68,9 @@ describe("experience translate rooms selected contract", () => {
       `${hostService}/{roomId}/invites/host`,
       `${hostService}/{roomId}/invites/guest`,
       `${hostService}/{roomId}/end`,
+      hostSiteService, `${hostSiteService}/{roomId}`, `${hostSiteService}/{roomId}/end`,
     ].sort());
-    for (const root of [legacy, site]) {
+    for (const root of [legacy, site, hostSiteService]) {
       expect(Object.keys(document.paths[root] ?? {})).toEqual(["parameters", "post"]);
       expect(Object.keys(document.paths[`${root}/{roomId}`] ?? {})).toEqual(["parameters", "get"]);
       expect(Object.keys(document.paths[`${root}/{roomId}/end`] ?? {})).toEqual(["parameters", "post"]);
@@ -84,7 +86,7 @@ describe("experience translate rooms selected contract", () => {
     const serviceIdentity = document.components.securitySchemes.ExperienceHostTranslateServiceIdToken;
     expect(serviceIdentity).toMatchObject({ type: "apiKey", in: "header" });
     expect(serviceIdentity?.name?.toLowerCase()).toBe("x-niho-experience-service-id-token");
-    for (const path of [hostService, `${hostService}/current`, `${hostService}/{roomId}`, `${hostService}/{roomId}/invites/host`, `${hostService}/{roomId}/invites/guest`, `${hostService}/{roomId}/end`]) {
+    for (const path of [hostService, `${hostService}/current`, `${hostService}/{roomId}`, `${hostService}/{roomId}/invites/host`, `${hostService}/{roomId}/invites/guest`, `${hostService}/{roomId}/end`, hostSiteService, `${hostSiteService}/{roomId}`, `${hostSiteService}/{roomId}/end`]) {
       const operation = Object.values(document.paths[path] ?? {}).find((value) => typeof value === "object" && value !== null && "operationId" in value) as { security?: Array<Record<string, unknown>> } | undefined;
       expect(operation?.security).toEqual([{ ExperienceHostTranslateServiceIdToken: [] }]);
     }

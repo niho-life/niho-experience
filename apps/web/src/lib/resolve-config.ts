@@ -226,7 +226,6 @@ function hostMailSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled:
 export const NIHO_HOST_TOKEN_FLAGS = Object.freeze([
   "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED",
   "EXPERIENCE_PROVIDER_PAGES_API_ENABLED",
-  "EXPERIENCE_TRANSLATE_API_ENABLED",
   "HOST_SUPPORT_SETTINGS_API_ENABLED",
   "HOST_SUPPORT_HISTORY_API_ENABLED",
   "EXPERIENCE_FEE_SUMMARY_API_ENABLED",
@@ -871,8 +870,7 @@ export function resolveConfig(env: Env) {
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted,
   // and only with the host console that shows the OWNER these bookings.
   const guestBooking = guestBookingSettings(apiMode, env, hostConsoleEnabled);
-  // 対面通訳 (#181): Experience予約はExperience DBで所属・状態を検証する。旧NIHO予約経路は使わない。
-  // site bookingは別のguest-booking flagが無いと画面・BFFとも閉じたまま。通訳自体は販売flagに依存しない。
+  // Experience予約の所属と状態はExperience DBで検証する。通訳の利用は販売flagから独立する。
   // http opens only after the selected NIHO API is deployed and accepted, per environment.
   const experienceTranslateApiEnabled = apiMode === "http" && hostConsoleEnabled && Boolean(env.EXPERIENCE_DATABASE_URL?.trim()) && env.EXPERIENCE_TRANSLATE_API_ENABLED === "true";
   // 出欠 (#107) of the bookings made on this site, kept in the experience DB (migration 0033), with the capacity of
@@ -889,6 +887,9 @@ export function resolveConfig(env: Env) {
   const hostMailEnabled = hostMailSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
   // ホストのアカウント (ADR 0003): /host signs in with Experience's own accounts instead of NIHO; see hostAccountsSetting.
   const hostAccountsEnabled = hostAccountsSetting(apiMode, env, hostConsoleEnabled, guestMail.enabled);
+  if (experienceTranslateApiEnabled && hostAccountsEnabled && !env.NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE?.trim()) {
+    throw new Error("EXPERIENCE_TRANSLATE_API_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE with Experience Host Accounts");
+  }
   const experienceTranslateStandaloneRequested = env.EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED === "true";
   if (experienceTranslateStandaloneRequested && apiMode === "http" && !hostAccountsEnabled) {
     throw new Error("EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");

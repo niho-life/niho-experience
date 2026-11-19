@@ -534,7 +534,7 @@ describe("admin support console settings", () => {
       .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_GUEST_MAIL_ENABLED=true");
     // Every flag whose code sends the NIHO host access token to NIHO stops the server, by name.
     expect(NIHO_HOST_TOKEN_FLAGS).toEqual(expect.arrayContaining([
-      "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_TRANSLATE_API_ENABLED",
+      "EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED",
       "HOST_SUPPORT_SETTINGS_API_ENABLED", "HOST_SUPPORT_HISTORY_API_ENABLED", "EXPERIENCE_FEE_SUMMARY_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED",
     ]));
     for (const name of NIHO_HOST_TOKEN_FLAGS) {
@@ -542,6 +542,13 @@ describe("admin support console settings", () => {
       expect(resolveConfig({ ...on, [name]: "false" }).hostAccountsEnabled, name).toBe(true);
     }
     expect(NIHO_HOST_TOKEN_FLAGS).not.toContain("EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED");
+    expect(resolveConfig({
+      ...on,
+      EXPERIENCE_TRANSLATE_API_ENABLED: "true",
+      NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test",
+    })).toMatchObject({ hostAccountsEnabled: true, experienceTranslateApiEnabled: true });
+    expect(() => resolveConfig({ ...on, EXPERIENCE_TRANSLATE_API_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_TRANSLATE_API_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
     expect(resolveConfig({
       ...on,
       EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED: "true",

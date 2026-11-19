@@ -87,6 +87,7 @@ export interface HostBookingsProps {
   feeSummaryEnabled: boolean;
   /** 通訳を始める (#181): whether the translate BFF is open. */
   translateEnabled: boolean;
+  translateRequiresOpenConsole?: boolean;
   /**
    * Bookings made on this site (#285 slice 8, experience DB, http mode): a session's heading opens their この回
    * (slice 8b), and the OWNER may cancel one with a full refund (slice 7). `nextCursor` reads the rest of the list
@@ -118,7 +119,7 @@ export interface HostBookingsProps {
  * (mock mode: 承認・お断り・取消 change them here only; the preview note says nothing is kept).
  * メッセージ leads to the booking's thread (#106). A session's heading opens its own screen (この回, #107).
  */
-export function HostBookings({ bookings: initialBookings, experiences: initialExperiences, today, now, providerId, providerDataId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, live = null, ota = null, assignments: initialAssignments = null }: HostBookingsProps) {
+export function HostBookings({ bookings: initialBookings, experiences: initialExperiences, today, now, providerId, providerDataId, supportPreview, supportHistoryEnabled, feeSummaryEnabled, translateEnabled, translateRequiresOpenConsole, live = null, ota = null, assignments: initialAssignments = null }: HostBookingsProps) {
   const searchParams = useSearchParams();
   const [bookings, setBookings] = useState<readonly HostBooking[]>(initialBookings);
   /** Live: the experiences the loaded bookings name, and where the rest of the list starts (null once all are here). */
@@ -396,6 +397,7 @@ export function HostBookings({ bookings: initialBookings, experiences: initialEx
                 supportHistoryEnabled={supportHistoryEnabled}
                 feeSummaryEnabled={feeSummaryEnabled}
                 translateEnabled={translateEnabled}
+                translateRequiresOpenConsole={translateRequiresOpenConsole}
                 assignment={(() => {
                   const found = assignmentFor(assignments, shown);
                   return found ? <HostAssignmentDetail providerId={providerDataId} found={found} onList={setAssignments} /> : null;

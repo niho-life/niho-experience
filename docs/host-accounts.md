@@ -137,7 +137,7 @@ OWNER が設定 › 受取口座で、登録された口座で提供者の Exper
 
 Experience 自前のチーム管理は `EXPERIENCE_HOST_TEAM_ENABLED`（既定 OFF）で独立して有効化する。現在の OWNER が、ops 登録済みのホストを COHOST として追加・解除できる。COHOST は開催枠・予約参照・返信を担当し、本文・料金・公開・金融・チーム管理は OWNER に残す。詳細は [ホストチーム](host-team.md)。旧 NIHO provider operations の flag を有効にする機能ではない。
 
-- **NIHO のユーザーbearerをNIHOへ送る既存機能**は、フラグと同時に ON にできない（起動時に止まる。配備前の検査でも止まる）：`EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED`、`EXPERIENCE_PROVIDER_PAGES_API_ENABLED`、予約関連の`EXPERIENCE_TRANSLATE_API_ENABLED`、`HOST_SUPPORT_SETTINGS_API_ENABLED`、`HOST_SUPPORT_HISTORY_API_ENABLED`、`EXPERIENCE_FEE_SUMMARY_API_ENABLED`（Admin と共用）、`EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED`。予約なし対面通訳は別の`EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED`を使い、Experience Host Accountの現OWNERを要求単位で確認した後、Experience service ID tokenだけでNIHOへ接続する。NIHOにHost Account IDやNIHO user bearerを渡さず、seller profile・Stripe・販売flagも要らない。NIHO側の選別契約・provider mapping・allowlistを先に配備し、stgで権限拒否と2台実機音声の受入が終わるまでこのflagはOFFにする。
+- **NIHO のユーザーbearerをNIHOへ送る既存機能**は、フラグと同時に ON にできない（起動時に止まる。配備前の検査でも止まる）：`EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED`、`EXPERIENCE_PROVIDER_PAGES_API_ENABLED`、`HOST_SUPPORT_SETTINGS_API_ENABLED`、`HOST_SUPPORT_HISTORY_API_ENABLED`、`EXPERIENCE_FEE_SUMMARY_API_ENABLED`（Admin と共用）、`EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED`。予約付き対面通訳の`EXPERIENCE_TRANSLATE_API_ENABLED`はHost Accountと併用できる。現在のExperience OWNERと予約所属を照合し、固定audienceのサービスIDトークンでNIHOへ接続する。予約なし対面通訳は別の`EXPERIENCE_TRANSLATE_STANDALONE_API_ENABLED`を使い、Experience Host Accountの現OWNERを要求単位で確認した後、Experience service ID tokenだけでNIHOへ接続する。NIHOにHost Account IDやNIHO user bearerを渡さず、seller profile・Stripe・販売flagも要らない。NIHO側の選別契約・provider mapping・allowlistを先に配備し、stgで権限拒否と2台実機音声の受入が終わるまでこのflagはOFFにする。
 - **運営者の招待**：招待された人にもホストアカウントが要る（無いアドレスにはリンクが届かない）。今は ops が先に登録する。
 - **新しい販売者の口座の接続**（Express アカウントの作成と Account Links）はまだ無い。今は Stripe で接続済みの既存の口座を ops が登録する。
 - Admin の Google Workspace ログイン、NIHO の app-connect・Host v1・旧ホスト API の撤去は後の段。
@@ -191,7 +191,7 @@ NIHO ログインの時期に登録した販売者（NIHO の key を持つも�
 ## staging で開く
 
 1. migration `0064`・`0065` と runtime の権限（`scripts/gcp/experience-db-grants.mjs`）を適用する。
-2. `STG_GUEST_MAIL_ENABLED=true`（メール job）を確かめ、上の NIHO トークンのフラグを `false` か未設定にする（`STG_PROVIDER_OPERATIONS_API_ENABLED`・`STG_PROVIDER_PAGES_API_ENABLED`・`STG_TRANSLATE_API_ENABLED`・`STG_HOST_ARTICLE_LINKS_ENABLED`）。
+2. `STG_GUEST_MAIL_ENABLED=true`（メール job）を確かめ、上の NIHO トークンのフラグを `false` か未設定にする（`STG_PROVIDER_OPERATIONS_API_ENABLED`・`STG_PROVIDER_PAGES_API_ENABLED`・`STG_HOST_ARTICLE_LINKS_ENABLED`）。
 3. `STG_PAYOUT_ACCOUNT_CONSENT_VERSION`（合成の版でよい）と `STG_STRIPE_PLATFORM_SECRET_KEY_REF`（予約と同じ `STRIPE_CONNECT_PLATFORM_SECRET_KEY:<version>`）を入れる。
 4. 合成の提供者に、合成のアドレスでホストアカウントを、テストモードの接続済み口座で販売者を登録する（上の script、`seller` 付き）。
 5. `STG_HOST_ACCOUNTS_ENABLED=true` で候補を作り、候補 URL でログイン・ログアウト・期限切れ・別ブラウザ・push を確かめる。公開も試すなら `STG_PUBLICATIONS_ENABLED`・`STG_HOST_PUBLICATION_API_ENABLED` も ON にし、受取口座の表示・30 分を過ぎた同意（ログインし直して戻る）・同意・取り消し（公開中が止まる）・公開・停止・再開・販売者表示・ホスト紹介を確かめてから昇格する。止めるときは variable を `false` に戻して新しい候補を作る。

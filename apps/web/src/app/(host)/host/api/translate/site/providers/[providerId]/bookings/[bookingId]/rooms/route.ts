@@ -13,5 +13,5 @@ export async function POST(request: Request, context: Context) {
   const loaded = await loadSiteTranslateRoomsClient(providerId, bookingId, "create");
   if (!loaded.ok) return loaded.response;
   const result = await loaded.client.createSiteRoom(providerId, bookingId);
-  return result.ok ? translateRoomsJson(projectTranslateRoom(result.data), 201) : translateRoomsFailure(result);
+  return result.ok ? translateRoomsJson(projectTranslateRoom(result.data), 201) : translateRoomsFailure(result, { serviceAuth: loaded.serviceAuth });
 }
