@@ -336,7 +336,7 @@ export const FLAGS = Object.freeze([
     // The terms of service a traveler agrees to by logging in: linked beside the privacy notice while set.
     settings: [{ env: "EXPERIENCE_TERMS_URL", variable: "TERMS_URL", shape: "httpsUrl", optional: true }],
   },
-  // S1b. NIHO's status API contract is proposed but not deployed; keep this off until its fixed source SHA is accepted in staging.
+  // S1b. NIHO's status API contract is merged in niho-app#21003 but not deployed/accepted in staging; keep this off until its fixed source SHA is accepted there.
   {
     env: "EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED",
     variable: "NIHO_ACCOUNT_STATUS_CHECK_ENABLED",
