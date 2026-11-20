@@ -1,3 +1,5 @@
+import { generateKeyPairSync, sign } from "node:crypto";
+import contract from "@niho-experience/api-client/niho-login-contract";
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NihoSessionResult } from "@niho-experience/experience-store";
@@ -12,6 +14,7 @@ const state = vi.hoisted(() => ({
     hostConsoleEnabled: true,
     hostAccountsEnabled: true,
     hostNihoLoginEnabled: true,
+    nihoIdentityLoginEnabled: false,
     nihoWriterEnabled: false,
     hostPwaEnabled: false,
     hostPushEnabled: false,
@@ -44,6 +47,7 @@ import { GET as callback } from "@/app/(host)/host/auth/callback/route";
 import { GET as mockLogin } from "@/app/(host)/host/auth/mock-login/route";
 import { cookieSealer } from "./cookie-seal";
 import { decodeLoginState, ACCOUNT_SESSION_COOKIE, LOGIN_COOKIE, SESSION_COOKIE } from "./session";
+import { startTravelerLogin } from "./niho-login";
 
 const SITE = state.config.siteUrl;
 const NIHO = state.config.nihoWebOrigin;
@@ -63,7 +67,7 @@ const calls: { url: URL; init: RequestInit }[] = [];
 
 beforeEach(() => {
   calls.length = 0;
-  Object.assign(state.config, { hostConsoleEnabled: true, hostAccountsEnabled: true, hostNihoLoginEnabled: true, nihoWriterEnabled: false, apiMode: "http" });
+  Object.assign(state.config, { hostConsoleEnabled: true, hostAccountsEnabled: true, hostNihoLoginEnabled: true, nihoIdentityLoginEnabled: false, nihoWriterEnabled: false, apiMode: "http" });
   state.cookies = {};
   const opened = async (): Promise<NihoSessionResult> => ({ kind: "ok", sessionToken: SESSION_TOKEN, sessionRef: "0f8fad5b-d9cb-469f-a165-70867728950e", hostAccountId: HOST, absoluteExpiresAtUtc: new Date(Date.now() + 30 * DAY).toISOString() });
   state.identities = { startSessionForNihoIdentity: vi.fn(opened), startWriterSessionForNihoIdentity: vi.fn(opened) };
@@ -171,6 +175,15 @@ describe("starting the NIHO account login", () => {
     expect(calls).toEqual([]);
   });
 
+  it("keeps traveler direct login without adding a recent-login requirement", () => {
+    state.config.nihoIdentityLoginEnabled = true;
+    const response = startTravelerLogin("google");
+    const location = new URL(response.headers.get("location")!);
+    expect(location.searchParams.get("audience")).toBe("guest");
+    expect(location.searchParams.get("method")).toBe("google");
+    expect(location.searchParams.get("max_age")).toBeNull();
+  });
+
   it("is the email form again while the flag is off, and NIHO's own login when host accounts are off", async () => {
     state.config.hostNihoLoginEnabled = false;
     expect((await login(new NextRequest(`${SITE}/host/auth/login`))).headers.get("location")).toBe("/host/auth/sign-in");
@@ -181,6 +194,77 @@ describe("starting the NIHO account login", () => {
 });
 
 describe("the callback", () => {
+  it("exchanges the identity code server-side and opens the same host session after verifying NIHO's signed nonce", async () => {
+    state.config.nihoIdentityLoginEnabled = true;
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const { location, cookie } = await startLogin("?reauth=1");
+    const loginState = decodeLoginState(cookieSealer(state.config.hostSessionSecret, "login"), cookie.slice(LOGIN_COOKIE.length + 1), Date.now());
+    const nonce = location.searchParams.get("nonce");
+    const code = "c".repeat(43);
+    const now = Math.floor(Date.now() / 1000);
+    const redirectUri = `${SITE}/host/auth/callback`;
+    expect(location.searchParams.get("client_id")).toBe(contract.clientId);
+    expect(location.searchParams.get("redirect_uri")).toBe(redirectUri);
+    expect(location.searchParams.get("scope")).toBe("openid");
+    expect(location.searchParams.get("max_age")).toBe("300");
+    expect(loginState?.nihoIdentity).toEqual({ nonce, maxAgeSeconds: 300 });
+    expect(nonce).not.toBe(location.searchParams.get("state"));
+    const unsigned = [
+      { alg: "RS256", typ: "JWT", kid: "test-key" },
+      { iss: NIHO + contract.issuerPath, aud: contract.clientId, sub: NIHO_USER, auth_time: now - 240, iat: now, exp: now + 120, nonce },
+    ].map((part) => Buffer.from(JSON.stringify(part)).toString("base64url")).join(".");
+    const idToken = `${unsigned}.${sign("RSA-SHA256", Buffer.from(unsigned), privateKey).toString("base64url")}`;
+    handler = (url, init) => {
+      if (url.pathname === contract.tokenPath) {
+        expect(init.headers).toMatchObject({ [contract.serviceIdentityHeader]: "synthetic-service-id-token" });
+        expect(init.redirect).toBe("error");
+        expect(init.body).toEqual(new URLSearchParams({
+          grant_type: "authorization_code", client_id: contract.clientId, redirect_uri: redirectUri,
+          code, code_verifier: loginState?.verifier ?? "",
+        }));
+        return json(200, { id_token: idToken });
+      }
+      if (url.pathname === contract.jwksPath) return json(200, {
+        keys: [{ ...publicKey.export({ format: "jwk" }), kid: "test-key", alg: "RS256", use: "sig" }],
+      });
+      return json(404, { error: "not_found" });
+    };
+    const request = (query: string) => new NextRequest(`${redirectUri}?${query}`, { headers: { cookie } });
+    const stateValue = location.searchParams.get("state");
+    const duplicate = await callback(request(`code=${code}&state=${stateValue}&state=another`));
+    expect(duplicate.headers.get("location")).toContain("reason=state");
+    expect(calls).toEqual([]);
+
+    const response = await callback(request(`code=${code}&state=${stateValue}`));
+    expect(response.headers.get("location")).toBe("/host/home");
+    expect(setCookies(response).get(ACCOUNT_SESSION_COOKIE)?.value).toBe(SESSION_TOKEN);
+    expect(response.headers.getSetCookie().join("\n")).not.toContain(idToken);
+    expect(state.identities?.startSessionForNihoIdentity).toHaveBeenCalledWith({
+      nihoUserId: NIHO_USER, authenticatedAtUtc: new Date((now - 240) * 1000).toISOString(), nowUtc: expect.any(String),
+    });
+    expect(calls.map(({ url }) => url.pathname)).toEqual([contract.tokenPath, contract.jwksPath]);
+  });
+
+  it("keeps identity-only login closed when its server exchange is rejected or a legacy state returns", async () => {
+    const legacy = await startLogin();
+    state.config.nihoIdentityLoginEnabled = true;
+    const response = await callback(new NextRequest(
+      `${SITE}/host/auth/callback?code=old-code&state=${legacy.location.searchParams.get("state")}`,
+      { headers: { cookie: legacy.cookie } },
+    ));
+    expect(response.headers.get("location")).toContain("reason=unverified");
+    expect(calls).toEqual([]);
+    const identity = await startLogin();
+    handler = () => json(400, { error: "invalid_grant" });
+    const rejected = await callback(new NextRequest(
+      `${SITE}/host/auth/callback?code=${"c".repeat(43)}&state=${identity.location.searchParams.get("state")}`,
+      { headers: { cookie: identity.cookie } },
+    ));
+    expect(rejected.headers.get("location")).toContain("reason=rejected");
+    expect(calls.map(({ url }) => url.pathname)).toEqual([contract.tokenPath]);
+    expect(state.identities?.startSessionForNihoIdentity).not.toHaveBeenCalled();
+  });
+
   it("opens the Experience session of the bound host account and ends the NIHO connection, keeping no NIHO token", async () => {
     const { response } = await signIn();
     expect(response.status).toBe(303);

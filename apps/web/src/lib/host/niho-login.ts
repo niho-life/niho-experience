@@ -5,6 +5,7 @@ import { config } from "@/lib/config";
 import { hostAccountIdentities, hostAccounts, hostInvitations, travelerAccounts } from "@/lib/experience/store-server";
 import { clearInviteBindingCookie, isOpaqueSecret, linkBindingHash, nowUtc, readExperienceHostSession, setAccountSessionCookie } from "./accounts";
 import { NIHO_REAUTHENTICATION_MAX_AGE_SECONDS, deleteConnection, exchangeCode, nihoConnectUrl, type NihoConnectAudience, type NihoConnectMethod } from "./niho-auth";
+import { exchangeNihoIdentity, nihoIdentityAuthorizationUrl, nihoIdentityRedirectUri } from "./niho-identity-login";
 import type { NihoIdentityOutcome } from "./niho-identity";
 import { loginStatesMatch, createLoginState, createPkceVerifier, pkceChallenge } from "./pkce";
 import { nihoIdOrNull } from "./providers";
@@ -21,10 +22,9 @@ import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_
  *
  *   /host/auth/login → NIHO's confirmation page (PKCE challenge, state, the host audience)
  *   NIHO → /host/auth/callback?code&state
- *     1. exchange the code (the verifier is in the sealed 10-minute login cookie)
- *     2. Host v1 `identity` → the NIHO user ID
- *     3. the experience DB: the host account that NIHO user ID is bound to → an Experience session
- *     4. end the NIHO connection at once (`DELETE /api/auth/app-connections/{id}`), whatever the outcome
+ *     1. exchange the code on the server using the verifier in the sealed 10-minute login cookie
+ *     2. verify the ID token against NIHO's JWKS and the sealed nonce
+ *     3. open an Experience session for the account bound to the verified NIHO user ID
  *
  * No NIHO token leaves this function: not into a cookie, the database, a log or a URL. The session is the Experience one
  * (`__Host-niho_host_account_session`, Path=/, so /write sees it too). A NIHO account no host account is bound to gets
@@ -99,16 +99,22 @@ export function startTravelerLogin(method: NihoConnectMethod | null): NextRespon
 function nihoRoundTrip(intent: Pick<HostLoginState, "providerId" | "invitationId" | "returnPath" | "purpose" | "hostAccountId">, reauth: boolean, target: { audience: NihoConnectAudience; method?: NihoConnectMethod } = { audience: "host" }): NextResponse {
   const verifier = createPkceVerifier();
   const state = createLoginState();
-  const response = seeOther(nihoConnectUrl(config.nihoWebOrigin, {
+  const maxAgeSeconds = reauth ? NIHO_REAUTHENTICATION_MAX_AGE_SECONDS : undefined;
+  const nihoIdentity = config.nihoIdentityLoginEnabled ? { nonce: createLoginState(), maxAgeSeconds } : undefined;
+  const start = {
     challenge: pkceChallenge(verifier),
     state,
-    origin: siteOrigin(),
-    audience: target.audience,
-    ...(target.method ? { method: target.method } : {}),
-    // A sign-in the host does not have to repeat is not asked again; a step-up always is (the window is NIHO_REAUTHENTICATION_MAX_AGE_SECONDS).
-    ...(reauth ? { maxAgeSeconds: NIHO_REAUTHENTICATION_MAX_AGE_SECONDS } : {}),
-  }));
-  setLoginCookie(response, { verifier, state, preparationCaseId: null, ...intent, expiresAt: Date.now() + LOGIN_MAX_AGE_SECONDS * 1000 });
+    ...target,
+  };
+  const response = seeOther(nihoIdentity
+    ? nihoIdentityAuthorizationUrl(config.nihoWebOrigin, { ...start, ...nihoIdentity, redirectUri: nihoIdentityRedirectUri(siteOrigin()) })
+    : nihoConnectUrl(config.nihoWebOrigin, {
+      ...start, origin: siteOrigin(), ...(reauth ? { maxAgeSeconds: NIHO_REAUTHENTICATION_MAX_AGE_SECONDS } : {}),
+    }));
+  setLoginCookie(response, {
+    verifier, state, preparationCaseId: null, ...intent, ...(nihoIdentity ? { nihoIdentity } : {}),
+    expiresAt: Date.now() + LOGIN_MAX_AGE_SECONDS * 1000,
+  });
   return response;
 }
 
@@ -123,17 +129,21 @@ function signedInAt(authTimeMs: number, now: number): string {
 type Verified<T> = { ok: true; value: T } | { ok: false; reason: "rejected" | "unavailable" | "unverified" };
 
 /**
- * The NIHO round trip's proof and nothing else: the code is exchanged, Host v1 `identity` names the NIHO user ID, `run` runs
- * with it and with when the person signed in at NIHO (`authTime`, epoch ms), and the connection ends whatever happened. No
- * token is passed on or kept.
- *
- * Fails closed: an exchange answer without a readable `authTime` (a NIHO without niho-coliving/niho-app#20305, or an answer
- * that is not NIHO's) runs nothing: no session, no binding, no invitation used up. Without NIHO's sign-in time the
- * recent-sign-in rule (and a step-up asked for through `max_age`, which the browser can drop from the URL) cannot be judged.
+ * Only the verified stable user ID and sign-in time reach the Experience session and binding code.
+ * The feature flag selects the protocol for the entire round trip, including after a rejected exchange.
  */
-async function withNihoIdentity<T>(code: string, verifier: string, run: (nihoUserId: string, authTimeMs: number) => Promise<T>): Promise<Verified<T>> {
+async function withNihoIdentity<T>(code: string, login: HostLoginState, run: (nihoUserId: string, authTimeMs: number) => Promise<T>): Promise<Verified<T>> {
   const deps = nihoAuthDeps();
-  const exchanged = await exchangeCode(deps, { code, codeVerifier: verifier });
+  if (config.nihoIdentityLoginEnabled) {
+    if (!login.nihoIdentity) return { ok: false, reason: "unverified" };
+    const verified = await exchangeNihoIdentity(deps, {
+      ...login.nihoIdentity, code, verifier: login.verifier, redirectUri: nihoIdentityRedirectUri(siteOrigin()),
+    });
+    if (!verified.ok) return verified;
+    return { ok: true, value: await run(verified.value.nihoUserId, verified.value.authTimeMs) };
+  }
+  if (login.nihoIdentity) return { ok: false, reason: "unverified" };
+  const exchanged = await exchangeCode(deps, { code, codeVerifier: login.verifier });
   if (!exchanged.ok) return exchanged;
   const { accessToken, connectionId, authTimeUtc } = exchanged.value;
   try {
@@ -146,6 +156,11 @@ async function withNihoIdentity<T>(code: string, verifier: string, run: (nihoUse
     // The connection only proved who the person is: end it now (best effort; NIHO's own expiry is the backstop).
     await deleteConnection(deps, connectionId, accessToken, { reason: null });
   }
+}
+
+function onlyQueryValue(params: URLSearchParams, key: string): string | null {
+  const values = params.getAll(key);
+  return values.length === 1 ? values[0] ?? null : null;
 }
 
 /** Back to the traveler's entrance with what went wrong, in words that name no NIHO account. */
@@ -167,9 +182,9 @@ export async function completeNihoLogin(request: NextRequest, options: { host: b
   if (login.purpose === "traveler") return config.travelerAccountsEnabled ? completeTravelerSignIn(request, login) : hostNotFound();
   if (!options.host) return hostNotFound();
   const link = login.purpose === "link";
-  if (!loginStatesMatch(login.state, params.get("state"))) return link ? linkBack(login, "unavailable") : failed("state", login);
+  if (!loginStatesMatch(login.state, onlyQueryValue(params, "state"))) return link ? linkBack(login, "unavailable") : failed("state", login);
   if (params.has("error")) return link ? linkBack(login, "denied") : failed("denied", login);
-  const code = params.get("code");
+  const code = onlyQueryValue(params, "code");
   if (!code || code.length > MAX_CODE_LENGTH) return link ? linkBack(login, "unavailable") : failed("rejected", login);
   if (link) return completeNihoLink(request, login, code);
   return login.purpose === "invite" ? completeInvite(request, login, code) : completeSignIn(request, login, code);
@@ -180,7 +195,7 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
   const accounts = hostAccounts();
   if (!identities || !accounts) return failed("unavailable", login);
 
-  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeMs) => {
+  const verified = await withNihoIdentity(code, login, async (nihoUserId, authTimeMs) => {
     const now = Date.now();
     try {
       // The session's `authenticated_at` is when the person signed in at NIHO (`authTime`), so the sensitive changes that
@@ -250,7 +265,7 @@ async function completeInvite(request: NextRequest, login: HostLoginState, code:
   const binding = request.cookies.get(INVITE_BINDING_COOKIE)?.value;
   if (!isOpaqueSecret(binding)) return failed("invite-invalid");
 
-  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeMs) => {
+  const verified = await withNihoIdentity(code, login, async (nihoUserId, authTimeMs) => {
     const now = Date.now();
     let accepted;
     try {
@@ -288,19 +303,18 @@ async function completeInvite(request: NextRequest, login: HostLoginState, code:
 
 /**
  * The return of a traveler's log in (#597): the account of the NIHO user ID that came back (made now when it is the first
- * time) and a session of it, in the traveler's own cookie. NIHO's sign-in time is the session's `authenticated_at` and a return
- * without one opens nothing (the same rule as a host's). The connection ends whatever happened.
+ * time) and a session of it, in the traveler's own cookie. NIHO's sign-in time is the session's `authenticated_at` and an unverified return opens nothing.
  */
 async function completeTravelerSignIn(request: NextRequest, login: HostLoginState): Promise<NextResponse> {
   const params = request.nextUrl.searchParams;
-  if (!loginStatesMatch(login.state, params.get("state"))) return travelerFailed("unavailable");
+  if (!loginStatesMatch(login.state, onlyQueryValue(params, "state"))) return travelerFailed("unavailable");
   if (params.has("error")) return travelerFailed("denied");
-  const code = params.get("code");
+  const code = onlyQueryValue(params, "code");
   if (!code || code.length > MAX_CODE_LENGTH) return travelerFailed("unavailable");
   const travelers = travelerAccounts();
   if (!travelers) return travelerFailed("unavailable");
 
-  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeMs) => {
+  const verified = await withNihoIdentity(code, login, async (nihoUserId, authTimeMs) => {
     const now = Date.now();
     try {
       return { now, result: await travelers.signInWithNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) }) };
@@ -339,7 +353,7 @@ async function completeNihoLink(request: NextRequest, login: HostLoginState, cod
   // Another tab signed in as someone else meanwhile (a shared browser): nothing is bound to an account that did not ask.
   if (!login.hostAccountId || session.hostAccountId !== login.hostAccountId) return linkBack(login, "switched");
 
-  const verified = await withNihoIdentity(code, login.verifier, async (nihoUserId, authTimeMs) => {
+  const verified = await withNihoIdentity(code, login, async (nihoUserId, authTimeMs) => {
     const now = Date.now();
     try {
       // The store refuses a NIHO sign-in older than the recent-sign-in window (`recent-authentication-required`).

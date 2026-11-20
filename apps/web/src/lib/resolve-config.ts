@@ -925,6 +925,14 @@ export function resolveConfig(env: Env) {
   const hostNihoLoginEnabled = hostNihoLoginSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const travelerAccountsEnabled = travelerAccountsSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const nihoAccountStatusCheckEnabled = nihoAccountStatusCheckSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
+  const nihoIdentityLoginEnabled = apiMode === "http" && env.EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED === "true";
+  if (nihoIdentityLoginEnabled) {
+    if (!nihoAccountStatusCheckEnabled || (!hostNihoLoginEnabled && !travelerAccountsEnabled)) {
+      throw new Error("EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED=true needs NIHO account status checks and a NIHO login entry");
+    }
+    const nihoOrigin = deploymentOrigin(env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life", "NEXT_PUBLIC_NIHO_WEB_ORIGIN");
+    if (!nihoOrigin.startsWith("https://")) throw new Error("EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED=true needs a HTTPS NIHO Web origin");
+  }
   const travelerLineEnabled = travelerLineSetting(env, travelerAccountsEnabled);
   const occurrenceAssignmentEnabled = occurrenceAssignmentSetting(apiMode, env, hostConsoleEnabled);
   // After host accounts: with them, the host publication API reads Stripe and the experience DB instead of NIHO.
@@ -1097,6 +1105,7 @@ export function resolveConfig(env: Env) {
     travelerAccountsEnabled,
     // S1b: off until NIHO's matching v1 status contract is fixed and deployed.
     nihoAccountStatusCheckEnabled,
+    nihoIdentityLoginEnabled,
     // 旅行者の入口の LINE: after NIHO's LINE provider moves (2027-01); off until then.
     travelerLineEnabled,
     // Experience-native COHOST membership, independent from the legacy provider-operations consumer.
