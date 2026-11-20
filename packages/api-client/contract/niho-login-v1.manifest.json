@@ -1,0 +1,12 @@
+{
+  "name": "niho-login",
+  "version": "1.0.0",
+  "sourceRepository": "niho-coliving/niho-app",
+  "sourceIssue": "niho-coliving/niho-app#20991",
+  "sourcePath": "contracts/src/niho-login-contract.ts",
+  "sourceBlob": "f92f0bf752407af93693060f9008596e0584100d",
+  "sha256": "0324735fa3ba83ecf6a0a07d88fca7ac093559bedc4b183e4656206d395cc245",
+  "contractFile": "niho-login-v1.contract.json",
+  "sha256File": "niho-login-v1.contract.json.sha256",
+  "deploymentStatus": "not-deployed"
+}

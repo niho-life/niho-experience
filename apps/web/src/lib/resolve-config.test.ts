@@ -640,6 +640,11 @@ describe("admin support console settings", () => {
     expect(() => resolveConfig(withoutAudience)).toThrow("EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");
     const on = { ...withoutAudience, NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" };
     expect(resolveConfig(on).nihoAccountStatusCheckEnabled).toBe(true);
+    expect(resolveConfig(on).nihoIdentityLoginEnabled).toBe(false);
+    const identityOnly = { ...on, EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED: "true", EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true" };
+    expect(resolveConfig(identityOnly).nihoIdentityLoginEnabled).toBe(true);
+    expect(() => resolveConfig({ ...identityOnly, EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "false" })).toThrow("needs NIHO account status checks");
+    expect(() => resolveConfig({ ...identityOnly, NEXT_PUBLIC_NIHO_WEB_ORIGIN: "https://niho.example.test/discovery" })).toThrow("must contain only an origin");
     expect(resolveConfig({ ...on, EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "1" }).nihoAccountStatusCheckEnabled).toBe(false);
     expect(() => resolveConfig({ ...base, EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "true" }))
       .toThrow("EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED=true needs NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE");

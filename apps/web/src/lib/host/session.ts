@@ -138,6 +138,8 @@ export interface HostLoginState {
    * to this one and no other: a session that changed meanwhile (another tab signed in as someone else) is refused.
    */
   hostAccountId?: string;
+  /** Binding of the signed NIHO ID token to this one login and its requested auth_time freshness. */
+  nihoIdentity?: { nonce: string; maxAgeSeconds?: number };
   /** Epoch ms; the login cookie lives 10 minutes. */
   expiresAt: number;
 }
@@ -168,6 +170,7 @@ interface LoginWire {
   sf?: 1;
   lk?: 1 | 2 | 3;
   ha?: string;
+  ni?: HostLoginState["nihoIdentity"];
   x: number;
 }
 
@@ -298,6 +301,7 @@ export function decodeSession(sealer: CookieSealer, raw: string | undefined | nu
 
 export function encodeLoginState(sealer: CookieSealer, login: HostLoginState): string {
   const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}), ...(login.invitationId ? { ii: login.invitationId } : {}), ...(login.returnPath ? { rt: login.returnPath } : {}), ...(login.surface === "app" ? { sf: 1 as const } : {}), ...(login.purpose === "link" ? { lk: 1 as const } : login.purpose === "invite" ? { lk: 2 as const } : login.purpose === "traveler" ? { lk: 3 as const } : {}), ...(login.hostAccountId ? { ha: login.hostAccountId } : {}) };
+  if (login.nihoIdentity) wire.ni = login.nihoIdentity;
   return sealer.seal(wire);
 }
 
@@ -305,10 +309,15 @@ export function decodeLoginState(sealer: CookieSealer, raw: string | undefined |
   const wire = sealer.open(raw) as Partial<LoginWire> | null;
   if (!wire || typeof wire !== "object" || wire.v !== 1) return null;
   if (!isString(wire.pv, 128) || !isString(wire.s, 128) || !isTime(wire.x) || now >= wire.x) return null;
+  const nihoIdentity = wire.ni;
+  if (nihoIdentity !== undefined && (!nihoIdentity || typeof nihoIdentity.nonce !== "string"
+    || !/^[A-Za-z0-9_-]{43}$/.test(nihoIdentity.nonce)
+    || (nihoIdentity.maxAgeSeconds !== undefined && (!Number.isSafeInteger(nihoIdentity.maxAgeSeconds)
+      || nihoIdentity.maxAgeSeconds < 60 || nihoIdentity.maxAgeSeconds > 86_400)))) return null;
   const preparationCaseId = typeof wire.pc === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(wire.pc) ? wire.pc : null;
   const invitationId = typeof wire.ii === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(wire.ii) ? wire.ii : null;
   if (preparationCaseId && invitationId) return null;
-  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(isString(wire.rt, 300) ? { returnPath: wire.rt } : {}), ...(wire.sf === 1 ? { surface: "app" as const } : {}), ...(wire.lk === 1 ? { purpose: "link" as const } : wire.lk === 2 ? { purpose: "invite" as const } : wire.lk === 3 ? { purpose: "traveler" as const } : {}), ...(typeof wire.ha === "string" && /^hst_[0-9a-f]{32}$/.test(wire.ha) ? { hostAccountId: wire.ha } : {}), expiresAt: wire.x };
+  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(isString(wire.rt, 300) ? { returnPath: wire.rt } : {}), ...(wire.sf === 1 ? { surface: "app" as const } : {}), ...(wire.lk === 1 ? { purpose: "link" as const } : wire.lk === 2 ? { purpose: "invite" as const } : wire.lk === 3 ? { purpose: "traveler" as const } : {}), ...(typeof wire.ha === "string" && /^hst_[0-9a-f]{32}$/.test(wire.ha) ? { hostAccountId: wire.ha } : {}), ...(nihoIdentity ? { nihoIdentity } : {}), expiresAt: wire.x };
 }
 
 /** HttpOnly, Secure, SameSite=Lax; the caller supplies the narrowest compatible path. */

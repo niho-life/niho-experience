@@ -6,6 +6,7 @@
   "description": "NIHO 共通基盤の公開 API（体験の一覧・詳細・残席・ゲスト予約の開始）とホスト API（提供者の本人向け）の選別された契約・型・クライアント・合成 mock。",
   "exports": {
     "./package.json": "./package.json",
+    "./niho-login-contract": "./contract/niho-login-v1.contract.json",
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"

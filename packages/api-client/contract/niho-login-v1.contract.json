@@ -1,0 +1,27 @@
+{
+  "version": "1.0.0",
+  "issuerPath": "/api/oidc/niho-login",
+  "tokenPath": "/api/oidc/niho-login/token",
+  "jwksPath": "/api/oidc/niho-login/jwks",
+  "authorizationCompletionPath": "/api/oidc/niho-login/authorize/complete",
+  "clientId": "niho-experience",
+  "authorizationPath": "/connect/niho-experience",
+  "redirectPath": "/host/auth/callback",
+  "responseType": "code",
+  "scope": "openid",
+  "grantType": "authorization_code",
+  "serviceIdentityHeader": "x-niho-experience-service-id-token",
+  "codeChallengeMethod": "S256",
+  "codeTtlSeconds": 300,
+  "idTokenAlgorithm": "RS256",
+  "idTokenTtlSeconds": 120,
+  "idTokenClaims": [
+    "iss",
+    "aud",
+    "sub",
+    "auth_time",
+    "nonce",
+    "iat",
+    "exp"
+  ]
+}

@@ -30,6 +30,8 @@
 
 ### 2. NIHO は本人確認だけに使う
 
+NIHO Login の本人確認プロファイルは [niho-app#20991](https://github.com/niho-coliving/niho-app/issues/20991) で追加する。固定版は [配布 manifest](../../packages/api-client/contract/niho-login-v1.manifest.json)。`EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED=true` の環境では、以下の従来の AppConnection 往復に代えて、Experience サーバーが一度限りのコードと PKCE verifier を交換し、短命の ID トークンを固定 NIHO origin の JWKS で検証する。署名、issuer、audience、subject、nonce、`auth_time`、発行・有効期限を確かめ、今の Experience セッションを開く。元の NIHO ログイン時刻を利用する。新プロファイルはアカウント状態照会の有効化を前提とする。
+
 - ログインは NIHO の app-connect の Web の接続先 `niho-experience`（PKCE S256・一度きりのコード）を使う。
 - 戻ったら、サーバーが code を交換し、`GET /api/experience-host/identity` で NIHO user ID と `ACTIVE` を確かめ、その接続をすぐ解除する（`DELETE /api/auth/app-connections/{id}`）。
 - NIHO のユーザーアクセストークンと refresh token は、セッションにもサーバーにも残さない。#627以降、既存セッションの利用時には15分以上確認していない場合だけExperienceのサービス ID トークンでNIHOの現在状態を確認する。
