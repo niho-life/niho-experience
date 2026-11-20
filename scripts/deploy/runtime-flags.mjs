@@ -342,6 +342,13 @@ export const FLAGS = Object.freeze([
     variable: "NIHO_ACCOUNT_STATUS_CHECK_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
   },
+  // NIHO Login (niho-app#20991): its code exchange uses a client-specific ID-token audience, and requires the S1b status check.
+  {
+    env: "EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED",
+    variable: "NIHO_IDENTITY_LOGIN_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED|EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED"],
+    settings: [{ env: "NIHO_LOGIN_SERVICE_AUDIENCE", variable: "NIHO_LOGIN_SERVICE_AUDIENCE", shape: "httpsUrl" }],
+  },
   // 旅行者の入口の LINE (Epic #591, #597): LINE のボタンと `method=line`。**NIHO の LINE プロバイダーの切替（2027-01）のあとに ON にする。**
   // 今は LINE の同意画面に切替前のプロバイダー名が出て、LINE の `sub` はプロバイダーごとに違うので、いま作った旅行者のアカウントは
   // 切替後に別人扱いになりやすい（オーナー決定 2026-11-14、niho-coliving/niho-app#20307）。

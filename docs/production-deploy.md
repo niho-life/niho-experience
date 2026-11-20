@@ -111,6 +111,7 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_HOST_ACCOUNTS_ENABLED` | `HOST_ACCOUNTS_ENABLED` | ホストの画面・DB、メール。提供者の運営・旧 provider pages・記事連携の API とは併用不可 | `PAYOUT_ACCOUNT_CONSENT_VERSION` → `EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION` | `STRIPE_PLATFORM_SECRET_KEY_REF` → `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` | — |
 | `EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED` | `TRAVELER_ACCOUNTS_ENABLED` | ホストの画面・DB・Experienceホストアカウント（`HOST_ACCOUNTS_ENABLED`）。NIHO の audience は host console の基礎設定 | `TERMS_URL`（任意）→ `EXPERIENCE_TERMS_URL` | — | — |
 | `EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED` | `NIHO_ACCOUNT_STATUS_CHECK_ENABLED` | ホストの画面・DB・Experienceホストアカウント、NIHO service audience | — | — | — |
+| `EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED` | `NIHO_IDENTITY_LOGIN_ENABLED` | ホストの画面・DB・NIHOアカウント状態確認・ホストまたは旅行者のNIHOログイン入口 | `NIHO_LOGIN_SERVICE_AUDIENCE`（NIHO Login専用のHTTPS audience） | — | — |
 | `EXPERIENCE_TRAVELER_LINE_ENABLED` | `TRAVELER_LINE_ENABLED` | `TRAVELER_ACCOUNTS_ENABLED`。**NIHO の LINE プロバイダーの切替（2027-01）のあとに ON**（いまは LINE の同意画面に切替前のプロバイダー名が出て、LINE の `sub` はプロバイダーごとに違うので、いま作ったアカウントが切替後に別人扱いになりやすい） | — | — | — |
 | `EXPERIENCE_HOST_NIHO_LOGIN_ENABLED` | `HOST_NIHO_LOGIN_ENABLED` | ホストの画面・DB・Experienceホストアカウント（`HOST_ACCOUNTS_ENABLED`）。NIHO の audience は host console の基礎設定 | — | — | — |
 | `EXPERIENCE_NIHO_WRITER_ENABLED` | `NIHO_WRITER_ENABLED` | ホストの画面・DB・Experienceホストアカウント・NIHOログイン・DB記事公開元・記事認可API・Guide Admin API | `NIHO_ARTICLE_AUTHORITY_ORIGIN`、`NIHO_ARTICLE_AUTHORITY_AUDIENCE`、`NIHO_ARTICLE_LINKS_AUDIENCE` | — | — |

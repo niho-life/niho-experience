@@ -641,8 +641,19 @@ describe("admin support console settings", () => {
     const on = { ...withoutAudience, NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" };
     expect(resolveConfig(on).nihoAccountStatusCheckEnabled).toBe(true);
     expect(resolveConfig(on).nihoIdentityLoginEnabled).toBe(false);
-    const identityOnly = { ...on, EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED: "true", EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true" };
-    expect(resolveConfig(identityOnly).nihoIdentityLoginEnabled).toBe(true);
+    const identityOnly = {
+      ...on,
+      EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED: "true",
+      EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true",
+      NIHO_LOGIN_SERVICE_AUDIENCE: "https://api.example.test/niho-login/niho-experience",
+    };
+    expect(resolveConfig(identityOnly)).toMatchObject({
+      nihoIdentityLoginEnabled: true,
+      nihoLoginServiceAudience: "https://api.example.test/niho-login/niho-experience",
+    });
+    expect(() => resolveConfig({ ...identityOnly, NIHO_LOGIN_SERVICE_AUDIENCE: undefined })).toThrow("valid HTTPS NIHO_LOGIN_SERVICE_AUDIENCE");
+    expect(() => resolveConfig({ ...identityOnly, NIHO_LOGIN_SERVICE_AUDIENCE: "http://api.example.test/niho-login/niho-experience" })).toThrow("valid HTTPS NIHO_LOGIN_SERVICE_AUDIENCE");
+    expect(() => resolveConfig({ ...identityOnly, NIHO_LOGIN_SERVICE_AUDIENCE: "https://api.example.test/niho-login/niho-experience?x=1" })).toThrow("valid HTTPS NIHO_LOGIN_SERVICE_AUDIENCE");
     expect(() => resolveConfig({ ...identityOnly, EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "false" })).toThrow("needs NIHO account status checks");
     expect(() => resolveConfig({ ...identityOnly, NEXT_PUBLIC_NIHO_WEB_ORIGIN: "https://niho.example.test/discovery" })).toThrow("must contain only an origin");
     expect(resolveConfig({ ...on, EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "1" }).nihoAccountStatusCheckEnabled).toBe(false);

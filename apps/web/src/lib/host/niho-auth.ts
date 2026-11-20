@@ -17,6 +17,8 @@ export interface NihoAuthDeps {
    * never an authorization: a call without it (or with one NIHO cannot verify) is simply counted by IP, as before.
    */
   serviceIdToken?: () => Promise<string | null>;
+  /** A separate, client-specific Google ID token for NIHO Login code exchange; never reuse the Host API audience token. */
+  nihoLoginServiceIdToken?: () => Promise<string | null>;
 }
 
 /** The header NIHO reads the service ID token from (the host `identity` call sends the same one). */

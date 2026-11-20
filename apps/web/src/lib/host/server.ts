@@ -32,7 +32,7 @@ import {
   type NihoHostSession,
 } from "./session";
 import { experiencePublicationRepository } from "@/lib/experience/store-server";
-import { experienceHostServiceIdToken as issueExperienceHostServiceIdToken } from "@/lib/niho/service-identity";
+import { experienceHostServiceIdToken as issueExperienceHostServiceIdToken, experienceNihoLoginServiceIdToken as issueNihoLoginServiceIdToken } from "@/lib/niho/service-identity";
 
 export const isHostMock = () => config.apiMode === "mock";
 export const siteOrigin = () => new URL(config.siteUrl).origin;
@@ -66,7 +66,7 @@ export function hostLoginLabel(): string {
 }
 
 export function nihoAuthDeps(): NihoAuthDeps {
-  return { fetch, nihoOrigin: config.nihoWebOrigin, serviceIdToken: serviceIdTokenOrNull };
+  return { fetch, nihoOrigin: config.nihoWebOrigin, serviceIdToken: serviceIdTokenOrNull, nihoLoginServiceIdToken: nihoLoginServiceIdTokenOrNull };
 }
 
 /**
@@ -80,6 +80,16 @@ async function serviceIdTokenOrNull(): Promise<string | null> {
     return await experienceHostServiceIdToken();
   } catch (error) {
     console.error(`[niho-auth] service ID token not issued: ${error instanceof Error ? error.name : "unknown error"}`);
+    return null;
+  }
+}
+
+async function nihoLoginServiceIdTokenOrNull(): Promise<string | null> {
+  if (!isHostMock() && !config.nihoLoginServiceAudience) return null;
+  try {
+    return await issueNihoLoginServiceIdToken();
+  } catch (error) {
+    console.error(`[niho-auth] NIHO Login service ID token not issued: ${error instanceof Error ? error.name : "unknown error"}`);
     return null;
   }
 }
