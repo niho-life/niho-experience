@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import contract from "../contract/niho-login-v1.contract.json";
-import manifest from "../contract/niho-login-v1.manifest.json";
+import contract from "../contract/niho-login-v1.contract.json" with { type: "json" };
+import manifest from "../contract/niho-login-v1.manifest.json" with { type: "json" };
 
 describe("NIHO Login consumer contract", () => {
   it("pins the selected version and the provider artifact by digest", async () => {
