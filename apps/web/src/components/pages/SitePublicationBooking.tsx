@@ -56,8 +56,8 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   // Every offer's dates in one calendar. One array per availability read: the calendar keeps the month the traveler turned
   // to while other fields re-render the form.
   const occurrences = useMemo(() => {
-    const sold = new Set((saleTerms?.offers ?? []).map((item) => item.id));
-    return availability.occurrences.filter((occurrence) => sold.has(occurrence.offerId));
+    const offerIds = new Set((saleTerms?.offers ?? []).map((item) => item.id));
+    return availability.occurrences.filter((occurrence) => offerIds.has(occurrence.offerId));
   }, [availability, saleTerms]);
   const [date, setDate] = useState("");
   const [adults, setAdults] = useState(1);
