@@ -39,6 +39,15 @@ describe("shared guide listing", () => {
 });
 
 describe("shared Japanese guide article", () => {
+  it("uses the update date rather than the content check date", async () => {
+    const article = await GuideArticle({
+      guide: guide("rainy-kamakura", { updatedAt: "2026-11-15", checkedAt: "2026-11-16", relatedExperienceSlugs: [], faq: [] }),
+      variant: "published", query: {}, locale: "ja", japaneseGuides: [], experienceCards: [], experienceCardDates: { kind: "given", occurrences: null },
+    });
+    const html = renderToStaticMarkup(article);
+    expect(html.match(/更新[\s\S]*?<time dateTime="([^"]+)"/)?.[1]).toBe("2026-11-15");
+  });
+
   it("shows the outline, native experience CTA, FAQ, consultation, related guide and author in Japanese", async () => {
     const article = await GuideArticle({
       guide: guide("rainy-kamakura"), variant: "published", query: {}, locale: "ja", japaneseGuides: [guide("other", { title: "鎌倉の朝", relatedGuideSlugs: [], relatedExperienceSlugs: [] })],

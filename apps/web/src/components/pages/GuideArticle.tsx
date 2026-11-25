@@ -73,7 +73,6 @@ export async function GuideArticle({
   const articlePath = `${prefix}/guides/${guide.slug}`;
   const guideListPath = `${prefix}/guides`;
   const publishedDate = guide.publishedAt;
-  const checkedDate = guide.checkedAt ?? guide.updatedAt;
   const cardCta = (card: CardModel) => <GuideExperienceCta key={card.slug} card={card} dates={cardDates} locale={locale} />;
 
   return <>
@@ -91,7 +90,7 @@ export async function GuideArticle({
           <h1 className="mt-1.5 text-[2.125rem] leading-[1.1] sm:text-[2.875rem]">{guide.title}</h1>
           <p className="mt-4 text-[0.9375rem] text-muted">
             <b className="font-extrabold text-ink">{guide.author.name}</b>{guide.author.role ? locale === "ja" ? `（${guide.author.role}）` : ` · ${guide.author.role}` : ""}{locale === "ja" ? "・" : " · "}{text.published}{" "}
-            <time dateTime={publishedDate}>{formatGuideDate(publishedDate, locale)}</time>{guide.updatedAt !== guide.publishedAt ? <>{locale === "ja" ? "・" : " · "}{text.updated}{" "}<time dateTime={checkedDate}>{formatGuideDate(checkedDate, locale)}</time></> : null}{locale === "ja" ? "・" : " · "}{text.readTime(guideReadMinutes(guide))}
+            <time dateTime={publishedDate}>{formatGuideDate(publishedDate, locale)}</time>{guide.updatedAt !== guide.publishedAt ? <>{locale === "ja" ? "・" : " · "}{text.updated}{" "}<time dateTime={guide.updatedAt}>{formatGuideDate(guide.updatedAt, locale)}</time></> : null}{locale === "ja" ? "・" : " · "}{text.readTime(guideReadMinutes(guide))}
           </p>
         </header>
         {hero?.href ? <figure className="mt-7">
