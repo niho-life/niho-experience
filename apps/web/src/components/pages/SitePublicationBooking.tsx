@@ -47,13 +47,20 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   const offers = saleTerms?.offers ?? [];
   const firstOffer = offers[0];
   const [api] = useState<ExperienceApiClient>(() => getSiteBookingApi(siteOrigin, locale));
+  // An offer is one 開催枠 of this experience (a schedule rule: its start time, and its price when the host set one). The
+  // traveler chooses a date, and the date chooses the offer; until then the first offer stands for the terms all offers share.
   const [offerId, setOfferId] = useState(firstOffer?.id ?? "");
-  const [availability, setAvailability] = useState<{ offerId: string; state: "loading" | "failed" | "ready"; occurrences: Occurrence[] }>({ offerId: firstOffer?.id ?? "", state: "loading", occurrences: [] });
-  const loading = availability.offerId !== offerId || availability.state === "loading";
-  const loadError = availability.offerId === offerId && availability.state === "failed";
-  const occurrences = availability.offerId === offerId ? availability.occurrences : [];
-  // One array per availability read: the calendar keeps the month the traveler turned to while other fields re-render the form.
-  const offerOccurrences = useMemo(() => (availability.offerId === offerId ? availability.occurrences.filter((occurrence) => occurrence.offerId === offerId) : []), [availability, offerId]);
+  const [availability, setAvailability] = useState<{ state: "loading" | "failed" | "ready"; occurrences: Occurrence[] }>({ state: "loading", occurrences: [] });
+  // Counts the availability reads asked for: one on arrival, one more after a date turned out to be taken.
+  const [availabilityRead, setAvailabilityRead] = useState(0);
+  const loading = availability.state === "loading";
+  const loadError = availability.state === "failed";
+  // Every offer's dates in one calendar. One array per availability read: the calendar keeps the month the traveler turned
+  // to while other fields re-render the form.
+  const occurrences = useMemo(() => {
+    const offerIds = new Set((saleTerms?.offers ?? []).map((item) => item.id));
+    return availability.occurrences.filter((occurrence) => offerIds.has(occurrence.offerId));
+  }, [availability, saleTerms]);
   const [date, setDate] = useState("");
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
@@ -101,17 +108,28 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
     postEmbedTop();
   }, [embed, step]);
 
+  const sold = offers.length > 0;
   useEffect(() => {
-    if (!offerId) return;
+    if (!sold) return;
     let active = true;
-    api.getAvailability(publication.slug, { offerId }).then((result) => {
+    api.getAvailability(publication.slug).then((result) => {
       if (!active) return;
-      if (!result.ok) { setAvailability({ offerId, state: "failed", occurrences: [] }); setDate(""); return; }
-      setAvailability({ offerId, state: "ready", occurrences: result.data.occurrences });
-      setDate((current) => current && result.data.occurrences.some((item) => item.date === current && item.offerId === offerId && item.bookable) ? current : "");
-    }).catch(() => { if (active) { setAvailability({ offerId, state: "failed", occurrences: [] }); setDate(""); } });
+      if (!result.ok) { setAvailability({ state: "failed", occurrences: [] }); setDate(""); return; }
+      setAvailability({ state: "ready", occurrences: result.data.occurrences });
+    }).catch(() => { if (active) { setAvailability({ state: "failed", occurrences: [] }); setDate(""); } });
     return () => { active = false; };
-  }, [api, publication.slug, offerId]);
+  }, [api, publication.slug, sold, availabilityRead]);
+
+  /** A day of the calendar, or one of its start times: the date and the offer held then. */
+  function chooseOccurrence(occurrence: Occurrence) {
+    const next = offers.find((item) => item.id === occurrence.offerId);
+    if (!next) return;
+    setDate(occurrence.date);
+    setOfferId(next.id);
+    if (!next.pricing.child) setChildren(0);
+    // The questions belong to the experience: answers stay when the date changes, unless that offer asks something else.
+    if (next.bookingQuestionsFingerprint !== offer?.bookingQuestionsFingerprint) setAnswers({});
+  }
 
   function updateAnswer(questionId: string, value: string | string[]) {
     setAnswers((current) => ({ ...current, [questionId]: value }));
@@ -164,6 +182,9 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
         if (code === "FULL" || code === "OCCURRENCE_INVALID" || code === "UNAVAILABLE") {
           setProblem(ja ? "この日時は予約できなくなりました。別の日時を選んでください。" : "That date is no longer available. Choose another date.");
           setDate("");
+          // What the calendar shows is from before: read it again, so the start that just filled up is not chosen again.
+          setAvailability({ state: "loading", occurrences: [] });
+          setAvailabilityRead((count) => count + 1);
           if (embed) setStep(1);
           return;
         }
@@ -211,24 +232,34 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   const heading = <h1 className="text-3xl">{approval ? (ja ? `${publication.japanese!.title}の予約リクエスト` : `Request to book ${publication.publicTitle}`) : (ja ? `${publication.japanese!.title}を予約` : `Book ${publication.publicTitle}`)}</h1>;
   // The cancellation terms and the minimum charge, as one line: beside the dates, and again where the traveler agrees to them.
   const cancellationLine = offer ? `${cancellationSummary(offer, locale)}${offer.minimumChargeableParticipants > 1 ? (ja ? ` · 最低請求人数は${offer.minimumChargeableParticipants}名` : ` · Minimum charge is ${offer.minimumChargeableParticipants} guests`) : ""}` : "";
+  // Several offers are the same experience at other times: the calendar holds all their dates, and what differs between
+  // them (start time, length, price) is said for the chosen date. Before a date, only what every offer shares is said.
+  const oneOffer = offers.length === 1;
+  const chosen = oneOffer || Boolean(selectedOccurrence);
+  const onePrice = offers.every((item) => item.pricing.adultPriceYen === firstOffer.pricing.adultPriceYen);
+  // "From": the lowest price a traveler can book now, not one of an offer without an open date.
+  const open = new Set(occurrences.filter((occurrence) => occurrence.bookable).map((occurrence) => occurrence.offerId));
+  const bookableOffers = offers.filter((item) => open.has(item.id));
+  const lowestPrice = formatYen(Math.min(...(bookableOffers.length > 0 ? bookableOffers : offers).map((item) => item.pricing.adultPriceYen)), locale);
+  const shownOffer = offer ?? firstOffer;
+  const scheduleLine = oneOffer
+    ? `${scheduleDescription(shownOffer, locale)} · ${formatDurationLabel(shownOffer.durationMinutes, locale)}`
+    : chosen || offers.every((item) => item.durationMinutes === firstOffer.durationMinutes)
+      ? `${ja ? "所要時間：" : "Duration: "}${formatDurationLabel(shownOffer.durationMinutes, locale)}`
+      : null;
   const offerAndSchedule = <>
-      {offers.length > 1 ? <label className={FIELD_LABEL}>{ja ? "プラン" : "Option"}
-        <select required value={offerId} onChange={(event) => { const next = offers.find((item) => item.id === event.target.value); setOfferId(event.target.value); setDate(""); setAnswers({}); if (!next?.pricing.child) setChildren(0); }} className={FIELD_SELECT}>
-          {offers.map((item) => <option key={item.id} value={item.id}>{item.name} · {pricePerAdult(item)}</option>)}
-        </select>
-      </label> : <div className="wrap-anywhere text-sm">
-        <p className="font-extrabold">{pricePerAdult(firstOffer)}</p>
-        {firstOffer.name !== publication.publicTitle ? <p className="mt-1 text-ink-soft">{firstOffer.name}</p> : null}
-      </div>}
-      {offer ? <>
-        <p className="-mt-3 text-sm text-ink-soft">{scheduleDescription(offer, locale)} · {formatDurationLabel(offer.durationMinutes, locale)}</p>
-        <p className="-mt-4 text-sm text-ink-soft">{cancellationLine}</p>
-      </> : null}
+      <div className="wrap-anywhere text-sm">
+        <p className="font-extrabold">{chosen || onePrice ? pricePerAdult(shownOffer) : ja ? `${lowestPrice}〜 / 大人1名` : `From ${lowestPrice} per adult`}</p>
+        {chosen && shownOffer.name !== publication.publicTitle ? <p className="mt-1 text-ink-soft">{shownOffer.name}</p> : null}
+      </div>
+      {scheduleLine ? <p className="-mt-3 text-sm text-ink-soft">{scheduleLine}</p> : null}
+      {offer ? <p className={`${scheduleLine ? "-mt-4" : "-mt-3"} text-sm text-ink-soft`}>{cancellationLine}</p> : null}
   </>;
   const dateField = <>
       <div role="group" aria-labelledby={dateHeadingId} className={FIELD_LABEL}>
         <p id={dateHeadingId}>{ja ? "日にち" : "Date"}</p>
-        <BookingCalendar occurrences={offerOccurrences} value={date} onChange={setDate} locale={locale} loading={loading} failed={loadError} />
+        <BookingCalendar occurrences={occurrences} value={date} offerId={offerId} onChange={chooseOccurrence} locale={locale} loading={loading} failed={loadError}
+          noteOf={onePrice ? undefined : (occurrence) => { const held = offers.find((item) => item.id === occurrence.offerId); return held ? pricePerAdult(held) : null; }} />
       </div>
       {loadError ? <p role="alert" className="text-sm text-red-700">{ja ? "空き状況を確認できませんでした。ページを再読み込みしてください。" : "Dates couldn’t be checked. Retry the page or contact us before paying."}</p> : null}
   </>;
@@ -253,7 +284,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       </label>
   </>;
   const totalBox = <div className="rounded-xl bg-sand p-4 text-sm">
-        <div className="flex justify-between gap-3"><span>{ja ? "合計" : "Total"}</span><b>{total === null ? ja ? "人数を確認してください" : "Check guest counts" : formatYen(total, locale)}</b></div>
+        <div className="flex justify-between gap-3"><span>{ja ? "合計" : "Total"}</span><b>{!chosen && !onePrice ? ja ? "日にちを選んでください" : "Choose a date" : total === null ? ja ? "人数を確認してください" : "Check guest counts" : formatYen(total, locale)}</b></div>
         <p className="mt-2 text-ink-soft">{ja ? "最低請求人数がある場合は合計に含まれます。席を確保する前に最終金額を再確認します。" : "The total includes the offer’s minimum chargeable guest count where one is set. The final amount is checked again before a seat is held."}</p>
       </div>;
   const sellerAndConsent = <>

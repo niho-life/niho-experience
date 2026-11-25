@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarDayLabel, calendarMonths, dayState, initialCalendarMonth, monthOf, monthWeeks, type CalendarOccurrence } from "./booking-calendar";
+import { calendarDayLabel, calendarMonths, dayState, initialCalendarMonth, monthOf, monthWeeks, occurrenceOn, occurrencesOn, type CalendarOccurrence } from "./booking-calendar";
 
 const at = (date: string, bookable = true, seatsLeft = 4): CalendarOccurrence => ({ date, bookable, seatsLeft, startAt: `${date}T09:00:00Z` });
 
@@ -24,6 +24,21 @@ describe("booking calendar", () => {
     expect(dayState(occurrences, "2026-12-05")).toBe("bookable");
     expect(dayState(occurrences, "2026-12-12")).toBe("unavailable");
     expect(dayState(occurrences, "2026-12-13")).toBe("none");
+  });
+
+  // 開催枠ごとに offer が分かれる (#638): a day holds one occurrence for each offer held then.
+  it("puts the starts of a day in time order and lets the earliest bookable one stand for the day", () => {
+    const start = (hour: string, bookable: boolean, seatsLeft: number): CalendarOccurrence => ({ date: "2026-12-05", bookable, seatsLeft, startAt: `2026-12-05T${hour}:00:00Z` });
+    const evening = start("09", true, 2);
+    const morningFull = start("01", false, 0);
+    const noon = start("03", true, 5);
+    const other = at("2026-12-06");
+    expect(occurrencesOn([evening, other, morningFull, noon], "2026-12-05")).toEqual([morningFull, noon, evening]);
+    expect(occurrenceOn([evening, other, morningFull, noon], "2026-12-05")).toBe(noon);
+    expect(occurrenceOn([morningFull], "2026-12-05")).toBe(morningFull);
+    expect(dayState([morningFull, evening], "2026-12-05")).toBe("bookable");
+    expect(occurrencesOn([evening], "2026-12-07")).toEqual([]);
+    expect(occurrenceOn([evening], "2026-12-07")).toBeNull();
   });
 
   it("lays a month out from Sunday with the last day of the month and blanks around it", () => {
