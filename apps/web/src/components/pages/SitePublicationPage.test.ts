@@ -333,11 +333,11 @@ describe("native publication context under the title and below the sections (#14
     expect(html).not.toContain("detail-guides-heading");
   });
 
-  it("suggests other experiences after the page content, English only, and nothing when there are none", async () => {
+  it("suggests other experiences after the page content, in both languages, and nothing when there are none", async () => {
     const other = { ...item, publication: { ...item.publication, slug: "another-experience", publicTitle: "Another experience" } } as SitePublicExperience;
     state.related = [sitePublicationCard(other)];
     const html = await page();
-    expect(relatedSiteExperienceCards).toHaveBeenCalledWith("native-review-page");
+    expect(relatedSiteExperienceCards).toHaveBeenCalledWith("native-review-page", "en");
     expect(html).toMatch(/<h2[^>]*>More experiences in Kamakura<\/h2>/);
     expect(html).toContain('href="/experiences/another-experience"');
     // Full width, after the price card rather than inside the two-column body.
@@ -345,7 +345,8 @@ describe("native publication context under the title and below the sections (#14
 
     const ja = await page("ja", { ...item, publication: { ...item.publication, japanese } } as SitePublicExperience);
     expect(ja).not.toContain("More experiences in Kamakura");
-    expect(relatedSiteExperienceCards).toHaveBeenCalledTimes(1);
+    expect(ja).toContain("ほかの体験");
+    expect(relatedSiteExperienceCards).toHaveBeenLastCalledWith("native-review-page", "ja");
 
     state.related = [];
     expect(await page()).not.toContain("More experiences in Kamakura");

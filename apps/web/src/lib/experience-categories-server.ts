@@ -1,5 +1,5 @@
 import "server-only";
-import type { ExperienceCategoryId } from "@niho-experience/experience-domain";
+import type { ExperienceCategoryId, ExperienceClassification } from "@niho-experience/experience-domain";
 import { productClassificationRepository } from "./experience/store-server";
 
 /**
@@ -15,6 +15,15 @@ export async function loadCategoryBySlug(): Promise<ReadonlyMap<string, Experien
     const bySlug = new Map<string, ExperienceCategoryId>();
     for (const [slug, classification] of classifications) if (classification.category) bySlug.set(slug, classification.category);
     return bySlug;
+  } catch {
+    return null;
+  }
+}
+
+/** One product's public classification (category and area), or null when it has none or cannot be read: the detail page then shows neither. */
+export async function loadClassificationOf(slug: string): Promise<ExperienceClassification | null> {
+  try {
+    return (await productClassificationRepository()?.listPublic())?.get(slug) ?? null;
   } catch {
     return null;
   }

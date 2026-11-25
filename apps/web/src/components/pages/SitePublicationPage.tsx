@@ -3,22 +3,28 @@ import type { Metadata } from "next";
 import { TrackView } from "@/components/Analytics";
 import { DesktopGallery, MobileGallery } from "@/components/DetailGallery";
 import { ExperienceCardGrid, GuideTeasers } from "@/components/GuideBlocks";
+import { CategoryIcon } from "@/components/CategoryIcon";
 import { HandIcon } from "@/components/HandIcon";
 import { JsonLd } from "@/components/JsonLd";
-import { NextDateBand } from "@/components/NextDateBand";
+import { NextDateBand, bookingCloseOf } from "@/components/NextDateBand";
 import { Photo } from "@/components/Photo";
 import { ReviewsSection } from "@/components/ReviewsSection";
 import { config } from "@/lib/config";
+import { dayOption } from "@/lib/date-filter";
+import { areaLabel, categoryHand, categoryLabel } from "@/lib/experience-categories";
+import { loadClassificationOf } from "@/lib/experience-categories-server";
+import { jaYen } from "@/lib/ja-catalog";
+import { loadPeople } from "@/lib/ja-people";
 import { inquiryHref } from "@/lib/group-inquiry-entry";
 import { buttonClass } from "@/components/ui";
 import { detailFromTokyoLine, detailGuideHeading } from "@/lib/detail-page";
 import { siteNextDates } from "@/lib/guest-booking-source";
 import { guidesAboutExperience } from "@/lib/guide-registry";
-import { formatDuration, formatYen } from "@/lib/format";
+import { formatDuration, formatTime, formatYen, jstDateKey } from "@/lib/format";
 import { iconForText } from "@/lib/themes";
 import { publicMetadata } from "@/lib/public-metadata";
 import { seoDescription } from "@/lib/seo-description";
-import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-card-model";
+import { cancellationLines, cancellationSummary, scheduleDescription } from "@/lib/experience/site-card-model";
 import { providerNameFor } from "@/lib/experience/provider-name";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import { relatedSiteExperienceCards } from "@/lib/experience/site-related";
@@ -73,6 +79,8 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   const bookingHref = `${ja ? "/ja" : ""}/experiences/${publication.slug}/book`;
   const nextDates = config.bookingsEnabled && config.guestBookingEnabled && offers.length ? await siteNextDates(publication.slug) : [];
   // Host-written FAQ in the page's language; none written means no section (never a filler FAQ).
+  const included = content?.included ?? publication.content.included;
+  const notIncluded = content?.notIncluded ?? publication.content.notIncluded;
   const faq = content ? content.faq : publication.content.faq;
   // The host's own bio (#146) in the page's language only: English needs the host's confirmed English. No filler.
   const hostBioText = (ja ? hostBio?.ja : hostBio?.en) ?? null;
@@ -87,25 +95,43 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   // explicit "N-minute walk from X Station" in the public meeting overview; otherwise the line says no more than the region.
   const locationLine = detailFromTokyoLine(ja ? "鎌倉" : "Kamakura", publication.meetingOverview, locale);
   // Guides and other experiences are English-only for now, as on the NIHO-sourced page. Both are optional and never break the page.
-  const [relatedGuides, relatedCards] = ja ? [NO_GUIDES, []] : await Promise.all([
-    guidesAboutExperience(publication.slug).catch(() => NO_GUIDES),
-    relatedSiteExperienceCards(publication.slug),
+  // Guides are English-only for now (the Japanese reading pieces come in a later step); the other experiences are in both languages.
+  const [relatedGuides, relatedCards, classification, allPeople] = await Promise.all([
+    ja ? NO_GUIDES : guidesAboutExperience(publication.slug).catch(() => NO_GUIDES),
+    relatedSiteExperienceCards(publication.slug, locale),
+    loadClassificationOf(publication.slug),
+    // 街の人 exist in Japanese only: the people this experience is met through (the provider's own listing and any person linked to it).
+    ja ? loadPeople() : Promise.resolve([]),
   ]);
+  const people = allPeople.filter((entry) => entry.experienceSlugs.includes(publication.slug));
+  const category = classification?.category ?? null;
+  const area = classification?.area ?? null;
+  const peopleLinks = config.peoplePagesEnabled;
+  const bookable = Boolean(config.bookingsEnabled && config.guestBookingEnabled && offers.length);
+  // The Japanese site writes yen with the half-width ¥, as its cards do.
+  const yen = (amount: number) => ja ? jaYen(amount) : formatYen(amount, "en");
+  const lowest = offers.length ? Math.min(...offers.map((offer) => offer.pricing.adultPriceYen)) : null;
+  const closes = nextDates[0] ? bookingCloseOf(nextDates[0]) : null;
+  const askHref = inquiryHref(locale, { from: "EXPERIENCE", experienceSlug: publication.slug, experienceTitle: title, hostName: providerName });
+  const cancellation = cancellationLines(offers, locale);
+  const cta = approval ? (ja ? "申込みを送る" : "Request to book") : (ja ? "日にちを選んで予約へ" : "Choose a date");
   const hostStoryGuide = relatedGuides.guides.find((guide) => "pillar" in guide && guide.pillar === "hosts" && !relatedGuides.draftSlugs.includes(guide.slug));
 
   return <>
     <JsonLd data={structured.touristTrip} />
     <JsonLd data={structured.product} />
-    {ja ? null : <TrackView event="experience_view" props={{ experience: publication.slug }} />}
-    <div className="overflow-x-clip">
+    <TrackView event="experience_view" props={{ experience: publication.slug }} />
+    <div className="overflow-x-clip pb-24 lg:pb-0">
       <MobileGallery photos={photos} title={title} backHref={ja ? "/ja/experiences" : "/experiences"} />
       <div className="container-page">
         <nav aria-label={ja ? "パンくずリスト" : "Breadcrumb"} className="hidden pt-7 text-sm text-muted lg:block">
           <Link href={ja ? "/ja/experiences" : "/experiences"} className="font-extrabold text-ink hover:underline">{ja ? "体験" : "Experiences"}</Link>
+          {category ? <><span aria-hidden> / </span><Link href={`${ja ? "/ja" : ""}/experiences?category=${category}`} className="font-extrabold text-ink hover:underline">{categoryLabel(category, locale)}</Link></> : null}
           <span aria-hidden> / </span><span aria-current="page">{title}</span>
         </nav>
         {cancelled ? <p role="status" className="mt-5 rounded-2xl bg-sand p-4">{ja ? "決済がキャンセルされました。予約は完了していません。" : "Checkout was cancelled. Your booking was not completed."}</p> : null}
         <header className="pt-5 lg:pt-3.5">
+          {category ? <span className="hand inline-flex items-center gap-1.5 text-[1.375rem]"><CategoryIcon id={category} className="size-5" />{categoryHand(category)}</span> : null}
           <h1 className="text-[2.125rem] leading-[1.1] lg:max-w-[20ch] lg:text-[3.25rem]">{title}</h1>
           <p className="mt-2.5 text-[0.9375rem] font-bold text-ink-soft">{locationLine}</p>
           {headline ? headline.href
@@ -118,6 +144,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
             {durations ? <li><span className="eyebrow">{ja ? "所要時間" : "Duration"}</span><p className="font-extrabold">{durations}</p></li> : null}
             {language ? <li><span className="eyebrow">{ja ? "対応言語" : "Language"}</span><p className="font-extrabold">{language}</p></li> : null}
             {offers.length ? <li><span className="eyebrow">{ja ? "参加人数" : "Group size"}</span><p className="font-extrabold">{Math.min(...offers.map((offer) => offer.minimumParticipants))}–{Math.max(...offers.map((offer) => offer.maxPartySize))}{ja ? "名" : " guests"}</p></li> : null}
+            {area ? <li><span className="eyebrow">{ja ? "エリア" : "Area"}</span><p className="font-extrabold">{areaLabel(area, locale)}</p></li> : null}
           </ul>
           {sellerInformationHref ? (
             <a href={sellerInformationHref} rel="noopener noreferrer" className="mt-1 inline-flex min-h-6 items-center text-sm text-muted underline underline-offset-2 hover:text-ink">
@@ -153,19 +180,23 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 })}
               </ol>
             </section> : null}
-            <section className="border-b border-line py-8 lg:py-10">
+            {included.length || notIncluded.length ? <section className="border-b border-line py-8 lg:py-10">
               <h2 className="text-2xl">{ja ? "料金に含まれるもの" : "What’s included"}</h2>
               <div className="mt-5 grid gap-7 sm:grid-cols-2">
-                <div><h3 className="font-extrabold">{ja ? "含まれるもの" : "Included"}</h3><ul className="mt-3 list-disc space-y-2 pl-5 text-ink-soft">{(content?.included ?? publication.content.included).map((value) => <li key={value}>{value}</li>)}</ul></div>
-                <div><h3 className="font-extrabold">{ja ? "含まれないもの" : "Not included"}</h3><ul className="mt-3 list-disc space-y-2 pl-5 text-ink-soft">{(content?.notIncluded ?? publication.content.notIncluded).map((value) => <li key={value}>{value}</li>)}</ul></div>
+                {included.length ? <div><h3 className="font-extrabold">{ja ? "含まれるもの" : "Included"}</h3><ul className="mt-3 space-y-2 text-ink-soft">{included.map((value) => <li key={value} className="flex gap-2"><HandIcon name="check" className="mt-0.5 size-5 shrink-0" />{value}</li>)}</ul></div> : null}
+                {notIncluded.length ? <div><h3 className="font-extrabold">{ja ? "含まれないもの" : "Not included"}</h3><ul className="mt-3 space-y-2 text-ink-soft">{notIncluded.map((value) => <li key={value} className="flex gap-2"><HandIcon name="cross" className="mt-0.5 size-5 shrink-0" />{value}</li>)}</ul></div> : null}
               </div>
-            </section>
+            </section> : null}
             {(content?.knowBeforeYouGo ?? publication.content.knowBeforeYouGo).length || (content?.notSuitableFor ?? publication.content.notSuitableFor).length ? <section className="border-b border-line py-8 lg:py-10">
               <h2 className="text-2xl">{ja ? "参加前にご確認ください" : "Know before you go"}</h2>
               {(content?.knowBeforeYouGo ?? publication.content.knowBeforeYouGo).length ? <ul className="mt-4 list-disc space-y-2 pl-5 text-ink-soft">{(content?.knowBeforeYouGo ?? publication.content.knowBeforeYouGo).map((value) => <li key={value}>{value}</li>)}</ul> : null}
               {(content?.notSuitableFor ?? publication.content.notSuitableFor).length ? <><h3 className="mt-6 font-extrabold">{ja ? "参加に適さない方" : "Not suitable for"}</h3><ul className="mt-3 list-disc space-y-2 pl-5 text-ink-soft">{(content?.notSuitableFor ?? publication.content.notSuitableFor).map((value) => <li key={value}>{value}</li>)}</ul></> : null}
             </section> : null}
-            {!ja && (publication.meetingOverview || publication.meetingPointDisclosure === "PUBLIC" || publication.meetingPointDisclosure === "AFTER_BOOKING") ? <section className="border-b border-line py-8 lg:py-10">
+            {/* 日本語は集合場所の説明と名前の日本語の原稿がまだ無い（`meetingOverview`・`meetingPoint.name` は英語だけ）ので、予約後にお知らせする場合の文だけを出す。原稿の都合による意図した差。 */}
+            {ja ? (publication.meetingPointDisclosure === "AFTER_BOOKING" ? <section className="border-b border-line py-8 lg:py-10">
+              <h2 className="text-2xl">集合場所</h2>
+              <p className="mt-4 text-ink-soft">集合場所は、予約が確定したあとにお伝えします。</p>
+            </section> : null) : publication.meetingOverview || publication.meetingPointDisclosure === "PUBLIC" || publication.meetingPointDisclosure === "AFTER_BOOKING" ? <section className="border-b border-line py-8 lg:py-10">
               <h2 className="text-2xl">Where you’ll meet</h2>
               {publication.meetingOverview ? <p className="mt-4 whitespace-pre-line text-ink-soft">{publication.meetingOverview}</p> : null}
               {publication.meetingPointDisclosure === "PUBLIC" && publication.meetingPoint ? <div className="mt-4">
@@ -173,7 +204,25 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 {publication.meetingPoint.exteriorPhotoIndex !== null && photos[publication.meetingPoint.exteriorPhotoIndex] ? <Photo image={photos[publication.meetingPoint.exteriorPhotoIndex]!} alt={photos[publication.meetingPoint.exteriorPhotoIndex]!.alt || `${publication.meetingPoint.name} exterior`} aspect="" rounded="rounded-xl" className="mt-4 h-52 w-64" sizes="256px" /> : null}
               </div> : publication.meetingPointDisclosure === "AFTER_BOOKING" ? <p className="mt-4 text-ink-soft">The meeting point is shared after your booking is confirmed.</p> : null}
             </section> : null}
-            {providerName || hostBioText ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
+            {/* 街の人のデータは日本語だけにある（#564）ので、紐づく人がいるときの「会いにいく人／案内する人」は日本語だけの差。 */}
+            {people.length ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
+              <h2 id="host-heading" className="text-2xl">{people.length === 1 ? "会いにいく人" : "案内する人"}</h2>
+              <ul className="mt-5 grid gap-6">
+                {people.map((entry) => (
+                  <li key={entry.slug} className="flex items-start gap-4">
+                    {peopleLinks
+                      ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} aria-label={`${entry.name}さんのページ`} className="shrink-0"><Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20" sizes="80px" /></Link>
+                      : <Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" />}
+                    <div className="min-w-0">
+                      <p className="font-extrabold">{entry.name}<span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{entry.roleJa}・{entry.areaJa}</span></p>
+                      {entry.quoteJa ? <p className="mt-1.5 text-[1.0625rem] leading-snug">「{entry.quoteJa}」</p> : null}
+                      {entry.introJa ? <p className="mt-2 line-clamp-3 whitespace-pre-line break-words text-ink-soft">{entry.introJa}</p> : null}
+                      {peopleLinks ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} className="mt-2 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{entry.name}さんのページ</Link> : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section> : providerName || hostBioText ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 id="host-heading" className="text-2xl">{ja ? "ホストについて" : "About your host"}</h2>
               <div className="mt-4 flex items-start gap-4">
                 {providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt={providerIdentityPhoto.alt} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" /> : null}
@@ -185,6 +234,10 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
               <h2 id="inquiry-heading" className="text-2xl">{ja ? "相談してみる" : "Planning something bigger?"}</h2>
               <p className="mt-3 text-ink-soft">{ja ? "学校や会社、グループでの参加など、予約の前に相談したいことがあれば、お気軽にどうぞ。はじめの相談は無料です。" : "For a school, a company or a group, or if you'd like to talk before booking, get in touch. The first conversation is free."}</p>
               <a href={inquiryHref(locale, { from: "EXPERIENCE", experienceSlug: publication.slug, experienceTitle: title, hostName: providerName })} className={buttonClass("secondary", "mt-4 w-full sm:w-auto")}>{ja ? "この体験について相談する" : "Ask about this experience"}</a>
+            </section> : null}
+            {cancellation.length ? <section className="border-b border-line py-8 lg:py-10" aria-labelledby="cancellation-heading">
+              <h2 id="cancellation-heading" className="text-2xl">{ja ? "取消について" : "Cancellation"}</h2>
+              <ul className="mt-4 space-y-2 text-ink-soft">{cancellation.map((line) => <li key={`${line.label}-${line.text}`}>{line.label ? <b className="text-ink">{line.label}{ja ? "：" : ": "}</b> : null}{line.text}</li>)}</ul>
             </section> : null}
             {reviews ? <section id="reviews" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 className="text-2xl">{ja ? "レビュー" : "Reviews"}</h2>
@@ -208,14 +261,16 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
             </section> : null}
           </div>
 
-          <aside className="h-max rounded-[var(--radius-card)] border border-line bg-white p-5 lg:sticky lg:top-24">
+          <aside id="book" className="h-max rounded-[var(--radius-card)] border border-line bg-white p-5 lg:sticky lg:top-24">
             {offers.length ? <>
               <p className="eyebrow">{ja ? "料金" : "From"}</p>
-              <p className="mt-1 text-3xl font-extrabold">{formatYen(Math.min(...offers.map((offer) => offer.pricing.adultPriceYen)), locale)} <span className="text-sm font-normal">{ja ? "大人1名から" : "per adult"}</span></p>
+              <p className="mt-1 text-3xl font-extrabold">{yen(lowest!)} <span className="text-sm font-normal">{ja ? "大人1名から" : "per adult"}</span></p>
               <p className="mt-2 text-sm text-ink-soft">{offers.map((offer) => scheduleDescription(offer, locale)).filter((line, index, all) => all.indexOf(line) === index).join(" · ")}</p>
-              {config.bookingsEnabled && config.guestBookingEnabled ? <Link href={`${ja ? "/ja" : ""}/experiences/${publication.slug}/book`} className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-ink px-6 font-extrabold text-white hover:bg-ink/90">{ja ? "日時を選ぶ" : "Choose a date"}</Link> : <p className="mt-5 rounded-xl bg-sand p-3 text-sm text-ink-soft">{ja ? "現在、オンライン予約はご利用いただけません。" : "Online booking is temporarily unavailable."}</p>}
+              {config.bookingsEnabled && config.guestBookingEnabled ? <Link href={bookingHref} className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-ink px-6 font-extrabold text-white hover:bg-ink/90">{cta}</Link> : <p className="mt-5 rounded-xl bg-sand p-3 text-sm text-ink-soft">{ja ? "現在、オンライン予約はご利用いただけません。" : "Online booking is temporarily unavailable."}</p>}
               <p className="mt-3 text-xs text-muted">{ja ? `${sellerName}が販売者です。お支払いはStripe Checkoutで受け付けます。` : `${sellerName} is the seller and receives the booking payment through Stripe Checkout.`}</p>
               {approval ? <p className="mt-2 text-sm font-semibold text-ink-soft">{ja ? "予約はリクエスト制です。承認後にお支払いをご案内します。" : "Request to book. Payment is due only after NIHO approves your request."}</p> : null}
+              {closes ? <p className="mt-3 text-[0.8125rem] text-ink-soft">{ja ? "予約締切：" : "Book by "}<time dateTime={closes} className="font-bold text-ink">{dayOption(jstDateKey(closes), locale).label} · {formatTime(closes, locale)} JST</time></p> : null}
+              {config.groupInquiryEnabled ? <Link href={askHref} className="mt-3 block text-center text-sm font-bold text-moss underline underline-offset-4">{ja ? "ほかの日を相談する" : "Ask about other dates"}</Link> : null}
               <ul className="mt-5 space-y-3 border-t border-line pt-4 text-sm text-ink-soft">
                 {offers.map((offer) => <li key={offer.id}><b className="text-ink">{offer.name}:</b> {cancellationSummary(offer, locale)}{offer.minimumChargeableParticipants > 1 ? ja ? ` · 最低請求人数: ${offer.minimumChargeableParticipants}名` : ` · Minimum charge: ${offer.minimumChargeableParticipants} guests` : ""}</li>)}
               </ul>
@@ -223,10 +278,14 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
           </aside>
         </div>
         {relatedCards.length ? <section aria-labelledby="related-experiences-heading" className="pt-14">
-          <h2 id="related-experiences-heading" className="mb-6 text-[1.75rem] lg:text-[2rem]">More experiences in Kamakura</h2>
+          <h2 id="related-experiences-heading" className="mb-6 text-[1.75rem] lg:text-[2rem]">{ja ? "ほかの体験" : "More experiences in Kamakura"}</h2>
           <ExperienceCardGrid cards={relatedCards} />
         </section> : null}
       </div>
+      {bookable && lowest !== null ? <div className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 border-t border-line bg-white px-5 py-3 lg:hidden">
+        <p className="text-[0.9375rem]">{ja ? null : <span className="mr-1 text-[0.8125rem] text-ink-soft">From</span>}<b className="text-[1.125rem]">{yen(lowest)}</b><span className="text-[0.8125rem] text-ink-soft">{ja ? "〜 / 人" : " / adult"}</span></p>
+        <Link href={bookingHref} className="inline-flex min-h-11 items-center rounded-full bg-leaf px-6 font-extrabold text-ink hover:bg-leaf-hover">{cta}</Link>
+      </div> : null}
     </div>
   </>;
 }

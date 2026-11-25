@@ -65,7 +65,7 @@ describe("Experience publication Japanese sale presentation", () => {
     expect(html).not.toContain("English lead");
     expect(html).not.toContain("English description");
     expect(html).not.toContain("English meeting overview");
-    expect(html).not.toContain("data-testid=\"analytics-event\"");
+    expect(html).toContain("data-testid=\"analytics-event\"");
     expect(sitePublicationMetadata(item, "ja").alternates).toEqual({
       canonical: "https://experience.example.test/ja/experiences/synthetic-tea",
       languages: { en: "https://experience.example.test/experiences/synthetic-tea", ja: "https://experience.example.test/ja/experiences/synthetic-tea", "x-default": "https://experience.example.test/experiences/synthetic-tea" },
