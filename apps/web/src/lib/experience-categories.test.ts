@@ -1,0 +1,43 @@
+import { describe, expect, it } from "vitest";
+import { EXPERIENCE_CATEGORIES, type ExperienceCategoryId } from "@niho-experience/experience-domain";
+import { ALL_CATEGORIES_LABEL, categoryLabel, filterByCategory, parseCategoryParam, resolveCategories } from "./experience-categories";
+
+describe("カテゴリーの名前（日英）", () => {
+  it("すべての id に英語名と日本語名がある", () => {
+    for (const { id, label } of EXPERIENCE_CATEGORIES) {
+      expect(categoryLabel(id, "en").trim()).not.toBe("");
+      expect(categoryLabel(id, "ja")).toBe(label);
+    }
+  });
+
+  it("英語名は決めたとおり、『すべて』も日英で持つ", () => {
+    expect(EXPERIENCE_CATEGORIES.map((item) => categoryLabel(item.id, "en"))).toEqual(["Walks", "Cook & eat", "Make by hand", "Zen & temples", "Dawn & dusk", "By the sea", "Meet people", "Groups & teams"]);
+    expect(ALL_CATEGORIES_LABEL).toEqual({ en: "All", ja: "すべて" });
+  });
+});
+
+describe("カテゴリーの絞り込み", () => {
+  const bySlug = new Map<string, ExperienceCategoryId>([["a", "walk"], ["b", "sea"], ["c", "walk"]]);
+  it("category の値は id だけ", () => {
+    expect(parseCategoryParam("walk")).toBe("walk");
+    expect(parseCategoryParam("cooking")).toBeNull();
+    expect(parseCategoryParam(["walk"])).toBeNull();
+    expect(parseCategoryParam(undefined)).toBeNull();
+  });
+
+  it("体験のあるカテゴリーだけを固定の順で出し、選択中は0件でも出す", () => {
+    expect(resolveCategories(["a", "b"], bySlug, null).available).toEqual(["walk", "sea"]);
+    expect(resolveCategories(["b"], bySlug, "zen").available).toEqual(["zen", "sea"]);
+    expect(resolveCategories(["x"], bySlug, null).available).toEqual([]);
+  });
+
+  it("分類を読めないときは並びを出さず、絞り込みもしない", () => {
+    expect(resolveCategories(["a"], null, "walk")).toEqual({ available: [], selected: null });
+    expect(filterByCategory([{ slug: "a" }, { slug: "b" }], null, "walk")).toHaveLength(2);
+  });
+
+  it("選んだカテゴリーの体験だけにする", () => {
+    expect(filterByCategory([{ slug: "a" }, { slug: "b" }, { slug: "c" }, { slug: "d" }], bySlug, "walk").map((card) => card.slug)).toEqual(["a", "c"]);
+    expect(filterByCategory([{ slug: "a" }, { slug: "d" }], bySlug, null)).toHaveLength(2);
+  });
+});

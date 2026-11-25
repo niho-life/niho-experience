@@ -7,7 +7,7 @@ export function isSupportedPublicPath(pathname: string): boolean {
 
 function switchQuery(sourcePath: string, query: string): string {
   const allowed = sourcePath === "/experiences"
-    ? new Set(["q", "theme", "date", "guests"])
+    ? new Set(["q", "theme", "date", "guests", "category"])
     : /^\/experiences\/[^/]+(?:\/book)?$/.test(sourcePath)
       ? new Set(["q", "theme", "date", "guests", "offer"])
       : new Set<string>();
