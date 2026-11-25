@@ -15,7 +15,7 @@ import { config } from "./config";
 import { getApi } from "./api";
 import type { PageId } from "./page-document-contract";
 import { assertSameJapaneseRelease, JapaneseReleaseUnavailable } from "./localized-release";
-import { experienceCounterparts, mapJapaneseExperiences, mapPublicationJapaneseExperiences } from "./localized-mapping";
+import { experienceCounterparts, mapJapaneseExperiences, mapPublicationJapaneseExperiences, SITE_OWNED_PAIRS } from "./localized-mapping";
 import { readBoundedJson } from "./read-bounded-json";
 import { LOCAL_JAPANESE_RELEASE_ID, localJapaneseCopy } from "./ja-static-copy";
 export { assertSameJapaneseRelease, JapaneseReleaseUnavailable, japaneseBookingAllowed } from "./localized-release";
@@ -195,7 +195,7 @@ export const getPreparedJapaneseStaticRelease = cache(async () => {
   const experiences = config.apiMode === "http"
     ? mapPublicationJapaneseExperiences(nativeCatalog?.experiences ?? [], config.bookingsEnabled && config.guestBookingEnabled)
     : mapJapaneseExperiences(copy.releaseId, catalog);
-  const counterparts = Object.freeze({ ...Object.fromEntries(pages.map((page) => [page.route.sourcePath, page.route.path])), ...experienceCounterparts(experiences) });
+  const counterparts = Object.freeze({ ...Object.fromEntries(pages.map((page) => [page.route.sourcePath, page.route.path])), ...Object.fromEntries(SITE_OWNED_PAIRS.map((pair) => [pair.englishPath, pair.japanesePath])), ...experienceCounterparts(experiences) });
   return Object.freeze({ releaseId: copy.releaseId, copy, pages: Object.freeze(pages), pageById, experiences, counterparts });
 });
 

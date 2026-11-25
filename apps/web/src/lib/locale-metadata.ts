@@ -4,7 +4,7 @@ import type { PageId } from "./page-document-contract";
 import { listExperiencesForSite } from "./api";
 import { config } from "./config";
 import { getJapaneseCatalog, getJapaneseDetail, getPreparedJapaneseStaticRelease } from "./localized-content";
-import { isIndexableJapanesePage, mapJapaneseExperiences, pairLanguages, staticPair } from "./localized-mapping";
+import { isIndexableJapanesePage, mapJapaneseExperiences, pairLanguages, siteOwnedPair, staticPair } from "./localized-mapping";
 import { experiencePublicationRepository } from "./experience/store-server";
 
 async function publicationLanguagePair(slug: string): Promise<boolean> {
@@ -26,7 +26,7 @@ export async function englishAlternates(sourcePath: string, indexable = true): P
   try {
     const release = await getPreparedJapaneseStaticRelease();
     const page = release.pages.find((candidate) => candidate.route.sourcePath === sourcePath);
-    const pair = page ? staticPair(page) : null;
+    const pair = page ? staticPair(page) : siteOwnedPair(sourcePath);
     if (!pair) return { canonical, languages: { en: canonical, "x-default": canonical } };
     return { canonical, languages: pairLanguages(canonical, `${config.siteUrl}${pair.japanesePath}`) };
   } catch { return { canonical, languages: { en: canonical, "x-default": canonical } }; }
@@ -72,6 +72,19 @@ export async function japaneseExperienceAlternates(slug: string, canonical: stri
     }
   } catch { /* English page unconfirmed: no hreflang */ }
   return { canonical };
+}
+
+/**
+ * hreflang for a Japanese page this site writes in both languages itself (`SITE_OWNED_PAIRS`, #658): the same pair as its
+ * English page. The /ja layout renders only with the prepared release, so without it there is canonical alone.
+ */
+export async function japaneseSiteOwnedAlternates(japanesePath: string): Promise<Metadata["alternates"]> {
+  const canonical = `${config.siteUrl}${japanesePath}`;
+  const pair = siteOwnedPair(japanesePath);
+  if (!pair) return { canonical };
+  try { await getPreparedJapaneseStaticRelease(); }
+  catch { return { canonical }; }
+  return { canonical, languages: pairLanguages(`${config.siteUrl}${pair.englishPath}`, canonical) };
 }
 
 export async function japaneseStaticMetadata(pageId: Extract<PageId, "home" | "experiences" | "host" | "help">, filtered = false): Promise<Metadata> {

@@ -34,6 +34,17 @@ type StaticPage = Readonly<{ route: Readonly<{ sourcePath: string; path: string;
 type CatalogInput = Readonly<{ releaseId: string; experiences: readonly Readonly<{ slug: string }>[] }>;
 type DetailInput = Readonly<{ releaseId: string; experience: Readonly<{ slug: string }> }> & Pick<SelectedExperienceDetailResponse, "localization">;
 
+/**
+ * Pages this site writes in both languages itself, outside the static pages of the Japanese release (#658). The pair holds
+ * whenever the Japanese site is on. Like the other pairs, the language switch, the sitemap and hreflang all read this list.
+ */
+export const SITE_OWNED_PAIRS: readonly LocalizedPair[] = [{ englishPath: "/about", japanesePath: "/ja/about" }];
+
+/** The site-owned pair one of whose two paths this is, or null. */
+export function siteOwnedPair(path: string): LocalizedPair | null {
+  return SITE_OWNED_PAIRS.find((pair) => pair.englishPath === path || pair.japanesePath === path) ?? null;
+}
+
 /** A Japanese static page may be indexed only when its route and SEO projections both say so. */
 export function isIndexableJapanesePage(page: StaticPage): boolean {
   return page.route.indexable && page.seo.indexable;
