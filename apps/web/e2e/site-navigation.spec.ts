@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-// The English header, its phone menu and the new About / Help pages (#645). The mock preview registers the sample guides, so Journal is shown.
+// The English header, its phone menu and the new About / Help pages (#645). The menu button is a <summary> (no "button" role),
+// so the tests find it as the details' summary. The mock preview registers the sample guides, so Journal is shown.
 
 test.describe("desktop header", () => {
   test.beforeEach(({}, testInfo) => test.skip(testInfo.project.name !== "desktop"));
@@ -10,7 +11,7 @@ test.describe("desktop header", () => {
     const nav = page.getByRole("navigation", { name: "Main" });
     await expect(nav.getByRole("link")).toHaveText(["Experiences", "Journal", "About", "Help"]);
     await expect(page.getByRole("banner").getByRole("link", { name: "Host with NIHO" })).toHaveCount(0);
-    await expect(page.getByRole("banner").getByRole("button", { name: "Menu" })).toBeHidden();
+    await expect(page.getByRole("banner").locator("details > summary")).toBeHidden();
   });
 
   test("About opens from the header with its heading", async ({ page }) => {
@@ -27,7 +28,7 @@ test.describe("phone menu", () => {
 
   test("opens with every destination, and navigating closes it", async ({ page }) => {
     await page.goto("/");
-    const button = page.getByRole("banner").getByRole("button", { name: "Menu" });
+    const button = page.getByRole("banner").locator("details > summary");
     await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link")).toHaveText(["Experiences"]);
     await button.click();
     const menu = page.getByRole("navigation", { name: "Menu" });
@@ -41,7 +42,7 @@ test.describe("phone menu", () => {
 
   test("Escape closes the menu and returns focus to its button", async ({ page }) => {
     await page.goto("/");
-    const button = page.getByRole("banner").getByRole("button", { name: "Menu" });
+    const button = page.getByRole("banner").locator("details > summary");
     await button.click();
     await expect(page.getByRole("navigation", { name: "Menu" })).toBeVisible();
     await page.keyboard.press("Escape");
