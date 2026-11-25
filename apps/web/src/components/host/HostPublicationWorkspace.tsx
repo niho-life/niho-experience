@@ -365,12 +365,18 @@ export function HostPublicationWorkspace({
   // A language that is not published takes the published one's photo descriptions when it has none (the upload API wants both).
   const effectiveMedia = adminDraft ? mediaDraft : fillUnlistedAlt(mediaDraft, listing);
   const effectiveProviderMedia = adminDraft ? providerMediaDraft : fillUnlistedAlt(providerMediaDraft, listing);
-  const mediaDirty = !!product && (!baselineForm || JSON.stringify(mediaForm(effectiveMedia)) !== JSON.stringify(baselineForm.media));
-  const providerMediaDirty = !adminDraft && !!product && JSON.stringify(providerMediaForm(effectiveProviderMedia)) !== providerMediaBaseline;
+  // What the host changed (shown as unsaved)…
+  const mediaEdited = !!product && (!baselineForm || JSON.stringify(mediaForm(mediaDraft)) !== JSON.stringify(baselineForm.media));
+  const providerMediaEdited = !adminDraft && !!product && JSON.stringify(providerMediaForm(providerMediaDraft)) !== providerMediaBaseline;
+  // …and what a save sends, the filled descriptions included. A page that only needs the fill is not shown as unsaved:
+  // the next save, or 「同意して公開」, writes it.
+  const mediaDirty = mediaEdited || (!!product && effectiveMedia !== mediaDraft);
+  const providerMediaDirty = providerMediaEdited || (!adminDraft && !!product && effectiveProviderMedia !== providerMediaDraft);
   // 分類 is saved on its own route, but the host edits it with the page: it counts as one of the unsaved changes.
   const classification = useProductClassification(!adminDraft && productId ? { kind: "host", productId } : null);
   const classificationDirty = !adminDraft && !!product && classification.dirty;
-  const dirty = adminCreate ? Boolean(slug || title || unitAmount) : !!product && (draftDirty || termsDirty || mediaDirty || providerMediaDirty || classificationDirty);
+  const dirty = adminCreate ? Boolean(slug || title || unitAmount) : !!product && (draftDirty || termsDirty || mediaEdited || providerMediaEdited || classificationDirty);
+  const needsSave = dirty || mediaDirty || providerMediaDirty;
   const updateContent = useCallback((key: string, value: unknown) => setContent((current) => ({ ...current, [key]: value })), []);
 
   // 英語と日本語のずれ: the Japanese manuscript's fingerprint now, computed after each edit (an older answer is dropped).
@@ -1070,7 +1076,7 @@ export function HostPublicationWorkspace({
   async function requestPublish() {
     if (!product || busy || conflictProduct || product.status === "SUSPENDED") return;
     let current = product;
-    if (dirty) {
+    if (needsSave) {
       const savedProduct = await saveAll();
       if (!savedProduct) return;
       current = savedProduct;
@@ -1223,7 +1229,7 @@ export function HostPublicationWorkspace({
         onChange={(key, checked) => { const next = { ...createListing, [key]: checked }; if (!next.en && !next.ja) { setListingNotice("掲載言語は1つ以上必要です"); return; } setListingNotice(""); setCreateListing(next); }}
         options={[{ key: "en", label: "英語", checked: createListing.en }, { key: "ja", label: "日本語", checked: createListing.ja }]} />
       {listingNotice ? <p role="status" className="text-sm font-bold text-warn">{listingNotice}</p> : null}
-      <EditorField label="体験名" value={createTitle} onChange={setCreateTitle} />
+      <EditorField label="体験名" value={createTitle} onChange={setCreateTitle} autoFocus />
       <EditorField label="大人1人の料金（税込・円）" value={createPrice} onChange={setCreatePrice} inputMode="numeric" info="無料の体験は0円にします。有料は50円以上にしてください。" />
       {error ? <p role="alert" className="rounded-xl bg-danger-pale p-3 text-danger">{error}</p> : null}
       <div className="flex justify-end gap-2 pt-4">
@@ -1642,7 +1648,7 @@ export function HostPublicationWorkspace({
     const settingsTab = <div className="grid max-w-[720px] gap-4">
       <section id="publication-listing" className={sectionClass} aria-labelledby="publication-listing-title">
         <h2 id="publication-listing-title" className={headingClass}>掲載言語<HostInfoTip label="掲載言語">英語ページは海外からの旅行者向け、日本語ページは日本語で探す人向けです。両方作ることも、片方だけにすることもできます。選んだ言語の原稿が必要です。掲載をやめた言語のページは、次の公開から表示されなくなります。</HostInfoTip></h2>
-        <EditorCheckList legend="掲載する言語" disabled={busy || !!conflictProduct} onChange={(key, checked) => changeListing({ ...listing, [key]: checked })}
+        <EditorCheckList legend="掲載する言語" legendHidden disabled={busy || !!conflictProduct} onChange={(key, checked) => changeListing({ ...listing, [key]: checked })}
           options={[
             { key: "en", label: "英語", checked: listing.en, detail: `/experiences/${slug}` },
             { key: "ja", label: "日本語", checked: listing.ja, detail: `/ja/experiences/${slug}` },

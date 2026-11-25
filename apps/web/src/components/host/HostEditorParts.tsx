@@ -22,9 +22,9 @@ export function EditorLabel({ htmlFor, label, small, info }: { htmlFor?: string;
   );
 }
 
-export function EditorField({ label, small, info, value, onChange, rows, placeholder, inputMode, reference, invalid = false, className = "" }: {
+export function EditorField({ label, small, info, value, onChange, rows, placeholder, inputMode, reference, invalid = false, autoFocus = false, className = "" }: {
   label: string; small?: string; info?: string; value: string; onChange: (value: string) => void; rows?: number; placeholder?: string;
-  inputMode?: "numeric" | "decimal"; reference?: ReactNode; invalid?: boolean; className?: string;
+  inputMode?: "numeric" | "decimal"; reference?: ReactNode; invalid?: boolean; /** In a <dialog>: the field focus starts on. */ autoFocus?: boolean; className?: string;
 }) {
   const id = useId();
   const tone = invalid ? " border-warn bg-warn-pale" : "";
@@ -32,7 +32,7 @@ export function EditorField({ label, small, info, value, onChange, rows, placeho
     <div className={`mt-3.5 first:mt-0 ${className}`.trim()}>
       <EditorLabel htmlFor={id} label={label} small={small} info={info} />
       {rows ? <textarea id={id} rows={rows} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className={`${EDITOR_INPUT} resize-y${tone}`} />
-        : <input id={id} value={value} placeholder={placeholder} inputMode={inputMode} onChange={(event) => onChange(event.target.value)} className={`${EDITOR_INPUT}${tone}`} />}
+        : <input id={id} value={value} placeholder={placeholder} inputMode={inputMode} autoFocus={autoFocus} onChange={(event) => onChange(event.target.value)} className={`${EDITOR_INPUT}${tone}`} />}
       {reference}
     </div>
   );
@@ -134,7 +134,7 @@ export function EditorDialog({ open, onClose, title, children }: { open: boolean
   }, [open]);
   return (
     <dialog ref={dialog} aria-labelledby={titleId} onClose={onClose} className={EDITOR_DIALOG}>
-      {open ? <div className="px-4 py-4 md:px-5 md:py-5"><h2 id={titleId} className="mb-1 font-sans text-[1.0625rem] font-extrabold">{title}</h2>{children}</div> : null}
+      {open ? <div className="px-4 py-4 md:px-5 md:py-5"><h2 id={titleId} className="mb-3 font-sans text-[1.0625rem] font-extrabold">{title}</h2>{children}</div> : null}
     </dialog>
   );
 }
@@ -162,13 +162,13 @@ export function EditorUnitField({ label, small, info, prefix, suffix, value, onC
 }
 
 /** A group of checkboxes drawn as cards (掲載言語: at least one stays checked, which the caller enforces). `detail` is a faint line under a row. */
-export function EditorCheckList({ legend, info, options, onChange, disabled }: {
-  legend: string; info?: string; disabled?: boolean; onChange: (key: string, checked: boolean) => void;
+export function EditorCheckList({ legend, legendHidden = false, info, options, onChange, disabled }: {
+  legend: string; legendHidden?: boolean; info?: string; disabled?: boolean; onChange: (key: string, checked: boolean) => void;
   options: readonly { key: string; label: string; checked: boolean; detail?: string }[];
 }) {
   return (
     <fieldset className="min-w-0">
-      <legend className="mb-1 flex items-center p-0 text-[0.8125rem] font-bold text-ink-soft">{legend}{info ? <HostInfoTip label={legend}>{info}</HostInfoTip> : null}</legend>
+      <legend className={legendHidden ? "sr-only" : "mb-1 flex items-center p-0 text-[0.8125rem] font-bold text-ink-soft"}>{legend}{info ? <HostInfoTip label={legend}>{info}</HostInfoTip> : null}</legend>
       <div className="grid gap-2">
         {options.map((option) => (
           <label key={option.key} className={`flex cursor-pointer items-start gap-2.5 rounded-xl border px-3.5 py-2.5 ${option.checked ? "border-ink bg-sand" : "border-line-strong"}`}>
