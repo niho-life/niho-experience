@@ -20,6 +20,11 @@ export const HOST_LOGIN_LINK_PATH = "/host/auth/open";
  * is `/host/auth/login?invite=1` (HOST_LOGIN_PATH), whose return binds the NIHO account to the invited host account.
  */
 export const HOST_INVITE_PATH = "/host/auth/invite";
+/**
+ * The link of a provider's team invitation (#636): `/host/auth/team-invite#t=<token>` from the email. The same two steps as
+ * HOST_INVITE_PATH, with its own cookie; the sign-in that follows is `/host/auth/login?teaminvite=1`.
+ */
+export const HOST_TEAM_INVITE_PATH = "/host/auth/team-invite";
 export const HOST_INVITATIONS_PATH = "/host/invitations";
 export const HOST_API_PREFIX = "/host/api/";
 /** Creates a short-lived Express dashboard login link after server-side OWNER checks. */
@@ -245,11 +250,13 @@ export function hostLandingPath(providerId: string | null, connect: unknown): st
  * unknown or no longer open when the NIHO sign-in came back (`invalid`); the NIHO account is bound to another host
  * account (`in-use`) or the invited host account has another NIHO account (`has-identity`), or the sign-in could not be
  * completed this time (`unavailable`: the invitation stays usable). `unverified`: NIHO did not say when the person signed in,
- * so no recent sign-in can be judged and nothing was opened or bound.
+ * so no recent sign-in can be judged and nothing was opened or bound. `team-invite-*` (#636): the same for a provider's team
+ * invitation (`mismatch`: the address's host account belongs to another NIHO account).
  */
 export const LOGIN_ERROR_REASONS = [
   "expired", "state", "denied", "rejected", "unavailable", "link", "unregistered", "suspended", "writer-revoked", "writer-unavailable",
   "invite-expired", "invite-used", "invite-browser", "invite-invalid", "invite-in-use", "invite-has-identity", "invite-unavailable",
   "unverified",
+  "team-invite-expired", "team-invite-used", "team-invite-browser", "team-invite-invalid", "team-invite-mismatch", "team-invite-unavailable",
 ] as const;
 export type LoginErrorReason = (typeof LOGIN_ERROR_REASONS)[number];

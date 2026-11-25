@@ -340,6 +340,26 @@ function hostTeamSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled:
 }
 
 /**
+ * メンバーの招待 (#636): the OWNER invites a person by address, who joins as COHOST with a NIHO sign-in. It builds on the native team,
+ * the NIHO login (the invited person signs in at NIHO) and the host mail (the mail job sends the link), so it refuses to start
+ * when one is missing. Off by default; with it off nothing about the team, the sign-in or the jobs changes.
+ */
+function hostTeamInvitationsSetting(
+  apiMode: "mock" | "http",
+  env: Env,
+  needs: { readonly hostConsoleEnabled: boolean; readonly hostAccountsEnabled: boolean; readonly hostTeamEnabled: boolean; readonly hostNihoLoginEnabled: boolean; readonly hostMailEnabled: boolean },
+): boolean {
+  const name = "EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (!needs.hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
+  if (!needs.hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
+  if (!needs.hostTeamEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_TEAM_ENABLED=true in http mode`);
+  if (!needs.hostNihoLoginEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true in http mode`);
+  if (!needs.hostMailEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_MAIL_ENABLED=true in http mode`);
+  return true;
+}
+
+/**
  * The flags whose code sends the signed-in admin's NIHO admin token (NIHO's Admin session) to NIHO. With the Google
  * login (ADR 0003 decision 4) there is no such token, so none of them may be on at the same time. The fee summary is
  * here for its Admin side (it is one gate for Admin and /host).
@@ -923,6 +943,7 @@ export function resolveConfig(env: Env) {
     && experienceTranslateStandaloneRequested;
   const hostTeamEnabled = hostTeamSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const hostNihoLoginEnabled = hostNihoLoginSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
+  const hostTeamInvitationsEnabled = hostTeamInvitationsSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostTeamEnabled, hostNihoLoginEnabled, hostMailEnabled });
   const travelerAccountsEnabled = travelerAccountsSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const nihoAccountStatusCheckEnabled = nihoAccountStatusCheckSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const nihoIdentityLoginEnabled = apiMode === "http" && env.EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED === "true";
@@ -1110,6 +1131,7 @@ export function resolveConfig(env: Env) {
     travelerLineEnabled,
     // Experience-native COHOST membership, independent from the legacy provider-operations consumer.
     hostTeamEnabled,
+    hostTeamInvitationsEnabled,
     occurrenceAssignmentEnabled,
     googleBusySyncEnabled: googleCalendarJobs.busySyncEnabled,
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,

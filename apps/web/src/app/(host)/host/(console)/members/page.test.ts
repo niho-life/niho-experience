@@ -1,7 +1,7 @@
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ sessionKind: "niho", hostTeamEnabled: false, provider: null as null | { id: string; displayName: string; memberRole: string } }));
+const state = vi.hoisted(() => ({ sessionKind: "niho", hostTeamEnabled: false, hostTeamInvitationsEnabled: false, provider: null as null | { id: string; displayName: string; memberRole: string } }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/host/data", () => ({
@@ -14,7 +14,7 @@ vi.mock("@/host/data", () => ({
   }),
 }));
 vi.mock("@/lib/host/provider-operations-server", () => ({ providerOperationsEnabled: () => false }));
-vi.mock("@/lib/config", () => ({ config: { get hostTeamEnabled() { return state.hostTeamEnabled; } } }));
+vi.mock("@/lib/config", () => ({ config: { get hostTeamEnabled() { return state.hostTeamEnabled; }, get hostTeamInvitationsEnabled() { return state.hostTeamInvitationsEnabled; } } }));
 
 import { HostOperatingTeamPanel } from "@/components/host/HostOperatingTeamPanel";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
@@ -29,6 +29,7 @@ function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
 beforeEach(() => {
   state.sessionKind = "niho";
   state.hostTeamEnabled = false;
+  state.hostTeamInvitationsEnabled = false;
   state.provider = { id: "provider-one", displayName: "Synthetic provider", memberRole: "OWNER" };
 });
 
@@ -38,6 +39,15 @@ describe("host members page", () => {
     state.hostTeamEnabled = true;
     const tree = elements(await HostMembersPage({ searchParams: Promise.resolve({ providerId: "provider-one" }) }));
     expect(tree.find((element) => element.type === HostOperatingTeamPanel)?.props).toMatchObject({ providerId: "provider-one", role: "OWNER", mode: "native" });
+  });
+
+  it("tells the panel whether the owner invites by email (#636): off unless the flag is on", async () => {
+    state.sessionKind = "experience";
+    state.hostTeamEnabled = true;
+    const panel = async () => elements(await HostMembersPage({ searchParams: Promise.resolve({ providerId: "provider-one" }) })).find((element) => element.type === HostOperatingTeamPanel)?.props;
+    expect(await panel()).toMatchObject({ invitationsEnabled: false });
+    state.hostTeamInvitationsEnabled = true;
+    expect(await panel()).toMatchObject({ invitationsEnabled: true });
   });
 
   it("asks a person without a provider to register", async () => {

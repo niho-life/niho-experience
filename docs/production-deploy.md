@@ -115,6 +115,7 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_HOST_NIHO_LOGIN_ENABLED` | `HOST_NIHO_LOGIN_ENABLED` | ホストの画面・DB・Experienceホストアカウント（`HOST_ACCOUNTS_ENABLED`）。NIHO の audience は host console の基礎設定 | — | — | — |
 | `EXPERIENCE_NIHO_WRITER_ENABLED` | `NIHO_WRITER_ENABLED` | ホストの画面・DB・Experienceホストアカウント・NIHOログイン・DB記事公開元・記事認可API・Guide Admin API | `NIHO_ARTICLE_AUTHORITY_ORIGIN`、`NIHO_ARTICLE_AUTHORITY_AUDIENCE`、`NIHO_ARTICLE_LINKS_AUDIENCE` | — | — |
 | `EXPERIENCE_HOST_TEAM_ENABLED` | `HOST_TEAM_ENABLED` | ホストの画面・DB・Experienceホストアカウント | — | — | — |
+| `EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED` | `HOST_TEAM_INVITATIONS_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストチーム・ホストの NIHO ログイン・ホストメール | — | — | — |
 | `EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED` | `OCCURRENCE_ASSIGNMENT_ENABLED` | ホストの画面・DB・完全代行の販売 | — | — | — |
 | `EXPERIENCE_JAPANESE_SITE_ENABLED` | `JAPANESE_SITE_ENABLED` | ホストの画面・DB（配線のため。機能は公開サイト） | — | — | — |
 | `EXPERIENCE_CHANNEL_WATCHDOG_ENABLED` | `CHANNEL_WATCHDOG_ENABLED` | ホストの画面・DB | — | — | `EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE`＝サイトの URL、`EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL`＝`experience-ota-watchdog@<project>` |

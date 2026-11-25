@@ -1,7 +1,7 @@
 import "server-only";
 import { otaSiteLabel } from "@/host/ota-sites";
 import { hostPushLines, whenJa, type HostPushEvent } from "@/lib/host/push/payload";
-import { HOST_INVITE_PATH, HOST_LOGIN_LINK_PATH, HOST_NOTIFICATION_EMAIL_PATH, HOST_SETTINGS_PATH } from "@/lib/host/routes";
+import { HOST_INVITE_PATH, HOST_LOGIN_LINK_PATH, HOST_NOTIFICATION_EMAIL_PATH, HOST_SETTINGS_PATH, HOST_TEAM_INVITE_PATH } from "@/lib/host/routes";
 import { absolute, mail, oneLine, type MailBlock, type RenderedMail } from "./templates";
 
 /*
@@ -127,6 +127,30 @@ export function hostInvitationEmail(input: { readonly siteUrl: string; readonly 
       lead: `下のリンクを開いて、NIHO にログインしてください。ご登録の NIHO アカウント（いつも使っているログインの方法）でお願いします。リンクは ${until} まで、1 回だけ使えます。最初にリンクを開いたブラウザで続けてください。`,
       label: "NIHO アカウントでログインする",
       href: `${absolute(input.siteUrl, HOST_INVITE_PATH)}#t=${encodeURIComponent(input.token)}`,
+    },
+    { kind: "p", text: "メールのアプリの中でリンクが開いたときは、そのブラウザのままログインを続けてください。別のブラウザで開き直すと、使えなくなります。" },
+    { kind: "p", text: "心当たりがなければ、このメールは無視してください。" },
+    REPLY,
+  ], "ja");
+}
+
+/**
+ * 「メンバーへのご招待」 (#636): a provider's OWNER invited this address to run the provider with them as a 共同ホスト. The link is
+ * `/host/auth/team-invite#t=<token>` (the token in the fragment only); it works until `expiresAt`, once, in the browser that
+ * opens it first. It says what a 共同ホスト may do, not who the person has to be: whoever signs in with a NIHO account joins.
+ * `providerDisplayName` is the provider's name when the office has one on record.
+ */
+export function hostTeamInvitationEmail(input: { readonly siteUrl: string; readonly token: string; readonly expiresAt: string; readonly providerDisplayName: string | null }): RenderedMail {
+  const until = JST.format(new Date(input.expiresAt));
+  const name = input.providerDisplayName && input.providerDisplayName.trim() !== "" ? input.providerDisplayName.trim() : null;
+  return mail(name ? `「${name}」のメンバーへのご招待` : "NIHO 体験ホストのメンバーへのご招待", [
+    { kind: "p", text: `NIHO 体験ホストで、${name ?? "体験の提供者"} を一緒に運営するメンバー（共同ホスト）に招待されました。` },
+    { kind: "p", text: "共同ホストは、開催枠の編集、予約の確認、予約者への返信ができます。" },
+    {
+      kind: "link",
+      lead: `下のリンクを開いて、NIHO アカウントでログインすると参加できます。リンクは ${until} まで、1 回だけ使えます。最初にリンクを開いたブラウザで続けてください。`,
+      label: "NIHO アカウントでログインして参加する",
+      href: `${absolute(input.siteUrl, HOST_TEAM_INVITE_PATH)}#t=${encodeURIComponent(input.token)}`,
     },
     { kind: "p", text: "メールのアプリの中でリンクが開いたときは、そのブラウザのままログインを続けてください。別のブラウザで開き直すと、使えなくなります。" },
     { kind: "p", text: "心当たりがなければ、このメールは無視してください。" },

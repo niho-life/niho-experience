@@ -527,6 +527,15 @@ describe("admin support console settings", () => {
     expect(resolveConfig(on).hostTeamEnabled).toBe(false);
     expect(resolveConfig({ ...on, EXPERIENCE_HOST_TEAM_ENABLED: "true" }).hostTeamEnabled).toBe(true);
     expect(() => resolveConfig({ ...mail, ...host, EXPERIENCE_HOST_TEAM_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_TEAM_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
+    // メンバーの招待 (#636): off by default, and it needs the team, the NIHO login and the host mail.
+    const invitations = { ...on, EXPERIENCE_HOST_TEAM_ENABLED: "true", EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", EXPERIENCE_HOST_MAIL_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.niho.example.test" };
+    expect(resolveConfig(invitations).hostTeamInvitationsEnabled).toBe(false);
+    expect(resolveConfig({ ...invitations, EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "true" }).hostTeamInvitationsEnabled).toBe(true);
+    expect(resolveConfig({ ...invitations, EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "1" }).hostTeamInvitationsEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "true" }).hostTeamInvitationsEnabled).toBe(false);
+    for (const missing of ["EXPERIENCE_HOST_TEAM_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"]) {
+      expect(() => resolveConfig({ ...invitations, [missing]: "false", EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "true" })).toThrow(`EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED=true needs ${missing}=true`);
+    }
     expect(() => resolveConfig({ ...on, HOST_CONSOLE_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
     expect(() => resolveConfig({ ...host, EXPERIENCE_API_MODE: "http", EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }))
       .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_DATABASE_URL");

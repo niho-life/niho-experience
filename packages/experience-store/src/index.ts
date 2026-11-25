@@ -252,6 +252,15 @@ export { HostAccountIdentities } from "./host-account-identities.ts";
 export { NIHO_ACCOUNT_STATUS_CHECK_INTERVAL_SECONDS, NihoAccountStatusStore } from "./niho-account-status.ts";
 export type { ApplyNihoAccountStatusResult, NihoAccountStatus, NihoAccountStatusCheck, NihoAccountStatusSessionKind } from "./niho-account-status.ts";
 export { HOST_INVITATION_LIMITS, HostInvitations } from "./host-invitations.ts";
+export { HOST_TEAM_INVITATION_LIMITS, HostTeamInvitations } from "./host-team-invitations.ts";
+export type {
+  AcceptHostTeamInvitationResult,
+  CreateHostTeamInvitationResult,
+  HostTeamInvitationLinkIssue,
+  HostTeamInvitationState,
+  HostTeamInvitationView,
+  OpenHostTeamInvitationResult,
+} from "./host-team-invitations.ts";
 export { TRAVELER_ACCOUNT_LIMITS, TravelerAccounts, isTravelerAccountId } from "./traveler-accounts.ts";
 export type { TravelerSession, TravelerSignInResult } from "./traveler-accounts.ts";
 export type { AcceptHostInvitationResult, CreateHostInvitationResult, HostInvitationLinkIssue, OpenHostInvitationResult } from "./host-invitations.ts";
