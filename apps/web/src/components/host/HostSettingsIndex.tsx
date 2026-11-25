@@ -8,14 +8,13 @@ import { hostSettingsIndexGroups, hostSettingsSectionFromHash } from "@/lib/host
 import { HOST_SURFACE } from "./host-ui";
 import { HostIcon } from "./HostIcon";
 
-export function HostSettingsIndex({ providerId, role, deviceEnabled, articlesEnabled }: {
+export function HostSettingsIndex({ providerId, role, articlesEnabled }: {
   providerId: string;
   role: HostProviderRole | null;
-  deviceEnabled: boolean;
   articlesEnabled: boolean;
 }) {
   const router = useRouter();
-  const groups = hostSettingsIndexGroups({ providerId, role, deviceEnabled, articlesEnabled });
+  const groups = hostSettingsIndexGroups({ providerId, role, articlesEnabled });
 
   useEffect(() => {
     const section = hostSettingsSectionFromHash(window.location.hash);

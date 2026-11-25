@@ -347,7 +347,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
         {show("notifications") ? <HostNotificationPanel view={notificationView} rows={notifications} onToggle={toggle} providerId={providerId} address={notificationAddress} /> : null}
       </div>
 
-      {section === "all" || ["team", "articles", "support", "device", "account"].includes(section) ? <div className="mt-3.5">{account}</div> : null}
+      {section === "all" || ["articles", "support"].includes(section) ? <div className="mt-3.5">{account}</div> : null}
 
       {/* PC: a leaf pill floating at the bottom right. Phones: a full-width band just above the bottom tabs. */}
       {editableSection ? <div className="sticky bottom-[var(--host-tabbar)] z-10 -mx-4 mt-4 -mb-6 border-t border-line bg-canvas px-4 pt-2.5 pb-3.5 md:pointer-events-none md:bottom-4 md:mx-0 md:mb-0 md:flex md:items-center md:justify-end md:gap-3 md:border-0 md:bg-transparent md:p-0">

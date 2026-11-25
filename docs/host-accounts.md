@@ -27,7 +27,9 @@
 
 preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock-login → ホーム。`?mock=unregistered` は未登録の案内で終わる。
 
-### 設定 › ログイン情報（#595）
+### あなたのアカウント › ログイン（#595）
+
+メニューの「あなたのアカウント」（`/host/account`）にある。旧 `/host/settings?section=account` は `/host/account` へ送られる（`providerId` と `niho` だけ引き継ぐ）。
 
 ホストアカウントの自分のセッションだけ（`EXPERIENCE_HOST_NIHO_LOGIN_ENABLED` が ON のとき）。「NIHO アカウント」の行に、結び付けの状態（結び付け済み／結び付けていません）、結び付けた日と最後のログインの日（NIHO user ID は出さない）、「NIHO アカウントを結び付ける」、「結び付けを解除する」（開いて確かめてから「解除する」）が出る。フォームは JavaScript なしの POST（`/host/api/niho-identity`、同一 origin だけ）で、結果は 303 で `設定 › ログイン情報` へ戻り、`?niho=` が結果を言葉で出す（`niho-identity.ts`）。
 
