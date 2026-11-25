@@ -3,8 +3,8 @@ export const EXPERIENCE_PRESENTATION_IDENTITY = Object.freeze({
   renderer: "niho-experience-presentation/v1",
   sourceCommit: "0b6f1d77c1496282eae8cab1eabf516f5b8a0da7",
   tgzSha256: "c4d4d066f767c525d2d1b8455f8b9b9793d1ce6610997f9c41a7a01fc3c65bd6",
-  copy: { schemaVersion: 2, keyCount: 342, sha256: "242e2111e705a14755d10f13d8d16820792ea1aeac3f337b9b01babbfdb106a9" },
-  legacyCopy: { schemaVersion: 1, keyCount: 239, sha256: "1d73b4c80ae1025321532ff3be81430a5e43abfa6ca72d6aef8f57dc2da2a307" },
+  copy: { schemaVersion: 2, keyCount: 342, sha256: "5a969928642f9236583cd66dbe54801d9d5b18e299fb7a377648ffa923a6e98a" },
+  legacyCopy: { schemaVersion: 1, keyCount: 239, sha256: "d7360b29fc9b486d203a81d322f338fcc9cf8b5bc0d2c1126fd2fad184d70da7" },
   // style/copy/assets follow this repo's package (a test pins them to the manifest); sourceCommit and tgzSha256 name the tgz NIHO reviewed and pinned.
   style: { id: "niho-experience-presentation/v1/scoped-css", sha256: "c7cf009042befe4c7a199c992a2e00908929ef5b22e64f7c5a67e71453b5d755" },
   assets: { schemaVersion: 1, sha256: "2ba41a362cbd003319506f1b53ae6b910205304adbd000aab49fca4dce55d7fa" },

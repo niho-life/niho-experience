@@ -35,7 +35,7 @@ decorative asset は安定 ID、`src`／`srcset`／`alt`／`position` と conten
 ## copy registry
 
 - schema 1: NIHO selected public UI registry 239 keysを byte-stable な legacy metadata codec として保持
-- schema 2: schema 1 全239 keysと、実 code-default で不足した97 keysを合わせた完全な336-key static registry
+- schema 2: schema 1 全239 keysと、実 code-default で不足した103 keysを合わせた完全な342-key static registry
 
 schema 2 は home の2見出しを whole rich message として持つ。`{em}...{/em}` は保護された paired marker であり、順序を変えた翻訳でも `RichMessageV1` が text／emphasis segment だけを描画する。HTML、eval、DOM replacement は使わない。key 集合、placeholder multiset、marker の種類／回数／balance／order は入力時に完全一致を要求する。
 
