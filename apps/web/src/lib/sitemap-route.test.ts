@@ -43,6 +43,7 @@ describe("sitemap route", () => {
       { url: `${SITE}/` },
       { url: `${SITE}/experiences` },
       { url: `${SITE}/host` },
+      { url: `${SITE}/about` },
       { url: `${SITE}/privacy` },
       { url: `${SITE}/experiences/tea-ceremony`, lastModified: "2026-10-20T00:00:00Z" },
       { url: `${SITE}/guides`, lastModified: "2026-10-25" },

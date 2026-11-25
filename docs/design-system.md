@@ -78,7 +78,7 @@
 
 - スマホの組み方が基本。PC は Tailwind の `lg`（64rem = 1024px）から組み替える（モック v3 の 900px に当たる）。`sm`（40rem）〜`lg` 未満のタブレットは、余白と一部の列数だけ広げたスマホの組み方。
 - 予約入力の2画面だけは、画面幅ではなく部品自身の幅（container query `@4xl` = 56rem）で2列にする。公開文書の枠の中など狭い所に置かれたときは1列のまま。
-- PC の組み替え：ヘッダーに Host with NIHO、トップの検索は1行のピル、一覧の人数と日付チップは1行、詳細はパンくず → タイトル → ページ幅の中のモザイク → 本文と右の予約カード、予約入力は左に step・右に要約カードと追従する合計のカード、提供者入口の流れは4列（§4）。
+- PC の組み替え：ヘッダーに About と Help、トップの検索は1行のピル、一覧の人数と日付チップは1行、詳細はパンくず → タイトル → ページ幅の中のモザイク → 本文と右の予約カード、予約入力は左に step・右に要約カードと追従する合計のカード、提供者入口の流れは4列（§4）。
 - 実装の注意：presentation の CSS（`@niho/experience-presentation/v1/styles.css`）は全規則が `@scope (.nexp-v1)` で包まれていて、同じ詳細度なら scope の近さで Web 側の規則に勝つ。`.nexp-v1` の中に置く Web 側の部品（トップの検索欄など）で、presentation の CSS にもある基本クラス（`relative`・`grid-cols-2`・`rounded-2xl` など）を `lg:` で上書きすると、PC の指定が負ける（2026-10-21、トップの検索欄が PC でも2段のままだった）。画面幅で変える値は `max-lg:` と `lg:` に分けて書き、基本クラスを持たせない。
 
 ## 3. 部品
@@ -118,7 +118,7 @@
 
 | 節 | 内容 |
 | --- | --- |
-| ヘッダー | 白。ロゴ、Experiences（一覧では淡い面で選択状態、`aria-current="page"`）、Host with NIHO（スマホは Experiences だけ）、"EN · ¥"（操作ではない表示。読み上げは "In English, prices in Japanese yen"） |
+| ヘッダー | 白。ロゴ。md（48rem）以上は Experiences · Journal（記事のページがあるときだけ）· About · Help の行（現在のページは淡い面と `aria-current="page"`）と、右端の言語ボタン（日本語のサイトが無い配備だけ "EN · ¥" の表示）。md 未満は行に Experiences だけ、言語ボタン（360px 未満は隠す）、丸いメニューボタン（`SiteMenu.tsx`。`<details>` なので JS なしで開閉し、JS があればページ移動・Escape・外側クリックで閉じる）。メニューは全幅のパネルで Experiences / Journal / About / Help / 言語 / 控えめな最後の項目 "For hosts"（`/host`）。ヘッダーの行に提供者向けのリンクは置かない（#645） |
 | ヒーロー | 全面の写真（NIHO のディナーの長いテーブル、`lib/site-media.ts`、priority）、h1 "Meet the people who make Kamakura *home*"（home を手書き）、リード "Cook, sit, mend and write with people who live here. Small groups, booked in minutes, no account needed."、右上に白い丸スタンプ。下端に重なる検索（スマホは日付・人数の2列＋下の行にボタン、PC は写真の下端にまたがる1行のピル。GET で `/experiences` へ。`date`＝Any day＋今日から14日（JST）、`guests`＝1〜8、既定は "2 adults"）。JS なしでも動く |
 | テーマ | 掲載中の体験から作る（空のテーマを作らない）。slug を明示した編集用の表でアイコンと短いラベルを決める（`lib/themes.ts`：Cook & eat / Roast coffee / Sit zazen / Mend a bowl / Write kanji）。題名からは推測しない（#36）。各テーマはその体験の詳細へ |
 | カード | 手書き "N to choose from"、h2 "Experiences hosted by neighbors"、See all。スマホは横スクロールの snap、PC は3列。最後に "Your experience here?"（`/host` へ） |
@@ -130,7 +130,9 @@
 | 予約の流れ | Pick a date（"See the next dates on every card. Times are Japan time."）/ Pay securely（"Checkout by Stripe in Japanese yen, tax included."）/ Meet your hosts（"The meeting point and your booking arrive by email."）、手書き "no account needed — book as a guest" |
 | 絵はがき | "Kamakura is small. Walk it."。切手の縁で少し傾け、手書きの地名。リンクなし |
 | ホスト募集 | アーチ形の動画、"Share what you love about Kamakura"、`/host` へ |
-| フッター | 白、丸スタンプ、説明 "Small experiences hosted by people who live in Kamakura. Made by NIHO, a shared living room two minutes from Kamakura Station."、既存ルート（`/experiences`、`/host`）だけ。プレビューだけ最下部に1行の表記 |
+| フッター | 白、丸スタンプ、説明（`SITE_FOOTER_DESCRIPTION`: サイトの説明に "Made by NIHO, the town's living room, two minutes from Kamakura Station."）、固定のリンクに続けて About、Kamakura Journal（記事があるときだけ）、For writers、Privacy。プレビューだけ最下部に1行の表記 |
+| About（`/about`、英語のみ。#645） | 全幅の写真のヒーロー（NIHO 自前の写真・動かさない）と h1 "It starts in the town’s living room" → 導入の1段落（明朝の大きな文字）→ 写真3枚と手書きのひとこと（local / deep / small）→ 予約の流れ（トップと同じ3ステップ）と "See the experiences" → 運営の紹介（アーチ形の外観写真・"Help and contact"）→ 地元の人向けの淡い緑の帯（`/host`）。体験の写真は使わない |
+| Help の "Common questions"（`/help`。#645） | 既存の Help の下に、同じ幅で手書きのひとこと "good to know" と `<details>` の質問5つ（アカウント・支払い・言語・集合場所・東京からの距離）。矢印は開くと180°回る。JS なしでもキーボードでも開閉できる |
 
 ### 一覧（`/experiences`）
 

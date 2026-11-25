@@ -7,6 +7,8 @@ const PAGES = [
   "/experiences/home-cooked-dinner-with-locals",
   "/experiences/indigo-dyeing-with-an-artisan",
   "/host",
+  "/about",
+  "/help",
   "/booking/return",
   "/preview/states",
   "/guides",
