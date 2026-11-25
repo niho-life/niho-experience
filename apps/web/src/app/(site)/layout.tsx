@@ -44,8 +44,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   let counterparts: Readonly<Record<string, string>> = {};
   try { counterparts = await getJapaneseStaticCounterparts(); } catch { /* no approved JA release: expose no link */ }
   const guides = await guideCatalogForSite();
+  const hasCounterparts = Object.keys(counterparts).length > 0;
+  const hasGuides = hasGuidesPage(guides);
   const footerLinks = [
-    ...(hasGuidesPage(guides) ? [{ href: "/guides", label: "Guides" }] : []),
+    { href: "/about", label: "About" },
+    ...(hasGuides ? [{ href: "/guides", label: "Kamakura Journal" }] : []),
     { href: "/write", label: "For writers" },
     // The traveler privacy notice (#285): always linked, last and quiet like the rest.
     privacyFooterLink("en"),
@@ -61,7 +64,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <AnalyticsSetup mode={analyticsMode} websiteId={config.umamiWebsiteId} />
           <ExperienceGa4Analytics measurementId={publicAnalytics?.ga4MeasurementId ?? null} />
           <AttributionCapture enabled={attributionEnabled()} />
-          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={Object.keys(counterparts).length ? <LanguageButton counterparts={counterparts} /> : undefined} footerLinks={footerLinks}>
+          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={hasCounterparts ? <LanguageButton counterparts={counterparts} /> : undefined} menuLanguage={hasCounterparts ? <LanguageButton counterparts={counterparts} variant="text" /> : undefined} journalHref={hasGuides ? "/guides" : null} footerLinks={footerLinks}>
             {children}
           </CodeSiteChrome>
         </SiteLocaleProvider>

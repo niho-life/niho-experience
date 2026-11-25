@@ -18,7 +18,7 @@ const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  * English static pages that are indexed, in sitemap order. `/help` is noindex (docs/seo.md), so it gets no pair. `/privacy`
  * (the traveler privacy notice, #285) is indexed and English only: it has no Japanese page, so it never pairs.
  */
-export const INDEXED_ENGLISH_STATIC_PATHS = ["/", "/experiences", "/host", "/privacy"] as const;
+export const INDEXED_ENGLISH_STATIC_PATHS = ["/", "/experiences", "/host", "/about", "/privacy"] as const;
 
 export type LocalizedPair = Readonly<{ englishPath: string; japanesePath: string }>;
 export type JapaneseExperienceLink = LocalizedPair & Readonly<{

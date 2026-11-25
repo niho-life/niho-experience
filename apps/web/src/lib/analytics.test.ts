@@ -64,6 +64,10 @@ describe("Umami privacy filter", () => {
     expect(sanitizeUmamiPayload("pageview", { url: "/booking/opaque-token?guest=Jane" }, origin)).toMatchObject({ url: "/booking" });
   });
 
+  it("keeps page views of the About page (#645)", () => {
+    expect(sanitizeUmamiPayload("pageview", { url: "/about" }, "https://experience.niho.life")).toMatchObject({ url: "/about", title: "About NIHO Experience" });
+  });
+
   it("never reports the guest's reply page, whose link carries a one-time token (#105)", () => {
     expect(sanitizeUmamiPayload("pageview", { url: "/questions/reply#t=sample-token" }, "https://experience.niho.life")).toBe(false);
     expect(sanitizeUmamiPayload("pageview", { url: "/questions/reply" }, "https://experience.niho.life")).toBe(false);

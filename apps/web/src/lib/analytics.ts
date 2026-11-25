@@ -80,7 +80,7 @@ export function sanitizeUmamiPayload(
       url.pathname = `/experiences/${/^[a-z0-9_-]{3,64}$/i.test(slug) ? slug : "_experience"}${detail[2] ?? ""}`;
     }
     const isBookingForm = Boolean(detail?.[2]);
-    const pageTitles: Record<string, string> = { "/": "NIHO Experience", "/experiences": "Experiences", "/host": "Host an experience", "/help": "Booking help" };
+    const pageTitles: Record<string, string> = { "/": "NIHO Experience", "/experiences": "Experiences", "/host": "Host an experience", "/help": "Booking help", "/about": "About NIHO Experience" };
     if (!isBookingResult && !detail && !Object.hasOwn(pageTitles, url.pathname)) return false;
     url.hash = "";
 

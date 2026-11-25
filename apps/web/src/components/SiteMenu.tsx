@@ -1,0 +1,59 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+import { useEffect, useRef, type ReactNode } from "react";
+import { LocalizedLink } from "./LocalizedLink";
+import { localeHref, useSiteLocale } from "./SiteLocale";
+
+const ROW = "flex min-h-[3.25rem] items-center border-b border-line text-[1.0625rem] font-extrabold";
+
+function MenuLink({ href, className, children }: { href: string; className: string; children: ReactNode }) {
+  const { locale } = useSiteLocale();
+  const current = usePathname() === localeHref(href, locale);
+  return <LocalizedLink href={href} aria-current={current ? "page" : undefined} className={`${className} ${current ? "text-moss" : ""}`}>{children}</LocalizedLink>;
+}
+
+/**
+ * The header menu below md (#645). A `<details>`, so it opens and closes without JS; with JS it also closes when the page
+ * changes, on Escape (focus returns to the button) and on a click outside. The panel hangs under the sticky header.
+ */
+export function SiteMenu({ journalHref, hostLabel = "For hosts", language }: { journalHref?: string | null; hostLabel?: string; language?: ReactNode }) {
+  const pathname = usePathname();
+  const ref = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => { if (ref.current) ref.current.open = false; }, [pathname]);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !node.open) return;
+      node.open = false;
+      node.querySelector("summary")?.focus();
+    };
+    const onPointer = (event: PointerEvent) => { if (node.open && event.target instanceof Node && !node.contains(event.target)) node.open = false; };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer);
+    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("pointerdown", onPointer); };
+  }, []);
+
+  return <details ref={ref} className="md:hidden">
+    <summary aria-label="Menu" className="grid size-10 cursor-pointer list-none place-items-center rounded-full border border-line-strong hover:bg-sand [&::-webkit-details-marker]:hidden">
+      <svg className="ico size-5" viewBox="0 0 24 24" aria-hidden><path d="M4.5 8h15M4.5 12.5h15M4.5 17h15" /></svg>
+    </summary>
+    <div className="absolute inset-x-0 top-16 border-b border-line bg-white shadow-[0_18px_30px_rgb(0_0_0/0.08)]">
+      <div className="container-page pb-4 pt-1">
+        <nav aria-label="Menu">
+          {/* A link to the page already open changes no pathname, so close on the click itself too. */}
+          <ul onClick={(event) => { if (ref.current && event.target instanceof Element && event.target.closest("a")) ref.current.open = false; }}>
+            <li><MenuLink href="/experiences" className={ROW}>Experiences</MenuLink></li>
+            {journalHref ? <li><MenuLink href={journalHref} className={ROW}>Journal</MenuLink></li> : null}
+            <li><MenuLink href="/about" className={ROW}>About</MenuLink></li>
+            <li><MenuLink href="/help" className={ROW}>Help</MenuLink></li>
+            {language ? <li className={`${ROW} [&>a]:flex [&>a]:min-h-[3.25rem] [&>a]:w-full [&>a]:items-center`}>{language}</li> : null}
+            <li><MenuLink href="/host" className="flex min-h-[3.25rem] items-center text-[0.9375rem] font-bold text-ink-soft">{hostLabel}</MenuLink></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </details>;
+}

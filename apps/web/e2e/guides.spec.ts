@@ -97,7 +97,7 @@ test("the guides list has its own title, description and canonical, and links ev
 
 test("the footer links to the guides while some exist, and unknown guides are not found", async ({ page, request }) => {
   await page.goto("/");
-  await expect(page.getByRole("contentinfo").getByRole("link", { name: "Guides", exact: true })).toHaveAttribute("href", "/guides");
+  await expect(page.getByRole("contentinfo").getByRole("link", { name: "Kamakura Journal", exact: true })).toHaveAttribute("href", "/guides");
   expect((await request.get("/guides/no-such-guide")).status()).toBe(404);
 });
 

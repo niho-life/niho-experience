@@ -41,11 +41,11 @@ describe("the Privacy footer link", () => {
   it("is in the English footer after the fixed links, with the same-origin writer link always present", async () => {
     const plain = links(renderToStaticMarkup(await RootLayout({ children: createElement("p", null, "page") })));
     expect(plain.at(-1)).toEqual(["/privacy", "Privacy"]);
-    expect(plain.map(([href]) => href)).toEqual(["/experiences", "/host", "/help", "/write", "/privacy"]);
+    expect(plain.map(([href]) => href)).toEqual(["/experiences", "/host", "/help", "/about", "/write", "/privacy"]);
     state.hasGuides = true;
     try {
       const more = links(renderToStaticMarkup(await RootLayout({ children: createElement("p", null, "page") })));
-      expect(more.map(([href]) => href)).toEqual(["/experiences", "/host", "/help", "/guides", "/write", "/privacy"]);
+      expect(more.map(([href]) => href)).toEqual(["/experiences", "/host", "/help", "/about", "/guides", "/write", "/privacy"]);
     } finally {
       state.hasGuides = false;
     }

@@ -66,3 +66,12 @@ export function siteMediaFiles(): string[] {
   const videos = [BANNER_VIDEO, HOST_BAND_VIDEO, CALLIGRAPHY_VIDEO, ...Object.values(STRIP_VIDEOS)].flatMap((item) => [item.src, item.poster]);
   return [HERO_PHOTO.src, ...FEATURE_MOSAIC.map((item) => item.src), GUIDE_FACE, ...POSTCARDS.map((card) => card.src), ...videos];
 }
+
+/** The About page (#645): NIHO's own photos only, never listing photos from the API. */
+export const ABOUT_HERO: SitePhoto = { src: photo("niho-dinner-1.jpg"), alt: "Neighbors and guests talking over drinks in the NIHO living room", position: "50% 55%" };
+export const ABOUT_PILLARS: readonly { word: string; line: string; photo: SitePhoto }[] = [
+  { word: "local", line: "Each one hosted by people who live here.", photo: { src: photo("niho-cd-kitchen-together.jpg"), alt: "Two people cooking together in the NIHO kitchen", position: "60% 40%" } },
+  { word: "deep", line: "Everyday life and culture, not sightseeing.", photo: { src: photo("niho-cd-hands-salad.jpg"), alt: "Hands preparing a salad together" } },
+  { word: "small", line: "Small enough for one table and real conversation.", photo: { src: photo("niho-cd-table-01.jpg"), alt: "Neighbors and guests around the dinner table at NIHO", position: "40% 50%" } },
+];
+export const ABOUT_EXTERIOR: SitePhoto = { src: photo("niho-exterior.jpg"), alt: "The entrance of NIHO kamakura" };
