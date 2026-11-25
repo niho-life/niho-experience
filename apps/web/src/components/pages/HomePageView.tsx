@@ -10,7 +10,7 @@ import type { CardModel, Face } from "@/lib/card-model";
 import type { PublicImageForSite } from "@/lib/experience-types";
 import { imageAlt } from "@/lib/experience-copy";
 import { HOME_TEXT } from "@/lib/home-text";
-import { pickHomeExperiences } from "@/lib/ja-home";
+import { pickHomeExperiences } from "@/lib/home";
 
 /** What the English and the Japanese home both pass that this view does not own (the journal layout draws none of it, but the model type needs it). */
 export type HomeRest = Omit<HomeViewModelV1, "cards" | "afterCards" | "empty" | "layout" | "finder" | "themes" | "cardsEyebrow" | "cardsTitle" | "heroMedia" | "heroHeading" | "heroHeadingClassName" | "heroBody" | "heroAction">;

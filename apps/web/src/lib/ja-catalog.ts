@@ -1,6 +1,6 @@
 import {
-  EXPERIENCE_AREAS, EXPERIENCE_CATEGORIES, EMPTY_EXPERIENCE_CLASSIFICATION, experienceAreaLabel,
-  type ExperienceAreaId, type ExperienceCategoryId, type ExperienceClassification,
+  EXPERIENCE_CATEGORIES, EMPTY_EXPERIENCE_CLASSIFICATION,
+  type ExperienceCategoryId, type ExperienceClassification,
 } from "@niho-experience/experience-domain";
 import type { SitePublicExperience } from "./experience/site-publications";
 
@@ -65,18 +65,6 @@ export function jaCardOf(item: SitePublicExperience, classification: ExperienceC
   };
 }
 
-/** 「3時間」「1時間30分」「45分」. */
-export function jaDuration(minutes: number): string {
-  if (minutes < 60) return `${minutes}分`;
-  const hours = Math.floor(minutes / 60), rest = minutes % 60;
-  return rest === 0 ? `${hours}時間` : `${hours}時間${rest}分`;
-}
-
-/** 「2〜8名」, or 「4名」 when it is one number. */
-export function jaCapacity(capacity: { min: number; max: number }): string {
-  return capacity.min === capacity.max ? `${capacity.max}名` : `${capacity.min}〜${capacity.max}名`;
-}
-
 export const jaYen = (amount: number): string => `¥${amount.toLocaleString("ja-JP")}`;
 
 /** How many published cards each category has: a category without any is not offered to search engines. */
@@ -86,6 +74,4 @@ export function jaCategoryCounts(cards: readonly JaCard[]): ReadonlyMap<Experien
   return counts;
 }
 
-export const jaCategoryOf = (id: ExperienceCategoryId | null) => EXPERIENCE_CATEGORIES.find((item) => item.id === id) ?? null;
-export const jaAreaLabel = (id: ExperienceAreaId | null) => experienceAreaLabel(id);
-export { EXPERIENCE_AREAS, EXPERIENCE_CATEGORIES };
+export { EXPERIENCE_CATEGORIES };

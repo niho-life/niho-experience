@@ -9,7 +9,7 @@ import { buildCardModels, cardFaceOf, type CardModel, type Face } from "@/lib/ca
 import { loadDetails } from "@/lib/catalog";
 import { getReviewSummaries } from "@/lib/journey";
 import { withReviewLines } from "@/lib/reviews-ui";
-import { config, isPilotPreview, isPreview } from "@/lib/config";
+import { config, isExperienceStaging, isPilotPreview, isPreview } from "@/lib/config";
 import type { SearchParams } from "@/lib/filters";
 import { scheduleLine } from "@/lib/schedule";
 import { BANNER_VIDEO, HERO_PHOTO, HOST_BAND_VIDEO, POSTCARDS, STRIP_VIDEOS, type SitePhoto, type SiteVideo } from "@/lib/site-media";
@@ -25,6 +25,9 @@ import { LISTING_NAME, publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib
 import { siteJsonLd } from "@/lib/structured-data";
 import { englishAlternates } from "@/lib/locale-metadata";
 import { getPublicSiteAnalyticsSettings } from "@/lib/public-site-analytics";
+import { listSitePublicExperiences } from "@/lib/experience/site-publications";
+import { sitePublicationCard } from "@/lib/experience/site-card-model";
+import { withoutNativeSlugs } from "@/lib/experience/dedupe-slugs";
 
 const NUMBER_WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
 const numberWord = (n: number) => NUMBER_WORDS[n] ?? String(n);
@@ -99,11 +102,22 @@ function homeRest(summaries: { slug: string; title: string }[], cards: CardModel
 
 export default async function Home({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
-  const [api, result, guideCatalogResult] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalogForSite()]);
+  const siteCatalogPromise = listSitePublicExperiences().catch((error: unknown) => {
+    if (!isExperienceStaging) throw error;
+    console.error("[home] staging public catalog unavailable");
+    return null;
+  });
+  const [api, result, guideCatalogResult, siteCatalog] = await Promise.all([getApi(query), listExperiencesForSite("kamakura", query), guideCatalogForSite(), siteCatalogPromise]);
+  if (siteCatalog === null) return <ErrorState title="We couldn't load experiences" />;
   if (!result.ok && result.kind !== "not_found") return <ErrorState title="We couldn't load experiences" />;
-  const summaries = result.ok ? result.data.experiences : [];
+  const nativePublications = siteCatalog.experiences.filter(({ saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0);
+  const soldHere = nativePublications.map(({ publication }) => publication.slug);
+  const summaries = result.ok ? withoutNativeSlugs(result.data.experiences, [...siteCatalog.claimedSlugs, ...soldHere]) : [];
   const details = await loadDetails(api, summaries, config.publicApiVersion !== "1.0");
-  const cards = withReviewLines(buildCardModels(summaries, details, isPilotPreview), await getReviewSummaries(summaries.map((summary) => summary.slug)));
+  const legacyCards = buildCardModels(summaries, details, isPilotPreview);
+  const nativeCards = nativePublications.map((item) => sitePublicationCard(item));
+  const mergedCards = [...withoutNativeSlugs(legacyCards, nativeCards.map((card) => card.slug)), ...nativeCards];
+  const cards = withReviewLines(mergedCards, await getReviewSummaries(mergedCards.map((card) => card.slug)));
   const listed = summaries.map((summary) => details.get(summary.slug)).filter((detail): detail is ExperienceDetailForSite => Boolean(detail));
   const cardDates: CardDatesSource = { kind: "read", preview: isPreview, sources: await guestBookingSources(cards.map((card) => card.slug)) };
   const journal = homeJournal(guideCatalogResult.guides, { draftSlugs: guideCatalogResult.draftSlugs });

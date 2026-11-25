@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { JapaneseHostPage } from "@/components/pages/JapaneseHostPage";
-import { japaneseHostMetadata } from "@/components/pages/HostPageContent";
+import { HostPageContent, japaneseHostMetadata } from "@/components/pages/HostPageContent";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +8,7 @@ export function generateMetadata(): Promise<Metadata> {
   return japaneseHostMetadata();
 }
 
-/** 体験を載せる (#565): 日本語サイトの独自の構成。英語の /host は今までどおり HostPageContent。 */
+/** 体験を載せる (#565): 英語と同じページ部品へ日本語の文言を渡す。 */
 export default function JapaneseHostRoute(props: { searchParams: Promise<SearchParams> }) {
-  return <JapaneseHostPage searchParams={props.searchParams} />;
+  return <HostPageContent {...props} locale="ja" />;
 }

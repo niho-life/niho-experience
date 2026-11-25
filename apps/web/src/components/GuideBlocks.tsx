@@ -6,6 +6,8 @@ import type { GuideDraftProblem } from "@/lib/guide-drafts";
 import { imageAlt } from "@/lib/experience-copy";
 import { parseGuideAnswer } from "@/lib/guide-markdown";
 import { formatGuideDate, guideReadMinutes, guideSummary } from "@/lib/guides";
+import { guideText } from "@/lib/guide-text";
+import type { SiteLocale } from "@/lib/experience-categories";
 import { CardDates, type CardDatesSource } from "./CardDates";
 import { ExperienceCard } from "./ExperienceCard";
 import { GuideInlines } from "./GuideBody";
@@ -15,27 +17,32 @@ import { Notice, Pill } from "./ui";
  * A list of guides: the title (a link), the description, the updated date and the author. Used by /guides and the related
  * blocks. Guides shown from a draft (preview only) carry a "Draft" pill above the title.
  */
-export function GuideTeasers({ guides, level = 3, draftSlugs = [], columns = "one", descriptions = true, variant = "default" }: { guides: readonly Guide[]; level?: 2 | 3; draftSlugs?: readonly string[]; columns?: "one" | "three"; descriptions?: boolean; variant?: "default" | "detail" }) {
+export function GuideTeasers({ guides, level = 3, draftSlugs = [], columns = "one", descriptions = true, variant = "default", locale = "en" }: { guides: readonly Guide[]; level?: 2 | 3; draftSlugs?: readonly string[]; columns?: "one" | "three"; descriptions?: boolean; variant?: "default" | "detail"; locale?: SiteLocale }) {
   const Heading = level === 2 ? "h2" : "h3";
+  const text = guideText(locale);
+  const prefix = locale === "ja" ? "/ja" : "";
   return (
     <ul className={columns === "three" ? "grid gap-3 md:grid-cols-3" : "grid gap-3"}>
       {guides.map((guide) => (
         <li key={guide.slug} className="rounded-[var(--radius-card)] border border-line bg-white p-4 shadow-[0_1px_2px_rgb(28_28_26/0.03)] sm:p-5">
           {draftSlugs.includes(guide.slug) ? (
             <p className="mb-2">
-              <Pill tone="warn">Draft</Pill>
+              <Pill tone="warn">{text.draft}</Pill>
             </p>
           ) : null}
-          {variant === "detail" ? <p className="eyebrow mb-2">Guide · {guideReadMinutes(guide)} min</p> : null}
+          {variant === "detail" ? <p className="eyebrow mb-2">{text.guide} · {text.minRead(guideReadMinutes(guide))}</p> : null}
           <Heading className={level === 2 ? "text-[1.625rem] leading-[1.2]" : "font-sans text-[1.1875rem] leading-[1.35] font-extrabold tracking-normal"}>
-            <Link href={`/guides/${guide.slug}`} className="underline-offset-4 hover:underline">
+            <Link href={`${prefix}/guides/${guide.slug}`} className="underline-offset-4 hover:underline">
               {guide.title}
             </Link>
           </Heading>
           {descriptions ? <p className="mt-1.5 text-[0.9375rem] text-ink-soft">{guideSummary(guide)}</p> : null}
+          {guide.category ? <p className="mt-2 text-sm font-bold text-moss">{locale === "ja" ? guide.category.labelJa ?? guide.category.label : guide.category.label}</p> : null}
           {variant !== "detail" ? <p className="mt-2 text-sm text-muted">
-            {guideReadMinutes(guide)} min · {guide.checkedAt ? "Checked" : "Updated"}{" "}
-            <time dateTime={guide.checkedAt ?? guide.updatedAt}>{formatGuideDate(guide.checkedAt ?? guide.updatedAt)}</time>
+            {locale === "ja"
+              ? <>{guide.author.name}・{text.published} </>
+              : <>{guide.author.name} · {text.minRead(guideReadMinutes(guide))} · {guide.checkedAt ? text.checked : text.updated} </>}
+            <time dateTime={locale === "ja" ? guide.publishedAt : guide.checkedAt ?? guide.updatedAt}>{formatGuideDate(locale === "ja" ? guide.publishedAt : guide.checkedAt ?? guide.updatedAt, locale)}</time>
           </p> : null}
         </li>
       ))}
@@ -44,23 +51,25 @@ export function GuideTeasers({ guides, level = 3, draftSlugs = [], columns = "on
 }
 
 /** A compact in-article CTA. Every variable fact comes from the same CardModel/CardDates path as public experience cards. */
-export function GuideExperienceCta({ card, dates }: { card: CardModel; dates: CardDatesSource }) {
+export function GuideExperienceCta({ card, dates, locale = "en" }: { card: CardModel; dates: CardDatesSource; locale?: SiteLocale }) {
+  const text = guideText(locale);
+  const href = `${locale === "ja" ? "/ja" : ""}/experiences/${card.slug}`;
   return (
-    <aside aria-label={`Experience: ${card.title}`} className="mt-8 rounded-[var(--radius-card)] border border-line bg-sand p-4 sm:p-5">
+    <aside aria-label={`${text.experience}: ${card.title}`} className="mt-8 rounded-[var(--radius-card)] border border-line bg-sand p-4 sm:p-5">
       <div className={`grid items-start gap-4${card.cover ? " sm:grid-cols-[96px_1fr]" : ""}`}>
         {card.cover ? (
           <NextImage src={card.cover.url} alt={imageAlt(card.cover, card.title)} width={192} height={144} unoptimized className="aspect-[4/3] w-24 rounded-xl object-cover" />
         ) : null}
         <div className="min-w-0">
-          <p className="eyebrow text-[1.25rem]">Experience</p>
+          {locale === "en" ? <p className="eyebrow text-[1.25rem]">{text.experience}</p> : null}
           <h3 className="mt-1 font-sans text-[1.0625rem] leading-snug font-extrabold tracking-normal">
-            <Link href={`/experiences/${card.slug}`} className="hover:underline">{card.title}</Link>
+            <Link href={href} className="hover:underline">{card.title}</Link>
           </h3>
           <p className="mt-1 text-sm text-ink-soft">
-            {card.priceIsFrom ? "From " : ""}{card.priceLabel} / adult · {card.durationLabel}{card.language ? ` · ${card.language.short}` : ""}
+            {card.priceIsFrom ? (locale === "ja" ? "〜" : "From ") : ""}{card.priceLabel}{locale === "ja" ? " / 人" : " / adult"} · {card.durationLabel}{card.language ? ` · ${card.language.short}` : ""}
           </p>
           <CardDates slug={card.slug} scheduleLabel={card.scheduleLabel} source={dates} />
-          <Link href={`/experiences/${card.slug}`} className="link-leaf mt-2 inline-block text-sm">See experience</Link>
+          <Link href={href} className="link-leaf mt-2 inline-block text-sm">{text.seeExperience}</Link>
         </div>
       </div>
     </aside>

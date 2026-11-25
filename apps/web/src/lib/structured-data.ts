@@ -184,10 +184,11 @@ export type GuideMentionedExperience = Readonly<{ slug: string; name: string }>;
  * cover sharing (`hero.licensed`). Unlike experiences, the sample guides of the mock preview carry it too: the article says
  * nothing beyond the page, and preview pages are `noindex`.
  */
-export function guideArticleJsonLd(guide: Guide, siteUrl: string, siteName: string, mentioned: readonly GuideMentionedExperience[] = []): JsonLd {
-  const url = `${siteUrl}/guides/${guide.slug}`;
+export function guideArticleJsonLd(guide: Guide, siteUrl: string, siteName: string, mentioned: readonly GuideMentionedExperience[] = [], locale: JsonLdLocale = "en"): JsonLd {
+  const prefix = locale === "ja" ? "/ja" : "";
+  const url = `${siteUrl}${prefix}/guides/${guide.slug}`;
   const image = shareableGuideImage(guide, siteUrl);
-  const section = guide.category?.label ?? guidePillarDetails(guide.pillar)?.label;
+  const section = locale === "ja" ? guide.category?.labelJa ?? guide.category?.label : guide.category?.label ?? guidePillarDetails(guide.pillar)?.label;
   const description = guideSummary(guide);
   return {
     "@context": "https://schema.org",
@@ -196,7 +197,7 @@ export function guideArticleJsonLd(guide: Guide, siteUrl: string, siteName: stri
     ...(description ? { description } : {}),
     url,
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
-    inLanguage: "en",
+    inLanguage: locale,
     ...(section ? { articleSection: section } : {}),
     author: {
       "@type": "Person",
@@ -209,7 +210,7 @@ export function guideArticleJsonLd(guide: Guide, siteUrl: string, siteName: stri
     publisher: { "@type": "Organization", "@id": `${siteUrl}/#organization`, name: siteName, url: `${siteUrl}/` },
     ...(image ? { image: [image] } : {}),
     ...(mentioned.length
-      ? { mentions: mentioned.map((item) => ({ "@type": "TouristTrip", name: item.name, url: `${siteUrl}/experiences/${item.slug}` })) }
+      ? { mentions: mentioned.map((item) => ({ "@type": "TouristTrip", name: item.name, url: `${siteUrl}${prefix}/experiences/${item.slug}` })) }
       : {}),
   };
 }

@@ -99,10 +99,10 @@ export function isGuideDate(value: string): boolean {
   return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
 }
 
-/** "24 Oct 2026" for an ISO date (the date itself, no time zone shift). */
-export function formatGuideDate(value: string): string {
+/** Format an ISO date without shifting its calendar day. */
+export function formatGuideDate(value: string, locale: "en" | "ja" = "en"): string {
   const [y, m, d] = value.split("-").map(Number) as [number, number, number];
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" }).format(new Date(Date.UTC(y, m - 1, d)));
+  return new Intl.DateTimeFormat(locale === "ja" ? "ja-JP" : "en-GB", { timeZone: "UTC", day: "numeric", month: locale === "ja" ? "long" : "short", year: "numeric" }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
 function text(problems: string[], label: string, value: unknown, max: number) {

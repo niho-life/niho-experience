@@ -60,11 +60,11 @@ test("booking puts the steps on the left and the summary and sticky total card o
   await expectAsideBar(page, page.getByRole("button", { name: "Continue to mock payment" }));
 });
 
-test("host steps sit in one row", async ({ page }) => {
+test("host plans sit in one row", async ({ page }) => {
   await page.goto("/host");
-  const steps = page.locator('section[aria-labelledby="host-steps-v1"] ol > li');
-  await expect(steps).toHaveCount(4);
-  await expect(steps.last()).toBeVisible();
-  const tops = await steps.evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)));
+  const plans = page.locator('section[aria-labelledby="host-plans-heading"] article');
+  await expect(plans).toHaveCount(3);
+  await expect(plans.last()).toBeVisible();
+  const tops = await plans.evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)));
   expect(new Set(tops).size).toBe(1);
 });

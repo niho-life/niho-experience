@@ -257,7 +257,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
             {relatedGuides.guides.length ? <section aria-labelledby="detail-guides-heading" className="pt-12">
               <p className="eyebrow">Guides</p>
               <h2 id="detail-guides-heading" className="mt-1 mb-[18px] text-[1.75rem] lg:text-[2rem]">{detailGuideHeading("Kamakura", publication.meetingOverview, offers.map((offer) => offer.startTime))}</h2>
-              <GuideTeasers guides={relatedGuides.guides} draftSlugs={relatedGuides.draftSlugs} columns="three" variant="detail" />
+              <GuideTeasers guides={relatedGuides.guides} draftSlugs={relatedGuides.draftSlugs} columns="three" variant="detail" locale={locale} />
             </section> : null}
           </div>
 

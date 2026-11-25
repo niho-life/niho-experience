@@ -15,7 +15,7 @@ const priorExperienceSetting = (): { setting: ExperienceSettingFixture } => ({ s
 
 async function signIn(page: Page, empty = false) {
   await page.goto(`/host${empty ? "?mock=empty" : ""}`);
-  await page.getByRole("link", { name: "NIHO でログイン" }).click();
+  await page.getByRole("link", { name: "Sign in to your host page" }).click();
   await page.waitForURL(/\/host\/home/);
 }
 

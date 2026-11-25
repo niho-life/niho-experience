@@ -205,29 +205,35 @@ export function SiteHeaderV1({ primitives, copy = EN_STATIC_COPY_V1, currentPath
 
 /** Extra footer links after the fixed ones (e.g. the guides, only while some exist). The consumer supplies the label. */
 export type FooterLinkV1 = Readonly<{ href: string; label: string }>;
-export function SiteFooterV1({ primitives, copy = EN_STATIC_COPY_V1, previewNote, description, copyright, links = [] }: { primitives?: Partial<PresentationPrimitivesV1>; copy?: StaticCopyAccessorV1; previewNote?: ReactNode; description?: string; copyright?: string; links?: readonly FooterLinkV1[] }) {
+export function SiteFooterV1({ primitives, copy = EN_STATIC_COPY_V1, previewNote, description, copyright, brandLabel, categoryLinks = [], categoryNavigationLabel = "Categories", footerNavigationLabel, fixedLinks, links = [], footerExtras = [] }: {
+  primitives?: Partial<PresentationPrimitivesV1>; copy?: StaticCopyAccessorV1; previewNote?: ReactNode; description?: string; copyright?: string; brandLabel?: string;
+  categoryLinks?: readonly FooterLinkV1[]; categoryNavigationLabel?: string; footerNavigationLabel?: string; fixedLinks?: readonly FooterLinkV1[]; links?: readonly FooterLinkV1[]; footerExtras?: readonly ReactNode[];
+}) {
   const { Link } = primitivesV1(primitives);
+  const primaryLinks = fixedLinks ?? [
+    { href: "/experiences", label: copy.text("chrome.footerExperiences") },
+    { href: "/host", label: copy.text("chrome.footerHost") },
+    { href: "/help", label: copy.text("chrome.footerBookingHelp") },
+  ];
+  const grid = categoryLinks.length ? "sm:grid-cols-[1.1fr_1.2fr_1fr_auto]" : "sm:grid-cols-[2fr_1fr_auto]";
   return <footer className="mt-24 border-t border-line bg-white">
-<div className={`container-page grid gap-7 pt-11 sm:grid-cols-[2fr_1fr_auto] sm:items-start ${previewNote ? "pb-10" : "pb-14"}`}>
+<div className={`container-page grid gap-7 pt-11 ${grid} sm:items-start ${previewNote ? "pb-10" : "pb-14"}`}>
 <div className="max-w-md">
-<p className="font-display text-xl font-semibold text-muted">{copy.text("chrome.brand")}</p>
+<p className="font-display text-xl font-semibold text-muted">{brandLabel ?? copy.text("chrome.brand")}</p>
 <p className="mt-2 text-sm text-muted">{description ?? copy.text("chrome.footerDescription")}</p>{copyright ? <p className="mt-2 text-sm text-muted">{copyright}</p> : null}</div>
-<nav aria-label={copy.text("chrome.footerNavigation")}>
+{categoryLinks.length ? <nav aria-label={categoryNavigationLabel}>
+<ul className="grid grid-cols-2 gap-x-5 gap-y-2 text-sm font-bold">
+{categoryLinks.map((link) => <li key={link.href}><Link href={link.href} className="hover:underline">{link.label}</Link></li>)}
+</ul>
+</nav> : null}
+<nav aria-label={footerNavigationLabel ?? copy.text("chrome.footerNavigation")}>
 <ul className="grid gap-2 text-sm font-bold">
-<li>
-<Link href="/experiences" className="hover:underline">{copy.text("chrome.footerExperiences")}</Link>
-</li>
-<li>
-<Link href="/host" className="hover:underline">{copy.text("chrome.footerHost")}</Link>
-</li>
-<li>
-<Link href="/help" className="hover:underline">{copy.text("chrome.footerBookingHelp")}</Link>
-</li>{links.map((link) => <li key={link.href}>
-<Link href={link.href} className="hover:underline">{link.label}</Link>
-</li>)}
+{primaryLinks.map((link) => <li key={link.href}><Link href={link.href} className="hover:underline">{link.label}</Link></li>)}
+{links.map((link) => <li key={link.href}><Link href={link.href} className="hover:underline">{link.label}</Link></li>)}
+{footerExtras.map((extra, index) => <li key={`footer-extra-${index}`}>{extra}</li>)}
 </ul>
 </nav>
-<RubberStamp className="size-[104px] rotate-[10deg] text-moss" />
+<RubberStamp className="size-[104px] rotate-[10deg] text-moss max-sm:hidden" />
 </div>{previewNote ? <div className="container-page">{previewNote}</div> : null}</footer>;
 }
 

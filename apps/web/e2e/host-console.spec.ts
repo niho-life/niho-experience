@@ -6,7 +6,7 @@ const SESSION_COOKIE = "__Secure-niho_host_session";
 
 async function signIn(page: Page, query = "") {
   await page.goto(`/host${query}`);
-  await page.getByRole("link", { name: "NIHO でログイン" }).click();
+  await page.getByRole("link", { name: "Sign in to your host page" }).click();
   await page.waitForURL(/\/host\/home(\?|$)/);
 }
 
@@ -35,13 +35,13 @@ async function openAccountMenu(page: Page) {
 }
 
 test("a host signs in from /host, switches provider, opens a section and signs out", async ({ page, context }) => {
-  // /host stays the public introduction: only the pages below it are private.
+  // /host stays the English public introduction: only the pages below it are private.
   expect((await page.goto("/host"))!.headers()["x-robots-tag"]).toBeUndefined();
   // The traveler page keeps its (preview) measurement.
   await expect.poll(() => page.evaluate(() => Array.isArray((window as Window & { __nihoEvents?: unknown[] }).__nihoEvents))).toBe(true);
   await expect(page.getByRole("link", { name: "Manage your experiences on NIHO" })).toHaveCount(0);
 
-  await page.getByRole("link", { name: "NIHO でログイン" }).click();
+  await page.getByRole("link", { name: "Sign in to your host page" }).click();
   await page.waitForURL(/\/host\/home$/);
   await expect(page.getByRole("heading", { level: 1, name: "ホーム" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "ja");
@@ -76,7 +76,7 @@ test("a host signs in from /host, switches provider, opens a section and signs o
   await openAccountMenu(page);
   await page.getByRole("button", { name: "ログアウト" }).click();
   await page.waitForURL(/\/host$/);
-  await expect(page.getByRole("link", { name: "NIHO でログイン" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sign in to your host page" })).toBeVisible();
   expect((await context.cookies()).some((c) => c.name === SESSION_COOKIE)).toBe(false);
   // The console's own sign-in page while the app is offered (#177; HOST_PWA_ENABLED on this server).
   await page.goto("/host/home");
@@ -96,8 +96,8 @@ test("an account without providers sees registration and the normal Spot support
 
 test("/host?providerId= is carried through sign-in, and only a valid providerId", async ({ page }) => {
   await page.goto("/host?providerId=sample-provider-studio&next=https://example.test");
-  await expect(page.getByRole("link", { name: "NIHO でログイン" })).toHaveAttribute("href", "/host/auth/login?providerId=sample-provider-studio");
-  await page.getByRole("link", { name: "NIHO でログイン" }).click();
+  await expect(page.getByRole("link", { name: "Sign in to your host page" })).toHaveAttribute("href", "/host/auth/login?providerId=sample-provider-studio");
+  await page.getByRole("link", { name: "Sign in to your host page" }).click();
   await page.waitForURL("**/host/home?providerId=sample-provider-studio");
   await expectProvider(page, "サンプル工房");
 
@@ -112,7 +112,7 @@ test("/host?providerId= is carried through sign-in, and only a valid providerId"
 
 test("an unusable providerId is not passed to the login", async ({ page }) => {
   await page.goto("/host?providerId=../../admin");
-  await expect(page.getByRole("link", { name: "NIHO でログイン" })).toHaveAttribute("href", "/host/auth/login");
+  await expect(page.getByRole("link", { name: "Sign in to your host page" })).toHaveAttribute("href", "/host/auth/login");
 });
 
 test("an expired ID token is refreshed once by the browser before the page shows", async ({ page }) => {

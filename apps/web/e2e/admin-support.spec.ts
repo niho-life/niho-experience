@@ -5,7 +5,7 @@ const ADMIN_COOKIE = "__Secure-niho_admin_preview";
 
 async function hostSignIn(page: Page) {
   await page.goto("/host");
-  await page.getByRole("link", { name: "NIHO でログイン" }).click();
+  await page.getByRole("link", { name: "Sign in to your host page" }).click();
   await page.waitForURL(/\/host\/home/);
 }
 

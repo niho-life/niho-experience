@@ -8,17 +8,24 @@ import { SiteMenu, type SiteMenuItem } from "./SiteMenu";
 import { siteNav, type SiteNavEntry } from "@/lib/site-nav";
 import { SITE_FOOTER_DESCRIPTION } from "@/lib/public-metadata";
 import type { SiteLocale } from "@/lib/localized-content";
+import { EXPERIENCE_CATEGORIES } from "@niho-experience/experience-domain";
+import { categoryLabel } from "@/lib/experience-categories";
 
 export type PreviewCatalog = "synthetic" | "pilot";
+export const JAPANESE_SITE_DESCRIPTION = "運営：NIHO kamakura（鎌倉駅西口から歩いて2分）";
 
 /**
  * Previews only: one small line at the very bottom of the footer (owner decision 2026-10-20).
  * Synthetic data is invented, pilot data is real but provisional. Nothing here is bookable for real.
  */
-export function PreviewNote({ catalog }: { catalog: PreviewCatalog }) {
+export function PreviewNote({ catalog, locale = "en" }: { catalog: PreviewCatalog; locale?: SiteLocale }) {
   return (
     <p role="note" className="border-t border-line py-3 text-xs leading-snug text-muted">
-      {catalog === "pilot" ? (
+      {locale === "ja" ? (catalog === "pilot" ? (
+        <><strong className="font-extrabold text-ink-soft">プレビュー</strong> · 日程と料金は確認用です。残席は実際の在庫ではありません · 予約できません</>
+      ) : (
+        <><strong className="font-extrabold text-ink-soft">サンプルデータのプレビュー</strong> · ホスト・日程・料金は仮のものです · 予約できません</>
+      )) : catalog === "pilot" ? (
         <>
           <strong className="font-extrabold text-ink-soft">Preview</strong> · schedules and prices are for review; availability is simulated · no real bookings
         </>
@@ -86,15 +93,30 @@ export function SiteFooter({
   copy = EN_STATIC_COPY_V1,
   locale = "en",
   links,
-}: { description?: string; copyright?: string; preview?: PreviewCatalog | null; copy?: StaticCopyAccessorV1; locale?: SiteLocale; links?: readonly FooterLinkV1[] } = {}) {
-  return <SiteFooterV1 primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} description={description ?? (locale === "en" ? SITE_FOOTER_DESCRIPTION : copy.text("chrome.footerDescription"))} copyright={copyright} previewNote={preview ? <PreviewNote catalog={preview} /> : undefined} links={links} />;
+  fixedLinks,
+  categoryLinks,
+  brandLabel,
+  footerNavigationLabel,
+  categoryNavigationLabel,
+  footerExtras,
+}: {
+  description?: string; copyright?: string; preview?: PreviewCatalog | null; copy?: StaticCopyAccessorV1; locale?: SiteLocale;
+  links?: readonly FooterLinkV1[]; fixedLinks?: readonly FooterLinkV1[]; categoryLinks?: readonly FooterLinkV1[]; brandLabel?: string;
+  footerNavigationLabel?: string; categoryNavigationLabel?: string; footerExtras?: readonly ReactNode[];
+} = {}) {
+  const categories = categoryLinks ?? EXPERIENCE_CATEGORIES.map(({ id }) => ({ href: `${locale === "ja" ? "/ja" : ""}/experiences?category=${id}`, label: categoryLabel(id, locale) }));
+  return <SiteFooterV1 primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} description={description ?? (locale === "en" ? SITE_FOOTER_DESCRIPTION : copy.text("chrome.footerDescription"))} copyright={copyright} brandLabel={brandLabel} previewNote={preview ? <PreviewNote catalog={preview} locale={locale} /> : undefined} categoryLinks={categories} categoryNavigationLabel={categoryNavigationLabel} footerNavigationLabel={footerNavigationLabel} fixedLinks={fixedLinks} links={links} footerExtras={footerExtras} />;
 }
 
 /** Public chrome is code-owned. Published visual documents never replace it. `footerLinks` adds links after the fixed ones (the guides, while some exist). */
-export function CodeSiteChrome({ children, preview = null, copy = EN_STATIC_COPY_V1, languageSwitch, locale = "en", footerLinks, journalHref, menuLanguage }: { children?: ReactNode; preview?: PreviewCatalog | null; copy?: StaticCopyAccessorV1; languageSwitch?: ReactNode; locale?: SiteLocale; footerLinks?: readonly FooterLinkV1[]; journalHref?: string | null; menuLanguage?: ReactNode }) {
+export function CodeSiteChrome({ children, preview = null, copy = EN_STATIC_COPY_V1, languageSwitch, locale = "en", footerLinks, journalHref, menuLanguage, header, footerFixedLinks, footerCategoryLinks, footerBrandLabel, footerDescription, footerExtras, footerNavigationLabel, categoryNavigationLabel }: {
+  children?: ReactNode; preview?: PreviewCatalog | null; copy?: StaticCopyAccessorV1; languageSwitch?: ReactNode; locale?: SiteLocale; footerLinks?: readonly FooterLinkV1[]; journalHref?: string | null; menuLanguage?: ReactNode;
+  header?: ReactNode; footerFixedLinks?: readonly FooterLinkV1[]; footerCategoryLinks?: readonly FooterLinkV1[]; footerBrandLabel?: string; footerDescription?: string;
+  footerExtras?: readonly ReactNode[]; footerNavigationLabel?: string; categoryNavigationLabel?: string;
+}) {
   return <PresentationRootV1 className="flex min-h-dvh flex-1 flex-col">
-    <SiteHeader copy={copy} languageSwitch={languageSwitch} journalHref={journalHref} menuLanguage={menuLanguage} />
+    {header ?? <SiteHeader copy={copy} languageSwitch={languageSwitch} journalHref={journalHref} menuLanguage={menuLanguage} />}
     <main id="main" className="flex-1">{children}</main>
-    <SiteFooter preview={preview} copy={copy} locale={locale} links={footerLinks} />
+    <SiteFooter preview={preview} copy={copy} locale={locale} links={footerLinks} fixedLinks={footerFixedLinks} categoryLinks={footerCategoryLinks} brandLabel={footerBrandLabel} description={footerDescription} footerExtras={footerExtras} footerNavigationLabel={footerNavigationLabel} categoryNavigationLabel={categoryNavigationLabel} />
   </PresentationRootV1>;
 }

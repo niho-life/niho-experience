@@ -29,7 +29,10 @@ import RootLayout from "@/app/(site)/layout";
 import { PRIVACY_PATH, privacyFooterLink } from "./privacy-link";
 
 const footer = (markup: string) => /<footer[\s\S]*<\/footer>/.exec(markup)?.[0] ?? "";
-const links = (markup: string) => [...footer(markup).matchAll(/<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((match) => [match[1], match[2]]);
+const links = (markup: string) => {
+  const navigation = [...footer(markup).matchAll(/<nav aria-label="([^"]+)">([\s\S]*?)<\/nav>/g)].find((match) => match[1] === "Footer" || match[1] === "フッター")?.[2] ?? "";
+  return [...navigation.matchAll(/<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((match) => [match[1], match[2]]);
+};
 
 describe("the Privacy footer link", () => {
   it("is one code-owned link to the English notice, labelled for the page's language", () => {

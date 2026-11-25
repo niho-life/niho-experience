@@ -35,9 +35,9 @@ test("the one button signs the host in (the preview's NIHO) and lands on ホー�
   await page.waitForURL(/\/host\/home/);
 });
 
-test("the sign-in the host's pages ask for says the same words, and keeps the page it was for", async ({ page }) => {
+test("the public host introduction uses its English sign-in label, and the auth entry keeps its destination", async ({ page }) => {
   await page.goto("/host/home");
-  const login = page.getByRole("link", { name: "NIHO アカウントでログイン" });
+  const login = page.getByRole("link", { name: "Sign in to your host page" });
   await expect(login).toBeVisible();
   await expect(page.getByRole("link", { name: /^(メール|NIHO) でログイン$/ })).toHaveCount(0);
   await page.goto("/host/auth/sign-in?next=%2Fwrite%2Fnew");
@@ -58,9 +58,9 @@ test("a NIHO account nobody registered ends on the not-registered page and signs
   await expect(main.getByRole("link", { name: "運営に問い合わせる" })).toHaveAttribute("href", /^mailto:info@niho\.life\?/);
   await noHorizontalScroll(page);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  // Nobody is signed in: the console still asks for the login.
+  // Nobody is signed in: /host/home returns to the public English host introduction.
   await page.goto("/host/home");
-  await expect(page.getByRole("link", { name: "NIHO アカウントでログイン" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sign in to your host page" })).toBeVisible();
   // Trying another way leads back to NIHO (the preview's), which here is a registered account.
   await page.goto("/host/auth/error?reason=unregistered");
   await page.getByRole("link", { name: "別の方法でやり直す" }).click();

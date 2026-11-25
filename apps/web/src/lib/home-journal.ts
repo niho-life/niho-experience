@@ -1,6 +1,7 @@
 import type { Guide } from "@/content/guides";
 import { guideLinkHref } from "./guide-markdown";
 import { formatGuideDate, GUIDE_PILLARS, guidePillarDetails, guideReadMinutes, guideSummary } from "./guides";
+import type { SiteLocale } from "./experience-categories";
 
 /** Guides on the home journal (the feature included); the rest are one "See all" away on /guides. */
 export const HOME_JOURNAL_LIMIT = 10;
@@ -26,8 +27,8 @@ export type HomeJournalItem = Readonly<{
 export type HomeJournal = Readonly<{ items: readonly HomeJournalItem[]; topics: readonly HomeJournalTopic[]; more: boolean }>;
 
 /** The CMS category of a database publication, else the code-owned pillar of a static guide. */
-export function homeJournalTopic(guide: Guide): HomeJournalTopic | null {
-  if (guide.category) return { key: guide.category.slug, label: guide.category.label };
+export function homeJournalTopic(guide: Guide, locale: SiteLocale = "en"): HomeJournalTopic | null {
+  if (guide.category) return { key: guide.category.slug, label: locale === "ja" ? guide.category.labelJa ?? guide.category.label : guide.category.label };
   const pillar = guidePillarDetails(guide.pillar);
   return pillar ? { key: pillar.key, label: pillar.label } : null;
 }
@@ -38,7 +39,7 @@ const topicOrder = (guide: Guide) => guide.category?.displayOrder ?? GUIDE_PILLA
  * The home journal follows the public catalog order, up to the limit. Topics are the distinct ones among the shown cards,
  * in the CMS display order or the pillar order.
  */
-export function homeJournal(guides: readonly Guide[], { draftSlugs = [] }: { draftSlugs?: readonly string[] } = {}): HomeJournal {
+export function homeJournal(guides: readonly Guide[], { draftSlugs = [], locale = "en" }: { draftSlugs?: readonly string[]; locale?: SiteLocale } = {}): HomeJournal {
   const ordered = [...guides];
   const shown = ordered.slice(0, HOME_JOURNAL_LIMIT);
   const items = shown.map((guide): HomeJournalItem => {
@@ -49,13 +50,13 @@ export function homeJournal(guides: readonly Guide[], { draftSlugs = [] }: { dra
       title: guide.title,
       // A guide without a lead uses the opening of its body instead (guideSummary).
       description: guideSummary(guide),
-      topic: homeJournalTopic(guide),
+      topic: homeJournalTopic(guide, locale),
       badge: draftSlugs.includes(guide.slug) ? "Draft" : null,
       image: src && guide.hero ? { src, alt: guide.hero.alt } : null,
       readMinutes: guideReadMinutes(guide),
       dateKind: guide.checkedAt ? "Checked" : "Updated",
       dateTime: date,
-      dateLabel: formatGuideDate(date),
+      dateLabel: formatGuideDate(date, locale),
     };
   });
   const topics = new Map<string, { topic: HomeJournalTopic; order: number }>();

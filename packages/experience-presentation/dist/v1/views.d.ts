@@ -108,13 +108,19 @@ export type FooterLinkV1 = Readonly<{
     href: string;
     label: string;
 }>;
-export declare function SiteFooterV1({ primitives, copy, previewNote, description, copyright, links }: {
+export declare function SiteFooterV1({ primitives, copy, previewNote, description, copyright, brandLabel, categoryLinks, categoryNavigationLabel, footerNavigationLabel, fixedLinks, links, footerExtras }: {
     primitives?: Partial<PresentationPrimitivesV1>;
     copy?: StaticCopyAccessorV1;
     previewNote?: ReactNode;
     description?: string;
     copyright?: string;
+    brandLabel?: string;
+    categoryLinks?: readonly FooterLinkV1[];
+    categoryNavigationLabel?: string;
+    footerNavigationLabel?: string;
+    fixedLinks?: readonly FooterLinkV1[];
     links?: readonly FooterLinkV1[];
+    footerExtras?: readonly ReactNode[];
 }): import("react").JSX.Element;
 export declare function SiteFrameV1({ children, header, footer, copy }: {
     children: ReactNode;

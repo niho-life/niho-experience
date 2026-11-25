@@ -42,7 +42,7 @@ printf '%s\n' "$connect_sources" | grep -Fx -- "$expected_api_origin" >/dev/null
 echo "ok   CSP permits the approved API origin"
 check /experiences/home-cooked-dinner-with-locals "Home-cooked dinner with locals in a shared living room"
 check /robots.txt "Disallow: /"
-check /host "Tell us your idea"
+check /host "Share what you love about Kamakura"
 check /host 'href="https://niho.life/experiences/provider"'
 test "$(docker exec "$name" id -u)" != "0" && echo "ok   runs as a non-root user"
 

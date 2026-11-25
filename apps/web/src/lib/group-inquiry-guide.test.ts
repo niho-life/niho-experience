@@ -10,7 +10,6 @@ vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NEXT_NOT_
 import { GroupGuidePage } from "@/components/pages/GroupGuidePage";
 import { ConsultBand } from "@/components/ja-home/JapaneseHomeSections";
 import { inquiryContextFromSearch } from "@/lib/group-inquiry-entry";
-import { inquiryFooterLinks } from "@/lib/group-inquiry-links";
 import { BUSINESS_GUIDE, GROUP_GUIDE_FACTS, GROUP_GUIDE_NUMBERS, SCHOOLS_GUIDE, from, n, range, type GroupGuide } from "@/lib/group-inquiry-guide";
 
 /** 法人・団体の方へ / 学校の方へ (#532): the guides' figures come from one place and the pages open the form on the right kind. */
@@ -69,13 +68,7 @@ describe("GroupGuidePage", () => {
   });
 });
 
-describe("the links from the Japanese site", () => {
-  it("add the form and both guides to the footer only while the feature is on", () => {
-    expect(inquiryFooterLinks().map((link) => link.href)).toEqual(["/ja/inquiry", "/ja/business", "/ja/schools"]);
-    state.config = { groupInquiryEnabled: false };
-    expect(inquiryFooterLinks()).toEqual([]);
-  });
-
+describe("the Japanese home links", () => {
   it("invites from the top page to the form and to the company and school guide (the school guide is reached from there, #612)", () => {
     const html = renderToStaticMarkup(createElement(ConsultBand));
     expect(html).toContain('href="/ja/inquiry"');

@@ -54,4 +54,12 @@ describe("English header (#562)", () => {
     expect(SITE_FOOTER_DESCRIPTION).toContain("Made by NIHO, the town's living room, two minutes from Kamakura Station.");
     expect(renderToStaticMarkup(SiteFooter())).toContain("two minutes from Kamakura Station");
   });
+
+  it("puts English category links in their own footer column", () => {
+    const html = renderToStaticMarkup(SiteFooter());
+    const categoryNav = /<nav aria-label="Categories">([\s\S]*?)<\/nav>/.exec(html)?.[1] ?? "";
+    const hrefs = [...categoryNav.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
+    expect(hrefs).toEqual(["/experiences?category=walk", "/experiences?category=food", "/experiences?category=craft", "/experiences?category=zen", "/experiences?category=time", "/experiences?category=sea", "/experiences?category=people", "/experiences?category=group"]);
+    expect(categoryNav).toContain("Cook &amp; eat");
+  });
 });
