@@ -189,6 +189,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   provider_team_commands: { write: I },
   provider_team_resolve_buckets: { write: IU },
   provider_team_revisions: { write: IU },
+  // メンバーの招待 (#636, 0088): created, minted, opened, then accepted, revoked or run out; never deleted.
+  provider_team_invitations: { write: IU },
   // 受取口座の利用同意 (ADR 0003, 0065): the current host-account OWNER records a consent; a withdrawal or a replacement
   // only marks the active row revoked (the rows are the consent's history: no DELETE, no other column changes).
   provider_payout_account_consents: { write: I, updateColumns: ["revoked_at", "revoked_by_niho_user_id"] },

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { config } from "@/lib/config";
 import { nihoConnectUrl } from "@/lib/host/niho-auth";
-import { startNihoInvite, startNihoLogin } from "@/lib/host/niho-login";
+import { startNihoInvite, startNihoLogin, startNihoTeamInvite } from "@/lib/host/niho-login";
 import { createLoginState, createPkceVerifier, pkceChallenge } from "@/lib/host/pkce";
 import { autoLoginAllowed, markAutoLoginStarted } from "@/lib/host/returning-host";
 import { nihoIdOrNull } from "@/lib/host/providers";
@@ -22,6 +22,8 @@ export async function GET(request: NextRequest) {
   if (config.hostAccountsEnabled && config.hostNihoLoginEnabled) {
     // An invitation link opened in this browser (#596): the sign-in whose return binds the NIHO account to the invited host account.
     if (request.nextUrl.searchParams.get("invite") === "1") return startNihoInvite(request);
+    // A provider's team invitation opened in this browser (#636). Without the flag the parameter means nothing.
+    if (config.hostTeamInvitationsEnabled && request.nextUrl.searchParams.get("teaminvite") === "1") return startNihoTeamInvite(request);
     // Already signed in (an old link, a second tab): straight on to where the sign-in was for, with no trip to NIHO.
     // A re-login (`reauth=1`, a sensitive change asked for a recent sign-in) always goes to NIHO.
     if (request.nextUrl.searchParams.get("reauth") !== "1" && await readHostSession()) return seeOther(invitationId ? hostInvitationPath(invitationId) : returnPath ?? HOST_HOME_PATH);

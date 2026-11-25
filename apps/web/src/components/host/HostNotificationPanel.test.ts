@@ -30,30 +30,23 @@ describe("設定 › 通知 › 宛先", () => {
     expect(render("EDITOR", null)).not.toContain("宛先");
   });
 
-  it("shows everyone their own address, where it came from, and 宛先を変える, the switches staying the owner's", () => {
+  it("points everyone to their account for the address, the switches staying the owner's", () => {
     const owner = render("OWNER", live());
-    expect(owner).toContain("login@example.test");
-    expect(owner).toContain(NOTIFICATION_ADDRESS_TEXT.login);
-    expect(owner).toContain("宛先を変える");
-    expect(owner).not.toContain("kitchen@example.com");
-    expect(owner).not.toContain("宛先の変更は準備中です");
+    expect(owner).toContain("宛先は、あなたのアカウントで変えられます。");
+    expect(owner).toContain('href="/host/account?providerId=provider-a"');
+    expect(owner).toContain("アカウント設定");
+    for (const gone of ["login@example.test", "宛先を変える", "kitchen@example.com", "宛先の変更は準備中です"]) expect(owner).not.toContain(gone);
     expect(owner).toContain("新しい予約・申込");
     const editor = render("EDITOR", live({ effective: "desk@example.test", source: "chosen" }));
-    expect(editor).toContain("desk@example.test");
-    expect(editor).toContain(NOTIFICATION_ADDRESS_TEXT.chosen);
-    // Back to the sign-in's address, and the owner's switches stay out of reach.
-    expect(editor).toContain("ログインのメールに戻す");
+    expect(editor).toContain("宛先は、あなたのアカウントで変えられます。");
+    expect(editor).not.toContain("desk@example.test");
+    expect(editor).not.toContain("ログインのメールに戻す");
+    // The owner's switches stay out of reach.
     expect(editor).toContain("通知の設定はオーナーが変えられます");
     expect(editor).not.toContain("新しい予約・申込");
   });
 
-  it("says when a new address waits for its link, when there is none yet, and when it could not be read", () => {
-    const waiting = render("OWNER", live({ pending: "new@example.test" }));
-    expect(waiting).toContain(NOTIFICATION_ADDRESS_TEXT.pending("new@example.test"));
-    expect(waiting).toContain("取り消す");
-    const none = render("OWNER", live({ effective: null, source: null, login: null }));
-    expect(none).toContain(NOTIFICATION_ADDRESS_TEXT.none);
-    expect(none).not.toContain("ログインのメールに戻す");
+  it("says when the address could not be read", () => {
     const failed = render("OWNER", "error");
     expect(failed).toMatch(new RegExp(`role="alert"[^>]*>${NOTIFICATION_ADDRESS_TEXT.loadFailed}`));
   });

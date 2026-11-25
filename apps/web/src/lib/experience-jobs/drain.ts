@@ -1,12 +1,12 @@
 import "server-only";
-import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type BookingRecord, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GroupInquiryRepository, type GuestReviewRepository, type HostAccounts, type HostInvitations, type HostMailOutbox, type HostNotificationAddresses, type HostNotificationOutbox } from "@niho-experience/experience-store";
+import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type BookingRecord, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GroupInquiryRepository, type GuestReviewRepository, type HostAccounts, type HostInvitations, type HostTeamInvitations, type HostMailOutbox, type HostNotificationAddresses, type HostNotificationOutbox } from "@niho-experience/experience-store";
 import type { RetrievedPlatformCheckout } from "@niho-experience/experience-payments";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { cleanupProviderMedia, type ProviderMediaCleanupCounts, type ProviderMediaCleanupDeps } from "@/lib/experience/provider-media-cleanup";
 import { groupInquiryReceiptEmail, groupInquiryStaffEmail } from "@/lib/mail/group-inquiry-templates";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import type { HostPushKind } from "@/lib/host/push/payload";
-import { hostAddressConfirmationEmail, hostBookingEmail, hostInvitationEmail, hostLoginLinkEmail, hostNotificationEmail } from "@/lib/mail/host-templates";
+import { hostAddressConfirmationEmail, hostBookingEmail, hostInvitationEmail, hostLoginLinkEmail, hostNotificationEmail, hostTeamInvitationEmail } from "@/lib/mail/host-templates";
 import { bookingConfirmationEmail, bookingLinkEmail, bookingMeetingGuideEmail, bookingMessageEmail, bookingNoticeEmail, managedGuestBookingEmail, managedOperationsBookingEmail, questionReplyEmail, reviewInvitationEmail, supportBookingMessageEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
@@ -82,6 +82,9 @@ export const EXPERIENCE_JOB_LIMITS = {
   hostLoginLinks: 20,
   /** ホストの招待リンク (#596): invitation emails a run sends (right after the sign-in links: the host is waiting for them too). */
   hostInvitations: 20,
+  hostTeamInvitations: 20,
+  /** Team invitations that ran out and are closed in one run (their addresses are cleared). */
+  hostTeamInvitationsClose: 100,
   /** Old sign-in requests and ended host sessions deleted per run (each kind). */
   hostAccountsPurgedPerStep: 500,
   /** Admin のログイン (ADR 0003): ended admin sessions deleted per run. */
@@ -176,6 +179,12 @@ export interface HostLoginLinkCounts {
 export type HostInvitationCounts = HostLoginLinkCounts;
 
 /**
+ * The invitations a provider's OWNER made for the team (#636). As the host invitations, and `closed`: the open invitations that
+ * ran out and were closed (their addresses cleared) at the start of the step.
+ */
+export type HostTeamInvitationCounts = HostLoginLinkCounts & { readonly closed: number };
+
+/**
  * 団体・個別の相談 (#532): the office's notices and the receipts to the people who wrote. Claimed: an email the store
  * handed over; retried: put back for 2, 4, 8 or 16 minutes; failed: the server refused it for good or the attempts ran
  * out (the Admin list shows a notice that did not go). Counts only: never an address, a name or a word of the inquiry.
@@ -220,6 +229,8 @@ export interface ExperienceJobCounts {
   readonly hostLoginLinks?: HostLoginLinkCounts | FailedStep;
   /** Only with the NIHO account login (EXPERIENCE_HOST_NIHO_LOGIN_ENABLED, #596): the invitation emails. */
   readonly hostInvitations?: HostLoginLinkCounts | FailedStep;
+  /** Only with the team invitations (EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED, #636): the invitation emails. */
+  readonly hostTeamInvitations?: HostTeamInvitationCounts | FailedStep;
   /** Only with 団体・個別の相談 (EXPERIENCE_GROUP_INQUIRY_ENABLED, #532). */
   readonly groupInquiryMails?: GroupInquiryMailCounts | FailedStep;
   readonly hostAccountPurge?: PurgeCounts | FailedStep;
@@ -296,6 +307,8 @@ export interface ExperienceJobDeps {
   readonly hostLogins?: Pick<HostAccounts, "listPendingLoginRequests" | "issueLoginLink" | "purgeExpired"> | null;
   /** The NIHO account login (Epic #591, #596), present only while EXPERIENCE_HOST_NIHO_LOGIN_ENABLED is on: the invitation emails to send. */
   readonly hostInvitations?: Pick<HostInvitations, "listPendingInvitations" | "issueInvitationLink"> | null;
+  /** The team invitations (#636), present only while EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED is on: the invitation emails to send. */
+  readonly hostTeamInvitations?: Pick<HostTeamInvitations, "listPending" | "issueLink" | "closeExpired"> | null;
   /**
    * 団体・個別の相談 (#532), present only while EXPERIENCE_GROUP_INQUIRY_ENABLED is on. `officeRecipient` is the office's
    * own address (the one the guests' replies reach), where each inquiry's notice goes.
@@ -861,6 +874,36 @@ async function sendHostInvitations(deps: ExperienceJobDeps, invitations: NonNull
 }
 
 /**
+ * The team invitations (#636): the ones that ran out are closed first (the address is cleared with them), then each pending
+ * invitation gets its link minted and emailed, as sendHostInvitations does. An email that does not go is not tried again with
+ * the same link: the OWNER invites again.
+ */
+async function sendHostTeamInvitations(deps: ExperienceJobDeps, invitations: NonNullable<ExperienceJobDeps["hostTeamInvitations"]>): Promise<HostTeamInvitationCounts> {
+  const startedAt = deps.now().getTime();
+  const closed = await invitations.closeExpired({ nowUtc: deps.now().toISOString(), limit: EXPERIENCE_JOB_LIMITS.hostTeamInvitationsClose });
+  const counts = { claimed: 0, sent: 0, skipped: 0, failed: 0, closed };
+  const pending = await invitations.listPending({ nowUtc: deps.now().toISOString(), limit: EXPERIENCE_JOB_LIMITS.hostTeamInvitations });
+  for (const invitationId of pending) {
+    if (!mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.hostTeamInvitations)) break;
+    counts.claimed += 1;
+    const issued = await invitations.issueLink({ invitationId, nowUtc: deps.now().toISOString() });
+    if (issued.kind === "skip") {
+      counts.skipped += 1;
+      continue;
+    }
+    const email = hostTeamInvitationEmail({ siteUrl: deps.siteUrl, token: issued.token, expiresAt: issued.expiresAtUtc, providerDisplayName: issued.providerDisplayName });
+    const result = await deps.mailer.sendMail({ to: issued.toEmail, ...email });
+    if (result.ok) {
+      counts.sent += 1;
+      continue;
+    }
+    counts.failed += 1;
+    if (result.failure === "transient") break;
+  }
+  return counts;
+}
+
+/**
  * 団体・個別の相談 (#532): the office's notice of each inquiry first, then the receipt to the person who wrote, one email
  * claimed at a time. A transient failure ends the step (the rest wait for the next run); a refusal for good is final.
  */
@@ -895,6 +938,8 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const hostLoginLinks = hostLogins ? await step(deps, "hostLoginLinks", () => sendHostLoginLinks(deps, hostLogins)) : undefined;
   const hostInvitationSource = deps.hostInvitations ?? null;
   const hostInvitations = hostInvitationSource ? await step(deps, "hostInvitations", () => sendHostInvitations(deps, hostInvitationSource)) : undefined;
+  const hostTeamInvitationSource = deps.hostTeamInvitations ?? null;
+  const hostTeamInvitations = hostTeamInvitationSource ? await step(deps, "hostTeamInvitations", () => sendHostTeamInvitations(deps, hostTeamInvitationSource)) : undefined;
   // 団体・個別の相談 (#532): a person asking the office is waiting too, and the office should hear at once.
   const groupInquiries = deps.groupInquiries ?? null;
   const groupInquiryMails = groupInquiries ? await step(deps, "groupInquiryMails", () => sendGroupInquiryMails(deps, groupInquiries)) : undefined;
@@ -988,6 +1033,7 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
     ...(managedBookingMails ? { managedBookingMails } : {}),
     ...(hostLoginLinks ? { hostLoginLinks } : {}),
     ...(hostInvitations ? { hostInvitations } : {}),
+    ...(hostTeamInvitations ? { hostTeamInvitations } : {}),
     ...(groupInquiryMails ? { groupInquiryMails } : {}),
     ...(hostAccountPurge ? { hostAccountPurge } : {}),
     ...(adminSessionPurge ? { adminSessionPurge } : {}),

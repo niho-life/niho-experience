@@ -373,6 +373,13 @@ export const FLAGS = Object.freeze([
     // The dependency opens the native account mode, so the team switch has the same incompatible legacy consumers.
     conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED"],
   },
+  // メンバーの招待 (#636, docs/host-team.md): the OWNER invites a person by email address; they join as COHOST by signing in at NIHO.
+  // Needs the native team, the NIHO login and the host mail (the mail job sends the link). Migration 0088 and its grants first.
+  {
+    env: "EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED",
+    variable: "HOST_TEAM_INVITATIONS_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_TEAM_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"],
+  },
   // 開催回の担当 (#535 v0, docs/occurrence-assignments.md): 承認後決済の開催回に1人の内部担当。報酬の計算・送金はしない。
   {
     env: "EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED",

@@ -38,9 +38,12 @@ test("設定の通常入口は役割に合う一覧で、providerId を保って
   await signIn(page);
   await page.goto("/host/settings?providerId=sample-provider-kitchen");
   const main = page.locator("main");
-  await expect(main.getByRole("heading", { level: 2 })).toHaveText(["販売者", "運営", "アカウント"]);
-  await expect(main.getByRole("link")).toHaveCount(11);
-  for (const label of ["提供者情報", "ホスト紹介", "販売者表示", "受取口座", "通知", "カレンダー連携", "チーム", "NIHOサポート", "集合案内", "ログイン情報", "この端末"]) {
+  await expect(page.getByRole("heading", { level: 1, name: "サンプルの台所 の設定" })).toBeVisible();
+  await expect(main.getByRole("heading", { level: 2 })).toHaveText(["掲載", "販売", "運営"]);
+  // The eight rows, and the one link to あなたのアカウント under the title.
+  await expect(main.getByRole("link")).toHaveCount(9);
+  await expect(main.getByRole("link", { name: "アカウント設定", exact: true })).toHaveAttribute("href", "/host/account?providerId=sample-provider-kitchen");
+  for (const label of ["提供者情報", "ホスト紹介", "販売者表示", "受取口座", "通知の種類", "カレンダー連携", "NIHOサポート", "集合案内"]) {
     await expect(main.getByRole("link", { name: new RegExp(`^${label}`) }), label).toBeVisible();
   }
   await expect(main.getByRole("link", { name: /ホスト紹介/ })).toHaveAttribute("href", "/host/profile?providerId=sample-provider-kitchen");
@@ -48,22 +51,24 @@ test("設定の通常入口は役割に合う一覧で、providerId を保って
   await expect(main.getByRole("link", { name: /NIHOサポート/ })).toHaveAttribute("href", "/host/support?hostKind=EXPERIENCE_PROVIDER&hostId=sample-provider-kitchen");
   await audit(page, "settings index");
 
-  await main.getByRole("link", { name: /^通知/ }).click();
+  await main.getByRole("link", { name: /^通知の種類/ }).click();
   await page.waitForURL("**/host/settings?providerId=sample-provider-kitchen&section=notifications");
   await expect(page.getByRole("heading", { level: 1, name: "通知" })).toBeVisible();
   await expect(page.getByRole("link", { name: "設定へ戻る" })).toHaveAttribute("href", "/host/settings?providerId=sample-provider-kitchen");
 
   await page.goto("/host/settings?providerId=sample-provider-studio");
-  await expect(main.getByRole("link")).toHaveCount(7);
-  for (const label of ["提供者情報", "通知", "カレンダー連携", "NIHOサポート", "集合案内", "ログイン情報", "この端末"]) {
+  await expect(main.getByRole("link")).toHaveCount(6);
+  for (const label of ["提供者情報", "通知の種類", "カレンダー連携", "NIHOサポート", "集合案内"]) {
     await expect(main.getByRole("link", { name: new RegExp(`^${label}`) }), label).toBeVisible();
   }
-  for (const ownerOnly of ["ホスト紹介", "販売者表示", "受取口座", "チーム"]) {
+  for (const ownerOnly of ["ホスト紹介", "販売者表示", "受取口座", "メンバー", "ログイン情報", "この端末"]) {
     await expect(main.getByRole("link", { name: new RegExp(ownerOnly) }), ownerOnly).toHaveCount(0);
   }
-  await main.getByRole("link", { name: /^通知/ }).click();
+  await main.getByRole("link", { name: /^通知の種類/ }).click();
   await expect(page.getByRole("region", { name: "通知", exact: true })).toContainText("オーナーが変えられます");
-  await expect(page.getByRole("button", { name: "宛先を変える", exact: true })).toBeVisible();
+  // The address is the person's own: changed in their account, not here.
+  await expect(page.getByRole("button", { name: "宛先を変える", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "通知", exact: true }).getByRole("link", { name: "アカウント設定" })).toHaveAttribute("href", "/host/account?providerId=sample-provider-studio");
   await expect(page.getByRole("switch", { name: "新しいレビュー", exact: true })).toHaveCount(0);
 });
 
@@ -249,13 +254,12 @@ test("通知: NIHO's eight notifications in its order; the three the owner may s
   await signIn(page);
   await page.goto("/host/settings?section=all");
   const panel = notificationPanel(page);
-  // Where the mail goes (#194): the person's own address, the sign-in's by default; 宛先を変える opens the field.
+  // Where the mail goes (#194) is the person's own address: told here, changed in あなたのアカウント.
   const to = panel.getByRole("group", { name: "宛先" });
-  await expect(to).toContainText("kitchen@example.com");
-  await expect(to).toContainText("ログインで確認したメールアドレスです。");
+  await expect(to).toContainText("宛先は、あなたのアカウントで変えられます。");
+  await expect(to.getByRole("link", { name: "アカウント設定" })).toHaveAttribute("href", "/host/account?providerId=sample-provider-kitchen");
   await expect(panel.getByRole("textbox")).toHaveCount(0);
-  await expect(panel.getByRole("button")).toHaveCount(1);
-  await expect(panel.getByRole("button", { name: "宛先を変える" })).toBeVisible();
+  await expect(panel.getByRole("button")).toHaveCount(0);
 
   const switches = panel.getByRole("switch");
   await expect(switches).toHaveCount(NOTIFICATIONS.length);
@@ -291,8 +295,8 @@ test("通知: NIHO's eight notifications in its order; the three the owner may s
 
 test("宛先: a new address waits for the link sent to it; 取り消す closes it; the preview sends nothing (#194)", async ({ page }) => {
   await signIn(page);
-  await page.goto("/host/settings?section=all");
-  const panel = notificationPanel(page);
+  await page.goto("/host/account");
+  const panel = page.getByRole("region", { name: "通知の宛先", exact: true });
   const to = panel.getByRole("group", { name: "宛先" });
   const sent = recordWrites(page);
   await panel.getByRole("button", { name: "宛先を変える" }).click();
@@ -323,7 +327,7 @@ test("宛先: a new address waits for the link sent to it; 取り消す closes i
   await panel.getByRole("button", { name: "確認のメールを送る" }).click();
   await expect(panel.getByRole("status").filter({ hasText: "このアドレスに届いています。" })).toBeVisible();
   expect(sent).toEqual([]);
-  await audit(page, "/host/settings (address)");
+  await audit(page, "/host/account (address)");
 });
 
 test("an editor reads that the notification settings are the owner's", async ({ page }) => {
@@ -405,16 +409,18 @@ test.describe("320px narrow phone", () => {
     await inside(calendar.getByRole("button", { name: "URL をコピー" }), "URL をコピー");
     await inside(calendar.getByRole("button", { name: "URL を作り直す" }), "URL を作り直す");
     for (const name of NOTIFICATIONS) await inside(notificationPanel(page).getByRole("switch", { name }), name);
-    // 宛先 (#194): the field, its buttons and the waiting line fit too.
-    const notification = notificationPanel(page);
+    // 宛先 (#194), now in あなたのアカウント: the field, its buttons and the waiting line fit too.
+    await page.goto("/host/account");
+    const notification = page.getByRole("region", { name: "通知の宛先", exact: true });
     await notification.getByRole("button", { name: "宛先を変える" }).click();
     await inside(notification.getByRole("textbox", { name: "新しい宛先" }), "新しい宛先");
     await inside(notification.getByRole("button", { name: "確認のメールを送る" }), "確認のメールを送る");
     await notification.getByRole("textbox", { name: "新しい宛先" }).fill("a-long-synthetic-address-for-narrow-phones@example.test");
     await notification.getByRole("button", { name: "確認のメールを送る" }).click();
     await inside(notification.getByRole("button", { name: "取り消す" }), "取り消す");
-    expect(await overflowX(page), "settings (address waiting)").toBeLessThanOrEqual(0);
-    await calendar.getByRole("button", { name: "URL を作り直す" }).click();
+    expect(await overflowX(page), "account (address waiting)").toBeLessThanOrEqual(0);
+    await page.goto("/host/settings?section=all");
+    await calendarPanel(page).getByRole("button", { name: "URL を作り直す" }).click();
     await inside(page.getByRole("dialog").getByRole("button", { name: "URL を作り直す" }), "dialog: URL を作り直す");
     expect(await overflowX(page), "dialog open").toBeLessThanOrEqual(0);
 

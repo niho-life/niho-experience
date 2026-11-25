@@ -78,4 +78,16 @@ describe("Experience-native host team", { skip: databaseUrl === undefined }, () 
       assert.equal(receiptColumns.some((column) => String(column).includes("email")), false);
     } finally { await db.dispose(); }
   });
+
+  it("lists a member without an address instead of failing", async () => {
+    const db = await createIsolatedDatabase(databaseUrl, "host_team_noaddr", { max: 2 });
+    try {
+      await seed(db.pool);
+      const writer = `hst_${"05".repeat(16)}`;
+      await db.pool.query("INSERT INTO host_accounts (id,email,email_key,created_at,updated_at) VALUES ($1,NULL,NULL,clock_timestamp(),clock_timestamp())", [writer]);
+      await db.pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,$2,'COHOST',true)", [PROVIDER, writer]);
+      const members = (await new HostTeamRepository(db.pool).list({ providerId: PROVIDER, hostAccountId: OWNER })).members;
+      assert.deepEqual(members.find((member) => member.hostAccountId === writer), { hostAccountId: writer, role: "COHOST", label: "メールアドレス未登録のメンバー" });
+    } finally { await db.dispose(); }
+  });
 });

@@ -1053,6 +1053,58 @@ describe("invitation links of host accounts (Epic #591, #596)", () => {
   });
 });
 
+describe("team invitations (#636)", () => {
+  const TEAM_TOKEN = "teamToken".padEnd(43, "Q");
+  const ids = ["7c9e6679-7425-40de-944b-e07fc1f90ae7", "16fd2706-8baf-433b-82eb-8c7fada847da"];
+  type Issue = { kind: "skip" } | { kind: "send"; token: string; toEmail: string; expiresAtUtc: string; providerDisplayName: string | null };
+  const send = (n: number, providerDisplayName: string | null = "合成ファーム"): Issue => ({ kind: "send", token: `${TEAM_TOKEN.slice(0, -1)}${n}`, toEmail: `member${n}@example.test`, expiresAtUtc: "2026-12-02T00:00:00.000Z", providerDisplayName });
+  function teamInvitations(issues: Issue[], closed = 0) {
+    return {
+      closeExpired: vi.fn<(input: { nowUtc: string; limit: number }) => Promise<number>>(async () => closed),
+      listPending: vi.fn<(input: { nowUtc: string; limit: number }) => Promise<readonly string[]>>(async () => [...ids]),
+      issueLink: vi.fn<(input: { invitationId: string; nowUtc: string }) => Promise<Issue>>(async () => issues.shift() ?? { kind: "skip" }),
+    };
+  }
+
+  it("closes what ran out first, then sends each pending invitation once with the token in the fragment only", async () => {
+    const invitations = teamInvitations([send(1), { kind: "skip" }], 2);
+    const counts = await runExperienceJobs({ ...s.deps, hostTeamInvitations: invitations });
+    expect(counts.hostTeamInvitations).toEqual({ claimed: 2, sent: 1, skipped: 1, failed: 0, closed: 2 });
+    expect(invitations.closeExpired).toHaveBeenCalledWith({ nowUtc: NOW.toISOString(), limit: EXPERIENCE_JOB_LIMITS.hostTeamInvitationsClose });
+    expect(invitations.closeExpired.mock.invocationCallOrder[0]).toBeLessThan(invitations.listPending.mock.invocationCallOrder[0]!);
+    expect(invitations.listPending).toHaveBeenCalledWith({ nowUtc: NOW.toISOString(), limit: EXPERIENCE_JOB_LIMITS.hostTeamInvitations });
+    expect(s.sent.map((mail) => mail.to)).toEqual(["member1@example.test"]);
+    const [mail] = s.sent;
+    expect(mail!.subject).toBe("「合成ファーム」のメンバーへのご招待");
+    expect(mail!.text).toContain(`${SITE}/host/auth/team-invite#t=${(send(1) as { token: string }).token}`);
+    expect(mail!.text).not.toContain(`?t=`);
+    expect(mail).not.toHaveProperty("deliveryRef");
+    expect(experienceJobActivity(counts).active).toBe(true);
+  });
+
+  it("never sends again after a failed send, and a transient failure ends the step for this run", async () => {
+    const invitations = teamInvitations([send(1), send(2)]);
+    s.results.push({ ok: false, failure: "transient" });
+    const counts = await runExperienceJobs({ ...s.deps, hostTeamInvitations: invitations });
+    expect(counts.hostTeamInvitations).toEqual({ claimed: 1, sent: 0, skipped: 0, failed: 1, closed: 0 });
+    expect(invitations.issueLink).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a failure by its class only, never a token or an address, and does not run while the flag is off", async () => {
+    const output = [vi.spyOn(console, "log"), vi.spyOn(console, "info"), vi.spyOn(console, "warn"), vi.spyOn(console, "error")].map((spy) => spy.mockImplementation(() => {}));
+    const invitations = teamInvitations([send(1)]);
+    invitations.listPending.mockRejectedValueOnce(new Error("list failed for member1@example.test"));
+    const counts = await runExperienceJobs({ ...s.deps, hostTeamInvitations: invitations });
+    expect(counts.hostTeamInvitations).toEqual({ error: "unavailable" });
+    expect(s.onStepError).toHaveBeenCalledWith("hostTeamInvitations", "Error");
+    const reported = JSON.stringify(counts) + JSON.stringify(s.onStepError.mock.calls) + JSON.stringify(output.flatMap((spy) => spy.mock.calls));
+    expect(reported).not.toContain("member1@example.test");
+    for (const spy of output) spy.mockRestore();
+    expect(await runExperienceJobs({ ...s.deps, hostTeamInvitations: null })).not.toHaveProperty("hostTeamInvitations");
+    expect(await runExperienceJobs({ ...s.deps })).not.toHaveProperty("hostTeamInvitations");
+  });
+});
+
 describe("ended sessions of the Admin's Google login (ADR 0003)", () => {
   it("deletes them while the flag is on, reports a failure by its class only, and does not run while it is off", async () => {
     const adminSessions = { purgeExpired: vi.fn<(input: { nowUtc: string; limit: number }) => Promise<number>>(async () => 3) };

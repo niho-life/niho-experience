@@ -91,12 +91,38 @@ export function hostAccessFingerprint(projection: HostAccessProjection): string 
   return createHash("sha256").update(JSON.stringify([HOST_TEAM_CONTRACT_VERSION, memberships, grants]), "utf8").digest("hex");
 }
 
+/** A member created by a NIHO sign-in (a team invitation, a writer) may have no address. */
+const NO_ADDRESS_LABEL = "メールアドレス未登録のメンバー";
+
 function memberLabel(email: unknown): string {
-  if (typeof email !== "string" || email.trim() === "") throw new StoreError("Database returned an invalid host account email.");
-  return email;
+  if (email === null || email === undefined) return NO_ADDRESS_LABEL;
+  if (typeof email !== "string") throw new StoreError("Database returned an invalid host account email.");
+  return email.trim() === "" ? NO_ADDRESS_LABEL : email;
 }
 
-async function requireCurrentOwner(client: PoolClient, actor: HostTeamActor, lock: "FOR SHARE" | "FOR UPDATE" = "FOR SHARE"): Promise<void> {
+/** The hourly lookup limit per provider and owner. Looking up a member by address and inviting by address share it. */
+export async function consumeResolveBucket(client: PoolClient, actor: HostTeamActor): Promise<void> {
+  const bucket = await client.query<DbRow>(
+    `INSERT INTO provider_team_resolve_buckets (provider_id,owner_host_account_id,window_started_at,attempts)
+     VALUES ($1,$2,date_trunc('hour',clock_timestamp()),1)
+     ON CONFLICT (provider_id,owner_host_account_id,window_started_at)
+     DO UPDATE SET attempts=provider_team_resolve_buckets.attempts+1
+       WHERE provider_team_resolve_buckets.attempts < $3
+     RETURNING attempts,extract(epoch FROM (window_started_at+interval '1 hour'-clock_timestamp()))::integer AS retry_after`,
+    [actor.providerId, actor.hostAccountId, HOST_TEAM_RESOLVE_LIMIT],
+  );
+  if (!bucket.rows[0]) {
+    const current = await client.query<DbRow>(
+      `SELECT GREATEST(1,extract(epoch FROM (window_started_at+interval '1 hour'-clock_timestamp()))::integer) AS retry_after
+         FROM provider_team_resolve_buckets
+        WHERE provider_id=$1 AND owner_host_account_id=$2 AND window_started_at=date_trunc('hour',clock_timestamp())`,
+      [actor.providerId, actor.hostAccountId],
+    );
+    throw new StoreRateLimitedError(Math.max(1, Number(current.rows[0]?.retry_after ?? 60)));
+  }
+}
+
+export async function requireCurrentOwner(client: PoolClient, actor: HostTeamActor, lock: "FOR SHARE" | "FOR UPDATE" = "FOR SHARE"): Promise<void> {
   const result = await client.query<DbRow>(
     `SELECT 1 FROM provider_memberships m
        JOIN host_accounts a ON a.id=m.niho_user_id AND a.status='ACTIVE'
@@ -106,7 +132,7 @@ async function requireCurrentOwner(client: PoolClient, actor: HostTeamActor, loc
   if (!result.rows[0]) throw new StoreAccessDeniedError();
 }
 
-async function lockTeam(client: PoolClient, providerId: string): Promise<number> {
+export async function lockTeam(client: PoolClient, providerId: string): Promise<number> {
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))", [`experience-provider-team:${providerId}`, TEAM_LOCK_SEED]);
   await client.query(
     `INSERT INTO provider_team_revisions (provider_id,version,updated_at) VALUES ($1,0,clock_timestamp())
@@ -164,24 +190,7 @@ export class HostTeamRepository {
     return withTransaction(this.#pool, async (client) => {
       await requireCurrentOwner(client, actor, "FOR UPDATE");
       const version = await lockTeam(client, actor.providerId);
-      const bucket = await client.query<DbRow>(
-        `INSERT INTO provider_team_resolve_buckets (provider_id,owner_host_account_id,window_started_at,attempts)
-         VALUES ($1,$2,date_trunc('hour',clock_timestamp()),1)
-         ON CONFLICT (provider_id,owner_host_account_id,window_started_at)
-         DO UPDATE SET attempts=provider_team_resolve_buckets.attempts+1
-           WHERE provider_team_resolve_buckets.attempts < $3
-         RETURNING attempts,extract(epoch FROM (window_started_at+interval '1 hour'-clock_timestamp()))::integer AS retry_after`,
-        [actor.providerId, actor.hostAccountId, HOST_TEAM_RESOLVE_LIMIT],
-      );
-      if (!bucket.rows[0]) {
-        const current = await client.query<DbRow>(
-          `SELECT GREATEST(1,extract(epoch FROM (window_started_at+interval '1 hour'-clock_timestamp()))::integer) AS retry_after
-             FROM provider_team_resolve_buckets
-            WHERE provider_id=$1 AND owner_host_account_id=$2 AND window_started_at=date_trunc('hour',clock_timestamp())`,
-          [actor.providerId, actor.hostAccountId],
-        );
-        throw new StoreRateLimitedError(Math.max(1, Number(current.rows[0]?.retry_after ?? 60)));
-      }
+      await consumeResolveBucket(client, actor);
       const found = await client.query<DbRow>("SELECT id,email FROM host_accounts WHERE email_key=$1 AND status='ACTIVE'", [emailKey]);
       const id = found.rows[0]?.id;
       const candidate = isHostAccountId(id) ? { hostAccountId: id, label: memberLabel(found.rows[0]?.email) } : null;

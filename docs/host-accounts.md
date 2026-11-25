@@ -27,7 +27,9 @@
 
 preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock-login → ホーム。`?mock=unregistered` は未登録の案内で終わる。
 
-### 設定 › ログイン情報（#595）
+### あなたのアカウント › ログイン（#595）
+
+メニューの「あなたのアカウント」（`/host/account`）にある。旧 `/host/settings?section=account` は `/host/account` へ送られる（`providerId` と `niho` だけ引き継ぐ）。
 
 ホストアカウントの自分のセッションだけ（`EXPERIENCE_HOST_NIHO_LOGIN_ENABLED` が ON のとき）。「NIHO アカウント」の行に、結び付けの状態（結び付け済み／結び付けていません）、結び付けた日と最後のログインの日（NIHO user ID は出さない）、「NIHO アカウントを結び付ける」、「結び付けを解除する」（開いて確かめてから「解除する」）が出る。フォームは JavaScript なしの POST（`/host/api/niho-identity`、同一 origin だけ）で、結果は 303 で `設定 › ログイン情報` へ戻り、`?niho=` が結果を言葉で出す（`niho-identity.ts`）。
 
@@ -39,6 +41,8 @@ preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock
 ### 招待リンク（#596）
 
 運営（ops）が、登録した `hst_` を NIHO アカウントに結び付ける 1 回限りの招待を出す。新しい OWNER・既存の OWNER（メールのリンクで登録した人）・共同ホスト（COHOST。`docs/host-team.md`）は、どれも同じ手順。migration `0084`（`host_account_invitations`、`HostInvitations`）。
+
+メンバーの招待（#636。OWNER が相手のメールアドレスへ COHOST の招待を出す）は、別の表（`provider_team_invitations`、migration `0088`）・別の入口（`/host/auth/team-invite`）・別の cookie だが、同じ作り（トークンは fragment、最初に開いたブラウザに限る、1 回、7 日）。ホストアカウントが無い人にも出せる。詳細は [ホストチーム](host-team.md)。
 
 1. ops が `provision-host-account.mjs` で招待を作る（下の「登録（ops）」）。招待は**メールの送信待ちの行**で、トークンは作らない。ops はリンクを持たない。
 2. メール job（毎分）が `listPendingInvitations` → `issueInvitationLink` でトークンを 1 回だけ作り、登録のアドレスへ `${SITE_URL}/host/auth/invite#t=<token>` を送る（日本語。有効期限・1 回・最初に開いたブラウザで続ける旨）。送信に失敗した同じトークンは送り直さない（ops が招待し直す）。
