@@ -17,7 +17,7 @@ test("the cards heading, the living-room band and the journal keep their order",
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 2, name: "Spend a few hours with a neighbor" })).toBeVisible();
   const band = page.getByRole("region", { name: "NIHO, the town’s living room" });
-  await expect(band.getByRole("link", { name: "About NIHO Experience" })).toHaveAttribute("href", "/about");
+  await expect(band.getByRole("link", { name: "About NIHO Travel" })).toHaveAttribute("href", "/about");
   const order = await page.locator("#home-cards-v1, #home-living-room, #home-guides-heading, #host-band-heading-v1").evaluateAll((nodes) => nodes.map((node) => node.id));
   expect(order).toEqual(["home-cards-v1", "home-living-room", "home-guides-heading", "host-band-heading-v1"]);
 });

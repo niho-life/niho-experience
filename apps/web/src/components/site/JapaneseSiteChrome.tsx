@@ -52,7 +52,7 @@ export function JapaneseSiteHeader({ counterparts, hostSignedIn, inquiryOpen, gu
     <div className="container-page flex h-16 items-center gap-1.5">
       <Link href="/ja" className="flex shrink-0 items-center gap-2 font-display text-xl font-semibold tracking-[-0.01em]">
         <span aria-hidden className="relative size-7 shrink-0 sm:size-8"><Image src="/icon.svg" alt="" sizes="32px" priority className="object-contain" /></span>
-        <span className="flex items-baseline gap-1.5"><span>NIHO</span><span className="font-normal text-ink-soft max-[479px]:sr-only">Experience 鎌倉</span></span>
+        <span className="flex items-baseline gap-1.5"><span>NIHO</span><span className="font-normal text-ink-soft max-[479px]:sr-only">Travel</span></span>
       </Link>
       <nav aria-label="メイン" className="ml-auto sm:ml-4 sm:flex-1">
         <ul className="flex items-center gap-0.5 text-[0.9375rem] font-bold sm:gap-1">
