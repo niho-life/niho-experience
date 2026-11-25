@@ -16,5 +16,7 @@ const GALLERY_PRIMITIVES_V1: PresentationPrimitivesV1 = { Link, Image: GalleryIm
 export function PresentationGalleryV1({ model }: { model: DetailGalleryModelV1 }) {
   const [index, setIndex] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null);
-  return <><MobileGalleryViewV1 model={model} index={index} onPositionChange={setIndex} primitives={GALLERY_PRIMITIVES_V1} /><DesktopGalleryViewV1 model={model} dialogRef={dialog} onOpen={() => dialog.current?.showModal()} onClose={() => dialog.current?.close()} primitives={GALLERY_PRIMITIVES_V1} /></>;
+  const open = () => dialog.current?.showModal();
+  const close = () => dialog.current?.close();
+  return <><MobileGalleryViewV1 model={model} index={index} onPositionChange={setIndex} onPhotoClick={open} primitives={GALLERY_PRIMITIVES_V1} /><DesktopGalleryViewV1 model={model} dialogRef={dialog} onOpen={open} onClose={close} primitives={GALLERY_PRIMITIVES_V1} /></>;
 }
