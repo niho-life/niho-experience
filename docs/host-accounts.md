@@ -42,6 +42,8 @@ preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock
 
 運営（ops）が、登録した `hst_` を NIHO アカウントに結び付ける 1 回限りの招待を出す。新しい OWNER・既存の OWNER（メールのリンクで登録した人）・共同ホスト（COHOST。`docs/host-team.md`）は、どれも同じ手順。migration `0084`（`host_account_invitations`、`HostInvitations`）。
 
+メンバーの招待（#636。OWNER が相手のメールアドレスへ COHOST の招待を出す）は、別の表（`provider_team_invitations`、migration `0088`）・別の入口（`/host/auth/team-invite`）・別の cookie だが、同じ作り（トークンは fragment、最初に開いたブラウザに限る、1 回、7 日）。ホストアカウントが無い人にも出せる。詳細は [ホストチーム](host-team.md)。
+
 1. ops が `provision-host-account.mjs` で招待を作る（下の「登録（ops）」）。招待は**メールの送信待ちの行**で、トークンは作らない。ops はリンクを持たない。
 2. メール job（毎分）が `listPendingInvitations` → `issueInvitationLink` でトークンを 1 回だけ作り、登録のアドレスへ `${SITE_URL}/host/auth/invite#t=<token>` を送る（日本語。有効期限・1 回・最初に開いたブラウザで続ける旨）。送信に失敗した同じトークンは送り直さない（ops が招待し直す）。
 3. `GET /host/auth/invite`（トークンは fragment。script が読んですぐ消し、同じパスへ POST）→ `POST /host/auth/invite`：最初にリンクを開いたブラウザに結び付く（そのブラウザの cookie `__Secure-niho_host_invite`＝32 バイトの乱数、Path=/host/auth、7 日、の SHA-256 を保存）。同じブラウザなら開き直せるし、招待し直したあとの新しい招待も同じブラウザで開ける（使い済み・置き換えの招待は値を持ったまま履歴になり、値を占有しない）。別の招待がその値を持っている共有ブラウザでは、新しい値で開き直す。成功なら 204 で、ページが `/host/auth/login?invite=1` へ進む。使えないリンクは 400 と理由で、ページが `/host/auth/error?reason=` へ送る：`invite-expired`（期限切れ、または新しい招待に置き換えられた）・`invite-used`（使用済み）・`invite-browser`（別のブラウザ）・`invite-invalid`（不明）。それぞれ次にすることを案内する（期限切れ・別ブラウザは運営に新しい招待を依頼）。

@@ -26,6 +26,12 @@ const MESSAGES: Record<LoginErrorReason, string> = {
   "invite-has-identity": "この招待のホストアカウントには、すでに別の NIHO アカウントが結び付いています。結び付けた NIHO アカウントでログインしてください。",
   "invite-unavailable": "NIHO でのログインを確認できませんでした。時間をおいて、もう一度お試しください。招待のリンクはまだ使えます。",
   unverified: "NIHO でログインした時刻を確認できませんでした。時間をおいて、もう一度お試しください。",
+  "team-invite-expired": "この招待は、期限が切れたか、新しい招待に置き換えられています。招待した人に、もう一度招待してもらってください。",
+  "team-invite-used": "この招待は、すでに使われています。参加が済んでいれば、ふつうにログインして入れます。",
+  "team-invite-browser": "この招待は、最初に開いたブラウザでだけ続けられます。そのブラウザでもう一度開くか、招待した人にもう一度招待してもらってください。",
+  "team-invite-invalid": "この招待のリンクは使えません。メールのリンクをもう一度開くか、招待した人に確かめてください。",
+  "team-invite-mismatch": "このメールアドレスのホストアカウントは、別の NIHO アカウントに結び付いています。いつも使っている NIHO アカウント（ログインの方法）でやり直してください。招待はまだ使えます。",
+  "team-invite-unavailable": "いまは参加の手続きを終えられませんでした。時間をおいて、メールのリンクからもう一度お試しください。招待はまだ使えます。",
 };
 
 /** The invitation's reasons (Epic #591, #596): what to press next (nothing for a link that cannot be used any more). */
@@ -34,6 +40,13 @@ const INVITE_RETRY: Partial<Record<LoginErrorReason, { href: string; label: stri
   "invite-used": { href: HOST_LOGIN_PATH, label: "NIHO アカウントでログイン" },
   "invite-has-identity": { href: HOST_LOGIN_PATH, label: "NIHO アカウントでログイン" },
   "invite-unavailable": { href: withQuery(HOST_LOGIN_PATH, { invite: "1" }), label: "もう一度ログイン" },
+};
+
+/** The team invitation's reasons (#636): what to press next, where the invitation can still be used or the person can just sign in. */
+const TEAM_INVITE_RETRY: Partial<Record<LoginErrorReason, { href: string; label: string }>> = {
+  "team-invite-used": { href: HOST_LOGIN_PATH, label: "NIHO アカウントでログイン" },
+  "team-invite-mismatch": { href: withQuery(HOST_LOGIN_PATH, { teaminvite: "1" }), label: "別の NIHO アカウントでやり直す" },
+  "team-invite-unavailable": { href: withQuery(HOST_LOGIN_PATH, { teaminvite: "1" }), label: "もう一度ログイン" },
 };
 
 /** NIHO's public support address (the help page uses it too). No account or NIHO user ID is put in the link. */
@@ -51,6 +64,20 @@ export default async function HostLoginErrorPage({ searchParams }: { searchParam
   const loginHref = invitationId ? hostInvitationLoginPath(invitationId) : preparationCaseId ? hostPreparationLoginPath(preparationCaseId) : HOST_LOGIN_PATH;
   // An emailed link that did not open (the migration fallback) is asked for again on the email form, not at NIHO.
   const retryHref = known === "link" && config.hostNihoLoginEnabled ? withQuery(HOST_EMAIL_SIGN_IN_PATH, { method: "email" }) : loginHref;
+  if (known.startsWith("team-invite-")) {
+    const retry = TEAM_INVITE_RETRY[known];
+    return (
+      <main id="main" className="mx-auto w-full max-w-xl px-4 py-16">
+        <h1 className={`${HOST_HEADING} text-2xl`}>招待を使えませんでした</h1>
+        <p role="alert" className="mt-3 text-ink-soft">{MESSAGES[known]}</p>
+        {retry ? (
+          <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
+            <HostLoginLink href={retry.href} className={hostButtonClass("primary")}>{retry.label}</HostLoginLink>
+          </div>
+        ) : null}
+      </main>
+    );
+  }
   if (known.startsWith("invite-")) {
     const retry = INVITE_RETRY[known];
     return (

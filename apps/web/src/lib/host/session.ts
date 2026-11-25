@@ -43,6 +43,10 @@ export const RETURN_PATH_COOKIE = "__Secure-niho_host_return";
 export const INVITE_BINDING_COOKIE = "__Secure-niho_host_invite";
 export const INVITE_BINDING_COOKIE_PATH = "/host/auth";
 export const INVITE_BINDING_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+/** The same for a provider's team invitation (#636): its own cookie, so a team invitation never meets a host invitation's binding. */
+export const TEAM_INVITE_BINDING_COOKIE = "__Secure-niho_host_team_invite";
+export const TEAM_INVITE_BINDING_COOKIE_PATH = "/host/auth";
+export const TEAM_INVITE_BINDING_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 /** Browsers drop cookies whose name and value exceed 4096 bytes. */
 export const COOKIE_BYTES_LIMIT = 4096;
 
@@ -130,9 +134,10 @@ export interface HostLoginState {
    * `link`: a signed-in host binds the NIHO account they sign in with to their host account (設定, Epic #591): the return
    * opens no session, it adds the binding to the one that is open. `invite`: the host opened an invitation link (#596):
    * the return binds the NIHO account to the invited host account and opens its session. `traveler`: a traveler logs in or
-   * signs up (Epic #591, #597): the return opens the traveler's own session, never a host account's.
+   * signs up (Epic #591, #597): the return opens the traveler's own session, never a host account's. `team-invite`: a person
+   * opened a provider's team invitation (#636): the return finds or makes their host account, adds it to the team and opens its session.
    */
-  purpose?: "link" | "invite" | "traveler";
+  purpose?: "link" | "invite" | "traveler" | "team-invite";
   /**
    * `link` only: the host account that asked to bind (the session that was open when the round trip started). The return binds
    * to this one and no other: a session that changed meanwhile (another tab signed in as someone else) is refused.
@@ -168,7 +173,7 @@ interface LoginWire {
   ii?: string;
   rt?: string;
   sf?: 1;
-  lk?: 1 | 2 | 3;
+  lk?: 1 | 2 | 3 | 4;
   ha?: string;
   ni?: HostLoginState["nihoIdentity"];
   x: number;
@@ -300,7 +305,7 @@ export function decodeSession(sealer: CookieSealer, raw: string | undefined | nu
 }
 
 export function encodeLoginState(sealer: CookieSealer, login: HostLoginState): string {
-  const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}), ...(login.invitationId ? { ii: login.invitationId } : {}), ...(login.returnPath ? { rt: login.returnPath } : {}), ...(login.surface === "app" ? { sf: 1 as const } : {}), ...(login.purpose === "link" ? { lk: 1 as const } : login.purpose === "invite" ? { lk: 2 as const } : login.purpose === "traveler" ? { lk: 3 as const } : {}), ...(login.hostAccountId ? { ha: login.hostAccountId } : {}) };
+  const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}), ...(login.invitationId ? { ii: login.invitationId } : {}), ...(login.returnPath ? { rt: login.returnPath } : {}), ...(login.surface === "app" ? { sf: 1 as const } : {}), ...(login.purpose === "link" ? { lk: 1 as const } : login.purpose === "invite" ? { lk: 2 as const } : login.purpose === "traveler" ? { lk: 3 as const } : login.purpose === "team-invite" ? { lk: 4 as const } : {}), ...(login.hostAccountId ? { ha: login.hostAccountId } : {}) };
   if (login.nihoIdentity) wire.ni = login.nihoIdentity;
   return sealer.seal(wire);
 }
@@ -317,7 +322,7 @@ export function decodeLoginState(sealer: CookieSealer, raw: string | undefined |
   const preparationCaseId = typeof wire.pc === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(wire.pc) ? wire.pc : null;
   const invitationId = typeof wire.ii === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(wire.ii) ? wire.ii : null;
   if (preparationCaseId && invitationId) return null;
-  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(isString(wire.rt, 300) ? { returnPath: wire.rt } : {}), ...(wire.sf === 1 ? { surface: "app" as const } : {}), ...(wire.lk === 1 ? { purpose: "link" as const } : wire.lk === 2 ? { purpose: "invite" as const } : wire.lk === 3 ? { purpose: "traveler" as const } : {}), ...(typeof wire.ha === "string" && /^hst_[0-9a-f]{32}$/.test(wire.ha) ? { hostAccountId: wire.ha } : {}), ...(nihoIdentity ? { nihoIdentity } : {}), expiresAt: wire.x };
+  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(isString(wire.rt, 300) ? { returnPath: wire.rt } : {}), ...(wire.sf === 1 ? { surface: "app" as const } : {}), ...(wire.lk === 1 ? { purpose: "link" as const } : wire.lk === 2 ? { purpose: "invite" as const } : wire.lk === 3 ? { purpose: "traveler" as const } : wire.lk === 4 ? { purpose: "team-invite" as const } : {}), ...(typeof wire.ha === "string" && /^hst_[0-9a-f]{32}$/.test(wire.ha) ? { hostAccountId: wire.ha } : {}), ...(nihoIdentity ? { nihoIdentity } : {}), expiresAt: wire.x };
 }
 
 /** HttpOnly, Secure, SameSite=Lax; the caller supplies the narrowest compatible path. */
