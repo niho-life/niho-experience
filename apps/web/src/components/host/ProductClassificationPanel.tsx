@@ -14,52 +14,113 @@ const FIELD = "mt-1 block min-h-10 w-full rounded-[10px] border border-line-stro
 
 function toggle<T extends string>(list: readonly T[], id: T): T[] { return list.includes(id) ? list.filter((item) => item !== id) : [...list, id]; }
 
-/**
- * 分類 (#529): the category, area, だれと and こんな日に the Japanese site sorts this experience by. It is saved on its own
- * and shows on /ja at once; it is not part of the draft, so it needs no 公開. A product without one is only in 「すべて」.
- */
-export function ProductClassificationPanel({ target }: { target: ClassificationTarget }) {
+export type ProductClassificationState = {
+  readonly value: ExperienceClassification | null;
+  readonly setValue: (next: ExperienceClassification) => void;
+  /** The classification differs from the saved one. */
+  readonly dirty: boolean;
+  readonly busy: boolean;
+  /** Not the OWNER (or not found): the classification is not for this person, so it is not shown. */
+  readonly hidden: boolean;
+  readonly state: { tone: "ok" | "alert"; text: string } | null;
+  /** Saves it. Resolves true when it is saved (or there is nothing to save), false when it could not be. */
+  readonly save: () => Promise<boolean>;
+  /** Reads the saved classification again, dropping what was typed. */
+  readonly reload: () => Promise<void>;
+};
+
+/** Reads, holds and saves a product's classification. With no target nothing is read. */
+export function useProductClassification(target: ClassificationTarget | null): ProductClassificationState {
   const [value, setValue] = useState<ExperienceClassification | null>(null);
   const [saved, setSaved] = useState<string>("");
   const [state, setState] = useState<{ tone: "ok" | "alert"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  /** Not the OWNER (or not found): the panel is not for this person, so it is not shown. */
   const [hidden, setHidden] = useState(false);
-  const read = target.kind === "host"
-    ? { url: `/host/api/products/${encodeURIComponent(target.productId)}/classification`, init: { cache: "no-store" as const, credentials: "same-origin" as const } }
-    : { url: `/admin/api/product-classifications?providerId=${encodeURIComponent(target.providerId)}&productId=${encodeURIComponent(target.productId)}`, init: { cache: "no-store" as const, credentials: "same-origin" as const } };
+  const kind = target?.kind ?? null;
+  const productId = target?.productId ?? null;
+  const providerId = target?.kind === "admin" ? target.providerId : null;
+  const url = kind === "host" ? `/host/api/products/${encodeURIComponent(productId ?? "")}/classification`
+    : kind === "admin" ? `/admin/api/product-classifications?providerId=${encodeURIComponent(providerId ?? "")}&productId=${encodeURIComponent(productId ?? "")}`
+      : null;
 
   const load = useCallback(async () => {
+    if (!url) return;
     try {
-      const response = await fetch(read.url, read.init);
+      const response = await fetch(url, { cache: "no-store", credentials: "same-origin" });
       if (response.status === 403 || response.status === 404) { setHidden(true); return; }
       const body = await response.json().catch(() => null) as { classification?: ExperienceClassification } | null;
       if (!response.ok || !body?.classification) throw new Error("load");
-      setValue(body.classification); setSaved(JSON.stringify(body.classification));
+      setValue(body.classification); setSaved(JSON.stringify(body.classification)); setState(null);
     } catch { setState({ tone: "alert", text: "分類を読み込めませんでした。時間をおいて、もう一度お試しください。" }); }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [read.url]);
+  }, [url]);
   useEffect(() => { queueMicrotask(() => void load()); }, [load]);
 
-  async function save() {
-    if (!value || busy) return;
+  const dirty = value !== null && JSON.stringify(value) !== saved;
+  const save = useCallback(async (): Promise<boolean> => {
+    if (!value || busy || !url) return true;
     setBusy(true); setState(null);
     try {
-      const response = target.kind === "host"
-        ? await fetch(read.url, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ classification: value }) })
-        : await fetch("/admin/api/product-classifications", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ items: [{ providerId: target.providerId, productId: target.productId, classification: value }] }) });
+      const response = kind === "host"
+        ? await fetch(url, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ classification: value }) })
+        : await fetch("/admin/api/product-classifications", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ items: [{ providerId, productId, classification: value }] }) });
       if (!response.ok) throw new Error("save");
       const body = await response.json().catch(() => null) as { classification?: ExperienceClassification } | null;
       const next = body?.classification ?? value;
       setValue(next); setSaved(JSON.stringify(next));
       setState({ tone: "ok", text: "分類を保存しました。日本語サイトの一覧にすぐ反映されます。" });
-    } catch { setState({ tone: "alert", text: "保存できませんでした。時間をおいて、もう一度お試しください。" }); }
-    finally { setBusy(false); }
-  }
+      return true;
+    } catch {
+      setState({ tone: "alert", text: "保存できませんでした。時間をおいて、もう一度お試しください。" });
+      return false;
+    } finally { setBusy(false); }
+  }, [busy, kind, productId, providerId, url, value]);
 
+  return { value, setValue, dirty, busy, hidden, state, save, reload: load };
+}
+
+/** The inputs of a classification: the category and area, and the chips of だれと and こんな日に. */
+export function ProductClassificationFields({ value, onChange, disabled = false }: { value: ExperienceClassification; onChange: (next: ExperienceClassification) => void; disabled?: boolean }) {
+  const chip = (on: boolean) => `inline-flex h-[34px] items-center rounded-full border px-3.5 text-[0.8125rem] font-bold ${on ? "border-moss bg-leaf-pale text-moss" : "border-line-strong bg-canvas text-ink-soft hover:bg-sand"}`;
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="text-sm font-bold text-ink-soft">カテゴリー
+          <select disabled={disabled} className={FIELD} value={value.category ?? ""} onChange={(event) => onChange({ ...value, category: (event.target.value || null) as ExperienceClassification["category"] })}>
+            <option value="">決めない</option>
+            {EXPERIENCE_CATEGORIES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        </label>
+        <label className="text-sm font-bold text-ink-soft">エリア
+          <select disabled={disabled} className={FIELD} value={value.area ?? ""} onChange={(event) => onChange({ ...value, area: (event.target.value || null) as ExperienceClassification["area"] })}>
+            <option value="">決めない</option>
+            {EXPERIENCE_AREAS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        </label>
+      </div>
+      <fieldset className="text-sm"><legend className="font-bold text-ink-soft">だれと</legend>
+        <div className="mt-1.5 flex flex-wrap gap-2">{EXPERIENCE_COMPANIONS.map((item) => {
+          const on = value.companions.includes(item.id);
+          return <button key={item.id} type="button" disabled={disabled} aria-pressed={on} className={chip(on)} onClick={() => onChange({ ...value, companions: toggle<ExperienceCompanionId>(value.companions, item.id) })}>{on ? "✓ " : ""}{item.label}</button>;
+        })}</div>
+      </fieldset>
+      <fieldset className="text-sm"><legend className="font-bold text-ink-soft">こんな日に</legend>
+        <div className="mt-1.5 flex flex-wrap gap-2">{EXPERIENCE_OCCASIONS.map((item) => {
+          const on = value.occasions.includes(item.id);
+          return <button key={item.id} type="button" disabled={disabled} aria-pressed={on} className={chip(on)} onClick={() => onChange({ ...value, occasions: toggle<ExperienceOccasionId>(value.occasions, item.id) })}>{on ? "✓ " : ""}{item.label}</button>;
+        })}</div>
+      </fieldset>
+    </div>
+  );
+}
+
+/**
+ * 分類 (#529): the category, area, だれと and こんな日に the Japanese site sorts this experience by. It is saved on its own
+ * and shows on /ja at once; it is not part of the draft, so it needs no 公開. A product without one is only in 「すべて」.
+ */
+export function ProductClassificationPanel({ target }: { target: ClassificationTarget }) {
+  const { value, setValue, dirty, busy, hidden, state, save } = useProductClassification(target);
   if (hidden) return null;
   if (!value) return state ? <p role="alert" className="mb-3 text-sm font-bold text-danger">{state.text}</p> : null;
-  const dirty = JSON.stringify(value) !== saved;
   return (
     <section className={`${HOST_SURFACE} mb-4 space-y-3 p-4`} aria-labelledby="classification-title">
       <div>

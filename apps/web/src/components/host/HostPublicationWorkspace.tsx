@@ -14,13 +14,17 @@ import {
   publicationTermsPayload,
   type PublicationTermsForm,
 } from "./publication-terms";
-import { publicationCanPublish, publicationNextAction } from "./publication-workflow";
-import { canonicalPublicationJson as canonicalJson, confirmPublicationEnglish, englishIsConfirmed, englishPublicationManuscript, liveEnglishStaleNote } from "./publication-confirmation";
+import { publicationBlockerDestination, publicationCanPublish, publicationNextAction } from "./publication-workflow";
+import { canonicalPublicationJson as canonicalJson, confirmPublicationEnglish, englishIsConfirmed, englishPublicationManuscript, liveEnglishStaleNote, publicationManuscriptFingerprint } from "./publication-confirmation";
 import { photoRightsConfirmed, type PhotoRightsConfirmation } from "./photo-rights";
 import { reapplyProviderMediaEdits } from "./publication-conflict";
 import { HostBookingLinkCopy } from "./HostBookingLinkCopy";
 import { providerBookingLinkAvailable } from "@/lib/provider-booking-link";
-import { ProductClassificationPanel } from "./ProductClassificationPanel";
+import { ProductClassificationFields, useProductClassification } from "./ProductClassificationPanel";
+import { HostInfoTip } from "./HostInfoTip";
+import { EDITOR_INPUT, EditorChoice, EditorDialog, EditorField, EditorReference, EditorRows, EditorSubheading, EditorSwitch, EditorUnitField } from "./HostEditorParts";
+import { manuscriptHasContent, publicationLanguageOutOfSync, readEnglishSourceFingerprint, savedEnglishSourceFingerprint, withEnglishSourceFingerprint, withoutEmptyRows } from "./publication-language";
+import { publicationSlugFromTitle, publicationSlugRetry } from "./publication-slug";
 import { PUBLICATION_FAQ_LIMITS, publicationContentFaqProblem, publicationFaqProblem, publicationFaqRows, withPublicationFaq, type PublicationFaqRow } from "./publication-faq";
 
 type Status = "DRAFT" | "PUBLISHED" | "STOPPED" | "RESTART_REQUIRED" | "SUSPENDED";
@@ -226,6 +230,23 @@ function saveLocal(namespace: string, productId: string, form: unknown) {
 }
 function clearLocal(namespace: string, productId: string) { try { window.sessionStorage.removeItem(`${namespace}:${productId}`); } catch { /* Best effort. */ } }
 
+const ROW_KEYS = ["highlights", "included", "notIncluded", "knowBeforeYouGo", "notSuitableFor"] as const;
+/** The draft content as saved: the rows of both languages without the empty ones the host left while typing. */
+function withoutEmptyRowsIn(source: Record<string, unknown>): Record<string, unknown> {
+  const clean = (record: Record<string, unknown>) => {
+    const next: Record<string, unknown> = { ...record };
+    for (const key of ROW_KEYS) {
+      const rows = next[key];
+      if (Array.isArray(rows)) next[key] = withoutEmptyRows(rows.filter((row): row is string => typeof row === "string"));
+    }
+    return next;
+  };
+  const next = clean(source);
+  if (isRecord(next.ja)) next.ja = clean(next.ja);
+  return next;
+}
+function stringRows(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
+
 function offerLabel(offer: Product["offers"][number]): string {
   const recurrence = offer.recurrence.kind === "DAILY" ? "毎日"
     : offer.recurrence.kind === "WEEKENDS" ? "土日"
@@ -252,8 +273,9 @@ export function HostPublicationWorkspace({
 }: Props) {
   const router = useRouter();
   const adminDraft = mode === "admin-draft";
-  /** The provider an office proxy workspace is for (its API base names it): 分類 is read and saved through the office's own route. */
-  const adminProviderId = adminDraft ? decodeURIComponent(/product-workspaces\/([^/]+)\/products/.exec(apiBase)?.[1] ?? "") : "";
+  /** The 代理登録 form. A host creates from the dialog on the list instead. */
+  const adminCreate = create && adminDraft;
+  const hostCreate = create && !adminDraft;
   const storageNamespace = adminDraft ? `admin-product-draft:${apiBase}` : "experience-product-draft";
   const [products, setProducts] = useState<Product[]>([]);
   const [product, setProduct] = useState<Product | null>(null);
@@ -288,8 +310,27 @@ export function HostPublicationWorkspace({
   const [sharedPhotoName, setSharedPhotoName] = useState<string | null>(null);
   const rightsConfirmed = photoRightsConfirmed(photoRights, selectedPhoto, product?.id ?? null, photoPlacement);
   const [translationBusy, setTranslationBusy] = useState(false);
-  const [workspaceSection, setWorkspaceSection] = useState<"page" | "pricing">("page");
-  const [editorLocale, setEditorLocale] = useState<"ja" | "en">("ja");
+  const [workspaceSection, setWorkspaceSection] = useState<"page" | "pricing" | "schedule" | "settings">("page");
+  const [editorLocale, setEditorLocale] = useState<"ja" | "en">("en");
+  // 通常 host mode only: the editor's own screen state.
+  const [compare, setCompare] = useState(false);
+  const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
+  const [photoDialog, setPhotoDialog] = useState<null | "gallery" | "provider">(null);
+  const [createOpen, setCreateOpen] = useState(create && !adminDraft);
+  const [createJapaneseOnly, setCreateJapaneseOnly] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [createPrice, setCreatePrice] = useState("");
+  const [translateConfirm, setTranslateConfirm] = useState(false);
+  const [discardConfirm, setDiscardConfirm] = useState(false);
+  const [blockerDialog, setBlockerDialog] = useState(false);
+  /** The blocker dialog was shown: until the page is published, the tabs it names carry a small mark. */
+  const [blockersShown, setBlockersShown] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [slugEditing, setSlugEditing] = useState(false);
+  /** null: open when a slot already has its own price. */
+  const [perOfferOpen, setPerOfferOpen] = useState<boolean | null>(null);
+  /** The Japanese manuscript's fingerprint now (computed after each edit); null until the first one. */
+  const [japaneseFingerprint, setJapaneseFingerprint] = useState<string | null>(null);
   const [sellerConfirmationMethod, setSellerConfirmationMethod] = useState<"" | "VERBAL" | "WRITTEN">("");
   const [sellerConfirmed, setSellerConfirmed] = useState(false);
   const [publicationPhotoRightsConfirmed, setPublicationPhotoRightsConfirmed] = useState(false);
@@ -300,6 +341,7 @@ export function HostPublicationWorkspace({
   /** 公開・停止 waiting for its confirmation in the page's dialog. */
   const [stateConfirm, setStateConfirm] = useState<"publish" | "stop" | null>(null);
   const stateConfirmStay = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const japaneseSourceRef = useRef<LocaleManuscript>(blankJapanese);
   const englishDraftRef = useRef<{ title: string; content: Record<string, unknown> }>({ title: "", content: blankContent });
 
@@ -311,8 +353,20 @@ export function HostPublicationWorkspace({
   const termsDirty = !!product && (!baselineForm || JSON.stringify(terms) !== JSON.stringify(baselineForm.terms));
   const mediaDirty = !!product && (!baselineForm || JSON.stringify(mediaForm(mediaDraft)) !== JSON.stringify(baselineForm.media));
   const providerMediaDirty = !adminDraft && !!product && JSON.stringify(providerMediaForm(providerMediaDraft)) !== providerMediaBaseline;
-  const dirty = create ? Boolean(slug || title || unitAmount) : !!product && (draftDirty || termsDirty || mediaDirty || providerMediaDirty);
+  // 分類 is saved on its own route, but the host edits it with the page: it counts as one of the unsaved changes.
+  const classification = useProductClassification(!adminDraft && productId ? { kind: "host", productId } : null);
+  const classificationDirty = !adminDraft && !!product && classification.dirty;
+  const dirty = adminCreate ? Boolean(slug || title || unitAmount) : !!product && (draftDirty || termsDirty || mediaDirty || providerMediaDirty || classificationDirty);
   const updateContent = useCallback((key: string, value: unknown) => setContent((current) => ({ ...current, [key]: value })), []);
+
+  // 英語と日本語のずれ: the Japanese manuscript's fingerprint now, computed after each edit (an older answer is dropped).
+  const japaneseKey = useMemo(() => canonicalJson(japaneseManuscript(withoutEmptyRowsIn(content))), [content]);
+  useEffect(() => {
+    if (adminDraft || !product) return;
+    let active = true;
+    void publicationManuscriptFingerprint(JSON.parse(japaneseKey) as unknown).then((value) => { if (active) setJapaneseFingerprint(value); }).catch(() => { if (active) setJapaneseFingerprint(null); });
+    return () => { active = false; };
+  }, [adminDraft, japaneseKey, product]);
 
   function updateJapanese(key: keyof LocaleManuscript, value: string | string[] | TimelineItem[]) {
     const next = { ...japaneseSourceRef.current, [key]: value } as LocaleManuscript;
@@ -444,7 +498,7 @@ export function HostPublicationWorkspace({
   }, [create, productId, refresh]);
 
   useEffect(() => {
-    if (!create) return;
+    if (!adminCreate) return;
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
@@ -467,16 +521,16 @@ export function HostPublicationWorkspace({
       setCreateDraftRestored(true);
     });
     return () => { active = false; };
-  }, [create, storageNamespace]);
+  }, [adminCreate, storageNamespace]);
 
   useEffect(() => {
-    if (!create || !createDraftRestored) return;
+    if (!adminCreate || !createDraftRestored) return;
     try { window.sessionStorage.setItem(`${storageNamespace}:new`, JSON.stringify({ slug, title, unitAmount, content, terms })); }
     catch { /* The current form still protects input in memory. */ }
-  }, [content, create, createDraftRestored, slug, storageNamespace, terms, title, unitAmount]);
+  }, [adminCreate, content, createDraftRestored, slug, storageNamespace, terms, title, unitAmount]);
 
   useEffect(() => {
-    if (create) {
+    if (adminCreate) {
       let active = true;
       queueMicrotask(() => { if (active) void fetch(apiBase, { cache: "no-store", credentials: "same-origin" }).then(async (response) => {
         const body = await response.json().catch(() => null);
@@ -496,11 +550,27 @@ export function HostPublicationWorkspace({
       if (active && isRecord(body) && Array.isArray(body.products)) setProducts(body.products as Product[]);
     }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "商品を読み込めませんでした。"); }); });
     return () => { active = false; };
-  }, [apiBase, create, productId]);
+  }, [adminCreate, apiBase, productId]);
 
   useEffect(() => {
     if (dirty && product) saveLocal(storageNamespace, product.id, { slug, title, unitAmount, content, terms, media: mediaDraft, providerMedia: providerMediaDraft });
   }, [content, dirty, mediaDraft, product, providerMediaDraft, slug, storageNamespace, terms, title, unitAmount]);
+
+  // A host's notice is one line above the save bar and goes by itself; an error stays.
+  useEffect(() => {
+    if (adminDraft || !notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 4000);
+    return () => window.clearTimeout(timer);
+  }, [adminDraft, notice]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointer = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onPointer); document.removeEventListener("keydown", onKey); };
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -549,19 +619,20 @@ export function HostPublicationWorkspace({
     } finally { setBusy(false); }
   }
 
-  async function saveAll(event?: React.FormEvent) {
+  /** Saves what changed. Resolves with the saved product, or null when something could not be saved (the reason is in `error`). */
+  async function saveAll(event?: React.FormEvent): Promise<Product | null> {
     event?.preventDefault();
-    if (!product || busy) return;
-    if (conflictProduct) { setError("別の更新と競合しています。入力を保持したまま、最新状態を確認してから保存してください。"); return; }
+    if (!product || busy) return null;
+    if (conflictProduct) { setError("別の更新と競合しています。入力を保持したまま、最新状態を確認してから保存してください。"); return null; }
     const amount = asPublicationPrice(unitAmount);
     const saleTerms = publicationTermsPayload(terms, product.saleTerms);
-    if (draftDirty && amount === null) { setError("料金は無料なら0円、有料なら50円以上の整数で入力してください。"); return; }
+    if (draftDirty && amount === null) { setError("料金は無料なら0円、有料なら50円以上の整数で入力してください。"); return null; }
     const faqProblem = draftDirty ? publicationContentFaqProblem(content) : null;
-    if (faqProblem) { setError(`${faqProblem}入力はこのブラウザーに保持しています。`); return; }
-    if (!draftDirty && !mediaDirty && !termsDirty && !providerMediaDirty) return;
-    if (termsDirty && !saleTerms && !draftDirty && !mediaDirty && !providerMediaDirty) {
+    if (faqProblem) { setError(`${faqProblem}入力はこのブラウザーに保持しています。`); return null; }
+    if (!draftDirty && !mediaDirty && !termsDirty && !providerMediaDirty && !classificationDirty) return product;
+    if (termsDirty && !saleTerms && !draftDirty && !mediaDirty && !providerMediaDirty && !classificationDirty) {
       setError("料金・取消条件はまだ保存できません。人数と、確定した取消期限・返金割合を入力してください。入力はこのブラウザーに保持しています。");
-      return;
+      return null;
     }
     if (adminDraft) {
       setSellerConfirmed(false);
@@ -589,8 +660,30 @@ export function HostPublicationWorkspace({
         shouldReconcile = false;
         setProduct(current); setMediaDraft(current.media);
       }
+      let savedContent: Record<string, unknown> | null = null;
       if (draftDirty) {
-        const draft = { slug: slug.trim(), publicTitle: title.trim(), content, currency: "JPY", unitAmount: amount! };
+        // 保存＝確認: empty rows are dropped and, on a page in both languages, the English is confirmed against the Japanese just before saving.
+        let draftContent = content;
+        if (!adminDraft) {
+          draftContent = withoutEmptyRowsIn(content);
+          if (content.japaneseOnly !== true) {
+            const japaneseNow = japaneseManuscript(draftContent);
+            try {
+              const translation = await confirmPublicationEnglish(() => ({ japanese: japaneseNow, english: englishPublicationManuscript(title.trim(), draftContent) }));
+              draftContent = { ...draftContent, translation };
+            } catch { /* Missing or invalid text: the server's blockers say what is still needed when publishing. */ }
+            const currentFingerprint = await publicationManuscriptFingerprint(japaneseNow);
+            const remembered = readEnglishSourceFingerprint(content);
+            const outOfSync = publicationLanguageOutOfSync({
+              japaneseOnly: false, japaneseWritten: manuscriptHasContent(japaneseNow),
+              englishWritten: manuscriptHasContent({ title, lead: draftContent.lead, description: draftContent.description }),
+              remembered, current: currentFingerprint,
+            });
+            draftContent = withEnglishSourceFingerprint(draftContent, savedEnglishSourceFingerprint({ outOfSync, remembered, current: currentFingerprint }));
+          }
+        }
+        const draft = { slug: slug.trim(), publicTitle: title.trim(), content: draftContent, currency: "JPY", unitAmount: amount! };
+        savedContent = draftContent;
         shouldReconcile = true;
         const response = await fetch(`${apiBase}/${encodeURIComponent(current.id)}`, { method: "PATCH", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: current.version, draft }) });
         const body: unknown = await response.json().catch(() => null);
@@ -602,6 +695,12 @@ export function HostPublicationWorkspace({
         current = (body as ProductResponse).product;
         shouldReconcile = false;
         setProduct(current);
+        if (savedContent && savedContent !== content) {
+          // What was saved is the draft without its empty rows plus the confirmation: the form shows exactly that.
+          japaneseSourceRef.current = japaneseManuscript(savedContent);
+          englishDraftRef.current = { title, content: savedContent };
+          setContent(savedContent);
+        }
         publicationUpdated = Boolean((body as { publicationUpdated?: boolean }).publicationUpdated);
       }
       let saved = current;
@@ -642,18 +741,22 @@ export function HostPublicationWorkspace({
         setProviderMediaDraft(savedProviderMedia);
         shouldReconcile = false;
       }
-      const savedContent = contentFrom(saved);
+      const baselineContent = contentFrom(saved);
       const savedTerms = publicationTermsForm(saved.saleTerms, saved.offers);
       setMediaDraft(saved.media);
       const savedProviderMediaForm = providerMediaForm(savedProviderMedia);
       setProviderMediaBaseline(JSON.stringify(savedProviderMediaForm));
-      setBaseline(JSON.stringify({ slug: saved.draft.slug, title: saved.draft.publicTitle, unitAmount: String(saved.draft.unitAmount), content: savedContent, terms: savedTerms, media: mediaForm(saved.media), providerMedia: savedProviderMediaForm }));
+      setBaseline(JSON.stringify({ slug: saved.draft.slug, title: saved.draft.publicTitle, unitAmount: String(saved.draft.unitAmount), content: baselineContent, terms: savedTerms, media: mediaForm(saved.media), providerMedia: savedProviderMediaForm }));
       if (termsSaved) setTerms(savedTerms);
       clearLocal(storageNamespace, saved.id); setConflictProduct(null);
-      if (publicationUpdated) setNotice("保存しました。掲載内容も更新しました。");
+      // 分類 is saved last; if only it fails, everything else stays saved and the reason is shown.
+      const classificationFailed = classificationDirty ? !(await classification.save()) : false;
+      if (classificationFailed) setError("分類を保存できませんでした。ほかの変更は保存しています。時間をおいて、もう一度保存してください。");
+      else if (publicationUpdated) setNotice("保存しました。掲載内容も更新しました。");
       else if (termsDirty && !saleTerms) setNotice("原稿・写真・販売者プロフィールを保存しました。料金・取消条件は入力途中のため、まだ保存されていません。");
       else if (saved.publicationNeedsUpdate) setNotice("下書きを保存しました。掲載中の内容は維持されています。公開条件を整えると変更を反映できます。");
       else setNotice("下書きを保存しました。");
+      return classificationFailed || (termsDirty && !saleTerms) ? null : saved;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存結果を確認できませんでした。最新状態を読み直してください。");
       // Only an uncertain write outcome or an explicit version conflict needs reconciliation.
@@ -661,6 +764,7 @@ export function HostPublicationWorkspace({
       if (shouldReconcile) {
         try { await refresh(true, true); } catch { /* The in-memory form and local draft remain untouched. */ }
       }
+      return null;
     } finally { setBusy(false); }
   }
 
@@ -720,11 +824,18 @@ export function HostPublicationWorkspace({
   async function replaceDraftWithLatest() {
     if (!product || busy) return;
     if (!window.confirm("保存していない入力を破棄し、最新の保存内容に置き換えます。続けますか？")) return;
+    await discardToLatest();
+  }
+
+  /** The 保存の帯's 「元に戻す」 (confirmed in the page's own dialog): back to what the server has, 分類 included. */
+  async function discardToLatest() {
+    if (!product || busy) return;
     setBusy(true);
     setNotice("");
     try {
       const latest = await refresh(false);
       clearLocal(storageNamespace, latest.id);
+      if (!adminDraft) await classification.reload();
       setError("");
       setNotice("最新の保存内容を読み込みました。");
     } catch (reason) {
@@ -766,6 +877,7 @@ export function HostPublicationWorkspace({
       }
       const saved = (body as ProductResponse).product;
       setProduct(saved); setNotice(action === "publish" ? "公開しました。" : "販売を停止しました。");
+      if (action === "publish") setBlockersShown(false);
       await refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "処理結果を確認できませんでした。入力は保持しています。");
@@ -819,11 +931,14 @@ export function HostPublicationWorkspace({
         highlights: english.highlights, included: english.included, notIncluded: english.notIncluded,
         knowBeforeYouGo: english.knowBeforeYouGo, notSuitableFor: english.notSuitableFor, timeline: english.timeline,
         translation: { sourceFingerprint: result.sourceFingerprint, confirmedSourceFingerprint: null, confirmedEnglishFingerprint: null },
+        // The English now follows this Japanese: the 「ずれ」 notice goes away.
+        languageSync: { englishSourceFingerprint: result.sourceFingerprint },
       }, publicationFaqRows(english.faq));
       englishDraftRef.current = { title: english.title, content: nextContent };
       setTitle(english.title);
       setContent(nextContent);
-      setNotice("英語案を作成しました。原文と照合して必要な修正を行い、確認してから保存してください。");
+      setCompare(true);
+      setNotice("日本語から翻訳しました。内容を確かめてから保存してください。");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "翻訳できませんでした。日本語原稿は保持しています。"); }
     finally { setTranslationBusy(false); }
   }
@@ -839,6 +954,59 @@ export function HostPublicationWorkspace({
       setContent((current) => ({ ...current, translation: confirmation }));
       setNotice("現在の日英原稿を確認しました。保存後に公開できます。");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "確認できませんでした。原稿は保持しています。"); }
+  }
+
+  /** 体験を作成 (host): the dialog asks the language, the name and the adult price; the address is made from the name. */
+  async function createHostProduct(event: React.FormEvent) {
+    event.preventDefault();
+    const name = createTitle.trim();
+    const price = asPublicationPrice(createPrice);
+    if (busy || !name || price === null) return;
+    setBusy(true); setError(""); setNotice("");
+    const draftContent = { ...blankContent, ...(createJapaneseOnly ? { japaneseOnly: true } : {}), ja: { ...blankJapanese, title: name } };
+    let address = publicationSlugFromTitle(name);
+    const post = (slugValue: string) => fetch(apiBase, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: slugValue, publicTitle: name, content: draftContent, currency: "JPY", unitAmount: price }) });
+    try {
+      let response = await post(address);
+      if (response.status === 409) { address = publicationSlugRetry(address); response = await post(address); }
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
+      router.replace(`${experiencesBase}/${encodeURIComponent((body as ProductResponse).product.id)}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "作成結果を確認できませんでした。入力を保持しています。");
+      // A lost response can still have created the product. Reconcile by the unique seller slug before retry.
+      try {
+        const listResponse = await fetch(apiBase, { cache: "no-store", credentials: "same-origin" });
+        const listBody = await listResponse.json().catch(() => null);
+        const found = isRecord(listBody) && Array.isArray(listBody.products) ? (listBody.products as Product[]).find((item) => item.draft.slug === address) : undefined;
+        if (found) router.replace(`${experiencesBase}/${encodeURIComponent(found.id)}`);
+      } catch { /* Keep the entered form; an explicit retry can reconcile again. */ }
+    } finally { setBusy(false); }
+  }
+
+  function closeCreateDialog() {
+    if (!createOpen) return;
+    setCreateOpen(false);
+    if (hostCreate) router.replace(experiencesBase);
+  }
+
+  /** 「同意して公開」: save first when there is something unsaved, then either say what is still missing or ask for the consent. */
+  async function requestPublish() {
+    if (!product || busy || conflictProduct || product.status === "SUSPENDED") return;
+    let current = product;
+    if (dirty) {
+      const savedProduct = await saveAll();
+      if (!savedProduct) return;
+      current = savedProduct;
+    }
+    if ((current.publicationBlockers ?? []).length > 0) { setBlockersShown(true); setBlockerDialog(true); return; }
+    setStateConfirm("publish");
+  }
+
+  /** 「日本語から翻訳」: asks first when the English already has something written. */
+  function requestTranslation() {
+    if (manuscriptHasContent({ title, lead: content.lead, description: content.description })) setTranslateConfirm(true);
+    else void generateEnglish();
   }
 
   async function switchManagedSalesPlan() {
@@ -873,13 +1041,15 @@ export function HostPublicationWorkspace({
     } finally { setBusy(false); }
   }
 
-  async function uploadPhoto() {
-    if (!product || !selectedPhoto || !rightsConfirmed || busy || conflictProduct) return;
+  async function uploadPhoto(): Promise<boolean> {
+    if (!product || !selectedPhoto || !rightsConfirmed || busy || conflictProduct) return false;
     setBusy(true); setError(""); setNotice("");
     try {
+      // A Japanese-only page asks for one description: the upload API wants both, so the English one is the same sentence.
+      const altEnglish = !adminDraft && content.japaneseOnly === true ? photoAltJa : photoAlt;
       const profileAsset = !adminDraft && photoPlacement !== "GALLERY";
       if (profileAsset && providerMediaVersion === null) throw new Error("販売者プロフィールの保存版がありません。再読み込みしてください。");
-      const response = await fetch(profileAsset ? "/host/api/provider-media/upload" : `${apiBase}/${encodeURIComponent(product.id)}/media`, { method: "POST", credentials: "same-origin", headers: { "content-type": selectedPhoto.type, "x-experience-photo-rights-confirmed": "true", "x-experience-photo-alt-text-utf8-base64url": base64UrlUtf8(photoAlt), "x-experience-photo-alt-text-ja-utf8-base64url": base64UrlUtf8(photoAltJa), "x-experience-media-placement": adminDraft ? "GALLERY" : photoPlacement, ...(profileAsset ? { "x-experience-provider-media-version": String(providerMediaVersion) } : {}), ...(photoCredit.trim() ? { "x-experience-photo-credit-utf8-base64url": base64UrlUtf8(photoCredit.trim()) } : {}) }, body: selectedPhoto });
+      const response = await fetch(profileAsset ? "/host/api/provider-media/upload" : `${apiBase}/${encodeURIComponent(product.id)}/media`, { method: "POST", credentials: "same-origin", headers: { "content-type": selectedPhoto.type, "x-experience-photo-rights-confirmed": "true", "x-experience-photo-alt-text-utf8-base64url": base64UrlUtf8(altEnglish), "x-experience-photo-alt-text-ja-utf8-base64url": base64UrlUtf8(photoAltJa), "x-experience-media-placement": adminDraft ? "GALLERY" : photoPlacement, ...(profileAsset ? { "x-experience-provider-media-version": String(providerMediaVersion) } : {}), ...(photoCredit.trim() ? { "x-experience-photo-credit-utf8-base64url": base64UrlUtf8(photoCredit.trim()) } : {}) }, body: selectedPhoto });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       if (profileAsset) {
@@ -895,7 +1065,8 @@ export function HostPublicationWorkspace({
         setNotice("体験写真を追加しました。保存すると公開中の商品にも反映されます。");
       }
       setSelectedPhoto(null); setSharedPhotoName(null); setPhotoRights(null); setPhotoAlt(""); setPhotoAltJa(""); setPhotoCredit("");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "写真を追加できませんでした。選択した写真と入力を保持しています。"); }
+      return true;
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "写真を追加できませんでした。選択した写真と入力を保持しています。"); return false; }
     finally { setBusy(false); }
   }
 
@@ -921,7 +1092,7 @@ export function HostPublicationWorkspace({
     finally { setBusy(false); }
   }
 
-  if (create) return <HostPageBody><PageHead title={adminDraft ? "商品の代理登録" : "体験を作成"} /><form onSubmit={createProduct} className={`${HOST_SURFACE} space-y-5 p-4 md:p-6`}>
+  if (adminCreate) return <HostPageBody><PageHead title="商品の代理登録" /><form onSubmit={createProduct} className={`${HOST_SURFACE} space-y-5 p-4 md:p-6`}>
     <p className="text-sm text-ink-soft">{adminDraft ? "選択した運営登録済み販売者へ、非公開の商品下書きを作成します。販売者へ確認後、通常公開と同じ条件を満たす未公開draftだけを事務局判断で代理公開できます。" : "新しい商品をExperienceに下書き保存します。公開前の入力は公開されません。"}</p>
     {error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : null}
     <Field label="公開URL用の英数字slug" value={slug} onChange={setSlug} placeholder="kamakura-community-dinner" />
@@ -963,10 +1134,23 @@ export function HostPublicationWorkspace({
   </form></HostPageBody>;
 
   if (!productId) return <HostPageBody><PageHead title={adminDraft ? "代理登録の商品" : "体験"}>{bookingGuideHref ? <Link className={consoleButtonClass("secondary")} href={bookingGuideHref}>予約後の集合案内</Link> : null}</PageHead><section className={`${HOST_SURFACE} p-4 md:p-6`}>
-    <div className="mb-4 flex items-center justify-between gap-3"><p className="text-ink-soft">{adminDraft ? "事務局が作成した、一度も公開していない下書き" : "あなたが販売する体験"}</p><Link className={consoleButtonClass("primary")} href={createHref}>{adminDraft ? "商品を代理登録" : "体験を作成"}</Link></div>
-    {error ? <p role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : null}
+    <div className="mb-4 flex items-center justify-between gap-3"><p className="text-ink-soft">{adminDraft ? "事務局が作成した、一度も公開していない下書き" : "あなたが販売する体験"}</p>{adminDraft ? <Link className={consoleButtonClass("primary")} href={createHref}>商品を代理登録</Link> : <button type="button" className={consoleButtonClass("primary")} onClick={() => setCreateOpen(true)}>体験を作成</button>}</div>
+    {error && !(createOpen && !adminDraft) ? <p role="alert" className={`mb-3 rounded-xl p-3 ${adminDraft ? "bg-rose-50 text-rose-900" : "bg-danger-pale text-danger"}`}>{error}</p> : null}
     {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={`${experiencesBase}/${encodeURIComponent(item.id)}`}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p>{!adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) ? <HostBookingLinkCopy slug={item.draft.slug} origin={publicSiteOrigin} japaneseOnly={item.draft.content.japaneseOnly === true} /> : null}</div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}
-  </section></HostPageBody>;
+  </section>
+  {!adminDraft ? <EditorDialog open={createOpen} onClose={closeCreateDialog} title="体験を作成">
+    <form onSubmit={(event) => void createHostProduct(event)} className="space-y-1">
+      <EditorChoice name="create-language" legend="掲載言語" info="「英語と日本語」は両方のページを作ります。「日本語のみ」は日本語のページだけに載り、英語のページ・一覧・検索結果には出ません。あとから英語を足すときは事務局へご連絡ください。" value={createJapaneseOnly ? "ja" : "both"} onChange={(next) => setCreateJapaneseOnly(next === "ja")} options={[{ value: "both", label: "英語と日本語" }, { value: "ja", label: "日本語のみ" }]} />
+      <EditorField label="体験名" value={createTitle} onChange={setCreateTitle} />
+      <EditorField label="大人1人の料金（税込・円）" value={createPrice} onChange={setCreatePrice} inputMode="numeric" info="無料の体験は0円にします。有料は50円以上にしてください。" />
+      {error ? <p role="alert" className="rounded-xl bg-danger-pale p-3 text-danger">{error}</p> : null}
+      <div className="flex justify-end gap-2 pt-4">
+        <button type="button" className={consoleButtonClass("secondary")} onClick={closeCreateDialog}>やめる</button>
+        <button type="submit" disabled={busy || !createTitle.trim() || asPublicationPrice(createPrice) === null} className={consoleButtonClass("primary")}>{busy ? "作成中…" : "作成"}</button>
+      </div>
+    </form>
+  </EditorDialog> : null}
+  </HostPageBody>;
 
   if (!product) return <HostPageBody><PageHead title="体験を読み込み中" />{error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : <p>商品を読み込んでいます…</p>}<button type="button" className={consoleButtonClass("secondary")} onClick={() => void refresh().catch((reason) => setError(reason instanceof Error ? reason.message : "読み込みに失敗しました。"))}>再読み込み</button></HostPageBody>;
 
@@ -1075,44 +1259,37 @@ export function HostPublicationWorkspace({
       lead: typeof content.lead === "string" ? content.lead : "",
       description: typeof content.description === "string" ? content.description : "",
       language: isRecord(content.facts) && typeof content.facts.language === "string" ? content.facts.language : "",
-      highlights: lines(content.highlights),
-      included: lines(content.included),
-      notIncluded: lines(content.notIncluded),
-      knowBeforeYouGo: lines(content.knowBeforeYouGo),
-      notSuitableFor: lines(content.notSuitableFor),
+      highlights: stringRows(content.highlights),
+      included: stringRows(content.included),
+      notIncluded: stringRows(content.notIncluded),
+      knowBeforeYouGo: stringRows(content.knowBeforeYouGo),
+      notSuitableFor: stringRows(content.notSuitableFor),
     };
+    type TextKey = "title" | "lead" | "description" | "language";
+    type RowKey = "highlights" | "included" | "notIncluded" | "knowBeforeYouGo" | "notSuitableFor";
+    const NAME = { en: "英語", ja: "日本語" } as const;
     const japaneseOnly = content.japaneseOnly === true;
-    const localeIsJapanese = editorLocale === "ja" || japaneseOnly;
-    const localeField = (key: "title" | "lead" | "description" | "language", jaLabel: string, enLabel: string, rows = 0) => {
-      const value = localeIsJapanese ? japanese[key] : english[key];
-      const update = (next: string) => {
-        if (localeIsJapanese) updateJapanese(key, next);
-        else if (key === "title") updateEnglishTitle(next);
-        else if (key === "language") updateEnglishContent("facts", { ...(isRecord(content.facts) ? content.facts : {}), language: next });
-        else updateEnglishContent(key, next);
-      };
-      return <Field label={localeIsJapanese ? jaLabel : enLabel} value={value} multiline={rows > 0} rows={rows || undefined} onChange={update} />;
+    const L: "en" | "ja" = japaneseOnly ? "ja" : editorLocale;
+    const O: "en" | "ja" = L === "en" ? "ja" : "en";
+    const englishWritten = manuscriptHasContent(english);
+    const japaneseWritten = manuscriptHasContent(japanese);
+    const showCompare = compare && !japaneseOnly && englishWritten && japaneseWritten;
+    const languageStale = publicationLanguageOutOfSync({ japaneseOnly, japaneseWritten, englishWritten, remembered: readEnglishSourceFingerprint(content), current: japaneseFingerprint });
+    const manuscriptOf = (locale: "en" | "ja") => (locale === "ja" ? japanese : english);
+    const setText = (key: TextKey, next: string) => {
+      if (L === "ja") updateJapanese(key, next);
+      else if (key === "title") updateEnglishTitle(next);
+      else if (key === "language") updateEnglishContent("facts", { ...(isRecord(content.facts) ? content.facts : {}), language: next });
+      else updateEnglishContent(key, next);
     };
-    const localeListField = (key: "highlights" | "included" | "notIncluded" | "knowBeforeYouGo" | "notSuitableFor", jaLabel: string, enLabel: string, rows = 3) => (
-      <Field
-        label={localeIsJapanese ? jaLabel : enLabel}
-        value={localeIsJapanese ? japanese[key].join("\n") : english[key]}
-        multiline
-        rows={rows}
-        onChange={(next) => {
-          // Keep the trailing empty line while typing so Enter can start the next item.
-          const value = next.split("\n");
-          if (localeIsJapanese) updateJapanese(key, value);
-          else updateEnglishContent(key, value);
-        }}
-        onBlur={() => {
-          const value = localeIsJapanese ? japanese[key] : english[key].split("\n");
-          if (!value.some((item) => !item.trim())) return;
-          const nonempty = value.filter((item) => item.trim().length > 0);
-          if (localeIsJapanese) updateJapanese(key, nonempty);
-          else updateEnglishContent(key, nonempty);
-        }}
-      />
+    const setRows = (key: RowKey, next: string[]) => { if (L === "ja") updateJapanese(key, next); else updateEnglishContent(key, next); };
+    const manuscriptField = (label: string, key: TextKey, options: { rows?: number; info?: string } = {}) => (
+      <EditorField label={label} rows={options.rows} info={options.info} value={manuscriptOf(L)[key]} onChange={(next) => setText(key, next)}
+        reference={showCompare ? <EditorReference language={NAME[O]} text={manuscriptOf(O)[key]} /> : undefined} />
+    );
+    const rowsEditor = (label: string, key: RowKey, small?: string) => (
+      <EditorRows label={label} small={small} values={manuscriptOf(L)[key]} onChange={(next) => setRows(key, next)} disabled={busy}
+        references={showCompare ? manuscriptOf(O)[key] : undefined} language={NAME[O]} />
     );
     const makeCoverPhoto = (id: string) => setMediaDraft((current) => {
       const gallery = current.filter((item) => item.placement === "GALLERY");
@@ -1122,101 +1299,363 @@ export function HostPublicationWorkspace({
       let cursor = 0;
       return current.map((item) => item.placement === "GALLERY" ? ordered[cursor++]! : item);
     });
-    const statusAndMessages = <>
-      {dirty ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">未保存の変更があります。公開・停止は保存後に実行できます。</p> : null}
-      {product.publicationNeedsUpdate ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">現在の掲載版を維持しています。公開条件を満たす変更を反映すると、確認後に新しい掲載版へ切り替わります。</p> : null}
-      {error || conflictProduct ? <div role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error ? <p>{error}</p> : null}{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
-      {notice ? <p role="status" className="mb-3 rounded-xl bg-green-50 p-3 text-green-900">{notice}</p> : null}
-      {product.status === "SUSPENDED" ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950">運営停止中です。入力と下書きは保存できますが、再開は運営の停止解除後に行えます。</p> : null}
-    </>;
-    const japaneseOnlyToggle = <label className="flex items-start gap-2 rounded-xl border border-line bg-sand/40 p-4 text-sm"><input type="checkbox" className="mt-1" checked={japaneseOnly} disabled={busy || !!conflictProduct} onChange={(event) => changeJapaneseOnly(event.target.checked)} /><span><b>日本語のみで公開する</b><span className="block text-ink-soft">英語の原稿・確認は要りません。日本語のページ（/ja）にだけ載り、英語のページ・英語の一覧・英語の検索結果には出ません。あとから英語を足したいときは事務局に連絡してください。日本語サイトが有効な環境でだけ保存できます。</span></span></label>;
-    const languageSwitch = japaneseOnly ? <p className="text-sm text-ink-soft">日本語の原稿だけを編集します。公開上の商品名は日本語の商品名と同じになります。</p> : <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="inline-flex rounded-xl border border-line bg-white p-1" role="group" aria-label="原稿の言語">
-        <button type="button" aria-pressed={localeIsJapanese} className={`min-h-10 rounded-lg px-4 text-sm font-bold ${localeIsJapanese ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale("ja")}>日本語</button>
-        <button type="button" aria-pressed={!localeIsJapanese} className={`min-h-10 rounded-lg px-4 text-sm font-bold ${!localeIsJapanese ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale("en")}>英語を確認</button>
-      </div>
-      {!localeIsJapanese ? <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${englishIsConfirmed(content.translation) ? "bg-green-50 text-moss" : "bg-amber-50 text-amber-950"}`}>{englishIsConfirmed(content.translation) ? "確認済み" : "未確認"}</span> : null}
+    const openPhotoDialog = (kind: "gallery" | "provider") => {
+      setPhotoPlacement(kind === "gallery" ? "GALLERY" : "PROVIDER_PHOTO");
+      setPhotoRights(null);
+      setPhotoDialog(kind);
+    };
+    const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    const activeIndex = mediaDraft.findIndex((item) => item.id === activePhotoId);
+    const activePhoto = activeIndex >= 0 ? mediaDraft[activeIndex]! : null;
+    const timeline = L === "ja" ? japanese.timeline : timelineItems(content.timeline);
+    const otherTimeline = O === "ja" ? japanese.timeline : timelineItems(content.timeline);
+    const faqRows = publicationFaqRows(L === "ja" ? (isRecord(content.ja) ? content.ja.faq : undefined) : content.faq);
+    const otherFaqRows = publicationFaqRows(O === "ja" ? (isRecord(content.ja) ? content.ja.faq : undefined) : content.faq);
+    const faqProblem = publicationFaqProblem(faqRows, NAME[L]);
+    const faqFull = faqRows.length >= PUBLICATION_FAQ_LIMITS.maxItems;
+    const changeFaq = (index: number, key: keyof PublicationFaqRow, value: string) => updateFaq(L, faqRows.map((row, at) => at === index ? { ...row, [key]: value } : row));
+    const disclosure = content.meetingPointDisclosure === "PUBLIC" ? "PUBLIC" : "AFTER_BOOKING";
+
+    const pillBase = "inline-flex h-[26px] items-center gap-1.5 rounded-full px-[11px] text-xs font-extrabold whitespace-nowrap before:size-1.5 before:rounded-full before:bg-current before:content-['']";
+    const statusTone = product.status === "PUBLISHED" ? "bg-leaf-pale text-moss"
+      : product.status === "DRAFT" ? "bg-sand text-ink-soft"
+        : product.status === "RESTART_REQUIRED" ? "bg-warn-pale text-warn" : "bg-danger-pale text-danger";
+    const pendingChanges = product.status === "PUBLISHED" && (product.publicationNeedsUpdate || savedBlockers.length > 0);
+    const showPrimary = !(product.status === "PUBLISHED" && !product.publicationNeedsUpdate);
+    const titleText = L === "ja" ? japanese.title || title || "体験を編集" : title || japanese.title || "体験を編集";
+    const blockerGoal = product.status === "PUBLISHED" ? "公開中のページに反映する" : product.status === "STOPPED" ? "再開する" : "公開する";
+    const markedTabs = new Set<string>();
+    if (blockersShown && !dirty) for (const blocker of savedBlockers) { const destination = publicationBlockerDestination(blocker); if (destination?.kind === "tab") markedTabs.add(destination.tab); }
+    const missingAltMark = blockersShown && savedBlockers.includes("PHOTOS_REQUIRED");
+    const perOffer = perOfferOpen ?? terms.offerPrices.some((price) => price.adultPriceYen !== "");
+    const sectionClass = `${HOST_SURFACE} scroll-mt-4 p-4 md:p-6`;
+    const headingClass = "mb-3.5 flex items-center text-base font-extrabold";
+    const setTermsField = <K extends keyof PublicationTermsForm>(key: K, value: PublicationTermsForm[K]) => setTerms((current) => ({ ...current, [key]: value }));
+    const classificationShown = !classification.hidden && classification.value !== null;
+
+    const languageBar = <div className="mb-4 flex flex-wrap items-center gap-1.5">
+      {japaneseOnly ? <>
+        <span className={`${pillBase} bg-sand text-ink-soft`}>日本語のみで公開</span>
+        <HostInfoTip label="日本語のみで公開">英語ページは作られません。公開上の商品名は日本語の体験名と同じになります。変えるときは「掲載設定 › 掲載言語」から。</HostInfoTip>
+        <button type="button" className="px-1 text-[0.8125rem] font-extrabold text-moss underline underline-offset-4" onClick={() => setWorkspaceSection("settings")}>掲載設定</button>
+      </> : <>
+        <div className="inline-flex rounded-xl border border-line-strong bg-canvas p-[3px]" role="group" aria-label="原稿の言語">
+          <button type="button" aria-pressed={L === "en"} className={`inline-flex h-9 items-center gap-1.5 rounded-[9px] px-[18px] text-[0.84375rem] font-extrabold ${L === "en" ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale("en")}>英語{languageStale ? <span role="img" aria-label="日本語のほうが新しい" className="inline-block size-[7px] rounded-full bg-warn" /> : null}</button>
+          <button type="button" aria-pressed={L === "ja"} className={`inline-flex h-9 items-center rounded-[9px] px-[18px] text-[0.84375rem] font-extrabold ${L === "ja" ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale("ja")}>日本語</button>
+        </div>
+        <HostInfoTip label="原稿の言語">「英語」は英語ページ、「日本語」は日本語ページの原稿です。どちらも直接書けます。英語は「日本語から翻訳」で作ることもできます。翻訳はボタンを押したときだけ行われ、自動では書き換わりません。写真の並び・料金・日程は共通です。</HostInfoTip>
+      </>}
+      <span className="grow" />
+      {!japaneseOnly && englishWritten && japaneseWritten ? <button type="button" aria-pressed={compare} className={`${consoleButtonClass("ghost", "sm")} ${compare ? "bg-sand text-ink" : ""}`} onClick={() => setCompare((current) => !current)}>{compare ? "✓ " : ""}{NAME[O]}と見比べる</button> : null}
+      {L === "en" && !japaneseOnly ? <button type="button" disabled={busy || translationBusy || !japaneseWritten} className={consoleButtonClass(englishWritten ? "secondary" : "primary", "sm")} onClick={requestTranslation}>{translationBusy ? "翻訳中…" : "日本語から翻訳"}</button> : null}
     </div>;
-    const translationControls = !localeIsJapanese ? <div className="rounded-xl border border-line bg-sand/40 p-4">
-      <p className="text-sm text-ink-soft">日本語の内容と照合し、公開する英語を確認してください。日本語を編集すると確認状態が解除されます。</p>
-      <div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={translationBusy || busy} className={consoleButtonClass("secondary")} onClick={() => void generateEnglish()}>{translationBusy ? "翻訳中…" : "日本語から英語案を作成"}</button><button type="button" disabled={translationBusy || busy || englishIsConfirmed(content.translation)} className={consoleButtonClass("secondary")} onClick={confirmEnglish}>この英語を確認</button></div>
-      {liveEnglishStaleNote(product.status, englishIsConfirmed(content.translation)) ? <p role="status" className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-950">{liveEnglishStaleNote(product.status, englishIsConfirmed(content.translation))}</p> : null}
-    </div> : null;
-    const photoSection = <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-photos-title">
-      <div><h2 id="publication-photos-title" className="text-base font-extrabold">写真</h2><p className="mt-1 text-sm text-ink-soft">1枚目が体験ページの表紙です。説明・クレジット・並び順も公開内容として保存します。</p></div>
-      {mediaDraft.map((photo, index) => <details key={photo.id} className="rounded-xl border border-line p-3">
-        <summary className="flex min-h-11 cursor-pointer items-center gap-3">
-          <Image src={photo.previewUrl} alt="" width={64} height={48} unoptimized className="h-12 w-16 rounded-lg object-cover" />
-          <span className="min-w-0 flex-1 break-words text-sm font-bold">写真 {index + 1}{index === 0 ? " · 表紙" : ""}<span className="block text-xs font-normal text-muted">{photo.altTextJa || photo.altText || "写真の説明を編集"}</span></span>
-          <span className="shrink-0 text-xs text-muted">編集</span>
-        </summary>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <Field label="写真の説明（英語）" value={photo.altText} onChange={(next) => updatePhoto(photo.id, { altText: next })} />
-          <Field label="写真の説明（日本語）" value={photo.altTextJa} onChange={(next) => updatePhoto(photo.id, { altTextJa: next })} />
-          <Field label="写真クレジット（任意）" value={photo.publicCredit ?? ""} onChange={(next) => updatePhoto(photo.id, { publicCredit: next.trim() ? next : null })} />
-          <div className="flex flex-wrap gap-2 md:col-span-2">
-            <button type="button" aria-label={`写真 ${index + 1} を前へ`} disabled={busy || galleryMedia[0]?.id === photo.id} className={consoleButtonClass("secondary", "sm")} onClick={() => movePhoto(photo.id, -1)}>前へ</button>
-            <button type="button" aria-label={`写真 ${index + 1} を後ろへ`} disabled={busy || galleryMedia.at(-1)?.id === photo.id} className={consoleButtonClass("secondary", "sm")} onClick={() => movePhoto(photo.id, 1)}>後ろへ</button>
-            <button type="button" aria-label={`写真 ${index + 1} を表紙にする`} disabled={busy || galleryMedia[0]?.id === photo.id} className={consoleButtonClass("secondary", "sm")} onClick={() => makeCoverPhoto(photo.id)}>表紙にする</button>
-            <button type="button" aria-label={`写真 ${index + 1} を下書きから外す`} disabled={busy} className={consoleButtonClass("secondary", "sm")} onClick={() => removePhoto(photo.id)}>外す</button>
+    const staleNotice = languageStale && L === "en" ? <section className="flex flex-wrap items-center justify-between gap-3.5 rounded-2xl bg-warn-pale px-[18px] py-3.5 text-ink">
+      <p className="flex min-w-40 flex-1 items-center font-bold">日本語を変えたあと、英語は変わっていません<HostInfoTip label="言語のずれ">もう一方の言語を変えても、こちらは自動では書き換わりません。翻訳し直すか、このままでよければ知らせを消せます。公開は止まりません。</HostInfoTip></p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" disabled={busy || translationBusy} className={consoleButtonClass("secondary", "sm")} onClick={requestTranslation}>日本語から翻訳し直す</button>
+        <button type="button" disabled={busy || japaneseFingerprint === null} className={consoleButtonClass("ghost", "sm")} onClick={() => { if (japaneseFingerprint !== null) setContent((current) => withEnglishSourceFingerprint(current, japaneseFingerprint)); }}>このままでよい</button>
+      </div>
+    </section> : null;
+
+    const photoSection = <section id="publication-photos" className={sectionClass} aria-labelledby="publication-photos-title">
+      <h2 id="publication-photos-title" className={headingClass}>写真<HostInfoTip label="写真">1枚目が体験ページの表紙です。写真を選ぶと、説明と並び順を変えられます。並び順は英語と日本語で共通です。</HostInfoTip></h2>
+      <div className="grid grid-cols-3 gap-2.5 md:grid-cols-4">
+        {mediaDraft.map((photo, index) => <button key={photo.id} type="button" aria-pressed={photo.id === activePhotoId} aria-label={`写真 ${index + 1}${index === 0 ? "（表紙）" : ""}を編集`} onClick={() => setActivePhotoId((current) => current === photo.id ? null : photo.id)} className={`relative block aspect-[4/3] w-full overflow-hidden rounded-xl border-2 bg-sand ${photo.id === activePhotoId ? "border-ink" : "border-transparent"}`}>
+          <Image src={photo.previewUrl} alt="" width={160} height={120} unoptimized className="size-full object-cover" />
+          {missingAltMark && !(L === "ja" ? photo.altTextJa : photo.altText).trim() ? <span className="absolute right-[7px] bottom-[7px] rounded-full bg-warn-pale px-[9px] py-px text-[0.6875rem] font-extrabold text-warn">説明なし</span> : null}
+          {index === 0 ? <span className="absolute top-[7px] left-[7px] rounded-full bg-canvas px-[9px] py-px text-[0.6875rem] font-extrabold">表紙</span> : <span className="absolute top-1.5 right-2 text-[0.6875rem] font-extrabold text-canvas [text-shadow:0_1px_2px_rgb(0_0_0/0.35)]">{index + 1}</span>}
+        </button>)}
+        <button type="button" disabled={!!conflictProduct} onClick={() => openPhotoDialog("gallery")} className="grid aspect-[4/3] w-full place-items-center rounded-xl border-[1.5px] border-dashed border-line-strong bg-sand text-[0.8125rem] font-extrabold text-ink-soft hover:bg-line">＋ 写真を追加</button>
+      </div>
+      {!mediaDraft.length ? <p className="mt-3 text-sm text-muted">表紙の写真がありません。公開するには、掲載許諾を確認した写真を追加してください。</p> : null}
+      {activePhoto ? <div className="mt-3 rounded-2xl bg-sand p-4">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2.5">
+          <b>写真 {activeIndex + 1}{activeIndex === 0 ? " · 表紙" : ""}</b>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" aria-label={`写真 ${activeIndex + 1} を表紙にする`} disabled={busy || mediaDraft[0]?.id === activePhoto.id} className={consoleButtonClass("secondary", "sm")} onClick={() => makeCoverPhoto(activePhoto.id)}>表紙にする</button>
+            <button type="button" aria-label={`写真 ${activeIndex + 1} を前へ`} disabled={busy || mediaDraft[0]?.id === activePhoto.id} className={consoleButtonClass("secondary", "sm")} onClick={() => movePhoto(activePhoto.id, -1)}>前へ</button>
+            <button type="button" aria-label={`写真 ${activeIndex + 1} を後ろへ`} disabled={busy || mediaDraft.at(-1)?.id === activePhoto.id} className={consoleButtonClass("secondary", "sm")} onClick={() => movePhoto(activePhoto.id, 1)}>後ろへ</button>
+            <button type="button" aria-label={`写真 ${activeIndex + 1} を下書きから外す`} disabled={busy} className={`${consoleButtonClass("secondary", "sm")} text-danger`} onClick={() => { removePhoto(activePhoto.id); setActivePhotoId(null); }}>外す</button>
           </div>
         </div>
-      </details>)}
-      {!mediaDraft.length ? <p className="text-sm text-muted">表紙の写真がありません。公開するには、掲載許諾を確認した写真を追加してください。</p> : null}
-      <details open={!mediaDraft.length} className="space-y-3 rounded-xl bg-sand/40 p-4">
-        <summary className="min-h-11 cursor-pointer py-2 font-bold">写真を追加</summary>
-        <label className="block text-sm font-bold text-ink-soft">写真の用途<select value={photoPlacement} disabled={busy} onChange={(event) => { setPhotoPlacement(event.target.value as typeof photoPlacement); setPhotoRights(null); }} className="mt-1 block w-full rounded-xl border border-line bg-white px-3 py-2"><option value="GALLERY">この体験の写真</option><option value="PROVIDER_PHOTO">提供者写真（全商品）</option><option value="BUSINESS_LOGO">事業者ロゴ（全商品）</option></select></label>
-        <Field label="写真の説明（英語）" value={photoAlt} onChange={setPhotoAlt} />
-        <Field label="写真の説明（日本語）" value={photoAltJa} onChange={setPhotoAltJa} />
-        <Field label="写真クレジット（任意）" value={photoCredit} onChange={setPhotoCredit} />
-        <HostSharedPhotoOffer disabled={busy || !!conflictProduct} onUse={(photo) => { setSelectedPhoto(photo); setSharedPhotoName(photo.name); setPhotoRights(null); }} />
-        <label className="block text-sm font-bold text-ink-soft">端末から選ぶ<input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => { setSelectedPhoto(event.target.files?.[0] ?? null); setSharedPhotoName(null); setPhotoRights(null); }} className="mt-1 block max-w-full font-normal" /></label>
-        {sharedPhotoName && selectedPhoto ? <p className="text-sm text-ink-soft">共有された写真を選択中: <span className="[overflow-wrap:anywhere]">{sharedPhotoName}</span></p> : null}
-        <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={rightsConfirmed} disabled={busy || !selectedPhoto} onChange={(event) => setPhotoRights(event.target.checked && selectedPhoto ? { file: selectedPhoto, productId: product.id, placement: photoPlacement } : null)} /><span>この写真を「{photoPlacement === "GALLERY" ? "この体験の写真" : photoPlacement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}」として{photoPlacement === "GALLERY" ? "この商品" : "販売者のすべての商品"}に公開する権利があり、権利者と写っている方から明示的な許諾を得ています。</span></label>
-        <button type="button" disabled={busy || !!conflictProduct || !selectedPhoto || !rightsConfirmed || !photoAlt.trim() || !photoAltJa.trim()} className={consoleButtonClass("secondary")} onClick={() => void uploadPhoto()}>写真を追加・差し替え</button>
-      </details>
+        <EditorField label="写真の説明" info="何が写っているかを一言で書きます。読み上げと検索に使われます。" value={L === "ja" ? activePhoto.altTextJa : activePhoto.altText}
+          onChange={(next) => updatePhoto(activePhoto.id, L === "ja" ? { altTextJa: next } : { altText: next })}
+          reference={showCompare ? <EditorReference language={NAME[O]} text={O === "ja" ? activePhoto.altTextJa : activePhoto.altText} /> : undefined} />
+        <EditorField label="クレジット" small="任意" placeholder="撮影者名など" value={activePhoto.publicCredit ?? ""} onChange={(next) => updatePhoto(activePhoto.id, { publicCredit: next.trim() ? next : null })} />
+      </div> : null}
     </section>;
-    const pageSections = <div id="publication-page-panel" className="space-y-4">
-      {japaneseOnlyToggle}
-      {languageSwitch}
-      {translationControls}
-      {photoSection}
-      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-intro-title"><h2 id="publication-intro-title" className="text-base font-extrabold">ひとこと紹介・言語・説明</h2>{localeField("title", "体験名", "Experience title")}{localeField("lead", "ひとこと紹介", "Short introduction", 2)}{localeField("language", "当日の言語", "Languages during the experience")}{localeField("description", "詳しい説明", "Description", 7)}</section>
-      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-highlights-title"><h2 id="publication-highlights-title" className="text-base font-extrabold">見どころ・含まれるもの</h2>{localeListField("highlights", "見どころ", "Highlights")}{localeListField("included", "含まれるもの", "Included", 2)}{localeListField("notIncluded", "含まれないもの", "Not included", 2)}</section>
-      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-timeline-title"><h2 id="publication-timeline-title" className="text-base font-extrabold">当日の流れ</h2>{timelineSection(editorLocale, localeIsJapanese ? japanese.timeline : timelineItems(content.timeline))}</section>
-      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-meeting-title"><h2 id="publication-meeting-title" className="text-base font-extrabold">集合場所</h2><label className="block text-sm font-bold text-ink-soft">集合場所を旅行者に見せる時期<select value={String(content.meetingPointDisclosure ?? "AFTER_BOOKING")} onChange={(event) => setContent((current) => ({ ...current, meetingPointDisclosure: event.target.value === "PUBLIC" ? "PUBLIC" : "AFTER_BOOKING" }))} className="mt-1 block w-full rounded-xl border border-line bg-white px-3 py-2 font-normal text-ink"><option value="AFTER_BOOKING">予約が確定してから案内する</option><option value="PUBLIC">予約前から公開する</option></select></label><Field label="予約前に公開する集合概要" value={typeof content.meetingOverview === "string" ? content.meetingOverview : ""} multiline rows={3} onChange={(next) => updateContent("meetingOverview", next || null)} /></section>
-      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-notes-title"><h2 id="publication-notes-title" className="text-base font-extrabold">注意事項・よくある質問</h2>{localeListField("knowBeforeYouGo", "参加前の注意", "Know before you go", 2)}{localeListField("notSuitableFor", "参加に向かない条件", "Not suitable for", 2)}{faqSection(editorLocale)}</section>
-      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-host-title"><h2 id="publication-host-title" className="text-base font-extrabold">迎える人</h2><p className="text-sm text-ink-soft">販売者表示: <span className="font-bold text-ink">{product.sellerDisplayName || "未設定"}</span></p><p className="text-sm text-muted">提供者写真と事業者ロゴは同じ販売者のすべての体験に反映されます。</p>{providerMediaDraft.map((photo) => <div key={photo.id} className="grid gap-3 rounded-xl border border-line p-3 md:grid-cols-[5rem_1fr]"><Image src={photo.previewUrl} alt={photo.altText} width={80} height={80} unoptimized className="size-20 rounded-lg object-cover" /><div className="grid gap-3 md:grid-cols-2"><p className="text-sm font-bold text-ink-soft md:col-span-2">{photo.placement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}</p><Field label="写真の説明（英語）" value={photo.altText} onChange={(next) => updateProviderPhoto(photo.id, { altText: next })} /><Field label="写真の説明（日本語）" value={photo.altTextJa} onChange={(next) => updateProviderPhoto(photo.id, { altTextJa: next })} /><Field label="写真クレジット（任意）" value={photo.publicCredit ?? ""} onChange={(next) => updateProviderPhoto(photo.id, { publicCredit: next.trim() ? next : null })} /><button type="button" disabled={busy || !!conflictProduct} className={`${consoleButtonClass("secondary", "sm")} justify-self-start`} onClick={() => void removeProviderMedia(photo.id)}>全商品から削除</button></div></div>)}{!providerMediaDraft.length ? <p className="text-sm text-muted">提供者写真・事業者ロゴは未設定です。写真の用途を選んで上の「写真」から追加できます。</p> : null}</section>
+
+    const timelineSection = <section id="publication-timeline" className={sectionClass} aria-labelledby="publication-timeline-title">
+      <h2 id="publication-timeline-title" className={headingClass}>当日の流れ</h2>
+      <div className="grid gap-2">
+        {timeline.map((item, index) => <div key={index}>
+          <div className="grid grid-cols-[1fr_34px] items-start gap-2 rounded-xl bg-sand p-2.5 md:grid-cols-[96px_1fr_34px]">
+            <input aria-label={`時刻 ${index + 1}`} value={item.time} onChange={(event) => updateTimeline(L, index, "time", event.target.value)} className={`${EDITOR_INPUT} col-start-1 row-start-1`} />
+            <div className="col-span-2 row-start-2 grid gap-1.5 md:col-span-1 md:col-start-2 md:row-start-1">
+              <input aria-label={`見出し ${index + 1}`} value={item.title} onChange={(event) => updateTimeline(L, index, "title", event.target.value)} className={EDITOR_INPUT} />
+              <textarea aria-label={`説明 ${index + 1}`} rows={2} value={item.text} onChange={(event) => updateTimeline(L, index, "text", event.target.value)} className={`${EDITOR_INPUT} resize-y`} />
+              <select aria-label={`添える写真 ${index + 1}`} value={item.photoIndex ?? ""} onChange={(event) => updateTimeline(L, index, "photoIndex", event.target.value === "" ? null : Number(event.target.value))} className={EDITOR_INPUT}>
+                <option value="">写真を添えない</option>
+                {galleryMedia.map((photo, at) => <option key={photo.id} value={photo.sourcePosition}>写真 {at + 1}</option>)}
+              </select>
+            </div>
+            <button type="button" aria-label={`項目 ${index + 1} を削除`} onClick={() => removeTimeline(L, index)} className="col-start-2 row-start-1 h-10 w-[34px] rounded-[9px] text-[1.0625rem] text-muted hover:bg-line hover:text-ink md:col-start-3">×</button>
+          </div>
+          {showCompare && otherTimeline[index] ? <EditorReference language={NAME[O]} text={`${otherTimeline[index]!.title}　${otherTimeline[index]!.text}`} /> : null}
+        </div>)}
+        <button type="button" onClick={() => addTimeline(L)} className="justify-self-start px-0.5 py-1.5 text-[0.8125rem] font-extrabold text-moss">＋ 項目を足す</button>
+      </div>
+    </section>;
+
+    const faqSection = <div role="group" aria-labelledby="publication-faq-title">
+      <EditorSubheading id="publication-faq-title" label="よくある質問" small="任意" info="予約前によく聞かれることを、質問と答えの組で書きます。書かなければ公開ページに出ません。" />
+      <p className="mb-2 text-xs text-muted">最大{PUBLICATION_FAQ_LIMITS.maxItems}件、質問{PUBLICATION_FAQ_LIMITS.questionMaxLength}文字・答え{PUBLICATION_FAQ_LIMITS.answerMaxLength}文字まで。</p>
+      <div className="grid gap-2">
+        {faqRows.map((row, index) => <div key={index}>
+          <div className="grid grid-cols-[1fr_34px] gap-2 rounded-xl bg-sand p-2.5">
+            <div className="grid gap-1.5">
+              <input aria-label={`質問 ${index + 1}`} placeholder="質問" value={row.question} onChange={(event) => changeFaq(index, "question", event.target.value)} className={EDITOR_INPUT} />
+              <p className={`text-right text-xs ${row.question.length > PUBLICATION_FAQ_LIMITS.questionMaxLength ? "font-bold text-danger" : "text-muted"}`}>{row.question.length}/{PUBLICATION_FAQ_LIMITS.questionMaxLength}文字</p>
+              <textarea aria-label={`答え ${index + 1}`} placeholder="答え" rows={2} value={row.answer} onChange={(event) => changeFaq(index, "answer", event.target.value)} className={`${EDITOR_INPUT} resize-y`} />
+              <p className={`text-right text-xs ${row.answer.length > PUBLICATION_FAQ_LIMITS.answerMaxLength ? "font-bold text-danger" : "text-muted"}`}>{row.answer.length}/{PUBLICATION_FAQ_LIMITS.answerMaxLength}文字</p>
+            </div>
+            <button type="button" aria-label={`質問 ${index + 1} を削除`} onClick={() => updateFaq(L, faqRows.filter((_, at) => at !== index))} className="h-10 w-[34px] rounded-[9px] text-[1.0625rem] text-muted hover:bg-line hover:text-ink">×</button>
+          </div>
+          {showCompare && otherFaqRows[index] ? <EditorReference language={NAME[O]} text={`${otherFaqRows[index]!.question}　${otherFaqRows[index]!.answer}`} /> : null}
+        </div>)}
+        <button type="button" disabled={faqFull} onClick={() => updateFaq(L, [...faqRows, { question: "", answer: "" }])} className="justify-self-start px-0.5 py-1.5 text-[0.8125rem] font-extrabold text-moss disabled:opacity-45">＋ 質問を足す</button>
+      </div>
+      {faqFull ? <p className="text-sm text-muted">質問は{PUBLICATION_FAQ_LIMITS.maxItems}件まで追加できます。</p> : null}
+      <p aria-live="polite" className="text-sm font-bold text-danger">{faqProblem ?? ""}</p>
     </div>;
-    const pricingSections = <div id="publication-pricing-panel" className="space-y-4">
-      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-pricing-title"><h2 id="publication-pricing-title" className="text-base font-extrabold">料金</h2><Field label="大人1人の基本料金（税込・円）" value={unitAmount} onChange={setUnitAmount} /><p className="text-sm text-muted">無料体験は0円、有料料金は50円以上で入力してください。1〜49円は保存できません。</p><div className="rounded-xl bg-sand/40 p-3"><h3 className="font-bold">開催枠ごとの大人料金（税込・円）</h3><p className="mt-1 text-sm text-ink-soft">空欄なら基本料金を使います。枠別料金を使う場合は、現在の開催枠をすべて入力してください。</p>{product.offers.length ? <div className="mt-3 grid gap-3">{product.offers.map((offer) => { const price = terms.offerPrices.find((item) => item.offerId === offer.id)?.adultPriceYen ?? ""; return <Field key={offer.id} label={offerLabel(offer)} value={price} onChange={(next) => setTerms((current) => ({ ...current, offerPrices: current.offerPrices.map((item) => item.offerId === offer.id ? { ...item, adultPriceYen: next } : item) }))} placeholder={`基本料金 ¥${unitAmount || "未入力"}`} />; })}</div> : <p className="mt-3 text-sm font-bold text-amber-950">先にカレンダーで開催枠を追加すると、枠別料金を入力できます。</p>}</div><label className="flex min-h-11 items-center gap-2 font-bold"><input type="checkbox" checked={terms.childPricingEnabled} onChange={(event) => setTerms((current) => ({ ...current, childPricingEnabled: event.target.checked }))} />子ども料金を設定する</label>{terms.childPricingEnabled ? <div className="grid gap-4 rounded-xl border border-line p-3 md:grid-cols-2"><Field label="子ども1人の料金（税込・円）" value={terms.childPriceYen} onChange={(next) => setTerms((current) => ({ ...current, childPriceYen: next }))} /><Field label="子ども料金の最少年齢" value={terms.childMinAge} onChange={(next) => setTerms((current) => ({ ...current, childMinAge: next }))} /><Field label="子ども料金の最高年齢" value={terms.childMaxAge} onChange={(next) => setTerms((current) => ({ ...current, childMaxAge: next }))} /><label className="flex min-h-11 items-center gap-2 text-sm font-bold"><input type="checkbox" checked={terms.childAdultRequired} onChange={(event) => setTerms((current) => ({ ...current, childAdultRequired: event.target.checked }))} />大人の同伴を必須にする</label></div> : null}</section>
-      <section className={`${HOST_SURFACE} space-y-4 p-4 md:p-6`} aria-labelledby="publication-booking-title"><h2 id="publication-booking-title" className="text-base font-extrabold">予約条件・取消条件</h2><div className="grid gap-4 md:grid-cols-2"><Field label="最少申込人数" value={terms.minimumParticipants} onChange={(next) => setTerms((current) => ({ ...current, minimumParticipants: next }))} /><Field label="最少課金人数" value={terms.minimumChargeableParticipants} onChange={(next) => setTerms((current) => ({ ...current, minimumChargeableParticipants: next }))} /><Field label="1組の上限人数" value={terms.maxPartySize} onChange={(next) => setTerms((current) => ({ ...current, maxPartySize: next }))} /><Field label="最少催行人数（任意）" value={terms.minimumAttendance} onChange={(next) => setTerms((current) => ({ ...current, minimumAttendance: next }))} /></div><label className="block text-sm font-bold text-ink-soft">取消条件<select value={terms.cancellationPolicy} onChange={(event) => setTerms((current) => ({ ...current, cancellationPolicy: event.target.value as PublicationTermsForm["cancellationPolicy"] }))} className="mt-1 block w-full rounded-xl border border-line bg-white px-3 py-2"><option value="">選択してください</option><option value="CUSTOM">独自の取消期限・返金割合</option><option value="FREE_UNTIL_24H">開始24時間前まで無料</option><option value="FREE_UNTIL_48H">開始48時間前まで無料</option><option value="NONE">返金なし</option></select></label>{terms.cancellationPolicy === "CUSTOM" ? <div className="grid gap-4 md:grid-cols-2"><label className="block text-sm font-bold text-ink-soft">無料取消の期限（開始前）<div className="mt-1 grid grid-cols-[1fr_auto] gap-2"><input value={terms.cancellationWindowValue} onChange={(event) => setTerms((current) => ({ ...current, cancellationWindowValue: event.target.value }))} inputMode="numeric" className="w-full rounded-xl border border-line bg-white px-3 py-2 font-normal text-ink" /><select value={terms.cancellationWindowUnit} onChange={(event) => setTerms((current) => ({ ...current, cancellationWindowUnit: event.target.value as PublicationTermsForm["cancellationWindowUnit"] }))} className="rounded-xl border border-line bg-white px-3 py-2"><option value="DAYS">日前</option><option value="HOURS">時間前</option><option value="MINUTES">分前</option></select></div></label><label className="block text-sm font-bold text-ink-soft">期限内の返金割合（%）<input value={terms.cancellationRefundPercent} onChange={(event) => setTerms((current) => ({ ...current, cancellationRefundPercent: event.target.value }))} inputMode="decimal" placeholder="例: 100 または 37.5" className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 font-normal text-ink" /></label></div> : null}<p className="text-sm text-muted">取消期限と返金割合には確定済みの条件を入力してください。最少催行人数に達しない場合の自動取消・返金はありません。</p></section>
-      <section className={`${HOST_SURFACE} space-y-3 p-4 md:p-6`} aria-labelledby="publication-questions-title"><h2 id="publication-questions-title" className="text-base font-extrabold">申込時の質問</h2><p className="text-sm text-ink-soft">保存済みの質問 {product.saleTerms?.bookingQuestions.length ?? 0}件</p><p className="text-sm text-muted">現在の質問はこの画面の保存でも維持されます。質問の追加・変更は、質問編集に対応した商品画面で行ってください。</p></section>
+
+    const hostSection = <section id="publication-host" className={sectionClass} aria-labelledby="publication-host-title">
+      <h2 id="publication-host-title" className={headingClass}>迎える人<HostInfoTip label="迎える人">販売者の表示と、提供者の写真・ロゴです。すべての体験に同じ内容が出ます。</HostInfoTip></h2>
+      <p className="text-sm text-ink-soft">販売者表示: <span className="font-bold text-ink">{product.sellerDisplayName || "未設定"}</span></p>
+      <div className="mt-3 grid gap-3">
+        {providerMediaDraft.map((photo) => <div key={photo.id} className="grid gap-3 rounded-xl border border-line p-3 md:grid-cols-[5rem_1fr]">
+          <Image src={photo.previewUrl} alt={L === "ja" ? photo.altTextJa : photo.altText} width={80} height={80} unoptimized className="size-20 rounded-lg object-cover" />
+          <div>
+            <p className="text-sm font-bold text-ink-soft">{photo.placement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}</p>
+            <EditorField label="写真の説明" value={L === "ja" ? photo.altTextJa : photo.altText} onChange={(next) => updateProviderPhoto(photo.id, L === "ja" ? { altTextJa: next } : { altText: next })}
+              reference={showCompare ? <EditorReference language={NAME[O]} text={O === "ja" ? photo.altTextJa : photo.altText} /> : undefined} />
+            <EditorField label="クレジット" small="任意" value={photo.publicCredit ?? ""} onChange={(next) => updateProviderPhoto(photo.id, { publicCredit: next.trim() ? next : null })} />
+            <button type="button" disabled={busy || !!conflictProduct} className={`${consoleButtonClass("secondary", "sm")} mt-3`} onClick={() => void removeProviderMedia(photo.id)}>全商品から削除</button>
+          </div>
+        </div>)}
+        {!providerMediaDraft.length ? <p className="text-sm text-muted">提供者写真・事業者ロゴは未設定です。</p> : null}
+        <button type="button" disabled={!!conflictProduct} className={`${consoleButtonClass("secondary", "sm")} justify-self-start`} onClick={() => openPhotoDialog("provider")}>写真を追加</button>
+      </div>
+    </section>;
+
+    const pageTab = <>
+      {languageBar}
+      <div className="grid gap-8 md:grid-cols-[minmax(0,1fr)_176px] md:items-start">
+        <div className="grid min-w-0 gap-4">
+          {staleNotice}
+          {photoSection}
+          <section id="publication-intro" className={sectionClass} aria-labelledby="publication-intro-title">
+            <h2 id="publication-intro-title" className={headingClass}>紹介</h2>
+            {manuscriptField("体験名", "title")}
+            {manuscriptField("ひとこと紹介", "lead", { rows: 2 })}
+            {manuscriptField("当日の言語", "language")}
+            {manuscriptField("詳しい説明", "description", { rows: 6 })}
+          </section>
+          <section id="publication-highlights" className={sectionClass} aria-labelledby="publication-highlights-title">
+            <h2 id="publication-highlights-title" className={headingClass}>見どころ・含まれるもの</h2>
+            {rowsEditor("見どころ", "highlights")}
+            {rowsEditor("含まれるもの", "included")}
+            {rowsEditor("含まれないもの", "notIncluded")}
+          </section>
+          {timelineSection}
+          <section id="publication-meeting" className={sectionClass} aria-labelledby="publication-meeting-title">
+            <h2 id="publication-meeting-title" className={headingClass}>集合場所</h2>
+            <EditorChoice name="meeting-disclosure" legend="集合場所を見せる時期" info="「予約が確定してから案内する」では、公開ページに「集合の概要」だけが出ます。「予約前から公開する」では、公開ページに集合場所が出ます。英語と日本語で共通です。"
+              value={disclosure} onChange={(next) => setContent((current) => ({ ...current, meetingPointDisclosure: next }))}
+              options={[{ value: "AFTER_BOOKING", label: "予約が確定してから案内する" }, { value: "PUBLIC", label: "予約前から公開する" }]} />
+            {L === "en" ? <EditorField label="集合の概要" rows={2} info="予約前の公開ページに出る、大まかな場所の案内です。英語のページにだけ出ます。" value={typeof content.meetingOverview === "string" ? content.meetingOverview : ""} onChange={(next) => updateContent("meetingOverview", next || null)} /> : null}
+          </section>
+          <section id="publication-notes" className={sectionClass} aria-labelledby="publication-notes-title">
+            <h2 id="publication-notes-title" className={headingClass}>注意事項・よくある質問</h2>
+            {rowsEditor("参加前の注意", "knowBeforeYouGo")}
+            {rowsEditor("参加に向かない条件", "notSuitableFor", "任意")}
+            <div className="mt-5">{faqSection}</div>
+          </section>
+          {hostSection}
+        </div>
+        <nav aria-label="このページの項目" className="sticky top-4 hidden gap-0.5 text-[0.8125rem] md:grid">
+          <b className="mb-1.5 text-[0.6875rem] tracking-[0.04em] text-muted">このページ</b>
+          {([["publication-photos", "写真"], ["publication-intro", "紹介"], ["publication-highlights", "見どころ"], ["publication-timeline", "当日の流れ"], ["publication-meeting", "集合場所"], ["publication-notes", "注意・質問"], ["publication-host", "迎える人"]] as const).map(([id, label]) => (
+            <button key={id} type="button" onClick={() => scrollTo(id)} className="rounded-lg px-2.5 py-1.5 text-left text-ink-soft hover:bg-sand hover:text-ink">{label}</button>
+          ))}
+        </nav>
+      </div>
+    </>;
+
+    const pricingTab = <div className="grid max-w-[720px] gap-4">
+      <section id="publication-price" className={sectionClass} aria-labelledby="publication-price-title">
+        <h2 id="publication-price-title" className={headingClass}>料金</h2>
+        <EditorUnitField label="大人1人" small="税込" prefix="¥" info="無料の体験は0円にします。有料は50円以上にしてください。" value={unitAmount} onChange={setUnitAmount} />
+        <EditorSwitch label="子ども料金を設定する" checked={terms.childPricingEnabled} onChange={(on) => setTermsField("childPricingEnabled", on)} />
+        {terms.childPricingEnabled ? <div className="mt-2.5 border-l-2 border-line pl-4">
+          <EditorUnitField label="子ども1人" small="税込" prefix="¥" value={terms.childPriceYen} onChange={(next) => setTermsField("childPriceYen", next)} />
+          <EditorUnitField label="対象の年齢" suffix="歳" value={terms.childMinAge} onChange={(next) => setTermsField("childMinAge", next)} to={{ label: "対象の年齢（上限）", value: terms.childMaxAge, onChange: (next) => setTermsField("childMaxAge", next) }} />
+          <label className="mt-3.5 flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={terms.childAdultRequired} onChange={(event) => setTermsField("childAdultRequired", event.target.checked)} className="accent-moss" />大人の同伴を必須にする</label>
+        </div> : null}
+        <EditorSwitch label="開催枠ごとに料金を変える" checked={perOffer} info="枠ごとに大人1人の料金を変えられます。空欄の枠は、上の大人1人の料金を使います。"
+          onChange={(on) => { setPerOfferOpen(on); if (!on) setTerms((current) => ({ ...current, offerPrices: current.offerPrices.map((price) => ({ ...price, adultPriceYen: "" })) })); }} />
+        {perOffer ? <div className="mt-2.5 border-l-2 border-line pl-4">
+          {product.offers.length ? product.offers.map((offer) => {
+            const price = terms.offerPrices.find((item) => item.offerId === offer.id)?.adultPriceYen ?? "";
+            return <EditorUnitField key={offer.id} label={offerLabel(offer)} prefix="¥" placeholder={unitAmount} value={price}
+              onChange={(next) => setTerms((current) => ({ ...current, offerPrices: current.offerPrices.map((item) => item.offerId === offer.id ? { ...item, adultPriceYen: next } : item) }))} />;
+          }) : <p className="text-sm font-bold text-warn">先にカレンダーで開催枠を追加すると、枠別料金を入力できます。</p>}
+        </div> : null}
+      </section>
+      <section id="publication-party" className={sectionClass} aria-labelledby="publication-party-title">
+        <h2 id="publication-party-title" className={headingClass}>人数</h2>
+        <EditorUnitField label="1組の人数" suffix="人" value={terms.minimumParticipants} onChange={(next) => setTermsField("minimumParticipants", next)} to={{ label: "1組の人数（上限）", value: terms.maxPartySize, onChange: (next) => setTermsField("maxPartySize", next) }} />
+        <EditorUnitField label="最少課金人数" suffix="人" info="少ない人数の予約でも、この人数分の料金をいただく場合に入れます。" value={terms.minimumChargeableParticipants} onChange={(next) => setTermsField("minimumChargeableParticipants", next)} />
+        <EditorUnitField label="最少催行人数" small="任意" suffix="人" info="管理用の記録です。旅行者には表示されず、自動の中止・返金もありません。" value={terms.minimumAttendance} onChange={(next) => setTermsField("minimumAttendance", next)} />
+      </section>
+      <section id="publication-cancel" className={sectionClass} aria-labelledby="publication-cancel-title">
+        <h2 id="publication-cancel-title" className={headingClass}>取消条件<HostInfoTip label="取消条件">無料の期限を過ぎた取消には返金しません。「返金なし」は、予約後の取消に返金しません。確定している条件を選んでください。</HostInfoTip></h2>
+        <EditorChoice name="cancel-policy" legend="取消条件を選ぶ" legendHidden value={terms.cancellationPolicy} onChange={(next) => setTermsField("cancellationPolicy", next)}
+          options={[{ value: "FREE_UNTIL_24H", label: "開始24時間前まで無料" }, { value: "FREE_UNTIL_48H", label: "開始48時間前まで無料" }, { value: "NONE", label: "返金なし" }, { value: "CUSTOM", label: "期限と返金割合を決める" }]} />
+        {terms.cancellationPolicy === "CUSTOM" ? <div className="mt-2.5 border-l-2 border-line pl-4">
+          <div className="mt-3.5">
+            <p className="mb-1 text-[0.8125rem] font-bold text-ink-soft">無料で取り消せる期限</p>
+            <div className="flex items-center gap-2 text-[0.8125rem] text-ink-soft">
+              <span>開始の</span>
+              <input aria-label="無料で取り消せる期限の数" inputMode="numeric" value={terms.cancellationWindowValue} onChange={(event) => setTermsField("cancellationWindowValue", event.target.value)} className={`${EDITOR_INPUT} w-[72px] text-right`} />
+              <select aria-label="無料で取り消せる期限の単位" value={terms.cancellationWindowUnit} onChange={(event) => setTermsField("cancellationWindowUnit", event.target.value as PublicationTermsForm["cancellationWindowUnit"])} className={`${EDITOR_INPUT} w-auto`}><option value="DAYS">日前</option><option value="HOURS">時間前</option><option value="MINUTES">分前</option></select>
+              <span>まで</span>
+            </div>
+          </div>
+          <EditorUnitField label="期限内の返金割合" suffix="%" inputMode="decimal" placeholder="100" value={terms.cancellationRefundPercent} onChange={(next) => setTermsField("cancellationRefundPercent", next)} />
+        </div> : null}
+      </section>
+      <section id="publication-questions" className={sectionClass} aria-labelledby="publication-questions-title">
+        <h2 id="publication-questions-title" className={headingClass}>申込時の質問<HostInfoTip label="申込時の質問">この画面では、まだ追加・変更できません。保存しても、今の質問はそのまま残ります。</HostInfoTip></h2>
+        <p className="text-sm text-ink-soft">保存済みの質問 {product.saleTerms?.bookingQuestions.length ?? 0}件</p>
+      </section>
     </div>;
-    const listingRail = <aside className="order-first space-y-4 md:sticky md:top-4 md:order-none md:col-start-2 md:row-start-1 md:self-start" aria-label="掲載・料金・日程">
-      <section className={`${HOST_SURFACE} space-y-3 p-4`} aria-labelledby="publication-listing-title"><div className="flex items-center justify-between gap-3"><h2 id="publication-listing-title" className="font-extrabold">掲載</h2><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[product.status]}</span></div><p className="text-sm text-ink-soft">{nextActionText}</p>{nextActionControl ? <div>{nextActionControl}</div> : null}{publicHref && nextAction !== "LIVE" ? <Link className="text-sm font-bold text-moss underline underline-offset-4" href={publicHref}>体験ページを見る</Link> : null}{product.status === "PUBLISHED" ? <button type="button" disabled={busy || dirty || !!conflictProduct} className={consoleButtonClass("ghost", "sm", "text-danger")} onClick={() => void changeState("stop")}>新しい予約を停止</button> : null}<details className="border-t border-line pt-2"><summary className="min-h-10 cursor-pointer py-2 font-bold">公開前の確認</summary>{!dirty && savedBlockers.length ? <ul className="list-disc space-y-1 pl-5 text-sm text-ink-soft">{savedBlockers.map((blocker) => <li key={blocker}>{BLOCKER_COPY[blocker] ?? "公開条件を確認してください。"}</li>)}</ul> : !dirty ? <p className="text-sm font-bold text-moss">保存済みの内容は公開条件を満たしています。</p> : <p className="text-sm text-ink-soft">保存後に公開条件を確認できます。</p>}</details></section>
-      <section className={`${HOST_SURFACE} hidden space-y-2 p-4 md:block`}><h2 className="font-extrabold">料金・予約</h2><p className="text-lg font-extrabold tabular-nums">{asPublicationPrice(unitAmount) === null ? "未設定" : `¥${Number(unitAmount).toLocaleString("ja-JP")}`} <span className="text-xs font-normal text-muted">/ 大人1名</span></p><p className="text-sm text-muted">1組 {terms.minimumParticipants || "–"}–{terms.maxPartySize || "–"}名</p><button type="button" className="text-sm font-bold text-moss underline underline-offset-4" onClick={() => setWorkspaceSection("pricing")}>料金・条件を編集</button></section>
-      <section className={`${HOST_SURFACE} hidden space-y-2 p-4 md:block`}><h2 className="font-extrabold">開催日程</h2><p className="text-sm text-ink-soft">日程と定員はカレンダーで登録します。</p><Link className="text-sm font-bold text-moss underline underline-offset-4" href={calendarHref}>カレンダーを開く</Link></section>
-      <details className={`${HOST_SURFACE} p-4`}><summary className="min-h-10 cursor-pointer py-2 font-bold">体験ページのアドレス</summary><div className="space-y-3 pt-2"><Field label="ページのアドレス" value={slug} onChange={setSlug} /><p className="break-all text-xs text-muted">/experiences/{slug || "ページ名"}</p></div></details>
-    </aside>;
+
+    const scheduleTab = <div className="grid max-w-[720px] gap-4">
+      <section id="publication-offers" className={sectionClass} aria-labelledby="publication-offers-title">
+        <h2 id="publication-offers-title" className={headingClass}>開催枠<HostInfoTip label="開催枠">旅行者が選べる曜日と時刻です。枠の追加・休止・回ごとの変更は、カレンダーで行います。</HostInfoTip></h2>
+        {product.offers.length ? <ul>{product.offers.map((offer) => <li key={offer.id} className="border-t border-line py-3 first:border-t-0 first:pt-0">{offerLabel(offer)}</li>)}</ul> : <p className="text-sm text-muted">開催枠はまだありません。</p>}
+        <div className="mt-3.5 border-t border-line pt-3.5"><Link className={consoleButtonClass("secondary")} href={calendarHref}>カレンダーで日程を編集 →</Link></div>
+      </section>
+    </div>;
+
+    const settingsTab = <div className="grid max-w-[720px] gap-4">
+      <section id="publication-listing" className={sectionClass} aria-labelledby="publication-listing-title">
+        <h2 id="publication-listing-title" className={headingClass}>掲載言語<HostInfoTip label="掲載言語">「英語と日本語」は両方のページを作ります。「日本語のみ」は日本語のページだけに載り、英語のページ・一覧・検索結果には出ません。あとから英語を足すときは事務局へご連絡ください。</HostInfoTip></h2>
+        <EditorChoice name="listing-language" legend="掲載する言語" legendHidden value={japaneseOnly ? "ja" : "both"} disabled={busy || !!conflictProduct} onChange={(next) => changeJapaneseOnly(next === "ja")}
+          options={[{ value: "both", label: "英語と日本語" }, { value: "ja", label: "日本語のみ" }]} />
+      </section>
+      <section id="publication-slug" className={sectionClass} aria-labelledby="publication-slug-title">
+        <h2 id="publication-slug-title" className={headingClass}>ページのアドレス<HostInfoTip label="ページのアドレス">体験を作ったときに自動で決まります。変えたいときだけ「変更」を押してください。半角の英小文字・数字・ハイフンで入力します。</HostInfoTip></h2>
+        {slugEditing ? <div className="flex items-center overflow-hidden rounded-[10px] border border-line-strong bg-canvas focus-within:border-moss focus-within:ring-2 focus-within:ring-moss/20">
+          <span className="py-2 pl-3 text-[0.84375rem] whitespace-nowrap text-muted">{japaneseOnly ? "/ja" : ""}/experiences/</span>
+          <input aria-label="ページのアドレス" value={slug} spellCheck={false} onChange={(event) => setSlug(event.target.value)} className="min-w-20 flex-1 border-0 bg-transparent py-2 pr-3 pl-0.5 text-[1rem] font-bold outline-none md:text-[0.875rem]" />
+        </div> : <div className="flex flex-wrap items-center gap-2.5">
+          <span className="text-muted [overflow-wrap:anywhere]">{japaneseOnly ? "/ja" : ""}/experiences/<b className="text-ink">{slug}</b></span>
+          <span className="grow" />
+          <button type="button" className={consoleButtonClass("secondary", "sm")} onClick={() => setSlugEditing(true)}>変更</button>
+        </div>}
+      </section>
+      {classificationShown ? <section id="publication-classification" className={sectionClass} aria-labelledby="publication-classification-title">
+        <h2 id="publication-classification-title" className={headingClass}>日本語の一覧での分類<small className="ml-1.5 text-xs font-normal text-muted">任意</small><HostInfoTip label="日本語の一覧での分類">日本語の一覧で、カテゴリーやエリアから探せるようになります。決めなくても掲載できます。「だれと」「こんな日に」は、当てはまるものをすべて選べます。</HostInfoTip></h2>
+        <ProductClassificationFields value={classification.value!} onChange={classification.setValue} disabled={busy} />
+      </section> : null}
+    </div>;
+
+    const tabs = [["page", "体験ページ"], ["pricing", "料金・予約"], ["schedule", "日程"], ["settings", "掲載設定"]] as const;
+    const photoDialogOpen = photoDialog !== null;
+    const uploadReady = !!selectedPhoto && rightsConfirmed && !busy && !conflictProduct && photoAltJa.trim().length > 0 && (japaneseOnly || photoAlt.trim().length > 0);
     return <HostPageBody>
-      <PageHead title={localeIsJapanese ? japanese.title || title || "体験を編集" : title || japanese.title || "体験を編集"} />
-      {statusAndMessages}
-      {product ? <ProductClassificationPanel key={product.id} target={adminDraft ? { kind: "admin", providerId: adminProviderId, productId: product.id } : { kind: "host", productId: product.id }} /> : null}
-      <nav className="mb-4 flex gap-5 overflow-x-auto border-b border-line" aria-label="体験の編集">
-        <button type="button" disabled={busy} aria-pressed={workspaceSection === "page"} className={`min-h-11 shrink-0 border-b-2 px-1 text-sm font-bold ${workspaceSection === "page" ? "border-ink text-ink" : "border-transparent text-muted"}`} onClick={() => setWorkspaceSection("page")}>体験ページ</button>
-        <button type="button" disabled={busy} aria-pressed={workspaceSection === "pricing"} className={`min-h-11 shrink-0 border-b-2 px-1 text-sm font-bold ${workspaceSection === "pricing" ? "border-ink text-ink" : "border-transparent text-muted"}`} onClick={() => setWorkspaceSection("pricing")}>料金・予約</button>
-        <Link href={calendarHref} aria-disabled={busy} tabIndex={busy ? -1 : undefined} onClick={(event) => { if (busy) event.preventDefault(); }} className="flex min-h-11 shrink-0 items-center border-b-2 border-transparent px-1 text-sm font-bold text-muted">日程</Link>
-      </nav>
+      <Link href={experiencesBase} className="mb-1.5 inline-flex items-center gap-1 text-[0.8125rem] font-bold text-muted hover:text-ink">‹ 体験</Link>
+      <div className="mb-3.5 flex flex-col gap-3 md:flex-row md:items-start">
+        <h1 className="min-w-0 flex-1 font-display text-[1.375rem] leading-[1.35] font-medium tracking-[-0.01em] [overflow-wrap:anywhere] md:text-[1.625rem]">
+          {titleText}
+          <span className={`${pillBase} ${statusTone} ml-2.5 align-middle`}>{STATUS_COPY[product.status]}</span>
+          {pendingChanges ? <button type="button" disabled={busy} onClick={() => { if (savedBlockers.length > 0) { setBlockersShown(true); setBlockerDialog(true); } else void requestPublish(); }} className={`${pillBase} ml-2 bg-warn-pale align-middle text-warn`}>未反映の変更あり</button> : null}
+        </h1>
+        <div ref={menuRef} className="relative flex shrink-0 items-center gap-2 pt-0.5 max-md:w-full">
+          {publicHref ? <Link className={consoleButtonClass("secondary")} href={publicHref}>公開ページを見る ↗</Link> : null}
+          {product.status === "PUBLISHED" ? <button type="button" aria-label="そのほかの操作" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((current) => !current)} className={consoleButtonClass("secondary", "md", "w-[38px] px-0 text-lg tracking-[1px]")}>⋯</button> : null}
+          {menuOpen ? <div role="menu" className="absolute top-12 right-0 z-20 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-canvas p-1.5 shadow-[0_10px_30px_rgb(28_28_26/0.12)]">
+            {publicSiteOrigin && providerBookingLinkAvailable(product) ? <div className="px-3 py-2"><HostBookingLinkCopy slug={product.draft.slug} origin={publicSiteOrigin} japaneseOnly={japaneseOnly} /></div> : null}
+            <button type="button" role="menuitem" disabled={busy || dirty || !!conflictProduct} onClick={() => { setMenuOpen(false); void changeState("stop"); }} className="block w-full rounded-[9px] px-3 py-2 text-left text-[0.8125rem] font-bold text-danger hover:bg-sand disabled:opacity-45">新しい予約を停止</button>
+          </div> : null}
+          {showPrimary ? <button type="button" disabled={busy || !!conflictProduct || product.status === "SUSPENDED"} className={`${consoleButtonClass("primary")} max-md:flex-1`} onClick={() => void requestPublish()}>{product.status === "STOPPED" ? "予約の受付を再開" : "同意して公開"}</button> : null}
+        </div>
+      </div>
+      {(error && !photoDialog) || conflictProduct ? <div role="alert" className="mb-3 rounded-xl bg-danger-pale p-3 text-danger">{error && !photoDialog ? <p>{error}</p> : null}{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
+      {product.status === "SUSPENDED" ? <p className="mb-3 rounded-xl bg-warn-pale p-3 text-warn">運営停止中です。入力と下書きは保存できますが、再開は運営の停止解除後に行えます。</p> : null}
+      <div role="tablist" aria-label="体験の編集" className="mb-5 flex gap-6 overflow-x-auto border-b border-line">
+        {tabs.map(([id, label]) => <button key={id} type="button" role="tab" id={`publication-tab-${id}`} aria-selected={workspaceSection === id} aria-controls="publication-tabpanel" onClick={() => setWorkspaceSection(id)} className={`-mb-px h-11 shrink-0 border-b-2 text-sm font-bold ${workspaceSection === id ? "border-ink text-ink" : "border-transparent text-muted"}`}>{label}{markedTabs.has(id) ? <span role="img" aria-label="確認が必要" className="ml-1.5 inline-block size-[7px] rounded-full bg-warn align-middle" /> : null}</button>)}
+      </div>
       <form id="product-editor" aria-busy={busy} onSubmit={(event) => void saveAll(event)} className="scroll-mt-24">
-        <fieldset disabled={busy} className="border-0 p-0">
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px] md:items-start">
-            {listingRail}
-            <div className="min-w-0 md:col-start-1 md:row-start-1">{workspaceSection === "page" ? pageSections : pricingSections}</div>
+        <fieldset disabled={busy} className="min-w-0 border-0 p-0">
+          <div role="tabpanel" id="publication-tabpanel" aria-labelledby={`publication-tab-${workspaceSection}`}>
+            {workspaceSection === "page" ? pageTab : workspaceSection === "pricing" ? pricingTab : workspaceSection === "schedule" ? scheduleTab : settingsTab}
           </div>
         </fieldset>
+        {dirty || notice ? <div className="sticky bottom-0 z-10 -mx-4 mt-5 bg-canvas/95 backdrop-blur md:-mx-9">
+          {notice ? <p role="status" className="px-4 py-2 text-sm font-bold text-moss md:px-9">{notice}</p> : null}
+          {dirty ? <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-3 md:px-9">
+            <p className="font-bold max-md:sr-only">未保存の変更があります</p>
+            <div className="flex gap-2 max-md:flex-1">
+              <button type="button" disabled={busy} className={consoleButtonClass("ghost")} onClick={() => setDiscardConfirm(true)}>元に戻す</button>
+              <button type="submit" disabled={busy || !!conflictProduct} className={consoleButtonClass("primary", "md", "max-md:h-[46px] max-md:flex-1")}>{busy ? "保存しています…" : "保存"}</button>
+            </div>
+          </div> : null}
+        </div> : null}
       </form>
-      {stateConfirm ? <HostConfirmDialog title={stateConfirm === "stop" ? "新しい予約を停止しますか？" : "この商品を公開しますか？"} description={stateConfirm === "stop" ? "この商品の新しい予約を停止します。受け付けた予約はそのまま残ります。" : "掲載条件を確認し、この商品を公開します。公開内容と販売条件に同意します。"} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>{stateConfirm === "stop" ? "停止する" : "同意して公開する"}</button>} onConfirm={() => { const action = stateConfirm; void runStateChange(action); }} onClose={() => setStateConfirm(null)} /> : null}
+      {stateConfirm ? <HostConfirmDialog title={stateConfirm === "stop" ? "新しい予約を停止しますか？" : product.status === "STOPPED" ? "予約の受付を再開しますか？" : "この商品を公開しますか？"} description={stateConfirm === "stop" ? "この商品の新しい予約を停止します。受け付けた予約はそのまま残ります。" : "掲載条件を確認し、この商品を公開します。公開内容と販売条件に同意します。"} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>{stateConfirm === "stop" ? "停止する" : "同意して公開する"}</button>} onConfirm={() => { const action = stateConfirm; void runStateChange(action); }} onClose={() => setStateConfirm(null)} /> : null}
+      {translateConfirm ? <HostConfirmDialog title="今の英語を置き換えますか？" description="日本語の原稿から翻訳し直します。英語に手で書いた内容は消えます。" focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>置き換える</button>} onConfirm={() => void generateEnglish()} onClose={() => setTranslateConfirm(false)} /> : null}
+      {discardConfirm ? <HostConfirmDialog title="変更を元に戻しますか？" description="保存していない入力は消えて、最後に保存した内容に戻ります。" focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>元に戻す</button>} onConfirm={() => void discardToLatest()} onClose={() => setDiscardConfirm(false)} /> : null}
+      <EditorDialog open={blockerDialog} onClose={() => setBlockerDialog(false)} title={`${blockerGoal}には、あと${savedBlockers.length}つ必要です`}>
+        <ul className="mt-3">
+          {savedBlockers.map((blocker) => {
+            const destination = publicationBlockerDestination(blocker);
+            const link = "font-extrabold whitespace-nowrap text-moss underline underline-offset-4";
+            return <li key={blocker} className="flex items-center justify-between gap-3.5 border-t border-line py-2.5">
+              <span>{blocker === "MANUSCRIPT_REQUIRED" ? `${japaneseOnly ? "日本語" : "英語と日本語"}の原稿（体験名・ひとこと紹介・当日の言語・詳しい説明）を書いてください。` : BLOCKER_COPY[blocker] ?? "公開条件を確認してください。"}</span>
+              {destination?.kind === "calendar" ? <Link href={calendarHref} className={link}>カレンダーを開く</Link>
+                : destination?.kind === "tab" ? <button type="button" className={link} onClick={() => { setBlockerDialog(false); setWorkspaceSection(destination.tab); }}>入力する</button>
+                  : destination?.kind === "href" ? <Link href={destination.href} className={link}>確認する</Link>
+                    : destination?.kind === "payment-consent" && paymentConsentHref ? <a href={paymentConsentHref} referrerPolicy="no-referrer" className={link}>{paymentConsentLabel}</a> : null}
+            </li>;
+          })}
+        </ul>
+        <div className="mt-5 flex justify-end"><button type="button" className={consoleButtonClass("secondary")} onClick={() => setBlockerDialog(false)}>閉じる</button></div>
+      </EditorDialog>
+      <EditorDialog open={photoDialogOpen} onClose={() => setPhotoDialog(null)} title="写真を追加">
+        <div className="space-y-1">
+          {photoDialog === "provider" ? <label className="block text-[0.8125rem] font-bold text-ink-soft">写真の用途
+            <select value={photoPlacement} disabled={busy} onChange={(event) => { setPhotoPlacement(event.target.value as typeof photoPlacement); setPhotoRights(null); }} className={`${EDITOR_INPUT} mt-1`}><option value="PROVIDER_PHOTO">提供者写真（全商品）</option><option value="BUSINESS_LOGO">事業者ロゴ（全商品）</option></select>
+          </label> : null}
+          {japaneseOnly ? <EditorField label="写真の説明（日本語）" value={photoAltJa} onChange={setPhotoAltJa} /> : <>
+            <EditorField label="写真の説明（英語）" value={photoAlt} onChange={setPhotoAlt} />
+            <EditorField label="写真の説明（日本語）" value={photoAltJa} onChange={setPhotoAltJa} />
+          </>}
+          <EditorField label="クレジット" small="任意" value={photoCredit} onChange={setPhotoCredit} />
+          <div className="pt-3"><HostSharedPhotoOffer disabled={busy || !!conflictProduct} onUse={(photo) => { setSelectedPhoto(photo); setSharedPhotoName(photo.name); setPhotoRights(null); }} /></div>
+          <label className="block pt-3 text-[0.8125rem] font-bold text-ink-soft">端末から選ぶ<input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => { setSelectedPhoto(event.target.files?.[0] ?? null); setSharedPhotoName(null); setPhotoRights(null); }} className="mt-1 block max-w-full font-normal" /></label>
+          {sharedPhotoName && selectedPhoto ? <p className="text-sm text-ink-soft">共有された写真を選択中: <span className="[overflow-wrap:anywhere]">{sharedPhotoName}</span></p> : null}
+          <label className="flex items-start gap-2 pt-3 text-sm"><input type="checkbox" className="mt-1 accent-moss" checked={rightsConfirmed} disabled={busy || !selectedPhoto} onChange={(event) => setPhotoRights(event.target.checked && selectedPhoto ? { file: selectedPhoto, productId: product.id, placement: photoPlacement } : null)} /><span>この写真を「{photoPlacement === "GALLERY" ? "この体験の写真" : photoPlacement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}」として{photoPlacement === "GALLERY" ? "この商品" : "販売者のすべての商品"}に公開する権利があり、権利者と写っている方から明示的な許諾を得ています。</span></label>
+        </div>
+        {error ? <p role="alert" className="mt-3 rounded-xl bg-danger-pale p-3 text-danger">{error}</p> : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" className={consoleButtonClass("secondary")} onClick={() => setPhotoDialog(null)}>閉じる</button>
+          <button type="button" disabled={!uploadReady} className={consoleButtonClass("primary")} onClick={() => void uploadPhoto().then((added) => { if (added) setPhotoDialog(null); })}>写真を追加・差し替え</button>
+        </div>
+      </EditorDialog>
     </HostPageBody>;
   }
 
