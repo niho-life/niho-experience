@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { languageButtonTarget, languageSwitchTarget } from "./locale-links";
-import { experienceCounterparts, mapJapaneseExperiences, mapPublicationJapaneseExperiences, pairLanguages, staticPair } from "./localized-mapping";
+import { experienceCounterparts, mapJapaneseExperiences, mapPublicationJapaneseExperiences, pairLanguages, SITE_OWNED_PAIRS, siteOwnedPair, staticPair } from "./localized-mapping";
 import { sitemapEntries } from "./sitemap-entries";
 
 const catalog = (releaseId: string, ...slugs: string[]) => ({ releaseId, experiences: slugs.map((slug) => ({ slug })) });
@@ -132,6 +132,15 @@ describe("language button target", () => {
     expect(languageButtonTarget("/ja/experiences/tea", "", rows)).toBe("/experiences/tea");
     expect(languageButtonTarget("/ja", "", rows)).toBe("/");
     expect(languageButtonTarget("/", "", rows)).toBe("/ja");
+  });
+
+  it("moves between the two About pages, which this site writes in both languages (#658)", () => {
+    const withAbout = { ...rows, ...Object.fromEntries(SITE_OWNED_PAIRS.map((pair) => [pair.englishPath, pair.japanesePath])) };
+    expect(SITE_OWNED_PAIRS).toEqual([{ englishPath: "/about", japanesePath: "/ja/about" }]);
+    expect(languageButtonTarget("/about", "", withAbout)).toBe("/ja/about");
+    expect(languageButtonTarget("/ja/about", "", withAbout)).toBe("/about");
+    expect(siteOwnedPair("/ja/about")).toEqual(siteOwnedPair("/about"));
+    expect(siteOwnedPair("/privacy")).toBeNull();
   });
 
   it("goes to the other language's top page where the page has no pair", () => {

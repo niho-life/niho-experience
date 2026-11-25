@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EXPERIENCE_CATEGORIES } from "@niho-experience/experience-domain";
-import { JA_HOME_FEATURES, JA_HOME_FEATURE_MIN, JA_HOME_HERO_PHOTOS, JA_HOME_OCCASIONS, JA_HOME_SEO_DESCRIPTION, JA_HOME_SEO_TITLE, categoriesWithExperiences, occasionHref, occasionsWithExperiences, pickFeaturedPerson, pickHomeExperiences, pickHomeFeature } from "./ja-home";
+import { JA_HOME_FEATURES, JA_HOME_FEATURE_MIN, JA_HOME_OCCASIONS, JA_HOME_SEO_DESCRIPTION, JA_HOME_SEO_TITLE, categoriesWithExperiences, occasionHref, occasionsWithExperiences, pickFeaturedPerson, pickHomeExperiences, pickHomeFeature } from "./ja-home";
 import { localJapaneseCopy } from "./ja-static-copy";
 import { existsSync } from "node:fs";
 
@@ -11,14 +11,6 @@ describe("日本語トップの編集内容（#563）", () => {
     expect(values["meta.description"]).toBe("書家と筆をとる。寺で坐る。地元の台所で一緒につくって食べる。鎌倉の街の人と、その人の時間を予約できます。");
     expect(JA_HOME_SEO_TITLE).toBe(values["meta.siteTitle"]);
     expect(JA_HOME_SEO_DESCRIPTION).toBe(values["meta.description"]);
-  });
-
-  it("写真は、権利の確認できた既存の素材（niho-*）だけで、ファイルがある", () => {
-    expect(JA_HOME_HERO_PHOTOS.length).toBeGreaterThanOrEqual(3);
-    for (const photo of JA_HOME_HERO_PHOTOS) {
-      expect(photo.src).toMatch(/^\/sample\/photos\/niho-[a-z0-9-]+\.jpg$/);
-      expect(existsSync(`public${photo.src}`)).toBe(true);
-    }
   });
 
   it("おすすめは、選んだ slug を上から順に、足りないぶんを公開中の体験で埋める（上限まで）", () => {

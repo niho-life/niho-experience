@@ -12,17 +12,6 @@ export const JA_HOME_LEAD = "書家と筆をとる。寺で坐る。地元の台
 export const JA_HOME_SEO_TITLE = `${JA_HOME_TITLE} | NIHO Travel`;
 export const JA_HOME_SEO_DESCRIPTION = JA_HOME_LEAD;
 
-export type HeroPhoto = Readonly<{ src: string; position: string }>;
-/** いちばん上の写真：人が交わる場面を数枚、数秒ごとに入れ替える（オーナー 2026-11-13）。 */
-export const JA_HOME_HERO_PHOTOS: readonly HeroPhoto[] = [
-  { src: "/sample/photos/niho-cd-table-02.jpg", position: "62% 45%" },
-  { src: "/sample/photos/niho-cd-table-01.jpg", position: "50% 42%" },
-  { src: "/sample/photos/niho-cd-kitchen-together.jpg", position: "50% 30%" },
-  { src: "/sample/photos/niho-dinner-1.jpg", position: "50% 40%" },
-  { src: "/sample/photos/niho-dinner-5.jpg", position: "50% 30%" },
-];
-export const HERO_ROTATE_MS = 5000;
-
 /**
  * トップに紹介する街の人：事務局が選んだスラッグ。街の人に載っていない・外した人なら、載っている先頭の人にする。
  * 載っている人が0人のときは、街の人のまとまり自体を出さない。

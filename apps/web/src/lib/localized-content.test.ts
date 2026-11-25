@@ -88,6 +88,15 @@ describe("Japanese release selection", () => {
     expect(fetch).toHaveBeenCalledWith(new URL("https://niho.example/api/public/experiences/pages/localized/home/ja"), expect.objectContaining({ method: "GET", cache: "no-store", credentials: "omit", redirect: "error" }));
   });
 
+  it("pairs the two About pages in hreflang, both ways (#658)", async () => {
+    const { englishAlternates, japaneseSiteOwnedAlternates } = await import("./locale-metadata");
+    const languages = { en: "https://experience.example.com/about", ja: "https://experience.example.com/ja/about", "x-default": "https://experience.example.com/about" };
+    await expect(englishAlternates("/about")).resolves.toEqual({ canonical: "https://experience.example.com/about", languages });
+    await expect(japaneseSiteOwnedAlternates("/ja/about")).resolves.toEqual({ canonical: "https://experience.example.com/ja/about", languages });
+    // A page that is not in the list gets canonical alone.
+    await expect(japaneseSiteOwnedAlternates("/ja/usage")).resolves.toEqual({ canonical: "https://experience.example.com/ja/usage" });
+  });
+
   it("builds canonical and hreflang metadata only from the prepared whole release", async () => {
     const { japaneseStaticMetadata } = await import("./locale-metadata");
     await expect(japaneseStaticMetadata("home")).resolves.toMatchObject({
@@ -145,6 +154,8 @@ describe("experience pairs in the prepared release (#59)", () => {
     const { getJapaneseStaticCounterparts, getPreparedJapaneseStaticRelease } = await import("./localized-content");
     await expect(getJapaneseStaticCounterparts()).resolves.toEqual({
       "/": "/ja", "/experiences": "/ja/experiences", "/host": "/ja/host", "/help": "/ja/help",
+      // The About pages are written here in both languages (#658).
+      "/about": "/ja/about",
       "/experiences/tea-ceremony": "/ja/experiences/tea-ceremony",
       "/experiences/zen-walk": "/ja/experiences/zen-walk",
     });
@@ -153,7 +164,7 @@ describe("experience pairs in the prepared release (#59)", () => {
   });
 
   it("keeps only the static pages when the catalog is missing or from another release", async () => {
-    const statics = { "/": "/ja", "/experiences": "/ja/experiences", "/host": "/ja/host", "/help": "/ja/help" };
+    const statics = { "/": "/ja", "/experiences": "/ja/experiences", "/host": "/ja/host", "/help": "/ja/help", "/about": "/ja/about" };
     const missing = await import("./localized-content");
     await expect(missing.getJapaneseStaticCounterparts()).resolves.toEqual(statics);
     vi.resetModules();

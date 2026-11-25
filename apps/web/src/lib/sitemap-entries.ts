@@ -3,6 +3,8 @@ import {
   INDEXED_ENGLISH_STATIC_PATHS,
   isIndexableJapanesePage,
   pairLanguages,
+  SITE_OWNED_PAIRS,
+  siteOwnedPair,
   staticPair,
   type JapaneseExperienceMapping,
   type LocalizedPair,
@@ -66,10 +68,12 @@ export function sitemapEntries({ siteUrl, experiences, guides, japanese, japanes
     ...japaneseOwn.categories.map((id) => ({ url: url(`/ja/experiences?category=${id}`) })),
   ];
   return [
-    ...INDEXED_ENGLISH_STATIC_PATHS.map((path) => paired({ url: url(path) }, staticPairs.get(path))),
+    ...INDEXED_ENGLISH_STATIC_PATHS.map((path) => paired({ url: url(path) }, staticPairs.get(path) ?? (japanese ? siteOwnedPair(path) : null))),
     ...experiences.map((item) => paired({ url: url(`/experiences/${item.slug}`), lastModified: item.updatedAt }, japanese?.experiences.get(item.slug))),
     ...guideEntries,
     ...(japanese?.pages ?? []).filter(isIndexableJapanesePage).map((page) => paired({ url: url(page.route.path) }, staticPair(page))),
+    // Pages written here in both languages (About): listed with their pair whenever the Japanese site is on.
+    ...(japanese ? SITE_OWNED_PAIRS.map((pair) => paired({ url: url(pair.japanesePath) }, pair)) : []),
     ...experiencePairs.map((link) => paired({ url: url(link.japanesePath) }, link)),
     ...japaneseOnlyLinks.map((link) => ({ url: url(link.japanesePath) })),
     ...own,

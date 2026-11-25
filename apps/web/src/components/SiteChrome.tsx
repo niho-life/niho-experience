@@ -2,8 +2,10 @@ import { EXPERIENCE_API_CONTRACT } from "@niho-experience/api-client";
 import type { ReactNode } from "react";
 import { EN_STATIC_COPY_V1, PresentationRootV1, RichMessageV1, SiteFooterV1, type FooterLinkV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
 import { PRESENTATION_PRIMITIVES_V1 } from "./PresentationV1";
+import { LocalizedLink } from "./LocalizedLink";
 import { NavLink } from "./NavLink";
-import { SiteMenu } from "./SiteMenu";
+import { SiteMenu, type SiteMenuItem } from "./SiteMenu";
+import { siteNav, type SiteNavEntry } from "@/lib/site-nav";
 import { SITE_FOOTER_DESCRIPTION } from "@/lib/public-metadata";
 import type { SiteLocale } from "@/lib/localized-content";
 
@@ -33,33 +35,46 @@ export function PreviewNote({ catalog }: { catalog: PreviewCatalog }) {
 }
 
 /**
- * The English header (`SiteHeaderV1`'s look, code-owned since #645). From md: Experiences, Journal (only while a guides page
- * exists), About, Help, then the language button at the right end (the "EN · ¥" pill stays only where there is no Japanese site).
- * Below md only Experiences stays in the row; the rest, the language and a link for hosts live in the menu button (`SiteMenu`).
- * Hosts are no longer in the header row: "For hosts" is the menu's last item and the footer/home carry the rest.
+ * The site header, one component for both languages (#658; `SiteHeaderV1`'s look, code-owned since #645). The tabs come from
+ * `siteNav()` (lib/site-nav.ts), the one place where the two languages differ. From md: every "row" and "tabs" entry, then the
+ * language button at the right end (the "EN · ¥" pill stays only where there is no Japanese site). Below md only the "row"
+ * entry stays; every entry, the language and a link for hosts live in the menu button (`SiteMenu`).
+ * Hosts are not in the header row: the menu's last item (`foot`) and the footer/home carry them. `rowEnd` is one extra item
+ * from lg (the signed-in host's link). Without `entries` this is the English header, as the old page documents call it.
  */
-export function SiteHeader({ brandLabel, exploreLabel, hostLabel, copy = EN_STATIC_COPY_V1, languageSwitch, journalHref, menuLanguage }: { brandLabel?: string; exploreLabel?: string; hostLabel?: string; copy?: StaticCopyAccessorV1; languageSwitch?: ReactNode; journalHref?: string | null; menuLanguage?: ReactNode } = {}) {
-  const experiences = exploreLabel ?? copy.text("chrome.experiences");
-  const { Link, Image } = PRESENTATION_PRIMITIVES_V1;
-  const item = "rounded-full px-2.5 py-2 hover:bg-sand md:px-3";
+export function SiteHeader({ brandLabel, exploreLabel, hostLabel, copy = EN_STATIC_COPY_V1, languageSwitch, journalHref, menuLanguage, entries, navLabel, menuLabel, foot, rowEnd }: {
+  brandLabel?: string; exploreLabel?: string; hostLabel?: string; copy?: StaticCopyAccessorV1; languageSwitch?: ReactNode; journalHref?: string | null; menuLanguage?: ReactNode;
+  entries?: readonly SiteNavEntry[]; navLabel?: string; menuLabel?: string; foot?: SiteMenuItem | null; rowEnd?: ReactNode;
+} = {}) {
+  const list = entries ?? siteNav("en", { guides: Boolean(journalHref), inquiry: false }).map((entry) => entry.href === "/experiences" ? { ...entry, label: exploreLabel ?? copy.text("chrome.experiences") }
+    : entry.href === "/guides" ? { ...entry, href: journalHref ?? entry.href }
+    : entry.href === "/help" ? { ...entry, label: copy.text("chrome.help") } : entry);
+  const { Image } = PRESENTATION_PRIMITIVES_V1;
+  const item = "rounded-full px-2.5 py-2 whitespace-nowrap hover:bg-sand md:px-3";
   return <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur-md backdrop-saturate-[1.2]">
     <div className="container-page flex h-16 items-center gap-1.5">
-      <Link href="/" className="flex shrink-0 items-center gap-2 font-display text-xl font-semibold tracking-[-0.01em]">
+      {/* lang="en": the wordmark is the same on the Japanese site, in the brand face (globals.css maps the faces back under [lang="en"]). */}
+      <LocalizedLink href="/" lang="en" className="flex shrink-0 items-center gap-2 font-display text-xl font-semibold tracking-[-0.01em]">
         <span aria-hidden className="relative size-7 shrink-0 sm:size-8"><Image src="/icon.svg" alt="" sizes="32px" priority className="object-contain" /></span>
         <span className="flex items-baseline gap-1.5">{brandLabel ? <span>{brandLabel}</span> : <RichMessageV1 segments={copy.rich("chrome.brandRich")} emphasisClassName="font-normal text-ink-soft max-[479px]:sr-only" />}</span>
-      </Link>
-      <nav aria-label={copy.text("chrome.main")} className="ml-auto">
+      </LocalizedLink>
+      <nav aria-label={navLabel ?? copy.text("chrome.main")} className="ml-auto">
         <ul className="flex items-center gap-0.5 text-[0.9375rem] font-bold md:gap-1">
-          <li><NavLink href="/experiences" className={item}>{experiences}</NavLink></li>
-          {journalHref ? <li className="max-md:hidden"><NavLink href={journalHref} className={item}>Journal</NavLink></li> : null}
-          <li className="max-md:hidden"><NavLink href="/about" className={item}>About</NavLink></li>
-          <li className="max-md:hidden"><NavLink href="/help" className={item}>{copy.text("chrome.help")}</NavLink></li>
+          {list.filter((entry) => entry.where !== "menu").map((entry) => <li key={entry.href} className={entry.where === "tabs" ? "max-md:hidden" : undefined}>
+            <NavLink href={entry.href} className={item}>{entry.short ? <><span className="lg:hidden">{entry.short}</span><span className="max-lg:hidden">{entry.label}</span></> : entry.label}</NavLink>
+          </li>)}
+          {rowEnd ? <li className="max-lg:hidden">{rowEnd}</li> : null}
         </ul>
       </nav>
       <div className="max-[359px]:hidden">
         {languageSwitch ?? <p className="shrink-0 rounded-full border border-line-strong px-2.5 py-1 text-[0.8125rem] font-extrabold whitespace-nowrap"><span aria-hidden>{copy.text("chrome.localeCurrency")}</span><span className="sr-only">{copy.text("chrome.localeCurrencyLabel")}</span></p>}
       </div>
-      <SiteMenu journalHref={journalHref} hostLabel={hostLabel || "For hosts"} language={menuLanguage} />
+      <SiteMenu
+        label={menuLabel}
+        items={list.map((entry) => ({ href: entry.href, label: entry.menuLabel ?? entry.label }))}
+        foot={foot === undefined ? { href: "/host", label: hostLabel || "For hosts" } : foot}
+        language={menuLanguage}
+      />
     </div>
   </header>;
 }

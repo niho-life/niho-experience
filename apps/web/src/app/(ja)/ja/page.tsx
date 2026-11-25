@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import { EXPERIENCE_CATEGORIES } from "@niho-experience/experience-domain";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { JaExperienceCard } from "@/components/ja/JaExperienceCard";
+import { HomeLivingRoom } from "@/components/HomeLivingRoom";
 import { JapaneseHero } from "@/components/ja-home/JapaneseHero";
 import { CategoryNav, ConsultBand, FeatureBand, GuidesBand, HomeFinder, HostBand, JapaneseHeroCopy, OccasionStrips, PeopleBand, PicksHeading } from "@/components/ja-home/JapaneseHomeSections";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
 import {
-  JA_HOME_FACES_LIMIT, JA_HOME_GUIDES_LIMIT, JA_HOME_HAND, JA_HOME_HERO_PHOTOS, JA_HOME_LEAD, JA_HOME_TITLE,
+  JA_HOME_FACES_LIMIT, JA_HOME_GUIDES_LIMIT, JA_HOME_HAND, JA_HOME_LEAD, JA_HOME_TITLE,
   categoriesWithExperiences, occasionsWithExperiences, pickFeaturedPerson, pickHomeExperiences, pickHomeFeature,
 } from "@/lib/ja-home";
 import { loadJaCards } from "@/lib/ja-catalog-server";
@@ -21,8 +22,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /**
- * 日本語のトップ（#563）。英語のトップの訳ではなく、日本語サイト独自の構成。上から：題と写真の入れ替え、さがす欄、カテゴリー、
- * おすすめの体験、特集、シーンからさがす、街の人、相談、読みもの、体験を載せる。中身がまだ無いまとまり（体験が0件のカテゴリー・
+ * 日本語のトップ（#563）。英語のトップの訳ではなく、日本語サイト独自の構成。上から：題と写真（英語のトップと同じ組み、#658）、さがす欄、カテゴリー、
+ * おすすめの体験、特集、シーンからさがす、街のリビング（NIHOの帯、#658）、街の人、相談、読みもの、体験を載せる。中身がまだ無いまとまり（体験が0件のカテゴリー・
  * 該当の無い「シーンからさがす」・載っている人が0人・公開中の記事が無い）は、空の枠を見せずに出さない。体験のカードは一覧と同じ
  * （`JaExperienceCard`）で、予約の方式や販売者の札は並べない。
  */
@@ -40,7 +41,7 @@ export default async function JapaneseHome() {
   const feature = pickHomeFeature(cards);
   const guides = allGuides.slice(0, JA_HOME_GUIDES_LIMIT);
   return <>
-    <JapaneseHero photos={JA_HOME_HERO_PHOTOS}><JapaneseHeroCopy title={JA_HOME_TITLE} hand={JA_HOME_HAND} lead={JA_HOME_LEAD} /></JapaneseHero>
+    <JapaneseHero><JapaneseHeroCopy title={JA_HOME_TITLE} hand={JA_HOME_HAND} lead={JA_HOME_LEAD} /></JapaneseHero>
     {cards.length ? <HomeFinder categories={categories} /> : null}
     {categories.length ? <CategoryNav categories={categories} /> : null}
     {picks.length ? <section aria-labelledby="picks" className="container-page mt-14 sm:mt-16">
@@ -51,6 +52,7 @@ export default async function JapaneseHome() {
     </section> : null}
     {feature ? <FeatureBand feature={feature} /> : null}
     {occasions.length ? <OccasionStrips items={occasions} /> : null}
+    <HomeLivingRoom hand="it starts here" title="街のリビング、NIHO" body="鎌倉駅から歩いて2分。街の人がふらりと寄って、一緒につくり、話し、手を動かす場所です。" action={{ href: "/ja/about", label: "NIHOについて" }} alt="NIHOの長いテーブルを囲む街の人たち" titleClassName="mt-1 text-[2rem] leading-[1.25] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:text-[3rem]" />
     {featured ? <PeopleBand featured={featured} people={people} facesLimit={JA_HOME_FACES_LIMIT} /> : null}
     {groupInquiryOpen() ? <ConsultBand /> : null}
     {guides.length ? <GuidesBand guides={guides} /> : null}

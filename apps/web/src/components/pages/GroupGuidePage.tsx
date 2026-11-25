@@ -20,7 +20,7 @@ export function GroupGuidePage({ guide }: { guide: GroupGuide }) {
         <h1 className="mt-1 max-w-[22ch] text-[2rem] leading-tight sm:text-[2.75rem]">{guide.title}</h1>
         <p className="mt-4 max-w-[40rem] text-[1.0625rem] text-ink-soft">{guide.lead}</p>
         <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
-          <a href={ask} className={buttonClass("primary", "w-full sm:w-auto")}>{guide.cta}</a>
+          <a href={ask} className={buttonClass("primary", "max-sm:w-full")}>{guide.cta}</a>
           <a href={guide.otherLink.href} className="font-extrabold underline underline-offset-4">{guide.otherLink.label}</a>
         </div>
         <p className="mt-3 text-sm text-ink-soft">はじめの相談は無料です。企画や調整が必要なときは、内容と料金をご案内してから進めます。</p>

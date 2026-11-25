@@ -43,16 +43,23 @@ describe("sitemap entries", () => {
       { url: `${SITE}/`, alternates: languages("/", "/ja") },
       { url: `${SITE}/experiences`, alternates: languages("/experiences", "/ja/experiences") },
       { url: `${SITE}/host`, alternates: languages("/host", "/ja/host") },
-      // English only: the About page and the privacy notice have no Japanese page, so they carry no hreflang pair.
-      { url: `${SITE}/about` },
+      // About is written here in both languages (#658); the privacy notice is English only and carries no hreflang pair.
+      { url: `${SITE}/about`, alternates: languages("/about", "/ja/about") },
       { url: `${SITE}/privacy` },
       { url: `${SITE}/experiences/tea-ceremony`, lastModified: "2026-10-20T00:00:00Z", alternates: languages("/experiences/tea-ceremony", "/ja/experiences/tea-ceremony") },
       { url: `${SITE}/experiences/zen-walk`, lastModified: "2026-10-21T00:00:00Z" },
       { url: `${SITE}/ja`, alternates: languages("/", "/ja") },
       { url: `${SITE}/ja/experiences`, alternates: languages("/experiences", "/ja/experiences") },
       { url: `${SITE}/ja/host`, alternates: languages("/host", "/ja/host") },
+      { url: `${SITE}/ja/about`, alternates: languages("/about", "/ja/about") },
       { url: `${SITE}/ja/experiences/tea-ceremony`, alternates: languages("/experiences/tea-ceremony", "/ja/experiences/tea-ceremony") },
     ]);
+  });
+
+  it("pairs About only while the Japanese site is on (#658)", () => {
+    const entries = sitemapEntries({ siteUrl: SITE, experiences: [], guides: [], japanese: null });
+    expect(entries.find((entry) => entry.url === `${SITE}/about`)).toStrictEqual({ url: `${SITE}/about` });
+    expect(entries.some((entry) => entry.url === `${SITE}/ja/about`)).toBe(false);
   });
 
   it("never lists a Japanese detail without its English page, nor one from another release", () => {
@@ -64,7 +71,7 @@ describe("sitemap entries", () => {
   it("leaves out Japanese static pages that are not indexable, and pairs a page only when both sides are indexed", () => {
     const japanese: JapaneseSitemapRelease = { pages: [page("/", "/ja", true), page("/experiences", "/ja/experiences", false), page("/host", "/ja/host", true), page("/help", "/ja/help", true)], experiences: new Map() };
     const entries = sitemapEntries({ siteUrl: SITE, experiences: [], guides: [], japanese });
-    expect(entries.map((entry) => entry.url)).toEqual([`${SITE}/`, `${SITE}/experiences`, `${SITE}/host`, `${SITE}/about`, `${SITE}/privacy`, `${SITE}/ja`, `${SITE}/ja/host`, `${SITE}/ja/help`]);
+    expect(entries.map((entry) => entry.url)).toEqual([`${SITE}/`, `${SITE}/experiences`, `${SITE}/host`, `${SITE}/about`, `${SITE}/privacy`, `${SITE}/ja`, `${SITE}/ja/host`, `${SITE}/ja/help`, `${SITE}/ja/about`]);
     expect(entries.find((entry) => entry.url === `${SITE}/experiences`)).toStrictEqual({ url: `${SITE}/experiences` });
     // English /help is noindex and not in the sitemap, so the Japanese help page points nowhere.
     expect(entries.find((entry) => entry.url === `${SITE}/ja/help`)).toStrictEqual({ url: `${SITE}/ja/help` });

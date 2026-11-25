@@ -17,7 +17,10 @@ function MenuLink({ href, className, children }: { href: string; className: stri
  * The header menu below md (#645). A `<details>`, so it opens and closes without JS; with JS it also closes when the page
  * changes, on Escape (focus returns to the button) and on a click outside. The panel hangs under the sticky header.
  */
-export function SiteMenu({ journalHref, hostLabel = "For hosts", language }: { journalHref?: string | null; hostLabel?: string; language?: ReactNode }) {
+export type SiteMenuItem = Readonly<{ href: string; label: string }>;
+
+/** `items` are the rows, then `language` (a row that hides itself when empty), then `foot` (the quiet last row). `label` names the button and the nav. */
+export function SiteMenu({ items, foot, language, label = "Menu" }: { items: readonly SiteMenuItem[]; foot?: SiteMenuItem | null; language?: ReactNode; label?: string }) {
   const pathname = usePathname();
   const ref = useRef<HTMLDetailsElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -38,20 +41,17 @@ export function SiteMenu({ journalHref, hostLabel = "For hosts", language }: { j
   }, []);
 
   return <details ref={ref} className="md:hidden" onToggle={(event) => setMenuOpen(event.currentTarget.open)}>
-    <summary role="button" aria-label="Menu" aria-expanded={menuOpen} aria-controls="site-menu-panel" className="grid size-10 cursor-pointer list-none place-items-center rounded-full border border-line-strong hover:bg-sand [&::-webkit-details-marker]:hidden">
+    <summary role="button" aria-label={label} aria-expanded={menuOpen} aria-controls="site-menu-panel" className="grid size-10 cursor-pointer list-none place-items-center rounded-full border border-line-strong hover:bg-sand [&::-webkit-details-marker]:hidden">
       <svg className="ico size-5" viewBox="0 0 24 24" aria-hidden><path d="M4.5 8h15M4.5 12.5h15M4.5 17h15" /></svg>
     </summary>
     <div id="site-menu-panel" className="absolute inset-x-0 top-16 border-b border-line bg-white shadow-[0_18px_30px_rgb(0_0_0/0.08)]">
       <div className="container-page pb-4 pt-1">
-        <nav aria-label="Menu">
+        <nav aria-label={label}>
           {/* A link to the page already open changes no pathname, so close on the click itself too. */}
           <ul onClick={(event) => { if (ref.current && event.target instanceof Element && event.target.closest("a")) ref.current.open = false; }}>
-            <li><MenuLink href="/experiences" className={ROW}>Experiences</MenuLink></li>
-            {journalHref ? <li><MenuLink href={journalHref} className={ROW}>Journal</MenuLink></li> : null}
-            <li><MenuLink href="/about" className={ROW}>About</MenuLink></li>
-            <li><MenuLink href="/help" className={ROW}>Help</MenuLink></li>
-            {language ? <li className={`${ROW} [&>a]:flex [&>a]:min-h-[3.25rem] [&>a]:w-full [&>a]:items-center`}>{language}</li> : null}
-            <li><MenuLink href="/host" className="flex min-h-[3.25rem] items-center text-[0.9375rem] font-bold text-ink-soft">{hostLabel}</MenuLink></li>
+            {items.map((item) => <li key={item.href}><MenuLink href={item.href} className={ROW}>{item.label}</MenuLink></li>)}
+            {language ? <li className={`${ROW} empty:hidden [&>a]:flex [&>a]:min-h-[3.25rem] [&>a]:w-full [&>a]:items-center`}>{language}</li> : null}
+            {foot ? <li><MenuLink href={foot.href} className="flex min-h-[3.25rem] items-center text-[0.9375rem] font-bold text-ink-soft">{foot.label}</MenuLink></li> : null}
           </ul>
         </nav>
       </div>
