@@ -15,9 +15,10 @@ test("browse, review adult and child total, and reach browser-only mock checkout
   const requests: string[] = [];
   page.on("request", (request) => { if (request.method() === "POST") requests.push(request.url()); });
   await page.goto("/");
-  await page.getByRole("button", { name: "Find experiences" }).click();
-  // The home finder starts at two adults (owner-approved mock, 2026-10-20).
-  await expect(page).toHaveURL(/\/experiences\?guests=2$/);
+  await page.getByRole("link", { name: "See the experiences" }).click();
+  await expect(page).toHaveURL(/\/experiences$/);
+  // The list's guest filter starts open; two adults carry on to the booking page.
+  await page.goto("/experiences?guests=2");
   await page.getByRole("link", { name: /Home-cooked dinner/ }).click();
   // Desktop: the sticky booking card. Phones: the bottom bar. Only one is shown at a time.
   await page.getByRole("link", { name: /^Check dates/ }).click();

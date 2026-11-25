@@ -253,3 +253,31 @@
     margin-top: 0;
   }
 }
+
+/*
+ * English home hero (#646): two photos fade in over the still hero photo and out again, 21s loop.
+ * Opacity only: no scale or move on photos (the per-frame steps show). Unlayered, so these win over the base layer.
+ * Photo 1 is the still underneath; 2 fades in over it, 3 over 2, 2 is hidden while 3 covers it, 3 fades back to 1.
+ */
+@keyframes hero-fade-2 {
+  0%, 26.67% { opacity: 0; }
+  33.33%, 71.4% { opacity: 1; }
+  71.5%, 100% { opacity: 0; }
+}
+@keyframes hero-fade-3 {
+  0%, 60% { opacity: 0; }
+  66.67%, 93.33% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.hero-fade-2,
+.hero-fade-3 {
+  opacity: 0;
+  will-change: opacity;
+}
+/* Each class carries the whole shorthand with its name: a shorthand without a name is collapsed to `animation: none` by the CSS build. */
+.hero-fade-2 { animation: hero-fade-2 21s ease-in-out infinite; }
+.hero-fade-3 { animation: hero-fade-3 21s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .hero-fade-2,
+  .hero-fade-3 { animation: none; }
+}

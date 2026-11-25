@@ -112,20 +112,21 @@
 
 2026-10-29 にオーナー承認のモック A（<https://niho-experience-top-mock.pages.dev/a-journal-grid.html>）の構成に変えた（オーナー判断「体験が最優先。体験を先に出して、その下に記事も。記事は今後たくさん増えるので、サムネイル画像とセットで一覧できるように」）。presentation の `HomeViewModelV1.layout: "journal"` で組む。
 
-上から：ヘッダー → ヒーロー（従来より低い 460px / PC 560px）→ テーマ → カード → 予約の流れ（カードの直下）→ 記事（Kamakura Journal）→ ホスト募集の帯 → フッター（プレビューだけ最下部に1行の表記）。
+上から：ヘッダー → ヒーロー（検索とテーマの行は置かない。検索が下端に重ならないので、高さは 560px / PC 680px、文字は下寄せ、PC の見出しは2行、#646）→ カード → 予約の流れ（カードの直下）→ リビングの帯（#646）→ 記事（Kamakura Journal）→ ホスト募集の帯 → フッター（プレビューだけ最下部に1行の表記）。
 
 特集・動画の帯・ホスト紹介・数字・絵はがきは `layout` を渡さない従来の構成（日本語版トップ）にだけ残る。下の表のそれらの行は従来の構成の説明。
 
 | 節 | 内容 |
 | --- | --- |
 | ヘッダー | 白。ロゴ。md（48rem）以上は Experiences · Journal（記事のページがあるときだけ）· About · Help の行（現在のページは淡い面と `aria-current="page"`）と、右端の言語ボタン（日本語のサイトが無い配備だけ "EN · ¥" の表示）。md 未満は行に Experiences だけ、言語ボタン（360px 未満は隠す）、丸いメニューボタン（`SiteMenu.tsx`。`<details>` なので JS なしで開閉し、JS があればページ移動・Escape・外側クリックで閉じる）。メニューは全幅のパネルで Experiences / Journal / About / Help / 言語 / 控えめな最後の項目 "For hosts"（`/host`）。ヘッダーの行に提供者向けのリンクは置かない（#645） |
-| ヒーロー | 全面の写真（NIHO のディナーの長いテーブル、`lib/site-media.ts`、priority）、h1 "Meet the people who make Kamakura *home*"（home を手書き）、リード "Cook, sit, mend and write with people who live here. Small groups, booked in minutes, no account needed."、右上に白い丸スタンプ。下端に重なる検索（スマホは日付・人数の2列＋下の行にボタン、PC は写真の下端にまたがる1行のピル。GET で `/experiences` へ。`date`＝Any day＋今日から14日（JST）、`guests`＝1〜8、既定は "2 adults"）。JS なしでも動く |
-| テーマ | 掲載中の体験から作る（空のテーマを作らない）。slug を明示した編集用の表でアイコンと短いラベルを決める（`lib/themes.ts`：Cook & eat / Roast coffee / Sit zazen / Mend a bowl / Write kanji）。題名からは推測しない（#36）。各テーマはその体験の詳細へ |
-| カード | 手書き "N to choose from"、h2 "Experiences hosted by neighbors"、See all。スマホは横スクロールの snap、PC は3列。最後に "Your experience here?"（`/host` へ） |
+| ヒーロー（#646） | 写真が主役。NIHO 自前の写真3枚（`lib/site-media.ts` の `HERO_PHOTO` ＝リビングの交流が下地・priority、`HOME_HERO_SLIDES` ＝一緒に料理する様子とテーブル。後の2枚は lazy・装飾）が21秒周期で重なりを入れ替える（`HomeHeroSlides.tsx`、`globals.css` の `hero-fade-2/3`）。**動きは不透明度のクロスフェードだけ**（拡大・移動は使わない。コマ単位のがたつきが見えるため）。`prefers-reduced-motion: reduce` では動かず下地の1枚だけ。h1 "Meet the people who make Kamakura *home*"（home を手書き）、リード "Small experiences with people who live here, one hour from Tokyo."、主ボタン "See the experiences"（`/experiences`）、右上に白い丸スタンプ。検索（日付・人数）とテーマの行はこの英語トップに置かない（presentation は `finder: null`・`themes: []`、`heroMedia` / `heroBody` / `heroAction` で差し込む。classic 構成と日本語版は従来どおり） |
+| テーマ（classic 構成のみ） | 英語トップ（journal）には出さない。classic 構成では掲載中の体験から作る（空のテーマを作らない）。slug を明示した編集用の表でアイコンと短いラベルを決める（`lib/themes.ts`：Cook & eat / Roast coffee / Sit zazen / Mend a bowl / Write kanji）。題名からは推測しない（#36）。各テーマはその体験の詳細へ |
+| カード | 手書き "after the Great Buddha"、h2 "Spend a few hours with a *neighbor*"（neighbor に波線。`cardsTitle`。classic 構成は従来の "N to choose from" / "Experiences hosted by neighbors"）、See all。スマホは横スクロールの snap、PC は3列。最後に "Your experience here?"（`/host` へ） |
 | 特集 | コミュニティディナーの slug が掲載中なら編集用の内容（`lib/themes.ts` の `FEATURED_STORY`）：データの曜日・時刻の手書き（"Tue, Thu & Sat · 6 PM"）、h2 "One long table, eight guests and a few neighbors"、本文、"See the dinner"、NIHO の自前の写真5枚のモザイク。掲載されていなければ写真が5枚以上ある最初の体験（題名、リード、"See details"、その写真） |
 | 動画の帯 | "Slow down, you're among neighbors" と手書きの副題。下に縦長の動画カード（掲載中のテーマだけ）。ラベルは手書きの動詞＋編集用の短い名前（"Cook / Community dinner"。表に無ければ題名の短縮）。書道は書道の動画で上書き。ホストの実名は書かない |
 | ホスト紹介 | sand の面。書道の slug が掲載中ならモックどおり（`FEATURED_HOST`）：データの hosts[0] の名前を手書き、役割 "Calligrapher, MC and event producer"、本文、切手の縁の中に書道の動画＋丸スタンプ、"See Shiryu's workshop"。掲載されていなければ個人の提供者（`provider.kind = INDIVIDUAL`）の体験の表紙・`provider.tagline`・リード。下にホストの顔（写真、無ければ頭文字。名前のあるホストを先に、ホストのいない体験は編集用の顔）を各体験へのリンクで並べ、紹介中の人を緑の縁で強調 |
 | 数字 | "Small on purpose"：駅からの分数（"From Kamakura Station West Exit to the living room door."）、最大定員（計算）、体験数（計算。掲載中の全体験にテーマがあれば "Food, coffee, Zen, mending and calligraphy." のように並べる）、言語数（"English and Japanese, often both at the same table."）。Fraunces 300 の数字＋手書きの単位 |
+| リビングの帯（#646） | カードと予約の流れの下、記事の上。全幅の1枚写真（長いテーブル、`min-h` 460px / PC 600px、動かさない）に左からの暗いグラデーション。手書き "it starts here"（leaf）、h2 "NIHO, the town’s living room"、本文、主ボタン "About NIHO Experience"（`/about`）。`components/HomeLivingRoom.tsx`（`afterCards` の先頭） |
 | 記事 | 手書き "then, wander the town"、h2 "Kamakura Journal"、説明 "Notes on the streets, food and everyday life of Kamakura, from people who live here."、`/guides` があれば See all。1本目（#147 の Editorial preview があればそれ）を大きく、右に次の3本（PC。スマホは縦に並ぶ行）、その下に3列のサムネイル（タブレット2列、スマホは左に正方形のサムネイルの行）。トップに出すのは10本まで、それより多ければ下に "More guides"（`/guides` へ）。カードはカテゴリ（DB の記事は CMS のカテゴリ、静的な記事は柱）・Draft / Editorial preview の表記、題名、2行の説明、読了分数と Checked / Updated の日付。写真（`hero`）が無い記事は sand の面に手書きのカテゴリ名。カテゴリが2つ以上あれば上にチップ（All と各カテゴリ。サーバーの HTML にある全カードをその場で絞るだけ）。`components/HomeJournal.tsx`・`lib/home-journal.ts` |
 | 予約の流れ | Pick a date（"See the next dates on every card. Times are Japan time."）/ Pay securely（"Checkout by Stripe in Japanese yen, tax included."）/ Meet your hosts（"The meeting point and your booking arrive by email."）、手書き "no account needed — book as a guest" |
 | 絵はがき | "Kamakura is small. Walk it."。切手の縁で少し傾け、手書きの地名。リンクなし |

@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { EN_STATIC_COPY_V1, HomeViewV1, type AssetBindingsV1, type DisplayImageV1, type DisplayVideoV1, type ExperienceCardModelV1, type HomeViewModelV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
-import { HomeFinder } from "@/components/HomeFinder";
 import { EmptyResults, ErrorState } from "@/components/States";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { CardDates, type CardDatesSource } from "@/components/CardDates";
@@ -11,16 +10,17 @@ import { loadDetails } from "@/lib/catalog";
 import { getReviewSummaries } from "@/lib/journey";
 import { withReviewLines } from "@/lib/reviews-ui";
 import { config, isPilotPreview, isPreview } from "@/lib/config";
-import { upcomingDays } from "@/lib/date-filter";
 import type { SearchParams } from "@/lib/filters";
 import { scheduleLine } from "@/lib/schedule";
 import { BANNER_VIDEO, HERO_PHOTO, HOST_BAND_VIDEO, POSTCARDS, STRIP_VIDEOS, type SitePhoto, type SiteVideo } from "@/lib/site-media";
-import { editorialOf, FEATURED_HOST, FEATURED_STORY, shortName, themeEntries, themeOf, topicsLine, type Theme } from "@/lib/themes";
+import { editorialOf, FEATURED_HOST, FEATURED_STORY, shortName, themeOf, topicsLine, type Theme } from "@/lib/themes";
 import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experience-types";
 import { imageAlt } from "@/lib/experience-copy";
 import { JsonLd } from "@/components/JsonLd";
 import { HomeJournal } from "@/components/HomeJournal";
-import { buttonClass } from "@/components/ui";
+import { ButtonLink, buttonClass } from "@/components/ui";
+import { HomeHeroSlides } from "@/components/HomeHeroSlides";
+import { HomeLivingRoom } from "@/components/HomeLivingRoom";
 import { guideCatalogForSite, hasGuidesPage } from "@/lib/guide-registry";
 import { homeJournal } from "@/lib/home-journal";
 import { LISTING_NAME, publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib/public-metadata";
@@ -68,8 +68,7 @@ function hostRow(listed: ExperienceDetailForSite[], current: ExperienceDetailFor
   return rows;
 }
 
-function homeModel(summaries: Parameters<typeof themeEntries>[0], cards: CardModel[], listed: ExperienceDetailForSite[], cardDates: CardDatesSource, days: ReturnType<typeof upcomingDays>, copy: StaticCopyAccessorV1, assets: AssetBindingsV1 | null, afterCards?: HomeViewModelV1["afterCards"]): HomeViewModelV1 {
-  const themes = themeEntries(summaries);
+function homeModel(summaries: { slug: string; title: string }[], cards: CardModel[], listed: ExperienceDetailForSite[], cardDates: CardDatesSource, copy: StaticCopyAccessorV1, assets: AssetBindingsV1 | null, afterCards?: HomeViewModelV1["afterCards"]): HomeViewModelV1 {
   const story = isPilotPreview ? (listed.find((experience) => experience.slug === FEATURED_STORY.slug) ?? null) : null;
   const featured = story ? null : (listed.find((experience) => experience.photos.length >= 5) ?? null);
   const strips: { theme: Theme; slug: string; name: string; video: SiteVideo }[] = [];
@@ -97,8 +96,8 @@ function homeModel(summaries: Parameters<typeof themeEntries>[0], cards: CardMod
     return { headingEyebrow: copy.text("home.hostFeatureEyebrow"), headingTitle: copy.text("home.hostFeatureTitle"), moreHostsLabel: copy.text("home.moreHosts"), name, role: editorial?.role ?? hostFeature.provider.tagline ?? undefined, story: editorial?.story ?? hostFeature.lead, cta: copy.text("home.hostFeatureCta", { name }), href: `/experiences/${hostFeature.slug}`, image: editorial ? undefined : (displayImage(hostFeature.cover) ?? undefined), video: editorial ? publishedVideo(assets, "home.strip.calligraphy", editorial.video) : undefined, faces: hostRow(listed, hostFeature, isPilotPreview).map((entry) => ({ face: displayFace(entry.face), href: `/experiences/${entry.slug}`, label: entry.name, current: entry.current })) };
   })() : undefined;
   return {
-    hero: publishedImage(assets, "home.hero", HERO_PHOTO), finder: <HomeFinder days={days} />,
-    themes: themes.map((theme) => ({ ...theme, href: `/experiences/${theme.slug}` })), cardsEyebrow: cards.length ? copy.text("home.cardsEyebrowCount", { countWord: numberWord(cards.length) }) : undefined,
+    hero: publishedImage(assets, "home.hero", HERO_PHOTO), heroMedia: <HomeHeroSlides />, heroBody: "Small experiences with people who live here, one hour from Tokyo.", heroAction: <ButtonLink href="/experiences">See the experiences</ButtonLink>, finder: null, themes: [],
+    cardsEyebrow: cards.length ? "after the Great Buddha" : undefined, cardsTitle: <>Spend a few hours with a <span className="squig">neighbor</span></>,
     cards: cards.map((card) => ({ model: cardModel(card), dates: <CardDates slug={card.slug} scheduleLabel={card.scheduleLabel} source={cardDates} /> })), empty: <EmptyResults clearHref={null} />, afterCards, feature,
     strips: strips.map((strip) => ({ key: strip.theme.key, href: `/experiences/${strip.slug}`, verb: strip.theme.verb, name: strip.name, video: publishedVideo(assets, `home.strip.${strip.theme.key}` as keyof AssetBindingsV1, strip.video) })),
     stripsEyebrow: copy.text(strips.length === 1 ? "home.stripsEyebrowOne" : "home.stripsEyebrowMany", { countWord: numberWord(strips.length) }), banner: publishedVideo(assets, "home.banner", BANNER_VIDEO), hostFeature: host, figures,
@@ -120,6 +119,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   const guideEntry = journal.items.length ? <HomeJournal journal={journal} allHref={hasGuidesPage(guideCatalogResult) ? "/guides" : null} moreClassName={buttonClass("secondary")} /> : undefined;
   return <>
     <JsonLd data={siteJsonLd(config.siteUrl, SITE_NAME, LISTING_NAME)} />
-    <HomeViewV1 model={homeModel(summaries, cards, listed, cardDates, upcomingDays(new Date(), 14), EN_STATIC_COPY_V1, null, guideEntry)} primitives={PRESENTATION_PRIMITIVES_V1} copy={EN_STATIC_COPY_V1} />
+    <HomeViewV1 model={homeModel(summaries, cards, listed, cardDates, EN_STATIC_COPY_V1, null, <><HomeLivingRoom />{guideEntry}</>)} primitives={PRESENTATION_PRIMITIVES_V1} copy={EN_STATIC_COPY_V1} />
   </>;
 }

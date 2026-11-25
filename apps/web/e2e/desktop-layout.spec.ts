@@ -29,19 +29,6 @@ async function expectAsideBar(page: Page, action: Locator) {
   expect(actionBox.width).toBeGreaterThan(barBox.width - 60);
 }
 
-test("home finder is one pill over the hero", async ({ page }) => {
-  await page.goto("/");
-  const finder = page.getByRole("search", { name: "Find experiences" });
-  await expect(finder).toHaveCSS("position", "absolute");
-  const date = await box(finder.locator("label").filter({ has: page.locator('select[name="date"]') }));
-  const guests = await box(finder.locator("label").filter({ has: page.locator('select[name="guests"]') }));
-  const submit = await box(finder.getByRole("button", { name: "Find experiences" }));
-  expect(Math.abs(guests.y - date.y)).toBeLessThanOrEqual(8);
-  expect(Math.abs(submit.y - date.y)).toBeLessThanOrEqual(8);
-  expect(guests.x).toBeGreaterThan(date.x + date.width - 1);
-  expect(submit.x).toBeGreaterThan(guests.x + guests.width - 1);
-});
-
 test("list puts the guests pill and the day chips on one row", async ({ page }) => {
   await page.goto("/experiences?guests=2");
   const pill = await box(page.locator("label").filter({ has: page.locator("select", { has: page.locator("option", { hasText: "Any group size" }) }) }));
