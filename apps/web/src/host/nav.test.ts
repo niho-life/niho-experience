@@ -13,8 +13,26 @@ describe("host navigation", () => {
     }
   });
   it("keeps every permissioned section while showing five daily destinations", () => {
-    expect(HOST_NAV.map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "売上", "設定"]);
+    expect(HOST_NAV.map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "売上", "メンバー", "設定"]);
     expect(hostDailyNavForChoice({ kind: "MEMBER", id: "provider-a", displayName: "Synthetic seller", memberRole: "OWNER" }).map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "売上"]);
+  });
+
+  it("shows メンバー only to the OWNER, and the sidebar list to each role as designed", () => {
+    const hrefs = (role: "OWNER" | "EDITOR" | "COHOST" | "VIEWER" | null) => hostNavForRole(role).map((item) => item.href);
+    expect(hrefs("OWNER")).toEqual(["/host/home", "/host/experiences", "/host/calendar", "/host/bookings", "/host/sales", "/host/members", "/host/settings"]);
+    expect(hrefs("EDITOR")).toEqual(["/host/home", "/host/experiences", "/host/calendar", "/host/settings"]);
+    expect(hrefs("COHOST")).toEqual(["/host/home", "/host/experiences", "/host/calendar", "/host/bookings", "/host/settings"]);
+    expect(hrefs(null)).toEqual(hrefs("COHOST"));
+    const member = (memberRole: "OWNER" | "EDITOR" | "COHOST") => ({ kind: "MEMBER", id: "provider-a", displayName: "Synthetic seller", memberRole }) as const;
+    expect(hostNavForChoice(member("OWNER")).map((item) => item.label)).toContain("メンバー");
+    expect(hostNavForChoice(member("EDITOR")).map((item) => item.label)).not.toContain("メンバー");
+    // The phone tab bar keeps its five (or fewer) daily places.
+    expect(hostDailyNavForChoice(member("OWNER")).map((item) => item.href)).not.toContain("/host/members");
+  });
+
+  it("never gives an operator メンバー, even when the server lists it", () => {
+    const operator = { kind: "OPERATOR", id: "provider-a", displayName: "Synthetic seller", memberRole: null, screens: ["/host/calendar", "/host/members", "/host/settings"] } as const;
+    expect(hostNavForChoice(operator).map((item) => item.href)).toEqual(["/host/calendar", "/host/settings"]);
   });
 
   it("hides sales from COHOST and EDITOR while keeping OWNER sales", () => {
@@ -46,6 +64,10 @@ describe("host navigation", () => {
     expect(selected("/host/bookings")).toEqual(["予約"]);
     expect(selected("/host/sales")).toEqual(["売上"]);
     expect(selected("/host/settings/")).toEqual(["設定"]);
+    expect(selected("/host/members?providerId=sample-provider-kitchen")).toEqual(["メンバー"]);
+    // あなたのアカウント belongs to the person, not to a menu item.
+    expect(selected("/host/account?providerId=sample-provider-kitchen#account-device")).toEqual([]);
+    expect(selected("/host/membership")).toEqual([]);
   });
 
   it("ignores ?providerId= and other queries on either side", () => {
@@ -80,7 +102,7 @@ describe("host navigation", () => {
     expect(hostBackLink("/host/experiences/community-dinner/?providerId=sample-provider-kitchen")).toEqual({ href: "/host/experiences", label: "体験" });
     expect(hostBackLink("/host/bookings/session", "date=2026-10-22&start=18%3A00&experience=community-dinner&offer=offer-dinner")).toEqual({ href: "/host/bookings", label: "予約" });
     expect(hostBackLink("/host/translate?providerId=sample-provider-kitchen")).toEqual({ href: "/host/home", label: "ホーム" });
-    for (const path of ["/host", "/host/home", "/host/experiences", "/host/experiences?providerId=x", "/host/settings", "/host/register"]) expect(hostBackLink(path), path).toBeNull();
+    for (const path of ["/host", "/host/home", "/host/experiences", "/host/experiences?providerId=x", "/host/settings", "/host/members", "/host/account", "/host/account?providerId=x", "/host/register"]) expect(hostBackLink(path), path).toBeNull();
   });
 
   it("gives one booking (?booking=) the way back to 予約, from the location or from the page's query", () => {
@@ -120,6 +142,8 @@ describe("host navigation", () => {
     // Another provider may have no such session: its list.
     expect(providerSwitchPath("/host/bookings/session")).toBe("/host/bookings");
     expect(providerSwitchPath("/host/home")).toBe("/host/home");
+    expect(providerSwitchPath("/host/members")).toBe("/host/members");
+    expect(providerSwitchPath("/host/account/")).toBe("/host/account");
   });
 
   it("adds a page's own query and the provider to a link", () => {

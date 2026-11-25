@@ -2,8 +2,9 @@ import { NOTIFICATION_ADDRESS_CHANGE_TEXT, NOTIFICATION_LOCKED_TEXT, type Notifi
 import { NOTIFICATION_ADDRESS_TEXT, type HostNotificationAddressView } from "@/host/notification-address";
 import { PREPARING_STATUS } from "@/host/status";
 import type { HostNotificationKey } from "@/host/types";
+import Link from "next/link";
+import { HOST_ACCOUNT_PATH, withProvider } from "@/lib/host/routes";
 import { FieldRow, FieldSection, SwitchRow } from "./fields";
-import { HostNotificationAddress } from "./HostNotificationAddress";
 
 /**
  * 設定 › 通知 (#109, the journey mock's H7): where the emails go and one switch per notification in the spec's order. The
@@ -35,7 +36,11 @@ export function HostNotificationPanel({
       {address === "error" ? (
         <p role="alert" className="flex min-h-10 items-center text-danger">{NOTIFICATION_ADDRESS_TEXT.loadFailed}</p>
       ) : (
-        <HostNotificationAddress providerId={providerId} initial={address} labelId="settings-notification-to" />
+        // The address is the person's own, so it is changed in their account, not per provider.
+        <div role="group" aria-labelledby="settings-notification-to" className="flex min-h-10 flex-wrap items-center gap-x-2 text-ink-soft">
+          <span>宛先は、あなたのアカウントで変えられます。</span>
+          <Link href={withProvider(HOST_ACCOUNT_PATH, providerId)} className="font-bold text-moss underline underline-offset-4">アカウント設定</Link>
+        </div>
       )}
     </FieldRow>
   );

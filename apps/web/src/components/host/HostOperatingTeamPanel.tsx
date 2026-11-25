@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ExperienceProviderMember, ExperienceProviderResolveMemberResponse } from "@niho-experience/api-client/experience-provider-operations";
 import type { HostProviderRole } from "@/lib/host/providers";
-import { parseTeamMutation, parseTeamResolveResult, parseTeamSnapshot, teamMutationMatchesCommand } from "@/lib/host/team-contract";
+import { parseTeamInvitationCreated, parseTeamInvitations, parseTeamMutation, parseTeamResolveResult, parseTeamSnapshot, teamMutationMatchesCommand, type TeamInvitationView } from "@/lib/host/team-contract";
 import { FieldSection } from "./fields";
 import { consoleButtonClass } from "./host-ui";
 import { HostTeamAsyncGate } from "./host-team-async";
@@ -13,23 +13,29 @@ const teamError = (reason: unknown, fallback: string) => reason instanceof Error
 
 export type HostTeamMode = "native" | "legacy" | "off";
 
-export function HostOperatingTeamPanel({ providerId, role, mode }: { providerId: string; role: HostProviderRole | null; mode: HostTeamMode }) {
-  if (mode === "native") return <NativeTeamPanel key={`${providerId}:${role ?? "none"}`} providerId={providerId} role={role} />;
+/** The date an invitation runs out, as the host reads it (Japan time). */
+const dayJa = (utc: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "numeric", day: "numeric" }).format(new Date(utc));
+const INVITATION_STATE_LABEL: Record<TeamInvitationView["state"], string> = { QUEUED: "送信待ち", SENT: "送信済み", OPENED: "相手が開きました" };
+
+/** `invitationsEnabled` (EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED, #636): the OWNER invites by email instead of finding an account by address. */
+export function HostOperatingTeamPanel({ providerId, role, mode, invitationsEnabled = false }: { providerId: string; role: HostProviderRole | null; mode: HostTeamMode; invitationsEnabled?: boolean }) {
+  if (mode === "native") return <NativeTeamPanel key={`${providerId}:${role ?? "none"}:${invitationsEnabled ? "invite" : "resolve"}`} providerId={providerId} role={role} invitationsEnabled={invitationsEnabled} />;
   return <LegacyTeamPanel providerId={providerId} role={role} enabled={mode === "legacy"} />;
 }
 
 type NativeMember = { readonly hostAccountId: string; readonly role: "OWNER" | "COHOST" | "EDITOR" | "VIEWER"; readonly label: string };
 type PendingCommand = { readonly operation: "add" | "remove"; readonly target: string; readonly commandId: string; readonly expectedRevision: number };
 
-function NativeTeamPanel({ providerId, role }: { providerId: string; role: HostProviderRole | null }) {
+function NativeTeamPanel({ providerId, role, invitationsEnabled }: { providerId: string; role: HostProviderRole | null; invitationsEnabled: boolean }) {
   const [members, setMembers] = useState<readonly NativeMember[]>([]); const [revision, setRevision] = useState(0);
   const [email, setEmail] = useState(""); const [candidate, setCandidate] = useState<{ hostAccountId: string; label: string } | null>(null);
   const [candidateEmail, setCandidateEmail] = useState(""); const [pending, setPending] = useState<PendingCommand | null>(null);
   const [busy, setBusy] = useState(""); const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [ended, setEnded] = useState(false);
+  const [invitations, setInvitations] = useState<readonly TeamInvitationView[]>([]); const [inviteEmail, setInviteEmail] = useState("");
   const gate = useRef(new HostTeamAsyncGate());
-  const controllers = useRef(new Set<AbortController>()); const root = `/host/api/team/${encodeURIComponent(providerId)}/members`; const scopeKey = `${providerId}:${role ?? "none"}`;
+  const controllers = useRef(new Set<AbortController>()); const root = `/host/api/team/${encodeURIComponent(providerId)}/members`; const invitationsRoot = `/host/api/team/${encodeURIComponent(providerId)}/invitations`; const scopeKey = `${providerId}:${role ?? "none"}`;
 
-  const clearPrivate = useCallback(() => { setMembers([]); setCandidate(null); setCandidateEmail(""); setEmail(""); setPending(null); setBusy(""); }, []);
+  const clearPrivate = useCallback(() => { setMembers([]); setCandidate(null); setCandidateEmail(""); setEmail(""); setPending(null); setBusy(""); setInvitations([]); setInviteEmail(""); }, []);
   const endAccess = useCallback((message: string) => {
     gate.current.deactivate();
     for (const controller of controllers.current) controller.abort(); controllers.current.clear();
@@ -52,16 +58,34 @@ function NativeTeamPanel({ providerId, role }: { providerId: string; role: HostP
     } finally { window.clearTimeout(timeout); controllers.current.delete(controller); }
   }, [endAccess, root, scopeKey]);
 
+  const loadInvitations = useCallback(async (expectedScope = scopeKey) => {
+    const token = gate.current.begin("invitations"); const controller = new AbortController(); controllers.current.add(controller); const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(invitationsRoot, { cache: "no-store", signal: controller.signal });
+      if (!gate.current.current(token) || token.scope !== expectedScope) return false;
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403 || response.status === 404) endAccess(response.status === 401 ? "ログインの有効期限が切れました。" : "チームを管理する権限が終了しています。");
+        throw new Error(response.status === 401 ? "ログインの有効期限が切れました。" : response.status === 403 || response.status === 404 ? "チームを管理する権限が終了しています。" : "招待中の一覧を読み込めませんでした。");
+      }
+      const value: unknown = await response.json();
+      if (!gate.current.current(token) || token.scope !== expectedScope) return false;
+      const parsed = parseTeamInvitations(value);
+      if (!parsed) throw new Error("招待中の一覧の応答を確認できませんでした。再読込してください。");
+      setInvitations(parsed.invitations); return true;
+    } finally { window.clearTimeout(timeout); controllers.current.delete(controller); }
+  }, [endAccess, invitationsRoot, scopeKey]);
+
   useEffect(() => {
     const requests = gate.current;
     const activeControllers = controllers.current;
     requests.activate(scopeKey);
     if (role === "OWNER") void load(scopeKey).catch((reason) => { if (requests.active(scopeKey)) setError(teamError(reason, "運営チームを読み込めませんでした。再読込してください。")); });
+    if (role === "OWNER" && invitationsEnabled) void loadInvitations(scopeKey).catch((reason) => { if (requests.active(scopeKey)) setError(teamError(reason, "招待中の一覧を読み込めませんでした。再読込してください。")); });
     return () => {
       requests.deactivate();
       for (const controller of activeControllers) controller.abort(); activeControllers.clear();
     };
-  }, [load, role, scopeKey]);
+  }, [invitationsEnabled, load, loadInvitations, role, scopeKey]);
 
   if (role === "COHOST") return <FieldSection id="settings-team" title="運営チーム"><div className="p-4"><p className="font-extrabold">あなたは共同ホストです</p><p className="mt-1 text-sm text-ink-soft">開催枠、予約の参照、予約者への返信を担当できます。本文・料金・販売者情報・受取口座・売上・手数料同意・公開と停止・取消と返金・チーム・通知設定はオーナー専用です。</p></div></FieldSection>;
   if (role !== "OWNER") return null;
@@ -82,7 +106,7 @@ function NativeTeamPanel({ providerId, role }: { providerId: string; role: HostP
       const parsed = parseTeamResolveResult(value);
       if (!parsed) throw new Error("確認結果の応答を確認できませんでした。");
       setRevision(parsed.teamRevision); setCandidate(parsed.candidate); setCandidateEmail(submitted);
-      if (!parsed.candidate) setError("一致する Experience 登録済みホストアカウントが見つかりません。運営による事前登録が必要です。");
+      if (!parsed.candidate) setError("この宛先の人は、まだ登録されていません。NIHO に登録を依頼してください。");
     } catch (reason) { if (gate.current.current(token)) setError(teamError(reason, "アカウントを確認できませんでした。もう一度お試しください。")); }
     finally { window.clearTimeout(timeout); controllers.current.delete(controller); if (gate.current.current(token)) setBusy((value) => value === "resolve" ? "" : value); }
   }
@@ -128,8 +152,78 @@ function NativeTeamPanel({ providerId, role }: { providerId: string; role: HostP
     void sendCommand({ operation: "remove", target: member.hostAccountId, commandId: crypto.randomUUID(), expectedRevision: revision });
   }
 
+  async function invite(event: React.FormEvent) {
+    event.preventDefault(); if (busy || pending) return;
+    const submitted = inviteEmail.trim(); if (submitted === "") return;
+    if (!window.confirm("共同ホストは開催枠・予約者情報・返信を扱えます。本文・料金・金融・公開・取消返金・設定は扱えません。招待しますか？")) return;
+    const token = gate.current.begin("invitations"); const expectedScope = scopeKey; const controller = new AbortController(); controllers.current.add(controller); const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    setBusy("invite"); setError(""); setNotice("");
+    try {
+      const response = await fetch(invitationsRoot, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: submitted }), signal: controller.signal });
+      if (!gate.current.current(token) || token.scope !== expectedScope) return;
+      if (response.status === 401 || response.status === 403 || response.status === 404) { endAccess(response.status === 401 ? "ログインの有効期限が切れました。" : "メンバーを管理する権限が終了しています。"); return; }
+      if (response.status === 429) throw new Error("確認回数の上限に達しました。しばらく待ってから再試行してください。");
+      if (response.status === 409) {
+        const value: unknown = await response.json().catch(() => null);
+        if (!gate.current.current(token) || token.scope !== expectedScope) return;
+        const reason = typeof value === "object" && value !== null && "error" in value ? (value as { error: unknown }).error : null;
+        throw new Error(reason === "already_member" ? "この宛先の人は、すでにメンバーです。" : reason === "too_many_open" ? "招待中が多すぎます。使わない招待を取り消してから、もう一度お試しください。" : "招待を送れませんでした。もう一度お試しください。");
+      }
+      if (response.status === 400) throw new Error("メールアドレスの形式を確認してください。");
+      if (response.status !== 201) throw new Error("招待を送れませんでした。もう一度お試しください。");
+      const value: unknown = await response.json();
+      if (!gate.current.current(token) || token.scope !== expectedScope) return;
+      const created = parseTeamInvitationCreated(value);
+      if (!created) throw new Error("招待の結果を確認できませんでした。招待中の一覧を再読込してください。");
+      // The same address again replaces the earlier invitation, so the list shows one for it.
+      setInvitations((current) => [...current.filter((item) => item.email.toLowerCase() !== created.invitation.email.toLowerCase()), created.invitation]);
+      setInviteEmail(""); setNotice("招待を送りました。相手が NIHO アカウントでログインすると参加します。");
+    } catch (reason) { if (gate.current.current(token)) setError(teamError(reason, "招待を送れませんでした。もう一度お試しください。")); }
+    finally { window.clearTimeout(timeout); controllers.current.delete(controller); if (gate.current.current(token)) setBusy((value) => value === "invite" ? "" : value); }
+  }
+  async function revokeInvitation(item: TeamInvitationView) {
+    if (busy || pending || !window.confirm("この招待を取り消しますか？")) return;
+    const token = gate.current.begin("invitations"); const expectedScope = scopeKey; const controller = new AbortController(); controllers.current.add(controller); const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    setBusy(`revoke:${item.id}`); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${invitationsRoot}/${encodeURIComponent(item.id)}`, { method: "DELETE", signal: controller.signal });
+      if (!gate.current.current(token) || token.scope !== expectedScope) return;
+      if (response.status === 401 || response.status === 403) { endAccess(response.status === 401 ? "ログインの有効期限が切れました。" : "メンバーを管理する権限が終了しています。"); return; }
+      if (response.status === 404) {
+        // Used, taken back or run out meanwhile: show what the team and the list are now.
+        setBusy(""); await Promise.all([load(expectedScope), loadInvitations(expectedScope)]);
+        throw new Error("この招待は、すでに使われたか、取り消されています。");
+      }
+      if (response.status !== 204) throw new Error("招待を取り消せませんでした。もう一度お試しください。");
+      setInvitations((current) => current.filter((candidate) => candidate.id !== item.id)); setNotice("招待を取り消しました。");
+    } catch (reason) { setError(teamError(reason, "招待を取り消せませんでした。もう一度お試しください。")); }
+    finally { window.clearTimeout(timeout); controllers.current.delete(controller); setBusy((value) => value === `revoke:${item.id}` ? "" : value); }
+  }
+  const inviteSection = (
+    <div className="space-y-4">
+      <form onSubmit={invite} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <label className="font-extrabold">相手のメールアドレス<input type="email" required maxLength={254} autoComplete="off" value={inviteEmail} disabled={pending !== null} onChange={(event) => { setInviteEmail(event.target.value); setError(""); }} className="mt-1 min-h-10 w-full rounded-xl border border-line-strong px-3" /></label>
+        <button disabled={Boolean(busy) || pending !== null} className={`${consoleButtonClass("secondary")} self-end`}>{busy === "invite" ? "送信中…" : "招待を送る"}</button>
+      </form>
+      <p className="text-xs text-muted">相手は、招待メールのリンクから NIHO アカウントでログインすると参加できます。リンクは7日間、1回だけ使えます。</p>
+      {invitations.length > 0 ? (
+        <div>
+          <p className="font-extrabold">招待中</p>
+          <ul className="mt-2 space-y-2">
+            {invitations.map((item) => (
+              <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-sand p-3">
+                <span><strong>{item.email}</strong><span className="ml-2 text-xs text-muted">{INVITATION_STATE_LABEL[item.state]}</span><span className="ml-2 text-xs text-muted">{dayJa(item.expiresAt)} まで</span></span>
+                <button type="button" disabled={Boolean(busy) || pending !== null} onClick={() => void revokeInvitation(item)} className={consoleButtonClass("secondary", "sm")}>取り消す</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+
   if (ended) return <FieldSection id="settings-team" title="運営チーム"><p role="alert" className="m-4 rounded-xl bg-danger-pale p-3 text-danger">{error || "チームを管理する権限が終了しています。"}</p></FieldSection>;
-  return <FieldSection id="settings-team" title="運営チーム"><div className="space-y-4 p-4"><div><p className="font-extrabold">この提供者の運営メンバー</p><p className="mt-1 text-sm text-ink-soft">共同ホストは開催枠・予約の参照・予約者への返信を担当します。本文・料金・販売者情報・受取口座・売上・手数料同意・公開/停止・取消返金・チーム・通知はオーナー専用です。編集者と商品限定オペレーターの権限は変わりません。</p></div>{error ? <p role="alert" className="rounded-xl bg-danger-pale p-3 text-danger">{error}</p> : null}{notice ? <p role="status" className="rounded-xl bg-leaf-pale p-3 text-moss">{notice}</p> : null}{pending ? <p className="rounded-xl bg-warn-pale p-3 text-sm">結果が不明です。他の操作は行わず、同じ操作だけを再送してください。<button type="button" disabled={Boolean(busy)} onClick={() => void sendCommand(pending)} className={`${consoleButtonClass("secondary", "sm")} ml-2`}>同じ操作を再送</button></p> : null}<ul className="space-y-2">{members.map((member) => <li key={member.hostAccountId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-sand p-3"><span><strong>{member.label}</strong><span className="ml-2 text-xs text-muted">{member.role === "OWNER" ? "オーナー" : member.role === "COHOST" ? "共同ホスト" : member.role === "EDITOR" ? "編集者" : "閲覧者"}</span></span>{member.role === "COHOST" ? <button type="button" disabled={Boolean(busy) || pending !== null} onClick={() => remove(member)} className={consoleButtonClass("secondary", "sm")}>外す</button> : null}</li>)}</ul><form onSubmit={resolve} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"><label className="font-extrabold">登録済み Experience ホストのメールアドレス<input type="email" required maxLength={254} autoComplete="off" value={email} disabled={pending !== null} onChange={(event) => { gate.current.invalidate("resolve"); if (busy === "resolve") setBusy(""); setEmail(event.target.value); setCandidate(null); setCandidateEmail(""); setError(""); }} className="mt-1 min-h-10 w-full rounded-xl border border-line-strong px-3" /></label><button disabled={Boolean(busy) || pending !== null} className={`${consoleButtonClass("secondary")} self-end`}>{busy === "resolve" ? "確認中…" : "アカウントを確認"}</button></form>{candidate ? <div className="rounded-xl border border-line-strong p-4"><p className="font-extrabold">{candidate.label}</p><p className="mt-1 text-sm text-ink-soft">確認したアドレス: {candidateEmail}</p><p className="mt-1 text-sm text-ink-soft">共同ホストとして、開催枠・予約者情報・返信を担当できるようにします。</p><button type="button" disabled={Boolean(busy) || pending !== null || candidateEmail !== email.trim()} onClick={add} className={`${consoleButtonClass("primary")} mt-3`}>範囲を確認して共同ホストにする</button></div> : null}<p className="text-xs text-muted">招待メールは送りません。運営が事前登録した ACTIVE アカウントだけを完全一致で確認します（1時間12回まで）。</p></div></FieldSection>;
+  return <FieldSection id="settings-team" title="運営チーム"><div className="space-y-4 p-4"><div><p className="font-extrabold">この提供者の運営メンバー</p><p className="mt-1 text-sm text-ink-soft">共同ホストは開催枠・予約の参照・予約者への返信を担当します。本文・料金・販売者情報・受取口座・売上・手数料同意・公開/停止・取消返金・チーム・通知はオーナー専用です。編集者と商品限定オペレーターの権限は変わりません。</p></div>{error ? <p role="alert" className="rounded-xl bg-danger-pale p-3 text-danger">{error}</p> : null}{notice ? <p role="status" className="rounded-xl bg-leaf-pale p-3 text-moss">{notice}</p> : null}{pending ? <p className="rounded-xl bg-warn-pale p-3 text-sm">結果が不明です。他の操作は行わず、同じ操作だけを再送してください。<button type="button" disabled={Boolean(busy)} onClick={() => void sendCommand(pending)} className={`${consoleButtonClass("secondary", "sm")} ml-2`}>同じ操作を再送</button></p> : null}<ul className="space-y-2">{members.map((member) => <li key={member.hostAccountId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-sand p-3"><span><strong>{member.label}</strong><span className="ml-2 text-xs text-muted">{member.role === "OWNER" ? "オーナー" : member.role === "COHOST" ? "共同ホスト" : member.role === "EDITOR" ? "編集者" : "閲覧者"}</span></span>{member.role === "COHOST" ? <button type="button" disabled={Boolean(busy) || pending !== null} onClick={() => remove(member)} className={consoleButtonClass("secondary", "sm")}>外す</button> : null}</li>)}</ul>{invitationsEnabled ? <><p className="font-extrabold">メンバーを招待</p>{inviteSection}</> : <><form onSubmit={resolve} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"><label className="font-extrabold">相手のメールアドレス<input type="email" required maxLength={254} autoComplete="off" value={email} disabled={pending !== null} onChange={(event) => { gate.current.invalidate("resolve"); if (busy === "resolve") setBusy(""); setEmail(event.target.value); setCandidate(null); setCandidateEmail(""); setError(""); }} className="mt-1 min-h-10 w-full rounded-xl border border-line-strong px-3" /></label><button disabled={Boolean(busy) || pending !== null} className={`${consoleButtonClass("secondary")} self-end`}>{busy === "resolve" ? "確認中…" : "アカウントを確認"}</button></form>{candidate ? <div className="rounded-xl border border-line-strong p-4"><p className="font-extrabold">{candidate.label}</p><p className="mt-1 text-sm text-ink-soft">確認したアドレス: {candidateEmail}</p><p className="mt-1 text-sm text-ink-soft">共同ホストとして、開催枠・予約者情報・返信を担当できるようにします。</p><button type="button" disabled={Boolean(busy) || pending !== null || candidateEmail !== email.trim()} onClick={add} className={`${consoleButtonClass("primary")} mt-3`}>範囲を確認して共同ホストにする</button></div> : null}<p className="text-xs text-muted">追加できるのは、NIHO への登録が済んでいる人です。この画面からメールは送られません（確認は1時間に12回まで）。</p></>}</div></FieldSection>;
 }
 
 function LegacyTeamPanel({ providerId, role, enabled }: { providerId: string; role: HostProviderRole | null; enabled: boolean }) {

@@ -285,6 +285,18 @@ function hostNihoLoginSetting(apiMode: "mock" | "http", env: Env, hostConsoleEna
  * NIHO's service audience (the identity call carries Experience's service ID token); the preview (mock) only needs
  * the flag and walks a synthetic NIHO.
  */
+/**
+ * The host's 「別の方法でやり直す」 (#632): NIHO is sent `prompt=select_account`, so it shows its confirmation (where the account
+ * is switched) even to a host it would pass straight through (niho-coliving/niho-app#21302). Off until NIHO takes the parameter:
+ * before that, NIHO refuses the whole URL.
+ */
+function nihoLoginPromptSetting(env: Env, hostNihoLoginEnabled: boolean): boolean {
+  const name = "EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED";
+  if (env[name] !== "true") return false;
+  if (!hostNihoLoginEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true`);
+  return true;
+}
+
 function travelerAccountsSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, hostAccountsEnabled: boolean): boolean {
   const name = "EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED";
   if (env[name] !== "true") return false;
@@ -336,6 +348,26 @@ function hostTeamSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled:
   if (!hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
   if (!hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
   if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error(`${name}=true needs EXPERIENCE_DATABASE_URL in http mode`);
+  return true;
+}
+
+/**
+ * メンバーの招待 (#636): the OWNER invites a person by address, who joins as COHOST with a NIHO sign-in. It builds on the native team,
+ * the NIHO login (the invited person signs in at NIHO) and the host mail (the mail job sends the link), so it refuses to start
+ * when one is missing. Off by default; with it off nothing about the team, the sign-in or the jobs changes.
+ */
+function hostTeamInvitationsSetting(
+  apiMode: "mock" | "http",
+  env: Env,
+  needs: { readonly hostConsoleEnabled: boolean; readonly hostAccountsEnabled: boolean; readonly hostTeamEnabled: boolean; readonly hostNihoLoginEnabled: boolean; readonly hostMailEnabled: boolean },
+): boolean {
+  const name = "EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (!needs.hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
+  if (!needs.hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
+  if (!needs.hostTeamEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_TEAM_ENABLED=true in http mode`);
+  if (!needs.hostNihoLoginEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true in http mode`);
+  if (!needs.hostMailEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_MAIL_ENABLED=true in http mode`);
   return true;
 }
 
@@ -885,6 +917,9 @@ export function resolveConfig(env: Env) {
   // writes use this flag; invitations also require guest booking, attendance and mail to be enabled. The mock keeps
   // its own synthetic reviews; http opens per environment after migrations 0027 and 0033 are accepted.
   const guestReviewsEnabled = apiMode === "http" && env.EXPERIENCE_GUEST_REVIEWS_ENABLED === "true";
+  // ホストのサイトへの埋め込み (#638, docs/embed.md): /embed/* and the host's 自分のサイトに貼る. Off by default; the same in
+  // mock and http mode (the mock host console shows the code with synthetic data). Booking itself still follows the booking flags.
+  const embedEnabled = env.EXPERIENCE_EMBED_ENABLED === "true";
   // 旅行者の予約 (#285) on this site instead of NIHO: availability and checkout from the experience DB. The mock keeps
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted,
   // and only with the host console that shows the OWNER these bookings.
@@ -923,7 +958,9 @@ export function resolveConfig(env: Env) {
     && experienceTranslateStandaloneRequested;
   const hostTeamEnabled = hostTeamSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const hostNihoLoginEnabled = hostNihoLoginSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
+  const hostTeamInvitationsEnabled = hostTeamInvitationsSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostTeamEnabled, hostNihoLoginEnabled, hostMailEnabled });
   const travelerAccountsEnabled = travelerAccountsSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
+  const nihoLoginPromptEnabled = nihoLoginPromptSetting(env, hostNihoLoginEnabled);
   const nihoAccountStatusCheckEnabled = nihoAccountStatusCheckSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const nihoIdentityLoginEnabled = apiMode === "http" && env.EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED === "true";
   let nihoLoginServiceAudience = "";
@@ -1082,6 +1119,7 @@ export function resolveConfig(env: Env) {
     groupInquiryEnabled,
     groupInquiryPreviewEnabled,
     guestReviewsEnabled,
+    embedEnabled,
     guestBookingEnabled: guestBooking.enabled,
     managedSalesEnabled: apiMode === "http" && env.EXPERIENCE_MANAGED_SALES_ENABLED === "true",
     managedSalesWebhooksEnabled: apiMode === "http" && env.EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED === "true",
@@ -1117,11 +1155,14 @@ export function resolveConfig(env: Env) {
     // S1b: off until NIHO's matching v1 status contract is fixed and deployed.
     nihoAccountStatusCheckEnabled,
     nihoIdentityLoginEnabled,
+    // 「別の方法でやり直す」 sends NIHO `prompt=select_account` (#632): on after NIHO takes it (niho-coliving/niho-app#21302).
+    nihoLoginPromptEnabled,
     nihoLoginServiceAudience,
     // 旅行者の入口の LINE: after NIHO's LINE provider moves (2027-01); off until then.
     travelerLineEnabled,
     // Experience-native COHOST membership, independent from the legacy provider-operations consumer.
     hostTeamEnabled,
+    hostTeamInvitationsEnabled,
     occurrenceAssignmentEnabled,
     googleBusySyncEnabled: googleCalendarJobs.busySyncEnabled,
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,

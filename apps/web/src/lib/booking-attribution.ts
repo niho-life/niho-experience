@@ -50,3 +50,9 @@ export function captureBookingAttribution(search: string, doNotTrack: string | n
 export function readBookingAttribution(doNotTrack: string | null | undefined): BookingAttribution {
   return bookingAttribution.read(doNotTrack);
 }
+
+/** What a booking sends: this visit's captured mark over a default (the embedded widget's, #638). Nothing with Do Not Track. */
+export function attributionWithDefault(defaults: BookingAttribution | undefined, captured: BookingAttribution, doNotTrack: string | null | undefined): BookingAttribution {
+  if (doNotTrackEnabled(doNotTrack)) return {};
+  return { ...defaults, ...captured };
+}

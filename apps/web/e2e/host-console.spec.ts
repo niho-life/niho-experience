@@ -19,15 +19,16 @@ async function noHorizontalScroll(page: Page) {
   return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 }
 
-/** The provider switch: the sidebar on PC, the account menu (the header's initial) on phones. Only one is visible. */
-const providerMenu = (page: Page) => page.locator("summary:visible", { hasText: "提供者" });
+/** The provider switch: the sidebar's chip on PC, the header's chip on phones. Only one is visible. */
+const PROVIDER_MENU = /提供者を切り替える|のメニュー/;
+const providerMenu = (page: Page) => page.locator("summary:visible", { hasText: PROVIDER_MENU });
 
 /** The provider being shown, as the visible switch names it. */
 async function expectProvider(page: Page, name: string) {
   await expect(providerMenu(page)).toContainText(name);
 }
 
-/** Settings and sign-out live in the account menu at both widths. */
+/** The person's own settings and sign-out live in the account menu at both widths. */
 async function openAccountMenu(page: Page) {
   const menu = page.locator("summary:visible", { hasText: "のアカウント" });
   if (await menu.count()) await menu.click();
@@ -182,15 +183,15 @@ test("host pages have no serious accessibility violations and fit the screen", a
     expect(await seriousViolations(page), path).toEqual([]);
     expect(await noHorizontalScroll(page), path).toBeLessThanOrEqual(0);
   }
-  for (const menu of ["提供者", "のアカウント"]) {
-    const summary = page.locator("summary:visible", { hasText: menu });
+  for (const [menu, hasText] of [["提供者", PROVIDER_MENU], ["のアカウント", "のアカウント"]] as const) {
+    const summary = page.locator("summary:visible", { hasText });
     if (!(await summary.count())) continue;
-    const mobileAccountMenu = page.viewportSize()!.width < 768 && await page.locator("summary:visible", { hasText: "のアカウント" }).count();
+    const phone = page.viewportSize()!.width < 768;
     await summary.click();
-    if (mobileAccountMenu) await expect(page.locator("#main")).toHaveAttribute("inert", "");
+    if (phone) await expect(page.locator("#main")).toHaveAttribute("inert", "");
     expect(await seriousViolations(page), `${menu} open`).toEqual([]);
     await summary.click();
-    if (mobileAccountMenu) await expect(page.locator("#main")).not.toHaveAttribute("inert");
+    if (phone) await expect(page.locator("#main")).not.toHaveAttribute("inert");
   }
   await page.goto("/host/auth/error?reason=state");
   expect(await seriousViolations(page), "login error").toEqual([]);
@@ -207,8 +208,12 @@ test.describe("320px narrow phone", () => {
       const box = await page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: label }).boundingBox();
       expect(box && box.x >= 0 && box.x + box.width <= 320, label).toBe(true);
     }
+    // The provider chip and the avatar share the header row without overlapping.
+    const chip = await providerMenu(page).boundingBox();
+    const avatar = await page.locator("summary:visible", { hasText: "のアカウント" }).boundingBox();
+    expect(chip && avatar && chip.x >= 0 && chip.x + chip.width <= avatar.x, "chip and avatar").toBe(true);
     await page.locator("summary:visible", { hasText: "のアカウント" }).click();
-    await expect(page.getByRole("link", { name: "設定", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "アカウント設定", exact: true })).toBeVisible();
     const logout = await page.getByRole("button", { name: "ログアウト" }).boundingBox();
     expect(logout && logout.x >= 0 && logout.x + logout.width <= 320).toBe(true);
     expect(await noHorizontalScroll(page)).toBeLessThanOrEqual(0);

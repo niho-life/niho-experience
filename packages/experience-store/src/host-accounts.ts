@@ -145,7 +145,7 @@ const isBindingHash = (value: unknown): value is Uint8Array => value instanceof 
 /** A host account ID: `hst_` and 32 lower-case hex digits. */
 export const isHostAccountId = (value: unknown): value is string => typeof value === "string" && HOST_ACCOUNT_ID.test(value);
 
-function hostEmail(input: unknown): { readonly email: string; readonly emailKey: string } {
+export function hostEmail(input: unknown): { readonly email: string; readonly emailKey: string } {
   const email = typeof input === "string" ? input.normalize("NFKC").trim() : "";
   const emailKey = email.toLowerCase();
   if (!isHostEmail(email) || !isHostEmail(emailKey) || INVISIBLE.test(email)) {

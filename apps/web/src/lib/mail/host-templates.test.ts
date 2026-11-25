@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { hostAddressConfirmationEmail, hostBookingEmail, hostNotificationEmail } from "./host-templates";
+import { hostAddressConfirmationEmail, hostBookingEmail, hostNotificationEmail, hostTeamInvitationEmail } from "./host-templates";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import { HOST_NOTIFICATION_TOPICS } from "@niho-experience/experience-store";
 
@@ -81,5 +81,34 @@ describe("host emails", () => {
     expect(mail.text).toContain(`${SITE}/host/notification-email#t=tok_EN-123`);
     expect(mail.text).toContain("11/1 15:05 まで、1 回だけ使えます");
     expect(mail.html).toContain('<html lang="ja">');
+  });
+});
+
+describe("team invitation email (#636)", () => {
+  const TOKEN = "teamInviteToken".padEnd(43, "Q");
+  const base = { siteUrl: "https://experience.example.test", token: TOKEN, expiresAt: "2026-12-02T00:00:00.000Z" };
+
+  it("carries the token in the URL fragment only, with the provider's name when it has one", () => {
+    const named = hostTeamInvitationEmail({ ...base, providerDisplayName: "合成ファーム" });
+    expect(named.subject).toBe("「合成ファーム」のメンバーへのご招待");
+    expect(named.text).toContain("NIHO 体験ホストで、合成ファーム を一緒に運営するメンバー（共同ホスト）に招待されました。");
+    expect(named.text).toContain("共同ホストは、開催枠の編集、予約の確認、予約者への返信ができます。");
+    expect(named.text).toContain(`https://experience.example.test/host/auth/team-invite#t=${TOKEN}`);
+    expect(named.html).toContain(`https://experience.example.test/host/auth/team-invite#t=${TOKEN}`);
+    expect(named.text).not.toContain(`?t=${TOKEN}`);
+    expect(named.text).not.toContain(`/team-invite/${TOKEN}`);
+    expect(named.html).toContain("NIHO アカウントでログインして参加する");
+    expect(named.text).toContain("1 回だけ使えます");
+    expect(named.text).toContain("最初にリンクを開いたブラウザで続けてください。");
+    expect(named.text).toContain("心当たりがなければ、このメールは無視してください。");
+    expect(named.text).not.toContain("アカウントが無ければ");
+  });
+
+  it("says a generic provider when the office has no name on record", () => {
+    for (const providerDisplayName of [null, "  "]) {
+      const anonymous = hostTeamInvitationEmail({ ...base, providerDisplayName });
+      expect(anonymous.subject).toBe("NIHO 体験ホストのメンバーへのご招待");
+      expect(anonymous.text).toContain("NIHO 体験ホストで、体験の提供者 を一緒に運営するメンバー（共同ホスト）に招待されました。");
+    }
   });
 });

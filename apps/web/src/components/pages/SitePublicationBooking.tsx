@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import type { ExperienceApiClient, ExperienceCheckoutRequest, Occurrence } from "@niho-experience/api-client";
 import { createClientRequestKey } from "@niho-experience/api-client";
 import { getSiteBookingApi } from "@/lib/browser-api";
 import { formatYen } from "@/lib/format";
 import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-card-model";
-import { readBookingAttribution } from "@/lib/booking-attribution";
+import { attributionWithDefault, readBookingAttribution, type BookingAttribution } from "@/lib/booking-attribution";
+import { bookingReturnCopy, readReturnType, type BookingReturnType } from "@/lib/booking-return-copy";
+import { calendarDayLabel, occurrenceStartTime } from "@/lib/experience/booking-calendar";
+import { leaveFrameTo, postEmbedTop, useEmbedFrame } from "@/lib/experience/embed-frame";
+import { BookingCalendar } from "@/components/BookingCalendar";
 import { expectedSiteBookingTotalYen } from "@/lib/experience/site-booking-rules";
 import { answersForCheckout } from "@/lib/experience/site-booking-answers";
 import type { SitePublicExperience, SitePublicOffer } from "@/lib/experience/site-publications";
@@ -17,8 +21,21 @@ const FIELD_LABEL = "grid min-w-0 grid-cols-1 gap-2 text-sm font-extrabold";
 const FIELD_INPUT = "min-h-12 w-full min-w-0 rounded-xl border border-line-strong px-3 text-base font-normal";
 const FIELD_SELECT = `${FIELD_INPUT} truncate`;
 const FIELD_TEXTAREA = "min-h-24 w-full min-w-0 rounded-xl border border-line-strong p-3 text-base font-normal";
+const FORM_FRAME = "rounded-[var(--radius-card)] border border-line bg-white p-5 sm:p-7";
+const PRIMARY_BUTTON = "min-h-12 rounded-full bg-ink px-6 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-45";
+const UNAVAILABLE = "rounded-2xl bg-sand p-5 text-ink-soft";
 
-export function SitePublicationBooking({ item, siteOrigin, consentVersion, bookingsEnabled, locale = "en", attributionEnabled = false }: { item: SitePublicExperience; siteOrigin: string; consentVersion: string; bookingsEnabled: boolean; locale?: "en" | "ja"; attributionEnabled?: boolean }) {
+/** The embedded widget's steps (#638, docs/embed.md「旅行者の流れ」): 1 date and guests, 2 details, 3 pay (or done). */
+type EmbedStep = 1 | 2 | 3;
+type EmbedOutcome = { readonly kind: "pay"; readonly checkoutUrl: string } | { readonly kind: "done"; readonly type: BookingReturnType | null; readonly free: boolean };
+
+/**
+ * The booking form. `layout="page"` is the public booking page: one screen, and checkout opens on its own after the request.
+ * `layout="embed"` is the widget another site frames (/embed, docs/embed.md): the same fields in three steps; payment opens
+ * in the top window only from a button the traveler presses, and a booking that needs no payment ends inside the frame.
+ */
+export function SitePublicationBooking({ item, siteOrigin, consentVersion, bookingsEnabled, locale = "en", attributionEnabled = false, layout = "page", preview = false, defaultAttribution }: { item: SitePublicExperience; siteOrigin: string; consentVersion: string; bookingsEnabled: boolean; locale?: "en" | "ja"; attributionEnabled?: boolean; layout?: "page" | "embed"; preview?: boolean; defaultAttribution?: BookingAttribution }) {
+  const embed = layout === "embed";
   const { publication, saleTerms } = item;
   const ja = locale === "ja";
   const sellerInformationUrl = siteSellerInformationHref(item, locale);
@@ -31,6 +48,8 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   const loading = availability.offerId !== offerId || availability.state === "loading";
   const loadError = availability.offerId === offerId && availability.state === "failed";
   const occurrences = availability.offerId === offerId ? availability.occurrences : [];
+  // One array per availability read: the calendar keeps the month the traveler turned to while other fields re-render the form.
+  const offerOccurrences = useMemo(() => (availability.offerId === offerId ? availability.occurrences.filter((occurrence) => occurrence.offerId === offerId) : []), [availability, offerId]);
   const [date, setDate] = useState("");
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
@@ -42,6 +61,12 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   const [problem, setProblem] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const attempt = useRef<{ signature: string; key: string } | null>(null);
+  const [step, setStep] = useState<EmbedStep>(1);
+  const [outcome, setOutcome] = useState<EmbedOutcome | null>(null);
+  const embedRoot = useRef<HTMLDivElement>(null);
+  const shownStep = useRef<EmbedStep>(1);
+  const dateHeadingId = useId();
+  useEmbedFrame(embedRoot, embed);
   const offer = offers.find((candidate) => candidate.id === offerId);
   const approval = offer?.acceptanceMode === "APPROVAL";
   const total = offer ? expectedSiteBookingTotalYen(offer, adults, children) : null;
@@ -63,6 +88,15 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
     return !question.required || (Array.isArray(answer) ? answer.length > 0 : typeof answer === "string" && answer.trim().length > 0);
   }) ?? false;
 
+  // A new step starts at the frame's top: ask the parent page to scroll there (nothing else is sent).
+  useEffect(() => {
+    if (!embed || shownStep.current === step) return;
+    shownStep.current = step;
+    // A frame of fixed height (pasted as a URL only) scrolls inside itself: the new step starts at its top there too.
+    window.scrollTo(0, 0);
+    postEmbedTop();
+  }, [embed, step]);
+
   useEffect(() => {
     if (!offerId) return;
     let active = true;
@@ -82,6 +116,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!api || !offer || !selectedOccurrence?.bookable || total === null || !agreed || !validAnswers || submitting) return;
+    if (embed && (step !== 2 || preview)) return;
     setProblem("");
     const answersBody = answersForCheckout(offer.bookingQuestions, answers);
     const bodyWithoutKey: Omit<ExperienceCheckoutRequest, "clientRequestKey"> & { salesPlanRevision?: number } = {
@@ -98,7 +133,8 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       consent: { agreedVersion: consentVersion },
       ...(saleTerms?.salesPlanRevision === undefined ? {} : { salesPlanRevision: saleTerms.salesPlanRevision }),
       // 流入の印（utm_*）：最初の流入だけをメモリに持ち、Do Not Track なら送らない（lib/booking-attribution.ts）。
-      ...(attributionEnabled ? readBookingAttribution(navigator.doNotTrack) : {}),
+      // The widget's default mark (utm_source=provider, utm_medium=embed) goes under what was captured, and never with Do Not Track.
+      ...(attributionEnabled ? attributionForCheckout(defaultAttribution) : {}),
     };
     const signature = JSON.stringify(bodyWithoutKey);
     if (attempt.current?.signature !== signature) attempt.current = { signature, key: createClientRequestKey() };
@@ -107,6 +143,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
     try {
       const result = await api.startCheckout(publication.slug, body);
       if (result.ok) {
+        if (embed) { showEmbedOutcome(result.checkoutUrl); return; }
         window.location.assign(result.checkoutUrl);
         return;
       }
@@ -119,6 +156,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
         if (code === "FULL" || code === "OCCURRENCE_INVALID" || code === "UNAVAILABLE") {
           setProblem(ja ? "この日時は予約できなくなりました。別の日時を選んでください。" : "That date is no longer available. Choose another date.");
           setDate("");
+          if (embed) setStep(1);
           return;
         }
         if (code === "RATE_LIMITED") setProblem(ja ? "操作が多すぎます。少し待ってから再度お試しください。" : "Too many attempts. Please wait a moment and try again.");
@@ -133,13 +171,39 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
     }
   }
 
-  if (!bookingsEnabled || !saleTerms || !firstOffer) return <p role="status" className="rounded-2xl bg-sand p-5 text-ink-soft">{ja ? "現在、この体験はオンライン予約できません。" : "Online booking is temporarily unavailable for this experience."}</p>;
+  /** Where checkout answered decides the last step: Stripe is paid in the top window, this site's return page ends here. */
+  function showEmbedOutcome(checkoutUrl: string) {
+    let target: URL;
+    try { target = new URL(checkoutUrl, siteOrigin); } catch { setProblem(connectionError); return; }
+    if (target.origin !== siteOrigin) {
+      setOutcome({ kind: "pay", checkoutUrl: target.href });
+    } else {
+      setOutcome({ kind: "done", type: readReturnType(target.searchParams.get("type")), free: target.searchParams.get("payment") === "free" });
+    }
+    setStep(3);
+  }
+
+  function payInTopWindow(event: MouseEvent<HTMLAnchorElement>, checkoutUrl: string) {
+    // When nothing was opened (not an https address), the link itself still goes to the top window.
+    if (leaveFrameTo(checkoutUrl) !== null) event.preventDefault();
+  }
+
+  function continueToDetails() {
+    if (preview || !selectedOccurrence?.bookable || total === null) return;
+    setProblem("");
+    setStep(2);
+  }
+
+  if (!bookingsEnabled || !saleTerms || !firstOffer) {
+    const unavailable = <p role="status" className={UNAVAILABLE}>{ja ? "現在、この体験はオンライン予約できません。" : "Online booking is temporarily unavailable for this experience."}</p>;
+    return embed ? <EmbedRoot rootRef={embedRoot} siteOrigin={siteOrigin}>{unavailable}</EmbedRoot> : unavailable;
+  }
 
   const pricePerAdult = (item: SitePublicOffer) => `${formatYen(item.pricing.adultPriceYen, locale)} ${ja ? "/ 大人1名" : "per adult"}`;
-
-  return <form onSubmit={submit} className="rounded-[var(--radius-card)] border border-line bg-white p-5 sm:p-7">
-    <h1 className="text-3xl">{approval ? (ja ? `${publication.japanese!.title}の予約リクエスト` : `Request to book ${publication.publicTitle}`) : (ja ? `${publication.japanese!.title}を予約` : `Book ${publication.publicTitle}`)}</h1>
-    <div className="mt-6 grid grid-cols-1 gap-5">
+  const heading = <h1 className="text-3xl">{approval ? (ja ? `${publication.japanese!.title}の予約リクエスト` : `Request to book ${publication.publicTitle}`) : (ja ? `${publication.japanese!.title}を予約` : `Book ${publication.publicTitle}`)}</h1>;
+  // The cancellation terms and the minimum charge, as one line: beside the dates, and again where the traveler agrees to them.
+  const cancellationLine = offer ? `${cancellationSummary(offer, locale)}${offer.minimumChargeableParticipants > 1 ? (ja ? ` · 最低請求人数は${offer.minimumChargeableParticipants}名` : ` · Minimum charge is ${offer.minimumChargeableParticipants} guests`) : ""}` : "";
+  const offerAndSchedule = <>
       {offers.length > 1 ? <label className={FIELD_LABEL}>{ja ? "プラン" : "Option"}
         <select required value={offerId} onChange={(event) => { const next = offers.find((item) => item.id === event.target.value); setOfferId(event.target.value); setDate(""); setAnswers({}); if (!next?.pricing.child) setChildren(0); }} className={FIELD_SELECT}>
           {offers.map((item) => <option key={item.id} value={item.id}>{item.name} · {pricePerAdult(item)}</option>)}
@@ -150,24 +214,26 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       </div>}
       {offer ? <>
         <p className="-mt-3 text-sm text-ink-soft">{scheduleDescription(offer, locale)} · {formatDurationLabel(offer.durationMinutes, locale)}</p>
-        <p className="-mt-4 text-sm text-ink-soft">{cancellationSummary(offer, locale)}{offer.minimumChargeableParticipants > 1 ? ja ? ` · 最低請求人数は${offer.minimumChargeableParticipants}名` : ` · Minimum charge is ${offer.minimumChargeableParticipants} guests` : ""}</p>
+        <p className="-mt-4 text-sm text-ink-soft">{cancellationLine}</p>
       </> : null}
-      <label className={FIELD_LABEL}>{ja ? "日にち" : "Date"}
-        <select required value={date} disabled={loading || loadError} onChange={(event) => setDate(event.target.value)} className={`${FIELD_SELECT} disabled:opacity-50`}>
-          <option value="">{loading ? ja ? "日時を読み込み中…" : "Loading dates…" : loadError ? ja ? "日時を確認できません" : "Dates unavailable" : ja ? "日時を選択" : "Choose a date"}</option>
-          {occurrences.map((occurrence) => <option key={`${occurrence.offerId}-${occurrence.date}`} value={occurrence.date} disabled={!occurrence.bookable}>{new Intl.DateTimeFormat(ja ? "ja-JP" : "en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric", timeZoneName: undefined }).format(new Date(`${occurrence.date}T12:00:00Z`))}{occurrence.bookable ? ` · ${new Intl.DateTimeFormat(ja ? "ja-JP" : "en-US", { timeZone: "Asia/Tokyo", hour: "numeric", minute: "2-digit" }).format(new Date(occurrence.startAt))} JST · ${occurrence.seatsLeft}${ja ? "席" : " places"}` : ja ? " · 予約不可" : " · Unavailable"}</option>)}
-        </select>
-      </label>
+  </>;
+  const dateField = <>
+      <div role="group" aria-labelledby={dateHeadingId} className={FIELD_LABEL}>
+        <p id={dateHeadingId}>{ja ? "日にち" : "Date"}</p>
+        <BookingCalendar occurrences={offerOccurrences} value={date} onChange={setDate} locale={locale} loading={loading} failed={loadError} />
+      </div>
       {loadError ? <p role="alert" className="text-sm text-red-700">{ja ? "空き状況を確認できませんでした。ページを再読み込みしてください。" : "Dates couldn’t be checked. Retry the page or contact us before paying."}</p> : null}
-      <div className="grid grid-cols-2 gap-4">
+  </>;
+  const guestCounts = <div className="grid grid-cols-2 gap-4">
         <label className={FIELD_LABEL}>{ja ? "大人の人数" : "Adults"}
           <input type="number" min={0} max={offer?.maxPartySize ?? 1} value={adults} onChange={(event) => setAdults(Number(event.target.value))} className={FIELD_INPUT} />
         </label>
         {offer?.pricing.child ? <label className={FIELD_LABEL}>{ja ? "子どもの人数" : "Children"} ({offer.pricing.child.minAge}–{offer.pricing.child.maxAge}{ja ? "歳" : ""})
           <input type="number" min={0} max={offer.maxPartySize} value={children} onChange={(event) => setChildren(Number(event.target.value))} className={FIELD_INPUT} />
         </label> : null}
-      </div>
-      {offer?.bookingQuestions.map((question) => <QuestionField key={question.id} question={question} value={answers[question.id]} onChange={(value) => updateAnswer(question.id, value)} locale={locale} />)}
+      </div>;
+  const questions = offer?.bookingQuestions.map((question) => <QuestionField key={question.id} question={question} value={answers[question.id]} onChange={(value) => updateAnswer(question.id, value)} locale={locale} />);
+  const contactFields = <>
       <label className={FIELD_LABEL}>{ja ? "お名前" : "Full name"}
         <input required autoComplete="name" maxLength={200} value={name} onChange={(event) => setName(event.target.value)} className={FIELD_INPUT} />
       </label>
@@ -177,24 +243,122 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       <label className={FIELD_LABEL}>{ja ? "担い手に伝えておきたいこと" : "Note"} <span className="font-normal text-muted">{ja ? "（任意）" : "Optional"}</span>
         <textarea maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} className={FIELD_TEXTAREA} />
       </label>
-      <div className="rounded-xl bg-sand p-4 text-sm">
+  </>;
+  const totalBox = <div className="rounded-xl bg-sand p-4 text-sm">
         <div className="flex justify-between gap-3"><span>{ja ? "合計" : "Total"}</span><b>{total === null ? ja ? "人数を確認してください" : "Check guest counts" : formatYen(total, locale)}</b></div>
         <p className="mt-2 text-ink-soft">{ja ? "最低請求人数がある場合は合計に含まれます。席を確保する前に最終金額を再確認します。" : "The total includes the offer’s minimum chargeable guest count where one is set. The final amount is checked again before a seat is held."}</p>
-      </div>
+      </div>;
+  const sellerAndConsent = <>
       {!sellerInformationUrl ? <p className="wrap-anywhere text-sm text-ink-soft">{ja ? `販売者：${sellerInformationName}` : `Sold by ${sellerInformationName}`}</p> : null}
       <label className="flex items-start gap-3 text-sm text-ink-soft">
         <input type="checkbox" required checked={agreed} onChange={(event) => setAgreed(event.target.checked)} className="mt-1 size-4 shrink-0" />
         <span className="min-w-0 wrap-anywhere">{ja ? "上記の予約・キャンセル条件と" : "I agree to the booking and cancellation conditions shown above and the "}<a className="font-extrabold underline" href="/privacy" target="_blank" rel="noreferrer">{ja ? "プライバシーポリシー" : "Privacy Policy"}</a>{sellerInformationUrl ? <>{ja ? "、および" : ", and "}<a className="underline underline-offset-2" href={sellerInformationUrl} target="_blank" rel="noreferrer">{ja ? `${sellerInformationName}の販売者情報` : `seller information for ${sellerInformationName}`}</a></> : null}{ja ? "に同意します。" : "."}</span>
       </label>
-      {problem ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{problem}</p> : null}
-      <button type="submit" disabled={!api || !selectedOccurrence?.bookable || total === null || !agreed || !validAnswers || submitting || loading || loadError} className="min-h-12 rounded-full bg-ink px-6 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-45">{submitLabel}</button>
-      <p className="text-center text-xs text-muted">{approval
+  </>;
+  const problemAlert = problem ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{problem}</p> : null;
+  const submitButton = <button type="submit" disabled={!api || !selectedOccurrence?.bookable || total === null || !agreed || !validAnswers || submitting || loading || loadError} className={PRIMARY_BUTTON}>{submitLabel}</button>;
+  const submitNote = <p className="text-center text-xs text-muted">{approval
         ? (ja ? "リクエスト時のお支払いはありません。承認後、事務局からお支払いリンクをメールでお送りします。" : "No payment is taken when you request. If NIHO approves your request, we’ll email you a payment link.")
         : free
           ? (ja ? "お支払いは不要です。氏名、メールアドレス、回答は予約の作成にのみ使用します。" : "No payment is needed. Your name, email and answers are sent only to create this booking.")
-          : (ja ? "お支払い情報はStripe Checkoutで入力します。氏名、メールアドレス、回答は予約の作成にのみ使用します。" : "Payment details are entered on Stripe Checkout. Your name, email and answers are sent only to create this booking.")}</p>
+          : (ja ? "お支払い情報はStripe Checkoutで入力します。氏名、メールアドレス、回答は予約の作成にのみ使用します。" : "Payment details are entered on Stripe Checkout. Your name, email and answers are sent only to create this booking.")}</p>;
+
+  if (!embed) return <form onSubmit={submit} className={FORM_FRAME}>
+    {heading}
+    <div className="mt-6 grid grid-cols-1 gap-5">
+      {offerAndSchedule}
+      {dateField}
+      {guestCounts}
+      {questions}
+      {contactFields}
+      {totalBox}
+      {sellerAndConsent}
+      {problemAlert}
+      {submitButton}
+      {submitNote}
     </div>
   </form>;
+
+  const noPayment = approval || free;
+  const stepNames = ja ? ["日にち", "お客さま情報", noPayment ? "完了" : "お支払い"] : ["Date", "Details", noPayment ? "Done" : "Pay"];
+  const chosenSummary = selectedOccurrence ? <div className="grid gap-2 rounded-xl bg-sand p-4 text-sm">
+    <div className="flex justify-between gap-3"><span>{ja ? "日時" : "Date"}</span><b className="text-right">{calendarDayLabel(selectedOccurrence.date, locale)} · {occurrenceStartTime(selectedOccurrence.startAt, locale)} JST</b></div>
+    <div className="flex justify-between gap-3"><span>{ja ? "人数" : "Guests"}</span><b className="text-right">{guestCountLabel(adults, children, locale)}</b></div>
+    <div className="flex justify-between gap-3"><span>{ja ? "合計" : "Total"}</span><b>{total === null ? "" : formatYen(total, locale)}</b></div>
+    {/* The conditions the consent below refers to: step 1 showed them, and this step is where they are agreed to. */}
+    {cancellationLine ? <p className="border-t border-line-strong pt-2 text-ink-soft">{cancellationLine}</p> : null}
+  </div> : null;
+  const done = outcome?.kind === "done" ? bookingReturnCopy(outcome.type, outcome.free, locale) : null;
+
+  return <EmbedRoot rootRef={embedRoot} siteOrigin={siteOrigin}>
+    <form onSubmit={submit} className={FORM_FRAME}>
+      {heading}
+      <ol className="mt-3.5 flex list-none gap-1.5 p-0 text-xs font-extrabold text-muted">
+        {stepNames.map((name, index) => <li key={name} aria-current={step === index + 1 ? "step" : undefined} className={`flex-1 border-t-[3px] pt-1.5 ${step === index + 1 ? "border-ink text-ink" : "border-line"}`}>{index + 1} {name}</li>)}
+      </ol>
+      <div className="mt-6 grid grid-cols-1 gap-5">
+        {step === 1 ? <>
+          {/* On top: a date that filled up brings the traveler back here, and the parent page shows the frame from its top. */}
+          {problemAlert}
+          {offerAndSchedule}
+          {dateField}
+          {guestCounts}
+          {totalBox}
+          {preview ? <p role="status" className="rounded-xl bg-sand p-3 text-center text-sm text-ink-soft">{ja ? "プレビューです。ここでは予約できません。" : "Preview. Booking is turned off here."}</p> : null}
+          <button type="button" onClick={continueToDetails} disabled={preview || !selectedOccurrence?.bookable || total === null || loading || loadError} className={PRIMARY_BUTTON}>{ja ? "次へ" : "Continue"}</button>
+        </> : null}
+        {step === 2 ? <>
+          {chosenSummary}
+          {questions}
+          {contactFields}
+          {sellerAndConsent}
+          {problemAlert}
+          {submitButton}
+          <button type="button" onClick={() => setStep(1)} disabled={submitting} className="justify-self-center text-sm font-extrabold underline underline-offset-2 disabled:opacity-45">{ja ? "← 戻る" : "← Back"}</button>
+          {submitNote}
+        </> : null}
+        {step === 3 && outcome?.kind === "pay" ? <>
+          <div className="rounded-xl bg-leaf-pale p-4 text-sm">
+            <b className="block font-extrabold">{ja ? "席を確保しました" : "Seats held"}</b>
+            <span className="text-ink-soft">{ja ? "これから30分間、席を確保しています。" : "Your seats are held for the next 30 minutes."}</span>
+          </div>
+          {chosenSummary}
+          <a href={outcome.checkoutUrl} target="_top" rel="noopener noreferrer" onClick={(event) => payInTopWindow(event, outcome.checkoutUrl)} className={`${PRIMARY_BUTTON} grid place-items-center text-center`}>{ja ? "Stripeで安全に支払う" : "Pay securely on Stripe"}</a>
+          <a href={outcome.checkoutUrl} target="_blank" rel="noopener noreferrer" className="justify-self-center text-sm underline underline-offset-2">{ja ? "新しいタブで支払いを開く" : "Open payment in a new tab"}</a>
+          <p className="text-center text-xs text-muted">{ja ? "このページを離れて、Stripeでお支払いいただきます。確認はあとでメールでお送りします。" : "You’ll leave this page to pay on Stripe. We email your confirmation afterwards."}</p>
+        </> : null}
+        {step === 3 && done ? <div role="status" className="rounded-xl bg-leaf-pale p-4">
+          <h2 className="text-2xl">{done.heading}</h2>
+          <p className="mt-2 text-ink-soft">{done.lead}</p>
+        </div> : null}
+      </div>
+    </form>
+  </EmbedRoot>;
+}
+
+/** The widget's frame: everything the parent page sizes, ending at "Powered by" with no space below it. */
+function EmbedRoot({ rootRef, siteOrigin, children }: { rootRef: React.RefObject<HTMLDivElement | null>; siteOrigin: string; children: React.ReactNode }) {
+  return <div data-embed-root ref={rootRef}>
+    {children}
+    <p className="mt-2 text-center text-xs text-muted"><a href={siteOrigin} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline">Powered by NIHO Experience</a></p>
+  </div>;
+}
+
+/** The widget's message when the experience cannot be booked: 200 inside the frame, never a 404 page there. */
+export function EmbedBookingUnavailable({ siteOrigin }: { siteOrigin: string }) {
+  const root = useRef<HTMLDivElement>(null);
+  useEmbedFrame(root, true);
+  return <EmbedRoot rootRef={root} siteOrigin={siteOrigin}><p role="status" className={UNAVAILABLE}>Online booking is temporarily unavailable for this experience.</p></EmbedRoot>;
+}
+
+/** The mark sent with checkout: what this visit captured, over the widget's default; nothing at all with Do Not Track. */
+function attributionForCheckout(defaultAttribution: BookingAttribution | undefined): BookingAttribution {
+  return attributionWithDefault(defaultAttribution, readBookingAttribution(navigator.doNotTrack), navigator.doNotTrack);
+}
+
+function guestCountLabel(adults: number, children: number, locale: "en" | "ja"): string {
+  if (locale === "ja") return [`大人${adults}名`, children > 0 ? `子ども${children}名` : ""].filter(Boolean).join("・");
+  return [`${adults} ${adults === 1 ? "adult" : "adults"}`, children > 0 ? `${children} ${children === 1 ? "child" : "children"}` : ""].filter(Boolean).join(", ");
 }
 
 function formatDurationLabel(minutes: number, locale: "en" | "ja" = "en"): string {

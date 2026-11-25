@@ -5,29 +5,34 @@ import type { NextConfig } from "next";
 // (indexing, host sign-up, API mode) is read at request time in src/lib/config.ts,
 // so one reviewed image can be promoted from preview to production.
 
+/**
+ * The site's Content-Security-Policy. Only `frame-src` and `frame-ancestors` vary (#638, docs/embed.md); the defaults give the
+ * policy every route has always had, character for character.
+ */
+function contentSecurityPolicy({ frameSrc = "https://www.youtube-nocookie.com", frameAncestors = "'none'" }: { frameSrc?: string; frameAncestors?: string } = {}): string {
+  return [
+    "default-src 'self'",
+    "img-src 'self' data: https:",
+    `media-src 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"}`,
+    "font-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    // Next.js inlines its bootstrap script. A nonce-based policy is planned with #12/#15.
+    `script-src 'self' 'unsafe-inline' https://cloud.umami.is https://www.googletagmanager.com${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+    `connect-src 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"} https://gateway.umami.is https://storage.googleapis.com https://www.googletagmanager.com https://*.google-analytics.com https://*.google.com`,
+    `frame-src ${frameSrc}`,
+    `frame-ancestors ${frameAncestors}`,
+    "base-uri 'self'",
+    // NIHO too: a traveler's log in is a form post answered with a redirect to NIHO (#597), and Chromium holds a redirect to form-action.
+    `form-action 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"} https://checkout.stripe.com https://connect.stripe.com https://stripe.com`,
+  ].join("; ");
+}
+
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   // Keeps booking URLs out of the Referer sent to Stripe or other sites.
   { key: "Referrer-Policy", value: "no-referrer" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
-  {
-    key: "Content-Security-Policy",
-    value: [
-      "default-src 'self'",
-      "img-src 'self' data: https:",
-      `media-src 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"}`,
-      "font-src 'self'",
-      "style-src 'self' 'unsafe-inline'",
-      // Next.js inlines its bootstrap script. A nonce-based policy is planned with #12/#15.
-      `script-src 'self' 'unsafe-inline' https://cloud.umami.is https://www.googletagmanager.com${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
-      `connect-src 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"} https://gateway.umami.is https://storage.googleapis.com https://www.googletagmanager.com https://*.google-analytics.com https://*.google.com`,
-      "frame-src https://www.youtube-nocookie.com",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      // NIHO too: a traveler's log in is a form post answered with a redirect to NIHO (#597), and Chromium holds a redirect to form-action.
-      `form-action 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"} https://checkout.stripe.com https://connect.stripe.com https://stripe.com`,
-    ].join("; "),
-  },
+  { key: "Content-Security-Policy", value: contentSecurityPolicy() },
 ];
 
 /** Pages that carry booking input or personal results: never cached, never indexed. */
@@ -43,6 +48,25 @@ const privatePageHeaders = [
  * Other sites still get no Referer.
  */
 const hostConsoleHeaders = [...privatePageHeaders, { key: "Referrer-Policy", value: "same-origin" }];
+
+/**
+ * The booking widget (#638, docs/embed.md): only `/embed/*` may be framed, by any https site (and localhost while developing).
+ * Private like the booking pages. Every other directive is the site's own.
+ */
+const embedHeaders = [
+  ...privatePageHeaders,
+  {
+    key: "Content-Security-Policy",
+    value: contentSecurityPolicy({ frameAncestors: `'self' https:${process.env.NODE_ENV === "development" ? " http://localhost:* http://127.0.0.1:*" : ""}` }),
+  },
+];
+
+/**
+ * The host console frames this site's own widget as the preview in 自分のサイトに貼る. The console moves between its pages
+ * without reloading the document, so the policy of whichever console page loaded first decides: every /host page may
+ * frame this origin (and of this origin only /embed lets itself be framed). The console itself is still never framed.
+ */
+const hostFrameHeaders = [{ key: "Content-Security-Policy", value: contentSecurityPolicy({ frameSrc: "'self' https://www.youtube-nocookie.com" }) }];
 
 /**
  * Crawlers that read `<head>` from the first HTML bytes and never run JavaScript.
@@ -103,6 +127,7 @@ const nextConfig: NextConfig = {
       // `referrerPolicy: same-origin` so the POST still carries this site's Origin.
       { source: "/host/auth/open", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
       { source: "/host/auth/invite", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
+      { source: "/host/auth/team-invite", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
       { source: "/host/auth/callback", headers: [...privatePageHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
       // 設定 › カレンダー's bookings feed (#109): the secret is the path, read by calendar apps; never archived, never in a Referer.
       // These headers win over the route's own (Next.js keeps a header already set), so they say the same.
@@ -121,6 +146,10 @@ const nextConfig: NextConfig = {
       // The retired /editor responds 410 and stays private and uncached.
       { source: "/editor", headers: hostConsoleHeaders },
       { source: "/editor/:path+", headers: hostConsoleHeaders },
+      // After "/:path*": for the same key the later rule wins (Next.js「Header Overriding Behavior」), so only these routes
+      // get their own Content-Security-Policy. /host keeps the host console's other headers from "/host/:path+".
+      { source: "/embed/:path*", headers: embedHeaders },
+      { source: "/host/:path*", headers: hostFrameHeaders },
     ];
   },
 };
