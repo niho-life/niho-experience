@@ -18,6 +18,7 @@ vi.mock("@/lib/catalog", () => ({ loadDetails: async () => new Map() }));
 vi.mock("@/lib/card-model", () => ({ buildCardModels: () => [] }));
 vi.mock("@/lib/journey", () => ({ getReviewSummaries: async () => new Map() }));
 vi.mock("@/lib/guide-registry", () => ({ guideCatalogForSite: async () => ({ guides: [] }) }));
+vi.mock("@/lib/experience-categories-server", () => ({ loadCategoryBySlug: async () => null }));
 vi.mock("@/lib/locale-metadata", () => ({ englishAlternates: async () => ({}) }));
 vi.mock("@/lib/guest-booking-source", () => ({ guestBookingSources: async () => ({ nihoWebOrigin: "https://niho.example.test", siteOrigin: "https://experience.example.test", siteSlugs: ["native-card"], closedSlugs: [] }) }));
 vi.mock("@/lib/experience/site-publications", () => ({ listSitePublicExperiences: async () => {

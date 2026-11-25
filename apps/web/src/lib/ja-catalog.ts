@@ -1,7 +1,6 @@
 import {
-  EXPERIENCE_AREAS, EXPERIENCE_CATEGORIES, EXPERIENCE_COMPANIONS, EXPERIENCE_OCCASIONS, EMPTY_EXPERIENCE_CLASSIFICATION,
-  experienceAreaLabel, isExperienceAreaId, isExperienceCategoryId,
-  type ExperienceAreaId, type ExperienceCategoryId, type ExperienceClassification, type ExperienceCompanionId, type ExperienceOccasionId,
+  EXPERIENCE_AREAS, EXPERIENCE_CATEGORIES, EMPTY_EXPERIENCE_CLASSIFICATION, experienceAreaLabel,
+  type ExperienceAreaId, type ExperienceCategoryId, type ExperienceClassification,
 } from "@niho-experience/experience-domain";
 import type { SitePublicExperience } from "./experience/site-publications";
 
@@ -80,64 +79,6 @@ export function jaCapacity(capacity: { min: number; max: number }): string {
 
 export const jaYen = (amount: number): string => `¥${amount.toLocaleString("ja-JP")}`;
 
-export const JA_GUEST_CHOICES = [1, 2, 3, 4, 5, 6, 8, 10, 20] as const;
-
-export type JaListQuery = {
-  readonly category: ExperienceCategoryId | null;
-  readonly area: ExperienceAreaId | null;
-  readonly companion: ExperienceCompanionId | null;
-  readonly occasion: ExperienceOccasionId | null;
-  readonly guests: number | null;
-  /** YYYY-MM-DD, one of the offered days. */
-  readonly date: string | null;
-};
-
-type Params = Record<string, string | string[] | undefined>;
-const one = (value: string | string[] | undefined): string | null => (typeof value === "string" ? value : null);
-
-/** The list's own query: a value that is not one of the choices is the same as no value. */
-export function parseJaListQuery(params: Params, days: readonly { readonly key: string }[]): JaListQuery {
-  const category = one(params.category), area = one(params.area), companion = one(params.with), occasion = one(params.occasion), guests = one(params.guests), date = one(params.date);
-  return {
-    category: isExperienceCategoryId(category) ? category : null,
-    area: isExperienceAreaId(area) ? area : null,
-    companion: EXPERIENCE_COMPANIONS.find((item) => item.id === companion)?.id ?? null,
-    occasion: EXPERIENCE_OCCASIONS.find((item) => item.id === occasion)?.id ?? null,
-    guests: guests !== null && /^\d{1,2}$/.test(guests) && (JA_GUEST_CHOICES as readonly number[]).includes(Number(guests)) ? Number(guests) : null,
-    date: date !== null && days.some((day) => day.key === date) ? date : null,
-  };
-}
-
-/** The list's address for a query (the category, and any other condition, as `?` parameters). */
-export function jaListHref(query: JaListQuery, override: Partial<{ [K in keyof JaListQuery]: JaListQuery[K] | null }> = {}): string {
-  const next = { ...query, ...override };
-  const params = new URLSearchParams();
-  if (next.category) params.set("category", next.category);
-  if (next.date) params.set("date", next.date);
-  if (next.area) params.set("area", next.area);
-  if (next.companion) params.set("with", next.companion);
-  if (next.occasion) params.set("occasion", next.occasion);
-  if (next.guests) params.set("guests", String(next.guests));
-  const text = params.toString();
-  return text ? `/ja/experiences?${text}` : "/ja/experiences";
-}
-
-/** Whether any condition besides the category is set (such a list is not for search engines). */
-export const jaQueryHasFilter = (query: JaListQuery): boolean => Boolean(query.area || query.companion || query.occasion || query.guests || query.date);
-
-/** The cards that meet every condition but the date: a day is decided only by the booking store's own availability (a rescheduled or closed occurrence moves it), never by the weekday. */
-export function filterJaCards(cards: readonly JaCard[], query: JaListQuery): JaCard[] {
-  return cards.filter((card) => {
-    const c = card.classification;
-    if (query.category && c.category !== query.category) return false;
-    if (query.area && c.area !== query.area) return false;
-    if (query.companion && !c.companions.includes(query.companion)) return false;
-    if (query.occasion && !c.occasions.includes(query.occasion)) return false;
-    if (query.guests && !card.offers.some((offer) => offer.minimumParticipants <= query.guests! && query.guests! <= offer.maxPartySize)) return false;
-    return true;
-  });
-}
-
 /** How many published cards each category has: a category without any is not offered to search engines. */
 export function jaCategoryCounts(cards: readonly JaCard[]): ReadonlyMap<ExperienceCategoryId, number> {
   const counts = new Map<ExperienceCategoryId, number>();
@@ -147,4 +88,4 @@ export function jaCategoryCounts(cards: readonly JaCard[]): ReadonlyMap<Experien
 
 export const jaCategoryOf = (id: ExperienceCategoryId | null) => EXPERIENCE_CATEGORIES.find((item) => item.id === id) ?? null;
 export const jaAreaLabel = (id: ExperienceAreaId | null) => experienceAreaLabel(id);
-export { EXPERIENCE_AREAS, EXPERIENCE_CATEGORIES, EXPERIENCE_COMPANIONS, EXPERIENCE_OCCASIONS };
+export { EXPERIENCE_AREAS, EXPERIENCE_CATEGORIES };

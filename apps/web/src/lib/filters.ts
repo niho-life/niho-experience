@@ -31,13 +31,15 @@ export function normalizeExperienceDate(value: string | string[] | undefined): s
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : undefined;
 }
 
+/** The list's search rule: every word of the query is somewhere in the text, in any order. An empty query matches. */
+export function matchesExperienceQuery(searchable: string, query: string): boolean {
+  const terms = normalizeExperienceQuery(query).toLocaleLowerCase("en-US").split(" ").filter(Boolean);
+  const text = searchable.toLocaleLowerCase("en-US");
+  return terms.every((term) => text.includes(term));
+}
+
 /** Search only the public summary fields already returned for the listing. */
 export function filterExperienceSummaries(items: ExperienceSummaryForSite[], query: string): ExperienceSummaryForSite[] {
-  const terms = normalizeExperienceQuery(query).toLocaleLowerCase("en-US").split(" ").filter(Boolean);
-  if (!terms.length) return items;
-
-  return items.filter((item) => {
-    const searchable = [item.title, item.lead, item.provider.name, item.region.name].join(" ").toLocaleLowerCase("en-US");
-    return terms.every((term) => searchable.includes(term));
-  });
+  if (!normalizeExperienceQuery(query)) return items;
+  return items.filter((item) => matchesExperienceQuery([item.title, item.lead, item.provider.name, item.region.name].join(" "), query));
 }

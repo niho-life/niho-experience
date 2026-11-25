@@ -20,6 +20,7 @@ export function ExperienceFiltersForm({
   theme,
   date,
   guests,
+  category,
   filtersEnabled,
   filtersActive,
   placement = "bar",
@@ -28,6 +29,8 @@ export function ExperienceFiltersForm({
   theme: ExperienceSiteTheme | undefined;
   date: string | undefined;
   guests?: number | null;
+  /** The chosen category (#658): a search keeps it. */
+  category?: string | null;
   filtersEnabled: boolean;
   filtersActive: boolean;
   placement?: "bar" | "inline";
@@ -90,6 +93,7 @@ export function ExperienceFiltersForm({
         ) : null}
         {date ? <input type="hidden" name="date" value={date} /> : null}
         {guests != null ? <input type="hidden" name="guests" value={guests} /> : null}
+        {category ? <input type="hidden" name="category" value={category} /> : null}
         {filtersEnabled && filtersActive ? (
           <div>
             <LocalizedLink href="/experiences" className="text-sm font-bold text-moss underline">

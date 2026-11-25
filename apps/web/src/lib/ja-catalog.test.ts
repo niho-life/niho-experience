@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { SitePublicExperience } from "./experience/site-publications";
-import { filterJaCards, jaCapacity, jaCardOf, jaGuideLine, jaCategoryCounts, jaDuration, jaListHref, jaQueryHasFilter, jaYen, parseJaListQuery, type JaCard } from "./ja-catalog";
+import { jaCapacity, jaCardOf, jaGuideLine, jaCategoryCounts, jaDuration, jaYen, type JaCard } from "./ja-catalog";
 
-/** 日本語サイトの一覧とカード (#529): the card from a publication, the query, the filters. Synthetic data only. */
-const DAYS = [{ key: "2026-11-15" }, { key: "2026-11-16" }, { key: "2026-11-17" }];
+/** 日本語サイトの一覧とカード (#529): the card from a publication and the category counts. Synthetic data only. */
 
 function item(over: { slug?: string; providerPublicName?: string | null; providerKind?: "PERSON" | "BUSINESS" | null; japanese?: object | null; offers?: object[] } = {}): SitePublicExperience {
   return {
@@ -69,55 +68,12 @@ describe("words", () => {
   });
 });
 
-describe("query", () => {
-  it("keeps only known values, and a date only when it is one of the offered days", () => {
-    expect(parseJaListQuery({ category: "walk", area: "kita", with: "friends", occasion: "rain", guests: "4", date: "2026-11-16" }, DAYS))
-      .toEqual({ category: "walk", area: "kita", companion: "friends", occasion: "rain", guests: 4, date: "2026-11-16" });
-    expect(parseJaListQuery({ category: "cooking", area: ["kita"], with: "rain", occasion: "friends", guests: "7", date: "2026-12-31" }, DAYS))
-      .toEqual({ category: null, area: null, companion: null, occasion: null, guests: null, date: null });
-    expect(parseJaListQuery({}, DAYS)).toEqual({ category: null, area: null, companion: null, occasion: null, guests: null, date: null });
-  });
-
-  it("writes the list's address in one order, and says which queries are only the category", () => {
-    const q = parseJaListQuery({ category: "sea", area: "zai", date: "2026-11-15" }, DAYS);
-    expect(jaListHref(q)).toBe("/ja/experiences?category=sea&date=2026-11-15&area=zai");
-    expect(jaListHref(q, { category: null, date: null })).toBe("/ja/experiences?area=zai");
-    expect(jaListHref(parseJaListQuery({}, DAYS))).toBe("/ja/experiences");
-    expect(jaQueryHasFilter(parseJaListQuery({ category: "sea" }, DAYS))).toBe(false);
-    expect(jaQueryHasFilter(q)).toBe(true);
-  });
-});
-
-describe("filterJaCards", () => {
+describe("jaCategoryCounts", () => {
   const cards = [
     card({ slug: "a" }),
     card({ slug: "b", classification: { category: "sea", area: "zai", companions: ["family", "date"], occasions: ["anniv"] }, offers: [{ minimumParticipants: 1, maxPartySize: 2, weekdays: [1] }] }),
     card({ slug: "c", classification: { category: null, area: null, companions: [], occasions: [] } }),
   ];
-  const q = (params: Record<string, string>) => parseJaListQuery(params, DAYS);
-  const slugs = (params: Record<string, string>) => filterJaCards(cards, q(params)).map((value) => value.slug);
-
-  it("is every card without conditions, and an unclassified one only there", () => {
-    expect(slugs({})).toEqual(["a", "b", "c"]);
-    expect(slugs({ category: "walk" })).toEqual(["a"]);
-    expect(slugs({ category: "sea" })).toEqual(["b"]);
-  });
-
-  it("treats だれと and こんな日に as separate conditions that both must hold", () => {
-    expect(slugs({ with: "family" })).toEqual(["b"]);
-    expect(slugs({ occasion: "rain" })).toEqual(["a"]);
-    expect(slugs({ with: "family", occasion: "rain" })).toEqual([]);
-    expect(slugs({ area: "zai", with: "date", occasion: "anniv" })).toEqual(["b"]);
-  });
-
-  it("keeps cards that have an offer for the party, and leaves a day to the booking store's availability (not the weekday)", () => {
-    expect(slugs({ guests: "1" })).toEqual(["a", "b", "c"]);
-    expect(slugs({ guests: "20" })).toEqual([]);
-    // A rescheduled occurrence can fall on a weekday the offer does not repeat on: no card is dropped here for its weekday.
-    expect(slugs({ date: "2026-11-15" })).toEqual(["a", "b", "c"]);
-    expect(slugs({ date: "2026-11-16", guests: "1" })).toEqual(["a", "b", "c"]);
-  });
-
   it("counts a category only for classified cards", () => {
     expect([...jaCategoryCounts(cards)]).toEqual([["walk", 1], ["sea", 1]]);
   });

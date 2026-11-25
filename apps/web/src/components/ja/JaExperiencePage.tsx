@@ -19,7 +19,7 @@ import { jaAreaLabel, jaCapacity, jaCategoryOf, jaDuration, jaYen, type JaCard }
 import { getLiveReviews } from "@/lib/journey";
 import { iconForText } from "@/lib/themes";
 import { reviewsForJsonLd, sitePublicationJsonLd } from "@/lib/structured-data";
-import { CategoryIcon } from "./CategoryIcon";
+import { CategoryIcon } from "@/components/CategoryIcon";
 import { JaExperienceCard } from "./JaExperienceCard";
 
 const H2 = "text-[1.5rem] leading-snug md:text-[1.75rem]";

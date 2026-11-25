@@ -1,11 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CatalogueViewV1, EN_STATIC_COPY_V1 } from "@niho/experience-presentation/v1";
+import { EN_STATIC_COPY_V1 } from "@niho/experience-presentation/v1";
 import { TrackView } from "@/components/Analytics";
-import { ExperienceList } from "@/components/ExperienceList";
-import { ExperienceFiltersForm } from "@/components/ExperienceFiltersForm";
-import { EmptyResults, ErrorState, StagingUnavailableState } from "@/components/States";
-import { BookingAssurance } from "@/components/BookingAssurance";
+import { ExperiencesPageView } from "@/components/pages/ExperiencesPageView";
+import { ErrorState, StagingUnavailableState } from "@/components/States";
 import { GuideTeasers } from "@/components/GuideBlocks";
 import { getApi, listExperiencesForSite } from "@/lib/api";
 import { buildCardModels } from "@/lib/card-model";
@@ -14,25 +12,35 @@ import { getReviewSummaries } from "@/lib/journey";
 import { withReviewLines } from "@/lib/reviews-ui";
 import { config, isExperienceStaging, isPilotPreview, isPreview } from "@/lib/config";
 import { dayOption, parseDateParam, parseGuestsParam, upcomingDays } from "@/lib/date-filter";
-import { filterExperienceSummaries, normalizeExperienceDate, normalizeExperienceQuery, normalizeExperienceTheme, type SearchParams } from "@/lib/filters";
+import { filterExperienceSummaries, matchesExperienceQuery, normalizeExperienceDate, normalizeExperienceQuery, normalizeExperienceTheme, type SearchParams } from "@/lib/filters";
 import { EXPERIENCE_LIST_DESCRIPTION, EXPERIENCE_LIST_TITLE, publicMetadata } from "@/lib/public-metadata";
 import { englishAlternates } from "@/lib/locale-metadata";
 import { guideCatalogForSite } from "@/lib/guide-registry";
 import { guestBookingSources } from "@/lib/guest-booking-source";
 import { listSitePublicExperiences } from "@/lib/experience/site-publications";
 import { sitePublicationCard } from "@/lib/experience/site-card-model";
+import { filterByCategory, parseCategoryParam, resolveCategories } from "@/lib/experience-categories";
+import { loadCategoryBySlug } from "@/lib/experience-categories-server";
+import { withoutNativeSlugs } from "@/lib/experience/dedupe-slugs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }): Promise<Metadata> {
   const query = await searchParams;
-  const filtered = query.theme !== undefined || query.date !== undefined || query.guests !== undefined || normalizeExperienceQuery(query.q) !== "";
+  const filtered = query.theme !== undefined || query.category !== undefined || query.date !== undefined || query.guests !== undefined || normalizeExperienceQuery(query.q) !== "";
   return {
     ...publicMetadata(EXPERIENCE_LIST_TITLE, EXPERIENCE_LIST_DESCRIPTION, `${config.siteUrl}/experiences`), alternates: await englishAlternates("/experiences"),
     ...(filtered ? { robots: { index: false, follow: true } } : {}),
   };
 }
+
+/**
+ * The native cards are searched by the same rule and the same fields as the legacy summaries (`filterExperienceSummaries`): every
+ * word, in any order, over the title, the lead, the provider and the region. With the duplicates gone (#643) a product sold here
+ * is found only through its native card, so a search that found it before must still find it.
+ */
+const NATIVE_REGION_NAME = "Kamakura";
 
 /** The home finder and the list's date chips both cover two weeks; the chips show only days with something on. A later date in the URL gets its own chip. */
 const FINDER_DAYS = 14;
@@ -52,14 +60,25 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const themesEnabled = config.apiMode === "mock" && config.publicApiVersion === "1.2";
   const theme = themesEnabled ? normalizeExperienceTheme(query.theme) : undefined;
   const sitePublications = siteCatalog.experiences;
-  const nativeSlugs = new Set(siteCatalog.claimedSlugs);
-  const catalog = result.ok ? result.data.experiences.filter((experience) => !nativeSlugs.has(experience.slug)) : [];
+  // A slug this site sells is never also read from the legacy list (#643). The legacy summaries are made from the same published
+  // products, and the claimed slugs cover host-seller products only, so a product published for a provider without a host seller
+  // profile came out twice. Dropped here: the claimed slugs and every slug sold here (its native card stays). A published product
+  // with no sale here keeps its legacy card.
+  const soldHere = sitePublications.filter(({ saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0).map(({ publication }) => publication.slug);
+  const catalog = result.ok ? withoutNativeSlugs(result.data.experiences, [...siteCatalog.claimedSlugs, ...soldHere]) : [];
   const items = filterExperienceSummaries(catalog, searchQuery);
   const legacyCards = buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview);
   const nativeCards = sitePublications
-    .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && (!searchQuery || `${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${publication.providerPublicName ?? publication.sellerDisplayName}`.toLocaleLowerCase("en").includes(searchQuery)))
+    .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && matchesExperienceQuery(`${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${publication.providerPublicName ?? publication.sellerDisplayName} ${NATIVE_REGION_NAME}`, searchQuery))
     .map((entry) => sitePublicationCard(entry));
-  const cardsWithoutReviews = [...legacyCards, ...nativeCards];
+  const bySlug = await loadCategoryBySlug();
+  const { available: categories, selected: category } = resolveCategories(
+    // Every experience on this list before the search narrows it, so the row does not change while searching.
+    [...catalog.map((experience) => experience.slug), ...soldHere],
+    bySlug,
+    parseCategoryParam(query.category),
+  );
+  const cardsWithoutReviews = filterByCategory([...withoutNativeSlugs(legacyCards, nativeCards.map((card) => card.slug)), ...nativeCards], bySlug, category);
   const cards = withReviewLines(cardsWithoutReviews, await getReviewSummaries(cardsWithoutReviews.map((card) => card.slug)));
   if (!result.ok && result.kind !== "not_found" && cards.length === 0) return <ErrorState title="We couldn't load experiences" />;
 
@@ -74,46 +93,34 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const days = upcomingDays(now, FINDER_DAYS);
   if (initialDate && !days.some((day) => day.key === initialDate)) days.push(dayOption(initialDate));
 
-  const searchProps = {
-    searchQuery,
-    theme,
-    date: initialDate ?? undefined,
-    guests: initialGuests,
-    filtersEnabled: themesEnabled,
-    filtersActive: Boolean(searchQuery || theme || date || initialGuests !== null),
-  };
-  const listContent = (
-    <CatalogueViewV1 copy={copy} heading="Kamakura experiences with local hosts" intro="Hosted by people who live here, one hour from Tokyo." content={
-      <ExperienceList
-        key={JSON.stringify([searchQuery, theme, initialDate, initialGuests])}
-        cards={cards}
-        days={days}
-        initialDate={initialDate}
-        initialGuests={initialGuests}
-        browseContext={{ q: searchQuery || undefined, theme }}
-        catalogDateFiltered={config.apiMode === "mock" && config.publicApiVersion === "1.2" && Boolean(date)}
-        preview={isPreview}
-        bookingSources={bookingSources}
-        search={<ExperienceFiltersForm key="bar-search" {...searchProps} placement="bar" />}
-        inlineSearch={<ExperienceFiltersForm key="inline-search" {...searchProps} placement="inline" />}
-        columns="three"
-        dayChips="available"
-        empty={<EmptyResults key="empty-results" clearHref={searchQuery || theme || date || initialGuests !== null ? "/experiences" : null} searchActive={Boolean(searchQuery)} />}
-      />
-    } />
-  );
+  const readings = guideCatalogResult.guides.length ? (
+    <section className="container-page pt-16 lg:pt-[88px]" aria-labelledby="catalogue-guides-heading">
+      <div className="mb-5 flex items-end justify-between gap-4">
+        <div><p className="eyebrow">plan your day</p><h2 id="catalogue-guides-heading" className="mt-1 text-[2rem] lg:text-[2.75rem]">From the Journal</h2></div>
+        <Link href="/guides" className="link-leaf shrink-0 text-sm">See all</Link>
+      </div>
+      <GuideTeasers guides={guideCatalogResult.guides.slice(0, 3)} draftSlugs={guideCatalogResult.draftSlugs} columns="three" descriptions={false} />
+    </section>
+  ) : null;
+
   return <>
     <TrackView event="list_view" props={{ theme: theme ?? "all", date_filtered: initialDate !== null, result_count: cards.length }} />
-    {listContent}
-    <BookingAssurance />
-    {guideCatalogResult.guides.length ? (
-      <section className="container-page pt-16 lg:pt-[88px]" aria-labelledby="catalogue-guides-heading">
-        <div className="mb-5 flex items-end justify-between gap-4">
-          <div><p className="eyebrow">plan your day</p><h2 id="catalogue-guides-heading" className="mt-1 text-[2rem] lg:text-[2.75rem]">From the Journal</h2></div>
-          <Link href="/guides" className="link-leaf shrink-0 text-sm">See all</Link>
-        </div>
-        <GuideTeasers guides={guideCatalogResult.guides.slice(0, 3)} draftSlugs={guideCatalogResult.draftSlugs} columns="three" descriptions={false} />
-      </section>
-    ) : null}
+    <ExperiencesPageView
+      locale="en"
+      copy={copy}
+      cards={cards}
+      days={days}
+      initialDate={initialDate}
+      initialGuests={initialGuests}
+      searchQuery={searchQuery}
+      category={category}
+      categories={categories}
+      theme={theme}
+      themesEnabled={themesEnabled}
+      catalogDateFiltered={config.apiMode === "mock" && config.publicApiVersion === "1.2" && Boolean(date)}
+      preview={isPreview}
+      bookingSources={bookingSources}
+      readings={readings}
+    />
   </>;
 }
