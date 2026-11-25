@@ -955,11 +955,17 @@
   .gap-x-3\.5 {
     column-gap: calc(var(--spacing) * 3.5);
   }
+  .gap-x-5 {
+    column-gap: calc(var(--spacing) * 5);
+  }
   .gap-x-6 {
     column-gap: calc(var(--spacing) * 6);
   }
   .gap-y-1 {
     row-gap: var(--spacing);
+  }
+  .gap-y-2 {
+    row-gap: calc(var(--spacing) * 2);
   }
   .gap-y-2\.5 {
     row-gap: calc(var(--spacing) * 2.5);
@@ -1938,6 +1944,11 @@
       border-bottom-width: 0px;
     }
   }
+  @media (width < 40rem) {
+    .max-sm\:hidden {
+      display: none;
+    }
+  }
   @media (width >= 30rem) {
     .min-\[30rem\]\:flex-row {
       flex-direction: row;
@@ -1977,6 +1988,9 @@
     }
     .sm\:grid-cols-2 {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .sm\:grid-cols-\[1\.1fr_1\.2fr_1fr_auto\] {
+      grid-template-columns: 1.1fr 1.2fr 1fr auto;
     }
     .sm\:grid-cols-\[2fr_1fr_auto\] {
       grid-template-columns: 2fr 1fr auto;

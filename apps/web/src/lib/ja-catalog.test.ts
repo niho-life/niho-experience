@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SitePublicExperience } from "./experience/site-publications";
-import { jaCapacity, jaCardOf, jaGuideLine, jaCategoryCounts, jaDuration, jaYen, type JaCard } from "./ja-catalog";
+import { jaCardOf, jaGuideLine, jaCategoryCounts, jaYen, type JaCard } from "./ja-catalog";
 
 /** 日本語サイトの一覧とカード (#529): the card from a publication and the category counts. Synthetic data only. */
 
@@ -60,10 +60,8 @@ describe("jaCardOf", () => {
   });
 });
 
-describe("words", () => {
-  it("writes time, party size and price the way the site does", () => {
-    expect([jaDuration(45), jaDuration(180), jaDuration(90)]).toEqual(["45分", "3時間", "1時間30分"]);
-    expect([jaCapacity({ min: 2, max: 8 }), jaCapacity({ min: 4, max: 4 })]).toEqual(["2〜8名", "4名"]);
+describe("Japanese price display", () => {
+  it("uses a half-width yen mark", () => {
     expect(jaYen(12000)).toBe("¥12,000");
   });
 });

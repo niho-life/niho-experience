@@ -5,9 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("next/image", () => ({ default: () => null }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/ja", useSearchParams: () => new URLSearchParams() }));
 
-import { JA_HOME_TITLE } from "@/lib/ja-home";
 import { HomeLivingRoom } from "../HomeLivingRoom";
-import { ConsultBand, GuidesBand, PeopleBand } from "./JapaneseHomeSections";
+import { ConsultBand, PeopleBand } from "./JapaneseHomeSections";
 
 describe("日本語トップ（#563）", () => {
   it("街のリビングの帯：日本語の見出し・説明・NIHOについてへのリンク。英語の既定の文は出ない", () => {
@@ -57,18 +56,4 @@ describe("日本語トップ（#563）", () => {
     expect(html).toContain('href="/ja/people"');
   });
 
-  it("読みもの：数本の記事と、一覧への入口", () => {
-    const guide = (slug: string, title: string) => ({ slug, title, description: `${title}のはなし`, hero: null, category: { label: "Walk", labelJa: "歩く" } }) as never;
-    const html = renderToStaticMarkup(createElement(GuidesBand, { guides: [guide("a", "切通しの歩き方"), guide("b", "雨の日の鎌倉")] } as never));
-    expect(html).toContain("読みもの");
-    expect(html).toContain("切通しの歩き方");
-    expect(html).toContain("歩く");
-    expect(html).toContain('href="/ja/guides/a"');
-    expect(html).toContain('href="/ja/guides/b"');
-    expect(html).toContain('href="/ja/guides"');
-  });
-
-  it("題は日本語のトップの題", () => {
-    expect(JA_HOME_TITLE).toBe("鎌倉の人に、会いにいく。");
-  });
 });

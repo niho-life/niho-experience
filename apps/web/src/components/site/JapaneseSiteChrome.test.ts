@@ -7,13 +7,41 @@ vi.mock("next/image", () => ({ default: () => null }));
 
 import { defaultStaticCopyValuesV1 } from "@niho/experience-presentation/v1";
 import { SiteLocaleProvider } from "../SiteLocale";
-import { JAPANESE_SITE_DESCRIPTION, JapaneseSiteChrome } from "./JapaneseSiteChrome";
+import { CodeSiteChrome, JAPANESE_SITE_DESCRIPTION, SiteHeader } from "../SiteChrome";
+import { siteNav } from "@/lib/site-nav";
+import { EXPERIENCE_CATEGORIES } from "@niho-experience/experience-domain";
+import { categoryLabel } from "@/lib/experience-categories";
+import { LanguageButton } from "./LanguageButton";
 
-const render = (props: { hostSignedIn?: boolean; inquiryOpen?: boolean; guidesOpen?: boolean }) => renderToStaticMarkup(createElement(
-  SiteLocaleProvider,
-  { locale: "ja", releaseId: "r", values: defaultStaticCopyValuesV1() } as never,
-  createElement(JapaneseSiteChrome, { counterparts: { "/": "/ja" }, hostSignedIn: props.hostSignedIn ?? false, inquiryOpen: props.inquiryOpen ?? true, guidesOpen: props.guidesOpen ?? false } as never, "BODY"),
-));
+const render = (props: { hostSignedIn?: boolean; inquiryOpen?: boolean; guidesOpen?: boolean }) => {
+  const hostSignedIn = props.hostSignedIn ?? false;
+  const inquiryOpen = props.inquiryOpen ?? true;
+  const guidesOpen = props.guidesOpen ?? false;
+  const counterparts = { "/": "/ja" };
+  const header = createElement(SiteHeader, {
+    navLabel: "メイン", menuLabel: "メニュー", entries: siteNav("ja", { guides: guidesOpen, inquiry: inquiryOpen }),
+    languageSwitch: createElement(LanguageButton, { counterparts }), menuLanguage: createElement(LanguageButton, { counterparts, variant: "text" }),
+    foot: hostSignedIn ? { href: "/host/home", label: "ホスト画面" } : { href: "/ja/host", label: "ホストになる" },
+    rowEnd: hostSignedIn ? createElement("a", { href: "/host/home", className: "max-lg:hidden" }, "ホスト画面") : null,
+  } as never);
+  const footerLinks = [
+    { href: "/ja/about", label: "NIHOについて" },
+    ...(guidesOpen ? [{ href: "/ja/guides", label: "読みもの" }] : []),
+    ...(inquiryOpen ? [{ href: "/ja/inquiry", label: "ご相談" }, { href: "/ja/business", label: "企業・学校の方へ" }] : []),
+    { href: "/host/auth/sign-in", label: "ホストログイン" },
+  ];
+  return renderToStaticMarkup(createElement(
+    SiteLocaleProvider,
+    { locale: "ja", releaseId: "r", values: defaultStaticCopyValuesV1() } as never,
+    createElement(CodeSiteChrome, {
+      locale: "ja", header, footerBrandLabel: "NIHO Travel 鎌倉", footerDescription: JAPANESE_SITE_DESCRIPTION, footerLinks,
+      footerFixedLinks: [{ href: "/ja/experiences", label: "すべての体験" }, { href: "/ja/host", label: "ホストになる" }, { href: "/ja/help", label: "予約のヘルプ" }],
+      footerCategoryLinks: EXPERIENCE_CATEGORIES.map(({ id }) => ({ href: `/ja/experiences?category=${id}`, label: categoryLabel(id, "ja") })),
+      categoryNavigationLabel: "カテゴリー", footerNavigationLabel: "フッター",
+      footerExtras: [createElement(LanguageButton, { key: "language", counterparts, variant: "text" }), createElement("a", { key: "privacy", href: "/privacy" }, "プライバシー")],
+    } as never, "BODY"),
+  ));
+};
 
 /** ヘッダーのナビの項目（li）：class と中身。 */
 const navItems = (html: string) => [...html.slice(html.indexOf('<nav aria-label="メイン"'), html.indexOf("</nav>")).matchAll(/<li([^>]*)>(.*?)<\/li>/g)].map((match) => ({ cls: (match[1] ?? "").match(/class="([^"]*)"/)?.[1] ?? "", html: match[2] ?? "" }));

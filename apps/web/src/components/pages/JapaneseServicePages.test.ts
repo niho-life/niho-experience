@@ -3,23 +3,22 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
-  config: { groupInquiryEnabled: true, groupInquiryPreviewEnabled: false, hostPilotContactUrl: "" } as Record<string, unknown>,
-  entry: null as null | { loginHref: string },
+  config: { groupInquiryEnabled: true, groupInquiryPreviewEnabled: false, hostPilotContactUrl: "", hostConsoleEnabled: false, hostSignupMode: "pilot", hostAccountsEnabled: false, nihoHostStartUrl: "", nihoWebOrigin: "" } as Record<string, unknown>,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NOT_FOUND"); }, redirect: () => { throw new Error("REDIRECT"); }, useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
 vi.mock("@/components/Analytics", () => ({ TrackedLink: ({ href, children }: { href: string; children: unknown }) => createElement("a", { href }, children as never), TrackView: () => null }));
-vi.mock("@/components/pages/HostPageContent", () => ({ hostConsoleEntry: async () => state.entry, japaneseHostMetadata: async () => ({}) }));
+vi.mock("@/lib/host/server", () => ({ isHostMock: () => false, readHostSession: async () => null }));
 
 import { InquiryPage } from "./InquiryPage";
-import { JapaneseHostPage } from "./JapaneseHostPage";
+import { HostPageContent } from "./HostPageContent";
 import { UsagePage } from "./UsagePage";
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/\s+/g, " ");
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((match) => match[1]!.replaceAll("&amp;", "&"));
 
-beforeEach(() => { state.config = { groupInquiryEnabled: true, groupInquiryPreviewEnabled: false, hostPilotContactUrl: "" }; state.entry = null; });
+beforeEach(() => { state.config = { groupInquiryEnabled: true, groupInquiryPreviewEnabled: false, hostPilotContactUrl: "", hostConsoleEnabled: false, hostSignupMode: "pilot", hostAccountsEnabled: false, nihoHostStartUrl: "", nihoWebOrigin: "" }; });
 
 describe("ご利用の案内", () => {
   it("has a column for guests and one for hosts, with the four points each", () => {
@@ -32,7 +31,7 @@ describe("ご利用の案内", () => {
 });
 
 describe("体験を載せる (/ja/host)", () => {
-  const render = async () => renderToStaticMarkup(await JapaneseHostPage({ searchParams: Promise.resolve({}) }));
+  const render = async () => renderToStaticMarkup(await HostPageContent({ searchParams: Promise.resolve({}), locale: "ja" }));
 
   it("opens the inquiry form as 体験を載せたい from 「まず話してみる」, shows the three plans with their rates and what each side does", async () => {
     const html = await render();
@@ -49,13 +48,13 @@ describe("体験を載せる (/ja/host)", () => {
 
   it("shows the host login only when the console has a login to offer, and falls back to the pilot contact link without the inquiry feature", async () => {
     expect(text(await render())).not.toContain("ホスト画面にログイン");
-    state.entry = { loginHref: "/host/login" };
+    state.config = { ...state.config, hostConsoleEnabled: true };
     const withLogin = await render();
-    expect(hrefs(withLogin)).toContain("/host/login");
+    expect(hrefs(withLogin)).toContain("/host/auth/login");
     expect(text(withLogin)).toContain("ホスト画面にログイン");
-    state.config = { groupInquiryEnabled: false, hostPilotContactUrl: "https://contact.example/host" };
+    state.config = { ...state.config, groupInquiryEnabled: false, hostPilotContactUrl: "https://contact.example/host" };
     expect(hrefs(await render())).toContain("https://contact.example/host");
-    state.config = { groupInquiryEnabled: false, hostPilotContactUrl: "" };
+    state.config = { ...state.config, groupInquiryEnabled: false, hostPilotContactUrl: "" };
     expect(text(await render())).not.toContain("まず話してみる");
   });
 });

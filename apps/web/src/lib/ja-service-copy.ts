@@ -46,9 +46,26 @@ export const HOST_PLANS: readonly HostPlanCopy[] = [
 
 export interface TitledText { readonly title: string; readonly body: string }
 
+export interface HostPageContentCopy {
+  readonly eyebrow: string;
+  readonly title: string;
+  readonly lead: string;
+  readonly talk: string;
+  readonly note: TitledText;
+  readonly plansTitle: string;
+  readonly rateLabel: string;
+  readonly you: string;
+  readonly niho: string;
+  readonly switchNote: string;
+  readonly stepsTitle: string;
+  readonly steps: readonly TitledText[];
+  readonly questionsTitle: string;
+  readonly questions: readonly { readonly question: string; readonly answer: string }[];
+  readonly closing: TitledText;
+  readonly loginLabel: string;
+}
+
 export const HOST_PAGE = {
-  metaTitle: "あなたの体験を、街の外の人へ",
-  metaDescription: "仕事場を見せる。得意なことを教える。好きな道を一緒に歩く。鎌倉・逗子・葉山で続けていることを、会いに来たい人へ届けます。",
   eyebrow: "share your craft",
   title: "あなたの体験を、街の外の人へ。",
   lead: "仕事場を見せる。得意なことを教える。好きな道を一緒に歩く。鎌倉・逗子・葉山で続けていることを、会いに来たい人へ届けます。",

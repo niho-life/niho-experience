@@ -113,8 +113,10 @@
 英語（`/…`）と日本語（`/ja/…`）は同じレイアウトにする（オーナー決定 2026-11-25）。1ページは1つの部品で、言語で変えるのは文言と、意図した差だけ。
 
 - ヘッダー：`SiteHeader` 1つ。タブは `apps/web/src/lib/site-nav.ts` が言語ごとに返す。英語は Experiences · Journal · About · Help、日本語は 体験をさがす · 読みもの · NIHOについて · 企業・学校 · ヘルプ。「企業・学校」とメニューの「ご相談」は日本語だけ（英語に相手のページが無い）。md 未満は1つ目だけを行に残し、ほかはメニュー（`SiteMenu`）。日本語の1つ目は lg 未満で「さがす」。
-- 同じ部品に文言を渡しているもの：About（`AboutPage`、日本語は `lib/ja-about.tsx`）、ヘルプの質問（`HelpFaq`）、街のリビングの帯（`HomeLivingRoom`）、ヒーローの写真の切替（`HomeHeroSlides`）。
-- まだ別の部品のもの：フッター、トップの節、一覧、カード、詳細、読みもの。#658 の順に共通の部品へ寄せる。日本語のトップのヒーロー（`JapaneseHero`）は、トップを1つにするまで英語の `HomeViewV1` と同じ組みを写して持つ。
+- フッター：`SiteFooter` が両言語で `SiteFooterV1` を使う。説明・カテゴリー・案内の3列を同じ配置にし、カテゴリーとリンクだけ locale に合わせる。プレビューの注記も両方に表示する。
+- 共通のページ部品：`HomePageView`（トップ）、`ExperiencesPageView`（一覧）、`SitePublicationPage`（詳細と予約要約）、`GuidesListPage`（読みもの一覧）、`GuideArticle`（記事）、`HomeJournal`（トップの記事）、`HostPageContent`（ホスト募集）。文言は各 `lib/*-text` に置き、route はデータと locale を渡す。
+- 日本語だけの差：トップのご相談と街の人の帯、一覧の相談案内と相談用の空状態、企業・学校・ご相談・ご利用の案内。記事には日本語の体験 CTA と相談帯を出し、FAQ・関連記事・目次・著者欄は共通部品で表示する。英語だけの差は For writers と Privacy。
+- `apps/web/src/lib/japanese-route-components.test.ts` が日本語専用部品の route import を検査する。例外は相談・街の人・日本語一覧の相談内容に限り、ページの構造を別実装へ戻さない。
 - 和文は欧文より大きく見えるので、見出しの大きさと行間だけ日本語用の値を持つ（About の `titleClassName` など）。
 
 ### トップ（`/`）
@@ -123,12 +125,12 @@
 
 上から：ヘッダー → ヒーロー（検索とテーマの行は置かない。検索が下端に重ならないので、高さは 560px / PC 680px、文字は下寄せ、PC の見出しは2行、#646）→ カード → 予約の流れ（カードの直下）→ リビングの帯（#646）→ 記事（Kamakura Journal）→ ホスト募集の帯 → フッター（プレビューだけ最下部に1行の表記）。
 
-特集・動画の帯・ホスト紹介・数字・絵はがきは `layout` を渡さない従来の構成（日本語版トップ）にだけ残る。下の表のそれらの行は従来の構成の説明。
+特集・動画の帯・ホスト紹介・数字・絵はがきは `HomeViewV1` の classic 構成向けに残る。公開中の英語・日本語トップはどちらも `HomePageView` から `layout: "journal"` を渡す。
 
 | 節 | 内容 |
 | --- | --- |
 | ヘッダー | 白。ロゴ。md（48rem）以上は Experiences · Journal（記事のページがあるときだけ）· About · Help の行（現在のページは淡い面と `aria-current="page"`）と、右端の言語ボタン（日本語のサイトが無い配備だけ "EN · ¥" の表示）。md 未満は行に Experiences だけ、言語ボタン（360px 未満は隠す）、丸いメニューボタン（`SiteMenu.tsx`。`<details>` なので JS なしで開閉し、JS があればページ移動・Escape・外側クリックで閉じる）。メニューは全幅のパネルで Experiences / Journal / About / Help / 言語 / 控えめな最後の項目 "For hosts"（`/host`）。ヘッダーの行に提供者向けのリンクは置かない（#645） |
-| ヒーロー（#646） | 写真が主役。NIHO 自前の写真3枚（`lib/site-media.ts` の `HERO_PHOTO` ＝リビングの交流が下地・priority、`HOME_HERO_SLIDES` ＝一緒に料理する様子とテーブル。後の2枚は lazy・装飾）が21秒周期で重なりを入れ替える（`HomeHeroSlides.tsx`、`globals.css` の `hero-fade-2/3`）。**動きは不透明度のクロスフェードだけ**（拡大・移動は使わない。コマ単位のがたつきが見えるため）。`prefers-reduced-motion: reduce` では動かず下地の1枚だけ。h1 "Meet the people who make Kamakura *home*"（home を手書き）、リード "Small experiences with people who live here, one hour from Tokyo."、主ボタン "See the experiences"（`/experiences`）、右上に白い丸スタンプ。検索（日付・人数）とテーマの行はこの英語トップに置かない（presentation は `finder: null`・`themes: []`、`heroMedia` / `heroBody` / `heroAction` で差し込む。classic 構成と日本語版は従来どおり） |
+| ヒーロー（#646） | 写真が主役。NIHO 自前の写真3枚（`lib/site-media.ts` の `HERO_PHOTO` ＝リビングの交流が下地・priority、`HOME_HERO_SLIDES` ＝一緒に料理する様子とテーブル。後の2枚は lazy・装飾）が21秒周期で重なりを入れ替える（`HomeHeroSlides.tsx`、`globals.css` の `hero-fade-2/3`）。**動きは不透明度のクロスフェードだけ**（拡大・移動は使わない。コマ単位のがたつきが見えるため）。`prefers-reduced-motion: reduce` では動かず下地の1枚だけ。見出し・リード・ボタンは `HOME_TEXT` の locale 別文言。日本語も同じ `HomeViewV1` と写真の切替を使い、`/ja/experiences` へ進む。検索（日付・人数）とテーマの行は両方に置かない（presentation は `finder: null`・`themes: []`、`heroMedia` / `heroBody` / `heroAction` で差し込む）。 |
 | テーマ（classic 構成のみ） | 英語トップ（journal）には出さない。classic 構成では掲載中の体験から作る（空のテーマを作らない）。slug を明示した編集用の表でアイコンと短いラベルを決める（`lib/themes.ts`：Cook & eat / Roast coffee / Sit zazen / Mend a bowl / Write kanji）。題名からは推測しない（#36）。各テーマはその体験の詳細へ |
 | カード | 手書き "after the Great Buddha"、h2 "Spend a few hours with a *neighbor*"（neighbor に波線。`cardsTitle`。classic 構成は従来の "N to choose from" / "Experiences hosted by neighbors"）、See all。スマホは横スクロールの snap、PC は3列。最後に "Your experience here?"（`/host` へ） |
 | 特集 | コミュニティディナーの slug が掲載中なら編集用の内容（`lib/themes.ts` の `FEATURED_STORY`）：データの曜日・時刻の手書き（"Tue, Thu & Sat · 6 PM"）、h2 "One long table, eight guests and a few neighbors"、本文、"See the dinner"、NIHO の自前の写真5枚のモザイク。掲載されていなければ写真が5枚以上ある最初の体験（題名、リード、"See details"、その写真） |
@@ -136,11 +138,11 @@
 | ホスト紹介 | sand の面。書道の slug が掲載中ならモックどおり（`FEATURED_HOST`）：データの hosts[0] の名前を手書き、役割 "Calligrapher, MC and event producer"、本文、切手の縁の中に書道の動画＋丸スタンプ、"See Shiryu's workshop"。掲載されていなければ個人の提供者（`provider.kind = INDIVIDUAL`）の体験の表紙・`provider.tagline`・リード。下にホストの顔（写真、無ければ頭文字。名前のあるホストを先に、ホストのいない体験は編集用の顔）を各体験へのリンクで並べ、紹介中の人を緑の縁で強調 |
 | 数字 | "Small on purpose"：駅からの分数（"From Kamakura Station West Exit to the living room door."）、最大定員（計算）、体験数（計算。掲載中の全体験にテーマがあれば "Food, coffee, Zen, mending and calligraphy." のように並べる）、言語数（"English and Japanese, often both at the same table."）。Fraunces 300 の数字＋手書きの単位 |
 | リビングの帯（#646） | カードと予約の流れの下、記事の上。全幅の1枚写真（長いテーブル、`min-h` 460px / PC 600px、動かさない）に左からの暗いグラデーション。手書き "it starts here"（leaf）、h2 "NIHO, the town’s living room"、本文、主ボタン "About NIHO Experience"（`/about`）。`components/HomeLivingRoom.tsx`（`afterCards` の先頭） |
-| 記事 | 手書き "then, wander the town"、h2 "Kamakura Journal"、説明 "Notes on the streets, food and everyday life of Kamakura, from people who live here."、`/guides` があれば See all。1本目（#147 の Editorial preview があればそれ）を大きく、右に次の3本（PC。スマホは縦に並ぶ行）、その下に3列のサムネイル（タブレット2列、スマホは左に正方形のサムネイルの行）。トップに出すのは10本まで、それより多ければ下に "More guides"（`/guides` へ）。カードはカテゴリ（DB の記事は CMS のカテゴリ、静的な記事は柱）・Draft / Editorial preview の表記、題名、2行の説明、読了分数と Checked / Updated の日付。写真（`hero`）が無い記事は sand の面に手書きのカテゴリ名。カテゴリが2つ以上あれば上にチップ（All と各カテゴリ。サーバーの HTML にある全カードをその場で絞るだけ）。`components/HomeJournal.tsx`・`lib/home-journal.ts` |
+| 記事 | 手書き "then, wander the town"、英語の h2 "Kamakura Journal"／日本語の h2 "鎌倉の読みもの"、説明・カテゴリー・操作は locale の文言。両方とも `/guides` または `/ja/guides` があれば一覧へ進む。1本目を大きく、右に次の3本（PC。スマホは縦に並ぶ行）、その下に3列のサムネイル（タブレット2列、スマホは左に正方形のサムネイルの行）。最大10本、複数カテゴリーがあれば絞り込みチップを出す。カードは題名、説明、読了分数、確認・更新日。英日とも `components/HomeJournal.tsx`・`lib/home-journal.ts`。 |
 | 予約の流れ | Pick a date（"See the next dates on every card. Times are Japan time."）/ Pay securely（"Checkout by Stripe in Japanese yen, tax included."）/ Meet your hosts（"The meeting point and your booking arrive by email."）、手書き "no account needed — book as a guest" |
 | 絵はがき | "Kamakura is small. Walk it."。切手の縁で少し傾け、手書きの地名。リンクなし |
-| ホスト募集 | アーチ形の動画、"Share what you love about Kamakura"、`/host` へ |
-| フッター | 白、丸スタンプ、説明（`SITE_FOOTER_DESCRIPTION`: サイトの説明に "Made by NIHO, the town's living room, two minutes from Kamakura Station."）、固定のリンクに続けて About、Kamakura Journal（記事があるときだけ）、For writers、Privacy。プレビューだけ最下部に1行の表記 |
+| ホスト募集 | 英語・日本語で `HostPageContent` を共有。日本語の3プランと確認済みの手数料率を土台に、手順・FAQ・相談・ログインを同じ配置で表示する。文言だけ `host-text` の英語コピーへ切り替える。 |
+| フッター | 白、丸スタンプ、説明・8カテゴリー・案内の3列を日英で同じ配置にする。英語は固定リンクに About、Kamakura Journal（記事があるときだけ）、For writers、Privacy。日本語は NIHOについて、読みもの（記事があるときだけ）、ご相談・企業学校（相談の flag が開いているとき）、ホストログイン、言語、プライバシー。プレビュー注記は最下部に日英の文で表示。 |
 | About（`/about`、英語のみ。#645） | 全幅の写真のヒーロー（NIHO 自前の写真・動かさない）と h1 "It starts in the town’s living room" → 導入の1段落（明朝の大きな文字）→ 写真3枚と手書きのひとこと（local / deep / small）→ 予約の流れ（トップと同じ3ステップ）と "See the experiences" → 運営の紹介（アーチ形の外観写真・"Help and contact"）→ 地元の人向けの淡い緑の帯（`/host`）。体験の写真は使わない |
 | Help の "Common questions"（`/help`。#645） | 既存の Help の下に、同じ幅で手書きのひとこと "good to know" と `<details>` の質問5つ（アカウント・支払い・言語・集合場所・東京からの距離）。矢印は開くと180°回る。JS なしでもキーボードでも開閉できる |
 

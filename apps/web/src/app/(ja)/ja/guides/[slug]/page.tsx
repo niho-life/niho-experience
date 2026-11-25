@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { JapaneseGuideArticlePage } from "@/components/pages/JapaneseGuidePages";
+import { GuideArticle } from "@/components/pages/GuideArticle";
 import { config } from "@/lib/config";
-import { loadJapaneseGuide } from "@/lib/ja-guides";
+import { loadJapaneseGuide, loadJapaneseGuides } from "@/lib/ja-guides";
+import { sitePublicationCard } from "@/lib/experience/site-card-model";
+import { guestBookingSources } from "@/lib/guest-booking-source";
+import type { CardDatesSource } from "@/components/CardDates";
 
 export const dynamic = "force-dynamic";
 
@@ -26,5 +29,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function JapaneseGuidePage({ params }: Props) {
   const data = await loadJapaneseGuide((await params).slug);
   if (!data) notFound();
-  return <JapaneseGuideArticlePage guide={data.guide} experiences={data.experiences} />;
+  const cards = data.experiences.flatMap((item) => {
+    const card = sitePublicationCard(item, "ja");
+    return card ? [card] : [];
+  });
+  const cardDates: CardDatesSource = { kind: "read", preview: false, sources: await guestBookingSources(cards.map((card) => card.slug)) };
+  return <GuideArticle guide={data.guide} variant="published" query={{}} locale="ja" japaneseGuides={await loadJapaneseGuides()} experienceCards={cards} experienceCardDates={cardDates} />;
 }

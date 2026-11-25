@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
-import { ConsultBand, GuidesBand, PeopleBand } from "@/components/ja-home/JapaneseHomeSections";
+import { ConsultBand, PeopleBand } from "@/components/ja-home/JapaneseHomeSections";
+import { HomeJournal } from "@/components/HomeJournal";
+import { buttonClass } from "@/components/ui";
 import { HomePageView, type HomeRest } from "@/components/pages/HomePageView";
 import type { CardDatesSource } from "@/components/CardDates";
 import type { CardModel } from "@/lib/card-model";
@@ -8,8 +10,9 @@ import { sitePublicationCard } from "@/lib/experience/site-card-model";
 import { listSitePublicExperiences } from "@/lib/experience/site-publications";
 import { guestBookingSources } from "@/lib/guest-booking-source";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
-import { JA_HOME_FACES_LIMIT, JA_HOME_GUIDES_LIMIT, pickFeaturedPerson } from "@/lib/ja-home";
+import { JA_HOME_FACES_LIMIT, pickFeaturedPerson } from "@/lib/ja-home";
 import { loadJapaneseGuides } from "@/lib/ja-guides";
+import { homeJournal } from "@/lib/home-journal";
 import { loadPeople, loadPeoplePages } from "@/lib/ja-people";
 import { peopleByExperience } from "@/lib/ja-people-links";
 import { getReviewSummaries } from "@/lib/journey";
@@ -55,11 +58,12 @@ export default async function JapaneseHome() {
   cards = withReviewLines(cards, await getReviewSummaries(cards.map((card) => card.slug)), "ja");
   const cardDates: CardDatesSource = { kind: "read", preview: false, sources: await guestBookingSources(cards.map((card) => card.slug)) };
   const featured = pickFeaturedPerson(peopleOnPages);
-  const guides = allGuides.slice(0, JA_HOME_GUIDES_LIMIT);
+  const journal = homeJournal(allGuides, { locale: "ja" });
+  const journalNode = journal.items.length ? <HomeJournal journal={journal} locale="ja" allHref="/ja/guides" moreClassName={buttonClass("secondary")} /> : undefined;
   return <HomePageView
     locale="ja" copy={copy} cards={cards} cardDates={cardDates} rest={REST}
     people={featured ? <PeopleBand featured={featured} people={peopleOnPages} facesLimit={JA_HOME_FACES_LIMIT} /> : undefined}
     consult={groupInquiryOpen() ? <ConsultBand /> : undefined}
-    journal={guides.length ? <GuidesBand guides={guides} /> : undefined}
+    journal={journalNode}
   />;
 }
