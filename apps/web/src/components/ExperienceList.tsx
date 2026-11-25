@@ -65,12 +65,6 @@ export function ExperienceList({
   const [readAttempt, setReadAttempt] = useState(0);
   const chips = useRef<HTMLDivElement>(null);
 
-  // A date arriving in the URL (e.g. from the home finder) may be off-screen on a phone.
-  useEffect(() => {
-    const row = chips.current;
-    const chip = row?.querySelector<HTMLElement>('[aria-pressed="true"]');
-    if (row && chip && initialDate) row.scrollLeft = chip.offsetLeft - row.clientWidth / 2 + chip.offsetWidth / 2;
-  }, [initialDate]);
 
   useEffect(() => {
     if (!cards.length) return;
@@ -109,6 +103,15 @@ export function ExperienceList({
     if (!ready) return null;
     return new Map(days.map((day) => [day.key, cards.filter((card) => matchingOccurrence(ready.get(card.slug) ?? [], card.offers, day.key, guests)).length]));
   }, [ready, days, cards, guests]);
+
+  // A date arriving in the URL may be off-screen on a phone. With `dayChips="available"` the other days only appear once
+  // availability has loaded (and change with the party size), so centre the selected chip again when they do.
+  const chipsSettled = dayChips === "available" ? counts : null;
+  useEffect(() => {
+    const row = chips.current;
+    const chip = row?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    if (row && chip && initialDate) row.scrollLeft = chip.offsetLeft - row.clientWidth / 2 + chip.offsetWidth / 2;
+  }, [initialDate, chipsSettled]);
 
   if (!cards.length)
     return (
