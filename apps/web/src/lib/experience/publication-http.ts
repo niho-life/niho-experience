@@ -34,7 +34,7 @@ import {
 import { experiencePublicMediaStorage } from "./public-media-storage";
 import { GuideCoverImageError, processGuideCoverImage, readGuideCoverInput } from "@/lib/guide-cover-image";
 import { anthropicTranslator } from "@/lib/translation/anthropic";
-import { EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH, experienceManuscriptToEnglish } from "@/lib/translation/prompts";
+import { EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH, experienceManuscriptToEnglish, experienceManuscriptToJapanese } from "@/lib/translation/prompts";
 
 export type PublicationProductContext = { params: Promise<{ productId: string }> };
 type RecordValue = Record<string, unknown>;
@@ -113,6 +113,7 @@ function validDraft(value: unknown): value is ProductDraftBody {
     && isRecord(value.content)
     && validContentFaq(value.content)
     && japaneseOnlyAllowed(value.content)
+    && !(value.content.japaneseOnly === true && value.content.englishOnly === true)
     && value.currency === "JPY"
     && typeof value.unitAmount === "number" && Number.isSafeInteger(value.unitAmount)
     && (value.unitAmount === 0 || value.unitAmount >= 50);
@@ -657,22 +658,26 @@ export async function publicationTranslationRequest(request: Request, context: P
   if (!PRODUCT_ID.test(productId) || new URL(request.url).search) return responseError("NOT_FOUND", 404);
   if (!publicationHostMutationAllowed(request)) return responseError("FORBIDDEN", 403);
   const parsed = await parseJson(request);
-  if (parsed instanceof Response || !exactKeys(parsed, ["japanese"]) || !validPublicationLocaleManuscript(parsed.japanese)) return responseError("INVALID_INPUT", 400);
+  // Exactly one of the two: the Japanese to translate into English, or the English to translate into Japanese.
+  if (parsed instanceof Response) return responseError("INVALID_INPUT", 400);
+  const toJapanese = exactKeys(parsed, ["english"]);
+  if (!toJapanese && !exactKeys(parsed, ["japanese"])) return responseError("INVALID_INPUT", 400);
+  const source = toJapanese ? parsed.english : parsed.japanese;
+  if (!validPublicationLocaleManuscript(source)) return responseError("INVALID_INPUT", 400);
   const prepared = await prepareHost("OWNER");
   if (!prepared.ok) return prepared.response;
   const translator = anthropicTranslator({ timeoutMs: 45_000 });
   if (!translator) return responseError("TRANSLATION_UNAVAILABLE", 503);
-  const japanese = parsed.japanese;
   try { await prepared.repository.getProduct(prepared.context.actor, productId); }
   catch (error) { return mapStoreError(error); }
-  const sourceFingerprint = publicationManuscriptFingerprint(japanese);
-  const translated = await translator(experienceManuscriptToEnglish(japanese), { maxLength: EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH });
+  const sourceFingerprint = publicationManuscriptFingerprint(source);
+  const translated = await translator(toJapanese ? experienceManuscriptToJapanese(source) : experienceManuscriptToEnglish(source), { maxLength: EXPERIENCE_MANUSCRIPT_TRANSLATION_MAX_LENGTH });
   if (!translated.ok) return responseError("TRANSLATION_UNAVAILABLE", 503);
-  let english: unknown;
-  try { english = JSON.parse(translated.text); } catch { return responseError("TRANSLATION_UNAVAILABLE", 503); }
-  // The draft must keep the same FAQ rows as the source (none, or one translated row per Japanese row).
-  if (!validPublicationLocaleManuscript(english) || faqLength(english) !== faqLength(japanese)) return responseError("TRANSLATION_UNAVAILABLE", 503);
-  return noStoreJson({ sourceFingerprint, english });
+  let result: unknown;
+  try { result = JSON.parse(translated.text); } catch { return responseError("TRANSLATION_UNAVAILABLE", 503); }
+  // The draft must keep the same FAQ rows as the source (none, or one translated row per source row).
+  if (!validPublicationLocaleManuscript(result) || faqLength(result) !== faqLength(source)) return responseError("TRANSLATION_UNAVAILABLE", 503);
+  return noStoreJson(toJapanese ? { sourceFingerprint, japanese: result } : { sourceFingerprint, english: result });
 }
 
 export async function readPublicationMedia(request: Request, context: PublicationProductContext & { params: Promise<{ productId: string; assetId: string }> }): Promise<Response> {

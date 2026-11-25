@@ -23,8 +23,8 @@ import { HostBookingLinkCopy } from "./HostBookingLinkCopy";
 import { providerBookingLinkAvailable } from "@/lib/provider-booking-link";
 import { ProductClassificationFields, useProductClassification } from "./ProductClassificationPanel";
 import { HostInfoTip } from "./HostInfoTip";
-import { EDITOR_INPUT, EditorChoice, EditorDialog, EditorField, EditorReference, EditorRows, EditorSubheading, EditorSwitch, EditorUnitField } from "./HostEditorParts";
-import { manuscriptHasContent, publicationLanguageOutOfSync, readEnglishSourceFingerprint, savedEnglishSourceFingerprint, withEnglishSourceFingerprint, withoutEmptyRows } from "./publication-language";
+import { EDITOR_INPUT, EditorCheckList, EditorChoice, EditorDialog, EditorField, EditorReference, EditorRows, EditorSubheading, EditorSwitch, EditorUnitField } from "./HostEditorParts";
+import { BLANK_JAPANESE_MANUSCRIPT, fillUnlistedAlt, languageSyncFollower, languageSyncOutOfSync, manuscriptHasContent, publicationEnglishTitle, publicationListing, readLanguageSync, savedLanguageSync, withLanguageSync, withPublicationListing, withoutEmptyRows, type PublicationListing } from "./publication-language";
 import { publicationSlugFromTitle, publicationSlugRetry } from "./publication-slug";
 import { PUBLICATION_FAQ_LIMITS, publicationContentFaqProblem, publicationFaqProblem, publicationFaqRows, withPublicationFaq, type PublicationFaqRow } from "./publication-faq";
 
@@ -162,8 +162,10 @@ function contentFrom(product: Product): Record<string, unknown> {
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function lines(value: unknown): string { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").join("\n") : ""; }
+/** The Japanese manuscript being edited: `content.ja`, or the draft `content.jaDraft` while the page is English-only. */
 function japaneseManuscript(content: Record<string, unknown>): LocaleManuscript {
-  const source = isRecord(content.ja) ? content.ja : {};
+  const stored = content.englishOnly === true ? content.jaDraft : content.ja;
+  const source = isRecord(stored) ? stored : {};
   // FAQ is optional: no key unless rows exist, so a pre-FAQ manuscript keeps its exact shape and fingerprint.
   const faq = publicationFaqRows(source.faq);
   return {
@@ -246,6 +248,7 @@ function withoutEmptyRowsIn(source: Record<string, unknown>): Record<string, unk
   };
   const next = clean(source);
   if (isRecord(next.ja)) next.ja = clean(next.ja);
+  if (isRecord(next.jaDraft)) next.jaDraft = clean(next.jaDraft);
   return next;
 }
 function stringRows(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
@@ -315,16 +318,19 @@ export function HostPublicationWorkspace({
   const rightsConfirmed = photoRightsConfirmed(photoRights, selectedPhoto, product?.id ?? null, photoPlacement);
   const [translationBusy, setTranslationBusy] = useState(false);
   const [workspaceSection, setWorkspaceSection] = useState<"page" | "pricing" | "schedule" | "settings">("page");
-  const [editorLocale, setEditorLocale] = useState<"ja" | "en">("en");
+  /** null: the default, English when it is published and Japanese when it is not. */
+  const [editorLocale, setEditorLocale] = useState<"ja" | "en" | null>(null);
   // 通常 host mode only: the editor's own screen state.
   const [compare, setCompare] = useState(false);
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
   const [photoDialog, setPhotoDialog] = useState<null | "gallery" | "provider">(null);
   const [createOpen, setCreateOpen] = useState(create && !adminDraft);
-  const [createJapaneseOnly, setCreateJapaneseOnly] = useState(false);
+  const [createListing, setCreateListing] = useState<PublicationListing>({ en: true, ja: false });
+  const [listingNotice, setListingNotice] = useState("");
   const [createTitle, setCreateTitle] = useState("");
   const [createPrice, setCreatePrice] = useState("");
-  const [translateConfirm, setTranslateConfirm] = useState(false);
+  /** Which tab's translation waits for its confirmation: the one that would be replaced. */
+  const [translateConfirm, setTranslateConfirm] = useState<"en" | "ja" | null>(null);
   const [discardConfirm, setDiscardConfirm] = useState(false);
   const [blockerDialog, setBlockerDialog] = useState(false);
   /** The blocker dialog was shown: until the page is published, the tabs it names carry a small mark. */
@@ -335,6 +341,7 @@ export function HostPublicationWorkspace({
   const [perOfferOpen, setPerOfferOpen] = useState<boolean | null>(null);
   /** The Japanese manuscript's fingerprint now (computed after each edit); null until the first one. */
   const [japaneseFingerprint, setJapaneseFingerprint] = useState<string | null>(null);
+  const [englishFingerprint, setEnglishFingerprint] = useState<string | null>(null);
   const [sellerConfirmationMethod, setSellerConfirmationMethod] = useState<"" | "VERBAL" | "WRITTEN">("");
   const [sellerConfirmed, setSellerConfirmed] = useState(false);
   const [publicationPhotoRightsConfirmed, setPublicationPhotoRightsConfirmed] = useState(false);
@@ -355,12 +362,22 @@ export function HostPublicationWorkspace({
   const baselineDraftJson = baselineForm ? canonicalJson({ slug: baselineForm.slug, title: baselineForm.title, unitAmount: baselineForm.unitAmount, content: baselineForm.content }) : "";
   const draftDirty = !!product && (!baselineForm || draftFormJson !== baselineDraftJson);
   const termsDirty = !!product && (!baselineForm || JSON.stringify(terms) !== JSON.stringify(baselineForm.terms));
-  const mediaDirty = !!product && (!baselineForm || JSON.stringify(mediaForm(mediaDraft)) !== JSON.stringify(baselineForm.media));
-  const providerMediaDirty = !adminDraft && !!product && JSON.stringify(providerMediaForm(providerMediaDraft)) !== providerMediaBaseline;
+  const listing = publicationListing(content);
+  // A language that is not published takes the published one's photo descriptions when it has none (the upload API wants both).
+  const effectiveMedia = adminDraft ? mediaDraft : fillUnlistedAlt(mediaDraft, listing);
+  const effectiveProviderMedia = adminDraft ? providerMediaDraft : fillUnlistedAlt(providerMediaDraft, listing);
+  // What the host changed (shown as unsaved)…
+  const mediaEdited = !!product && (!baselineForm || JSON.stringify(mediaForm(mediaDraft)) !== JSON.stringify(baselineForm.media));
+  const providerMediaEdited = !adminDraft && !!product && JSON.stringify(providerMediaForm(providerMediaDraft)) !== providerMediaBaseline;
+  // …and what a save sends, the filled descriptions included. A page that only needs the fill is not shown as unsaved:
+  // the next save, or 「同意して公開」, writes it.
+  const mediaDirty = mediaEdited || (!!product && effectiveMedia !== mediaDraft);
+  const providerMediaDirty = providerMediaEdited || (!adminDraft && !!product && effectiveProviderMedia !== providerMediaDraft);
   // 分類 is saved on its own route, but the host edits it with the page: it counts as one of the unsaved changes.
   const classification = useProductClassification(!adminDraft && productId ? { kind: "host", productId } : null);
   const classificationDirty = !adminDraft && !!product && classification.dirty;
-  const dirty = adminCreate ? Boolean(slug || title || unitAmount) : !!product && (draftDirty || termsDirty || mediaDirty || providerMediaDirty || classificationDirty);
+  const dirty = adminCreate ? Boolean(slug || title || unitAmount) : !!product && (draftDirty || termsDirty || mediaEdited || providerMediaEdited || classificationDirty);
+  const needsSave = dirty || mediaDirty || providerMediaDirty;
   const updateContent = useCallback((key: string, value: unknown) => setContent((current) => ({ ...current, [key]: value })), []);
 
   // 英語と日本語のずれ: the Japanese manuscript's fingerprint now, computed after each edit (an older answer is dropped).
@@ -372,12 +389,31 @@ export function HostPublicationWorkspace({
     return () => { active = false; };
   }, [adminDraft, japaneseKey, product]);
 
+  const englishKey = useMemo(() => canonicalJson(englishPublicationManuscript(title.trim(), withoutEmptyRowsIn(content))), [content, title]);
+  useEffect(() => {
+    if (adminDraft || !product) return;
+    let active = true;
+    void publicationManuscriptFingerprint(JSON.parse(englishKey) as unknown).then((value) => { if (active) setEnglishFingerprint(value); }).catch(() => { if (active) setEnglishFingerprint(null); });
+    return () => { active = false; };
+  }, [adminDraft, englishKey, product]);
+
   function updateJapanese(key: keyof LocaleManuscript, value: string | string[] | TimelineItem[]) {
     const next = { ...japaneseSourceRef.current, [key]: value } as LocaleManuscript;
     japaneseSourceRef.current = next;
     // 日本語のみの商品は、公開上の商品名＝日本語の商品名（英語の商品名は無い）。
     if (key === "title" && typeof value === "string" && content.japaneseOnly === true) setTitle(value);
-    setContent((current) => ({ ...current, ja: next, translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } }));
+    setContent((current) => ({ ...current, [current.englishOnly === true ? "jaDraft" : "ja"]: next, translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } }));
+  }
+
+  /** 掲載言語 (host): the unpublished language keeps its draft. At least one language stays published. */
+  function changeListing(next: PublicationListing) {
+    if (!next.en && !next.ja) { setListingNotice("掲載言語は1つ以上必要です"); return; }
+    setListingNotice("");
+    const converted = withPublicationListing({ content, title }, next);
+    setTitle(converted.title);
+    setContent(converted.content);
+    japaneseSourceRef.current = japaneseManuscript(converted.content);
+    englishDraftRef.current = { title: publicationEnglishTitle(converted.content, converted.title), content: converted.content };
   }
 
   /** 「日本語のみで公開する」（#59）。英語の原稿・確認が要らなくなり、英語のページは作られない。 */
@@ -394,7 +430,7 @@ export function HostPublicationWorkspace({
     if (locale === "ja") {
       const next = withPublicationFaq(japaneseSourceRef.current, rows);
       japaneseSourceRef.current = next;
-      setContent((current) => ({ ...current, ja: next, translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } }));
+      setContent((current) => ({ ...current, [current.englishOnly === true ? "jaDraft" : "ja"]: next, translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } }));
       return;
     }
     englishDraftRef.current = { ...englishDraftRef.current, content: withPublicationFaq(englishDraftRef.current.content, rows) };
@@ -403,8 +439,9 @@ export function HostPublicationWorkspace({
 
   function updateEnglishTitle(value: string) {
     englishDraftRef.current = { ...englishDraftRef.current, title: value };
-    setTitle(value);
-    setContent((current) => ({ ...current, translation: { ...(isRecord(current.translation) ? current.translation : {}), confirmedSourceFingerprint: null, confirmedEnglishFingerprint: null } }));
+    // A Japanese-only page's public title is the Japanese one: its English title is only a draft.
+    if (content.japaneseOnly !== true) setTitle(value);
+    setContent((current) => ({ ...current, ...(current.japaneseOnly === true ? { enTitleDraft: value } : {}), translation: { ...(isRecord(current.translation) ? current.translation : {}), confirmedSourceFingerprint: null, confirmedEnglishFingerprint: null } }));
   }
 
   function updateEnglishContent(key: string, value: unknown) {
@@ -467,7 +504,7 @@ export function HostPublicationWorkspace({
     const restored = (() => { try { const saved = window.sessionStorage.getItem(`${storageNamespace}:${current.id}`); return saved ? JSON.parse(saved) as Record<string, unknown> : null; } catch { return null; } })();
     const nextContent = contentFrom(current);
     japaneseSourceRef.current = japaneseManuscript(nextContent);
-    englishDraftRef.current = { title: current.draft.publicTitle, content: nextContent };
+    englishDraftRef.current = { title: publicationEnglishTitle(nextContent, current.draft.publicTitle), content: nextContent };
     const nextTerms = publicationTermsForm(current.saleTerms, current.offers);
     const serverForm = { slug: current.draft.slug, title: current.draft.publicTitle, unitAmount: String(current.draft.unitAmount), content: nextContent, terms: nextTerms, media: mediaForm(current.media), providerMedia: providerMediaForm(currentProviderMedia) };
     if (restoreLocal && restored && isRecord(restored) && typeof restored.slug === "string" && typeof restored.title === "string" && isRecord(restored.content) && isRecord(restored.terms)) {
@@ -480,14 +517,14 @@ export function HostPublicationWorkspace({
       setProviderMediaBaseline(JSON.stringify(providerMediaForm(currentProviderMedia)));
       if (canonicalJson(restoredForm) !== canonicalJson(serverForm)) setNotice("保存していない入力を復元しました。");
       japaneseSourceRef.current = japaneseManuscript(restored.content);
-      englishDraftRef.current = { title: restored.title, content: restored.content };
+      englishDraftRef.current = { title: publicationEnglishTitle(restored.content, restored.title), content: restored.content };
     } else {
       setSlug(current.draft.slug); setTitle(current.draft.publicTitle); setUnitAmount(String(current.draft.unitAmount)); setContent(nextContent); setTerms(nextTerms); setMediaDraft(current.media);
       setProviderMediaDraft(currentProviderMedia);
       setBaseline(JSON.stringify(serverForm));
       setProviderMediaBaseline(JSON.stringify(providerMediaForm(currentProviderMedia)));
       japaneseSourceRef.current = japaneseManuscript(nextContent);
-      englishDraftRef.current = { title: current.draft.publicTitle, content: nextContent };
+      englishDraftRef.current = { title: publicationEnglishTitle(nextContent, current.draft.publicTitle), content: nextContent };
     }
     setError(""); setConflictProduct(null);
     return current;
@@ -656,7 +693,7 @@ export function HostPublicationWorkspace({
         shouldReconcile = true;
         const mediaResponse = await fetch(`${apiBase}/${encodeURIComponent(current.id)}/media`, {
           method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ version: current.version, media: mediaForm(mediaDraft) }),
+          body: JSON.stringify({ version: current.version, media: mediaForm(effectiveMedia) }),
         });
         const mediaBody: unknown = await mediaResponse.json().catch(() => null);
         if (!mediaResponse.ok) {
@@ -675,19 +712,22 @@ export function HostPublicationWorkspace({
         if (!adminDraft) {
           draftContent = withoutEmptyRowsIn(content);
           if (content.japaneseOnly !== true) {
-            const japaneseNow = japaneseManuscript(draftContent);
+            // An English-only page sends an empty Japanese manuscript (its Japanese is only a draft in jaDraft).
+            const englishOnly = content.englishOnly === true;
+            const japaneseNow: Record<string, unknown> = englishOnly ? { ...BLANK_JAPANESE_MANUSCRIPT } : japaneseManuscript(draftContent);
+            if (englishOnly) draftContent = { ...draftContent, ja: japaneseNow };
+            const englishNow = englishPublicationManuscript(title.trim(), draftContent);
             try {
-              const translation = await confirmPublicationEnglish(() => ({ japanese: japaneseNow, english: englishPublicationManuscript(title.trim(), draftContent) }));
+              const translation = await confirmPublicationEnglish(() => ({ japanese: japaneseNow, english: englishPublicationManuscript(title.trim(), draftContent) }), { allowEmptyJapanese: englishOnly });
               draftContent = { ...draftContent, translation };
             } catch { /* Missing or invalid text: the server's blockers say what is still needed when publishing. */ }
-            const currentFingerprint = await publicationManuscriptFingerprint(japaneseNow);
-            const remembered = readEnglishSourceFingerprint(content);
-            const outOfSync = publicationLanguageOutOfSync({
-              japaneseOnly: false, japaneseWritten: manuscriptHasContent(japaneseNow),
-              englishWritten: manuscriptHasContent({ title, lead: draftContent.lead, description: draftContent.description }),
-              remembered, current: currentFingerprint,
-            });
-            draftContent = withEnglishSourceFingerprint(draftContent, savedEnglishSourceFingerprint({ outOfSync, remembered, current: currentFingerprint }));
+            if (!englishOnly) {
+              const japaneseWritten = manuscriptHasContent(japaneseNow);
+              const englishWritten = manuscriptHasContent({ title, lead: draftContent.lead, description: draftContent.description });
+              const [japaneseFingerprintNow, englishFingerprintNow] = await Promise.all([publicationManuscriptFingerprint(japaneseNow), publicationManuscriptFingerprint(englishNow)]);
+              const sync = savedLanguageSync({ content, japaneseWritten, englishWritten, japaneseFingerprint: japaneseFingerprintNow, englishFingerprint: englishFingerprintNow });
+              draftContent = withLanguageSync(draftContent, sync.source, sync.fingerprint);
+            }
           }
         }
         const draft = { slug: slug.trim(), publicTitle: title.trim(), content: draftContent, currency: "JPY", unitAmount: amount! };
@@ -706,7 +746,7 @@ export function HostPublicationWorkspace({
         if (savedContent && savedContent !== content) {
           // What was saved is the draft without its empty rows plus the confirmation: the form shows exactly that.
           japaneseSourceRef.current = japaneseManuscript(savedContent);
-          englishDraftRef.current = { title, content: savedContent };
+          englishDraftRef.current = { title: publicationEnglishTitle(savedContent, title), content: savedContent };
           setContent(savedContent);
         }
         publicationUpdated = Boolean((body as { publicationUpdated?: boolean }).publicationUpdated);
@@ -734,7 +774,7 @@ export function HostPublicationWorkspace({
         shouldReconcile = true;
         const profileResponse = await fetch("/host/api/provider-media", {
           method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ version: providerMediaVersion, media: providerMediaForm(providerMediaDraft) }),
+          body: JSON.stringify({ version: providerMediaVersion, media: providerMediaForm(effectiveProviderMedia) }),
         });
         const profileBody: unknown = await profileResponse.json().catch(() => null);
         if (!profileResponse.ok) {
@@ -933,21 +973,57 @@ export function HostPublicationWorkspace({
       if (canonicalJson(englishDraftRef.current) !== englishSnapshot) { setNotice("翻訳中に英語原稿が編集されたため、結果を破棄しました。入力した英語は保持しています。"); return; }
       if (typeof result.sourceFingerprint !== "string" || !isRecord(result.english)) throw new Error("翻訳結果を確認できませんでした。原稿は変更していません。");
       const english = result.english as unknown as LocaleManuscript;
+      const japaneseOnlyPage = content.japaneseOnly === true;
+      const sourceFingerprint = result.sourceFingerprint;
       // The translation keeps the Japanese FAQ rows (the server checks the count); none removes the English FAQ.
-      const nextContent = withPublicationFaq({
-        ...englishDraftRef.current.content, lead: english.lead, description: english.description, facts: { language: english.language },
+      const apply = (base: Record<string, unknown>) => withPublicationFaq({
+        ...base, lead: english.lead, description: english.description, facts: { language: english.language },
         highlights: english.highlights, included: english.included, notIncluded: english.notIncluded,
         knowBeforeYouGo: english.knowBeforeYouGo, notSuitableFor: english.notSuitableFor, timeline: english.timeline,
-        translation: { sourceFingerprint: result.sourceFingerprint, confirmedSourceFingerprint: null, confirmedEnglishFingerprint: null },
+        // A Japanese-only page keeps the English title as a draft; its public title stays the Japanese one.
+        ...(japaneseOnlyPage ? { enTitleDraft: english.title } : {}),
+        translation: { sourceFingerprint, confirmedSourceFingerprint: null, confirmedEnglishFingerprint: null },
         // The English now follows this Japanese: the 「ずれ」 notice goes away.
-        languageSync: { englishSourceFingerprint: result.sourceFingerprint },
+        languageSync: { englishSourceFingerprint: sourceFingerprint },
       }, publicationFaqRows(english.faq));
-      englishDraftRef.current = { title: english.title, content: nextContent };
-      setTitle(english.title);
-      setContent(nextContent);
+      englishDraftRef.current = { title: english.title, content: apply(englishDraftRef.current.content) };
+      if (!japaneseOnlyPage) setTitle(english.title);
+      setContent(apply);
       setCompare(true);
       setNotice("日本語から翻訳しました。内容を確かめてから保存してください。");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "翻訳できませんでした。日本語原稿は保持しています。"); }
+    finally { setTranslationBusy(false); }
+  }
+
+  /** 「英語から翻訳」: the English manuscript goes in, the Japanese comes back into the Japanese manuscript being edited. */
+  async function generateJapanese() {
+    if (!product || translationBusy || busy || adminDraft) return;
+    const cleaned = withoutEmptyRowsIn(content);
+    const english = englishPublicationManuscript(publicationEnglishTitle(content, title).trim(), cleaned);
+    if (["title", "lead", "description"].some((key) => typeof english[key] !== "string" || !english[key].trim())) { setError("英語の体験名・ひとこと紹介・詳しい説明を入力してください。"); return; }
+    const faqProblem = publicationFaqProblem(publicationFaqRows(english.faq), "英語");
+    if (faqProblem) { setError(faqProblem); return; }
+    const snapshot = canonicalJson(english);
+    const japaneseSnapshot = canonicalJson(japaneseSourceRef.current);
+    const currentEnglish = () => canonicalJson(englishPublicationManuscript(englishDraftRef.current.title.trim(), withoutEmptyRowsIn(englishDraftRef.current.content)));
+    setTranslationBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/translation`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ english }) });
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
+      const result = body as { sourceFingerprint?: unknown; japanese?: unknown };
+      if (currentEnglish() !== snapshot) { setNotice("翻訳中に英語原稿が変更されたため、結果を破棄しました。もう一度翻訳してください。"); return; }
+      if (canonicalJson(japaneseSourceRef.current) !== japaneseSnapshot) { setNotice("翻訳中に日本語原稿が編集されたため、結果を破棄しました。入力した日本語は保持しています。"); return; }
+      if (typeof result.sourceFingerprint !== "string" || !isRecord(result.japanese)) throw new Error("翻訳結果を確認できませんでした。原稿は変更していません。");
+      const next = japaneseManuscript({ ja: result.japanese });
+      const sourceFingerprint = result.sourceFingerprint;
+      japaneseSourceRef.current = next;
+      // A Japanese-only page's public title is its Japanese title.
+      if (content.japaneseOnly === true) setTitle(next.title);
+      setContent((current) => withLanguageSync({ ...current, [current.englishOnly === true ? "jaDraft" : "ja"]: next, translation: { sourceFingerprint: null, confirmedSourceFingerprint: null } }, "en", sourceFingerprint));
+      setCompare(true);
+      setNotice("英語から翻訳しました。内容を確かめてから保存してください。");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "翻訳できませんでした。英語原稿は保持しています。"); }
     finally { setTranslationBusy(false); }
   }
 
@@ -971,7 +1047,10 @@ export function HostPublicationWorkspace({
     const price = asPublicationPrice(createPrice);
     if (busy || !name || price === null) return;
     setBusy(true); setError(""); setNotice("");
-    const draftContent = { ...blankContent, ...(createJapaneseOnly ? { japaneseOnly: true } : {}), ja: { ...blankJapanese, title: name } };
+    // English-only: the Japanese stays empty. Japanese-only: the name is the Japanese title. Both: the same name until it is written in each.
+    const draftContent = createListing.ja
+      ? { ...blankContent, ...(createListing.en ? {} : { japaneseOnly: true }), ja: { ...blankJapanese, title: name } }
+      : { ...blankContent, englishOnly: true };
     let address = publicationSlugFromTitle(name);
     const post = (slugValue: string) => fetch(apiBase, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: slugValue, publicTitle: name, content: draftContent, currency: "JPY", unitAmount: price }) });
     try {
@@ -1004,7 +1083,7 @@ export function HostPublicationWorkspace({
     let current = product;
     // Manuscripts that were saved without a confirmation (the old 「英語を確認」) get it from this press: no edit is needed for it.
     const confirmManuscripts = content.japaneseOnly !== true && (current.publicationBlockers ?? []).includes("MANUSCRIPT_REQUIRED");
-    if (dirty || confirmManuscripts) {
+    if (needsSave || confirmManuscripts) {
       const savedProduct = await saveAll(undefined, { confirmManuscripts });
       if (!savedProduct) return;
       current = savedProduct;
@@ -1013,10 +1092,13 @@ export function HostPublicationWorkspace({
     setStateConfirm("publish");
   }
 
-  /** 「日本語から翻訳」: asks first when the English already has something written. */
-  function requestTranslation() {
-    if (manuscriptHasContent({ title, lead: content.lead, description: content.description })) setTranslateConfirm(true);
-    else void generateEnglish();
+  /** 「日本語から翻訳」(into the English tab) or 「英語から翻訳」(into the Japanese tab): asks first when the tab already has something written. */
+  function requestTranslation(into: "en" | "ja") {
+    const written = into === "en"
+      ? manuscriptHasContent({ title: publicationEnglishTitle(content, title), lead: content.lead, description: content.description })
+      : manuscriptHasContent(japaneseManuscript(content));
+    if (written) setTranslateConfirm(into);
+    else void (into === "en" ? generateEnglish() : generateJapanese());
   }
 
   async function switchManagedSalesPlan() {
@@ -1056,10 +1138,10 @@ export function HostPublicationWorkspace({
     setBusy(true); setError(""); setNotice("");
     try {
       // A Japanese-only page asks for one description: the upload API wants both, so the English one is the same sentence.
-      const altEnglish = !adminDraft && content.japaneseOnly === true ? photoAltJa : photoAlt;
+      const altEnglish = !adminDraft && !listing.en ? photoAltJa : photoAlt;
       const profileAsset = !adminDraft && photoPlacement !== "GALLERY";
       if (profileAsset && providerMediaVersion === null) throw new Error("販売者プロフィールの保存版がありません。再読み込みしてください。");
-      const response = await fetch(profileAsset ? "/host/api/provider-media/upload" : `${apiBase}/${encodeURIComponent(product.id)}/media`, { method: "POST", credentials: "same-origin", headers: { "content-type": selectedPhoto.type, "x-experience-photo-rights-confirmed": "true", "x-experience-photo-alt-text-utf8-base64url": base64UrlUtf8(altEnglish), "x-experience-photo-alt-text-ja-utf8-base64url": base64UrlUtf8(photoAltJa), "x-experience-media-placement": adminDraft ? "GALLERY" : photoPlacement, ...(profileAsset ? { "x-experience-provider-media-version": String(providerMediaVersion) } : {}), ...(photoCredit.trim() ? { "x-experience-photo-credit-utf8-base64url": base64UrlUtf8(photoCredit.trim()) } : {}) }, body: selectedPhoto });
+      const response = await fetch(profileAsset ? "/host/api/provider-media/upload" : `${apiBase}/${encodeURIComponent(product.id)}/media`, { method: "POST", credentials: "same-origin", headers: { "content-type": selectedPhoto.type, "x-experience-photo-rights-confirmed": "true", "x-experience-photo-alt-text-utf8-base64url": base64UrlUtf8(altEnglish), "x-experience-photo-alt-text-ja-utf8-base64url": base64UrlUtf8(!adminDraft && !listing.ja ? photoAlt : photoAltJa), "x-experience-media-placement": adminDraft ? "GALLERY" : photoPlacement, ...(profileAsset ? { "x-experience-provider-media-version": String(providerMediaVersion) } : {}), ...(photoCredit.trim() ? { "x-experience-photo-credit-utf8-base64url": base64UrlUtf8(photoCredit.trim()) } : {}) }, body: selectedPhoto });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       if (profileAsset) {
@@ -1150,8 +1232,11 @@ export function HostPublicationWorkspace({
   </section>
   {!adminDraft ? <EditorDialog open={createOpen} onClose={closeCreateDialog} title="体験を作成">
     <form onSubmit={(event) => void createHostProduct(event)} className="space-y-1">
-      <EditorChoice name="create-language" legend="掲載言語" info="「英語と日本語」は両方のページを作ります。「日本語のみ」は日本語のページだけに載り、英語のページ・一覧・検索結果には出ません。あとから英語を足すときは事務局へご連絡ください。" value={createJapaneseOnly ? "ja" : "both"} onChange={(next) => setCreateJapaneseOnly(next === "ja")} options={[{ value: "both", label: "英語と日本語" }, { value: "ja", label: "日本語のみ" }]} />
-      <EditorField label="体験名" value={createTitle} onChange={setCreateTitle} />
+      <EditorCheckList legend="掲載言語" info="英語ページは海外からの旅行者向け、日本語ページは日本語で探す人向けです。両方作ることも、片方だけにすることもできます。選んだ言語の原稿が必要です。掲載をやめた言語のページは、次の公開から表示されなくなります。"
+        onChange={(key, checked) => { const next = { ...createListing, [key]: checked }; if (!next.en && !next.ja) { setListingNotice("掲載言語は1つ以上必要です"); return; } setListingNotice(""); setCreateListing(next); }}
+        options={[{ key: "en", label: "英語", checked: createListing.en }, { key: "ja", label: "日本語", checked: createListing.ja }]} />
+      {listingNotice ? <p role="status" className="text-sm font-bold text-warn">{listingNotice}</p> : null}
+      <EditorField label="体験名" value={createTitle} onChange={setCreateTitle} autoFocus />
       <EditorField label="大人1人の料金（税込・円）" value={createPrice} onChange={setCreatePrice} inputMode="numeric" info="無料の体験は0円にします。有料は50円以上にしてください。" />
       {error ? <p role="alert" className="rounded-xl bg-danger-pale p-3 text-danger">{error}</p> : null}
       <div className="flex justify-end gap-2 pt-4">
@@ -1265,7 +1350,7 @@ export function HostPublicationWorkspace({
   if (!adminDraft) {
     const japanese = japaneseManuscript(content);
     const english = {
-      title,
+      title: publicationEnglishTitle(content, title),
       lead: typeof content.lead === "string" ? content.lead : "",
       description: typeof content.description === "string" ? content.description : "",
       language: isRecord(content.facts) && typeof content.facts.language === "string" ? content.facts.language : "",
@@ -1279,12 +1364,16 @@ export function HostPublicationWorkspace({
     type RowKey = "highlights" | "included" | "notIncluded" | "knowBeforeYouGo" | "notSuitableFor";
     const NAME = { en: "英語", ja: "日本語" } as const;
     const japaneseOnly = content.japaneseOnly === true;
-    const L: "en" | "ja" = japaneseOnly ? "ja" : editorLocale;
+    const L: "en" | "ja" = editorLocale ?? (listing.en ? "en" : "ja");
     const O: "en" | "ja" = L === "en" ? "ja" : "en";
     const englishWritten = manuscriptHasContent(english);
     const japaneseWritten = manuscriptHasContent(japanese);
-    const showCompare = compare && !japaneseOnly && englishWritten && japaneseWritten;
-    const languageStale = publicationLanguageOutOfSync({ japaneseOnly, japaneseWritten, englishWritten, remembered: readEnglishSourceFingerprint(content), current: japaneseFingerprint });
+    const showCompare = compare && englishWritten && japaneseWritten;
+    // 英語と日本語の両方を掲載するときだけ: the tab of the language that follows the other is told when the source moved on.
+    const sync = readLanguageSync(content);
+    const syncCurrent = sync.source === "ja" ? japaneseFingerprint : englishFingerprint;
+    const languageStale = languageSyncOutOfSync({ listing, japaneseWritten, englishWritten, remembered: sync.remembered, current: syncCurrent });
+    const staleTab = languageSyncFollower(sync.source);
     const manuscriptOf = (locale: "en" | "ja") => (locale === "ja" ? japanese : english);
     const setText = (key: TextKey, next: string) => {
       if (L === "ja") updateJapanese(key, next);
@@ -1320,8 +1409,8 @@ export function HostPublicationWorkspace({
     const activePhoto = activeIndex >= 0 ? mediaDraft[activeIndex]! : null;
     const timeline = L === "ja" ? japanese.timeline : timelineItems(content.timeline);
     const otherTimeline = O === "ja" ? japanese.timeline : timelineItems(content.timeline);
-    const faqRows = publicationFaqRows(L === "ja" ? (isRecord(content.ja) ? content.ja.faq : undefined) : content.faq);
-    const otherFaqRows = publicationFaqRows(O === "ja" ? (isRecord(content.ja) ? content.ja.faq : undefined) : content.faq);
+    const faqRows = publicationFaqRows(L === "ja" ? japanese.faq : content.faq);
+    const otherFaqRows = publicationFaqRows(O === "ja" ? japanese.faq : content.faq);
     const faqProblem = publicationFaqProblem(faqRows, NAME[L]);
     const faqFull = faqRows.length >= PUBLICATION_FAQ_LIMITS.maxItems;
     const changeFaq = (index: number, key: keyof PublicationFaqRow, value: string) => updateFaq(L, faqRows.map((row, at) => at === index ? { ...row, [key]: value } : row));
@@ -1333,7 +1422,7 @@ export function HostPublicationWorkspace({
         : product.status === "RESTART_REQUIRED" ? "bg-warn-pale text-warn" : "bg-danger-pale text-danger";
     const pendingChanges = product.status === "PUBLISHED" && (product.publicationNeedsUpdate || savedBlockers.length > 0);
     const showPrimary = !(product.status === "PUBLISHED" && !product.publicationNeedsUpdate);
-    const titleText = L === "ja" ? japanese.title || title || "体験を編集" : title || japanese.title || "体験を編集";
+    const titleText = L === "ja" ? japanese.title || english.title || "体験を編集" : english.title || japanese.title || "体験を編集";
     const blockerGoal = product.status === "PUBLISHED" ? "公開中のページに反映する" : product.status === "STOPPED" ? "再開する" : "公開する";
     const markedTabs = new Set<string>();
     if (blockersShown && !dirty) for (const blocker of savedBlockers) { const destination = publicationBlockerDestination(blocker); if (destination?.kind === "tab") markedTabs.add(destination.tab); }
@@ -1342,29 +1431,32 @@ export function HostPublicationWorkspace({
     const sectionClass = `${HOST_SURFACE} scroll-mt-4 p-4 md:p-6`;
     const headingClass = "mb-3.5 flex items-center text-base font-extrabold";
     const setTermsField = <K extends keyof PublicationTermsForm>(key: K, value: PublicationTermsForm[K]) => setTerms((current) => ({ ...current, [key]: value }));
-    const classificationShown = !classification.hidden && classification.value !== null;
+    const classificationShown = listing.ja && !classification.hidden && classification.value !== null;
 
+    const otherWritten = L === "en" ? japaneseWritten : englishWritten;
+    const currentWritten = L === "en" ? englishWritten : japaneseWritten;
+    const tabButton = (locale: "en" | "ja") => (
+      <button type="button" aria-pressed={L === locale} className={`inline-flex h-9 items-center gap-1.5 rounded-[9px] px-[18px] text-[0.84375rem] font-extrabold ${L === locale ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale(locale)}>
+        {NAME[locale]}
+        {!listing[locale] ? <span className="rounded-full bg-sand px-2 py-px text-[0.6875rem] font-extrabold text-ink-soft">掲載しない</span> : null}
+        {languageStale && staleTab === locale ? <span role="img" aria-label={`${NAME[locale === "en" ? "ja" : "en"]}のほうが新しい`} className="inline-block size-[7px] rounded-full bg-warn" /> : null}
+      </button>
+    );
     const languageBar = <div className="mb-4 flex flex-wrap items-center gap-1.5">
-      {japaneseOnly ? <>
-        <span className={`${pillBase} bg-sand text-ink-soft`}>日本語のみで公開</span>
-        <HostInfoTip label="日本語のみで公開">英語ページは作られません。公開上の商品名は日本語の体験名と同じになります。変えるときは「掲載設定 › 掲載言語」から。</HostInfoTip>
-        <button type="button" className="px-1 text-[0.8125rem] font-extrabold text-moss underline underline-offset-4" onClick={() => setWorkspaceSection("settings")}>掲載設定</button>
-      </> : <>
-        <div className="inline-flex rounded-xl border border-line-strong bg-canvas p-[3px]" role="group" aria-label="原稿の言語">
-          <button type="button" aria-pressed={L === "en"} className={`inline-flex h-9 items-center gap-1.5 rounded-[9px] px-[18px] text-[0.84375rem] font-extrabold ${L === "en" ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale("en")}>英語{languageStale ? <span role="img" aria-label="日本語のほうが新しい" className="inline-block size-[7px] rounded-full bg-warn" /> : null}</button>
-          <button type="button" aria-pressed={L === "ja"} className={`inline-flex h-9 items-center rounded-[9px] px-[18px] text-[0.84375rem] font-extrabold ${L === "ja" ? "bg-sand text-ink" : "text-muted"}`} onClick={() => setEditorLocale("ja")}>日本語</button>
-        </div>
-        <HostInfoTip label="原稿の言語">「英語」は英語ページ、「日本語」は日本語ページの原稿です。どちらも直接書けます。英語は「日本語から翻訳」で作ることもできます。翻訳はボタンを押したときだけ行われ、自動では書き換わりません。写真の並び・料金・日程は共通です。</HostInfoTip>
-      </>}
+      <div className="inline-flex rounded-xl border border-line-strong bg-canvas p-[3px]" role="group" aria-label="原稿の言語">
+        {tabButton("en")}
+        {tabButton("ja")}
+      </div>
+      <HostInfoTip label="原稿の言語">「英語」は英語ページ、「日本語」は日本語ページの原稿です。直接書いても、もう一方の言語から翻訳しても作れます。翻訳はボタンを押したときだけ行われ、自動では書き換わりません。掲載しない言語は、翻訳のもとになる下書きとして使えます。写真の並び・料金・日程は共通です。</HostInfoTip>
       <span className="grow" />
-      {!japaneseOnly && englishWritten && japaneseWritten ? <button type="button" aria-pressed={compare} className={`${consoleButtonClass("ghost", "sm")} ${compare ? "bg-sand text-ink" : ""}`} onClick={() => setCompare((current) => !current)}>{compare ? "✓ " : ""}{NAME[O]}と見比べる</button> : null}
-      {L === "en" && !japaneseOnly ? <button type="button" disabled={busy || translationBusy || !japaneseWritten} className={consoleButtonClass(englishWritten ? "secondary" : "primary", "sm")} onClick={requestTranslation}>{translationBusy ? "翻訳中…" : "日本語から翻訳"}</button> : null}
+      {englishWritten && japaneseWritten ? <button type="button" aria-pressed={compare} className={`${consoleButtonClass("ghost", "sm")} ${compare ? "bg-sand text-ink" : ""}`} onClick={() => setCompare((current) => !current)}>{compare ? "✓ " : ""}{NAME[O]}と見比べる</button> : null}
+      <button type="button" disabled={busy || translationBusy || !otherWritten} className={consoleButtonClass(!currentWritten && otherWritten ? "primary" : "secondary", "sm")} onClick={() => requestTranslation(L)}>{translationBusy ? "翻訳中…" : `${NAME[O]}から翻訳`}</button>
     </div>;
-    const staleNotice = languageStale && L === "en" ? <section className="flex flex-wrap items-center justify-between gap-3.5 rounded-2xl bg-warn-pale px-[18px] py-3.5 text-ink">
-      <p className="flex min-w-40 flex-1 items-center font-bold">日本語を変えたあと、英語は変わっていません<HostInfoTip label="言語のずれ">もう一方の言語を変えても、こちらは自動では書き換わりません。翻訳し直すか、このままでよければ知らせを消せます。公開は止まりません。</HostInfoTip></p>
+    const staleNotice = languageStale && L === staleTab ? <section className="flex flex-wrap items-center justify-between gap-3.5 rounded-2xl bg-warn-pale px-[18px] py-3.5 text-ink">
+      <p className="flex min-w-40 flex-1 items-center font-bold">{NAME[O]}を変えたあと、{NAME[L]}は変わっていません<HostInfoTip label="言語のずれ">もう一方の言語を変えても、こちらは自動では書き換わりません。翻訳し直すか、このままでよければ知らせを消せます。公開は止まりません。</HostInfoTip></p>
       <div className="flex flex-wrap gap-2">
-        <button type="button" disabled={busy || translationBusy} className={consoleButtonClass("secondary", "sm")} onClick={requestTranslation}>日本語から翻訳し直す</button>
-        <button type="button" disabled={busy || japaneseFingerprint === null} className={consoleButtonClass("ghost", "sm")} onClick={() => { if (japaneseFingerprint !== null) setContent((current) => withEnglishSourceFingerprint(current, japaneseFingerprint)); }}>このままでよい</button>
+        <button type="button" disabled={busy || translationBusy} className={consoleButtonClass("secondary", "sm")} onClick={() => requestTranslation(L)}>{NAME[O]}から翻訳し直す</button>
+        <button type="button" disabled={busy || syncCurrent === null} className={consoleButtonClass("ghost", "sm")} onClick={() => { if (syncCurrent !== null) setContent((current) => withLanguageSync(current, sync.source, syncCurrent)); }}>このままでよい</button>
       </div>
     </section> : null;
 
@@ -1562,17 +1654,21 @@ export function HostPublicationWorkspace({
 
     const settingsTab = <div className="grid max-w-[720px] gap-4">
       <section id="publication-listing" className={sectionClass} aria-labelledby="publication-listing-title">
-        <h2 id="publication-listing-title" className={headingClass}>掲載言語<HostInfoTip label="掲載言語">「英語と日本語」は両方のページを作ります。「日本語のみ」は日本語のページだけに載り、英語のページ・一覧・検索結果には出ません。あとから英語を足すときは事務局へご連絡ください。</HostInfoTip></h2>
-        <EditorChoice name="listing-language" legend="掲載する言語" legendHidden value={japaneseOnly ? "ja" : "both"} disabled={busy || !!conflictProduct} onChange={(next) => changeJapaneseOnly(next === "ja")}
-          options={[{ value: "both", label: "英語と日本語" }, { value: "ja", label: "日本語のみ" }]} />
+        <h2 id="publication-listing-title" className={headingClass}>掲載言語<HostInfoTip label="掲載言語">英語ページは海外からの旅行者向け、日本語ページは日本語で探す人向けです。両方作ることも、片方だけにすることもできます。選んだ言語の原稿が必要です。掲載をやめた言語のページは、次の公開から表示されなくなります。</HostInfoTip></h2>
+        <EditorCheckList legend="掲載する言語" legendHidden disabled={busy || !!conflictProduct} onChange={(key, checked) => changeListing({ ...listing, [key]: checked })}
+          options={[
+            { key: "en", label: "英語", checked: listing.en, detail: `/experiences/${slug}` },
+            { key: "ja", label: "日本語", checked: listing.ja, detail: `/ja/experiences/${slug}` },
+          ]} />
+        {listingNotice ? <p role="status" className="mt-2 text-sm font-bold text-warn">{listingNotice}</p> : null}
       </section>
       <section id="publication-slug" className={sectionClass} aria-labelledby="publication-slug-title">
         <h2 id="publication-slug-title" className={headingClass}>ページのアドレス<HostInfoTip label="ページのアドレス">体験を作ったときに自動で決まります。変えたいときだけ「変更」を押してください。半角の英小文字・数字・ハイフンで入力します。</HostInfoTip></h2>
         {slugEditing ? <div className="flex items-center overflow-hidden rounded-[10px] border border-line-strong bg-canvas focus-within:border-moss focus-within:ring-2 focus-within:ring-moss/20">
-          <span className="py-2 pl-3 text-[0.84375rem] whitespace-nowrap text-muted">{japaneseOnly ? "/ja" : ""}/experiences/</span>
+          <span className="py-2 pl-3 text-[0.84375rem] whitespace-nowrap text-muted">{listing.en ? "" : "/ja"}/experiences/</span>
           <input aria-label="ページのアドレス" value={slug} spellCheck={false} onChange={(event) => setSlug(event.target.value)} className="min-w-20 flex-1 border-0 bg-transparent py-2 pr-3 pl-0.5 text-[1rem] font-bold outline-none md:text-[0.875rem]" />
         </div> : <div className="flex flex-wrap items-center gap-2.5">
-          <span className="text-muted [overflow-wrap:anywhere]">{japaneseOnly ? "/ja" : ""}/experiences/<b className="text-ink">{slug}</b></span>
+          <span className="text-muted [overflow-wrap:anywhere]">{listing.en ? "" : "/ja"}/experiences/<b className="text-ink">{slug}</b></span>
           <span className="grow" />
           <button type="button" className={consoleButtonClass("secondary", "sm")} onClick={() => setSlugEditing(true)}>変更</button>
         </div>}
@@ -1585,7 +1681,7 @@ export function HostPublicationWorkspace({
 
     const tabs = [["page", "体験ページ"], ["pricing", "料金・予約"], ["schedule", "日程"], ["settings", "掲載設定"]] as const;
     const photoDialogOpen = photoDialog !== null;
-    const uploadReady = !!selectedPhoto && rightsConfirmed && !busy && !conflictProduct && photoAltJa.trim().length > 0 && (japaneseOnly || photoAlt.trim().length > 0);
+    const uploadReady = !!selectedPhoto && rightsConfirmed && !busy && !conflictProduct && (!listing.ja || photoAltJa.trim().length > 0) && (!listing.en || photoAlt.trim().length > 0);
     return <HostPageBody>
       <Link href={experiencesBase} className="mb-1.5 inline-flex items-center gap-1 text-[0.8125rem] font-bold text-muted hover:text-ink">‹ 体験</Link>
       <div className="mb-3.5 flex flex-col gap-3 md:flex-row md:items-start">
@@ -1628,7 +1724,7 @@ export function HostPublicationWorkspace({
         </div> : null}
       </form>
       {stateConfirm ? <HostConfirmDialog title={stateConfirm === "stop" ? "新しい予約を停止しますか？" : product.status === "STOPPED" ? "予約の受付を再開しますか？" : "この商品を公開しますか？"} description={stateConfirm === "stop" ? "この商品の新しい予約を停止します。受け付けた予約はそのまま残ります。" : "掲載条件を確認し、この商品を公開します。公開内容と販売条件に同意します。"} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>{stateConfirm === "stop" ? "停止する" : "同意して公開する"}</button>} onConfirm={() => { const action = stateConfirm; void runStateChange(action); }} onClose={() => setStateConfirm(null)} /> : null}
-      {translateConfirm ? <HostConfirmDialog title="今の英語を置き換えますか？" description="日本語の原稿から翻訳し直します。英語に手で書いた内容は消えます。" focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>置き換える</button>} onConfirm={() => void generateEnglish()} onClose={() => setTranslateConfirm(false)} /> : null}
+      {translateConfirm ? <HostConfirmDialog title={`今の${NAME[translateConfirm]}を置き換えますか？`} description={`${translateConfirm === "en" ? "日本語" : "英語"}の原稿から翻訳し直します。${NAME[translateConfirm]}に手で書いた内容は消えます。`} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>置き換える</button>} onConfirm={() => void (translateConfirm === "en" ? generateEnglish() : generateJapanese())} onClose={() => setTranslateConfirm(null)} /> : null}
       {discardConfirm ? <HostConfirmDialog title="変更を元に戻しますか？" description="保存していない入力は消えて、最後に保存した内容に戻ります。" focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>元に戻す</button>} onConfirm={() => void discardToLatest()} onClose={() => setDiscardConfirm(false)} /> : null}
       <EditorDialog open={blockerDialog} onClose={() => setBlockerDialog(false)} title={`${blockerGoal}には、あと${savedBlockers.length}つ必要です`}>
         <ul className="mt-3">
@@ -1636,7 +1732,7 @@ export function HostPublicationWorkspace({
             const destination = publicationBlockerDestination(blocker);
             const link = "font-extrabold whitespace-nowrap text-moss underline underline-offset-4";
             return <li key={blocker} className="flex items-center justify-between gap-3.5 border-t border-line py-2.5">
-              <span>{blocker === "MANUSCRIPT_REQUIRED" ? `${japaneseOnly ? "日本語" : "英語と日本語"}の原稿（体験名・ひとこと紹介・当日の言語・詳しい説明）を書いてください。` : BLOCKER_COPY[blocker] ?? "公開条件を確認してください。"}</span>
+              <span>{blocker === "MANUSCRIPT_REQUIRED" ? `${listing.en && listing.ja ? "英語と日本語" : listing.en ? "英語" : "日本語"}の原稿（体験名・ひとこと紹介・当日の言語・詳しい説明）を書いてください。` : BLOCKER_COPY[blocker] ?? "公開条件を確認してください。"}</span>
               {destination?.kind === "calendar" ? <Link href={calendarHref} className={link}>カレンダーを開く</Link>
                 : destination?.kind === "tab" ? <button type="button" className={link} onClick={() => { setBlockerDialog(false); setWorkspaceSection(destination.tab); }}>入力する</button>
                   : destination?.kind === "href" ? <Link href={destination.href} className={link}>確認する</Link>
@@ -1651,10 +1747,8 @@ export function HostPublicationWorkspace({
           {photoDialog === "provider" ? <label className="block text-[0.8125rem] font-bold text-ink-soft">写真の用途
             <select value={photoPlacement} disabled={busy} onChange={(event) => { setPhotoPlacement(event.target.value as typeof photoPlacement); setPhotoRights(null); }} className={`${EDITOR_INPUT} mt-1`}><option value="PROVIDER_PHOTO">提供者写真（全商品）</option><option value="BUSINESS_LOGO">事業者ロゴ（全商品）</option></select>
           </label> : null}
-          {japaneseOnly ? <EditorField label="写真の説明（日本語）" value={photoAltJa} onChange={setPhotoAltJa} /> : <>
-            <EditorField label="写真の説明（英語）" value={photoAlt} onChange={setPhotoAlt} />
-            <EditorField label="写真の説明（日本語）" value={photoAltJa} onChange={setPhotoAltJa} />
-          </>}
+          {listing.en ? <EditorField label="写真の説明（英語）" value={photoAlt} onChange={setPhotoAlt} /> : null}
+          {listing.ja ? <EditorField label="写真の説明（日本語）" value={photoAltJa} onChange={setPhotoAltJa} /> : null}
           <EditorField label="クレジット" small="任意" value={photoCredit} onChange={setPhotoCredit} />
           <div className="pt-3"><HostSharedPhotoOffer disabled={busy || !!conflictProduct} onUse={(photo) => { setSelectedPhoto(photo); setSharedPhotoName(photo.name); setPhotoRights(null); }} /></div>
           <label className="block pt-3 text-[0.8125rem] font-bold text-ink-soft">端末から選ぶ<input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => { setSelectedPhoto(event.target.files?.[0] ?? null); setSharedPhotoName(null); setPhotoRights(null); }} className="mt-1 block max-w-full font-normal" /></label>

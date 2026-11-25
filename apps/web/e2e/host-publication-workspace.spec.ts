@@ -71,7 +71,7 @@ const baseProduct = (over: Record<string, unknown> = {}, content: Record<string,
 });
 
 // Mounts the host editor on synthetic responses. PATCH answers with the posted draft so the form is level with the server again.
-async function mountHost(page: Page, product: ReturnType<typeof baseProduct>, patches: Array<Record<string, unknown>> = []) {
+async function mountHost(page: Page, product: ReturnType<typeof baseProduct>, patches: Array<Record<string, unknown>> = [], translations: Array<Record<string, unknown>> = []) {
   await page.route(`${ORIGIN}/`, (route) => route.fulfill({ contentType: "text/html", body: '<!doctype html><meta charset="utf-8"><div id="root"></div>' }));
   await page.route(`${ORIGIN}/synthetic/products/synthetic-product`, async (route) => {
     if (route.request().method() === "PATCH") {
@@ -79,6 +79,11 @@ async function mountHost(page: Page, product: ReturnType<typeof baseProduct>, pa
       patches.push(posted.draft);
       await route.fulfill({ json: { product: { ...product, version: "2", draft: { ...product.draft, ...posted.draft } } } });
     } else await route.fulfill({ json: { product } });
+  });
+  await page.route(`${ORIGIN}/synthetic/products/synthetic-product/translation`, async (route) => {
+    translations.push(route.request().postDataJSON() as Record<string, unknown>);
+    const posted = translations.at(-1) as { english?: Record<string, unknown> };
+    await route.fulfill({ json: { sourceFingerprint: "e".repeat(64), japanese: { ...(posted.english ?? {}), title: "翻訳された商品", lead: "翻訳された紹介", description: "翻訳された説明", language: "日本語" } } });
   });
   await page.route(`${ORIGIN}/host/api/provider-media`, (route) => route.fulfill({ json: { providerMedia: { version: 1, assets: [] } } }));
   await page.route(`${ORIGIN}/host/api/products/synthetic-product/classification`, (route) => route.fulfill({ status: 404, json: {} }));
@@ -101,8 +106,8 @@ test("the host editor opens on the English tab with four in-page tabs and transl
   await page.getByRole("button", { name: "日本語", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1 })).toContainText("合成の商品");
   await expect(page.getByRole("button", { name: "日本語から翻訳", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "英語から翻訳", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "集合の概要" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "英語から翻訳", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "集合の概要" })).toHaveCount(0);
   for (const name of ["料金・予約", "日程", "掲載設定", "体験ページ"]) await page.getByRole("tab", { name }).click();
   expect(errors).toEqual([]);
 });
@@ -155,15 +160,88 @@ test("a Japanese change after the English was made level is told on the English 
   await expect(page.getByText("未保存の変更があります")).toBeVisible();
 });
 
-test("a Japanese-only page shows only Japanese, and the photo dialog asks one description", async ({ page }) => {
-  await mountHost(page, baseProduct({}, { japaneseOnly: true }));
-  await expect(page.getByRole("group", { name: "原稿の言語" })).toHaveCount(0);
+test("a Japanese-only page opens on Japanese, still has the English tab marked 掲載しない, and asks one description", async ({ page }) => {
+  await mountHost(page, baseProduct({}, { japaneseOnly: true, enTitleDraft: "Draft title" }));
+  const tabs = page.getByRole("group", { name: "原稿の言語" }).getByRole("button");
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.nth(0)).toContainText("掲載しない");
+  await expect(tabs.nth(1)).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("合成の商品");
+  await tabs.nth(0).click();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Draft title");
   await page.getByRole("button", { name: "＋ 写真を追加" }).click();
   const dialog = page.getByRole("dialog", { name: "写真を追加" });
   await expect(dialog.getByRole("textbox", { name: "写真の説明（日本語）", exact: true })).toBeVisible();
   await expect(dialog.getByRole("textbox", { name: "写真の説明（英語）", exact: true })).toHaveCount(0);
   await expect(dialog.getByLabel("写真の用途")).toHaveCount(0);
+});
+
+test("English-only: saving sends an empty ja, keeps the Japanese in jaDraft and confirms the English; the last language cannot be unchecked", async ({ page }) => {
+  const patches: Array<Record<string, unknown>> = [];
+  await mountHost(page, baseProduct({}, { languageSync: { englishSourceFingerprint: "x" } }), patches);
+  await page.getByRole("tab", { name: "掲載設定" }).click();
+  await page.getByRole("checkbox", { name: /^日本語/ }).uncheck();
+  await page.getByRole("checkbox", { name: /^英語/ }).click();
+  await expect(page.getByRole("status").filter({ hasText: "掲載言語は1つ以上必要です" })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /^英語/ })).toBeChecked();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByText("未保存の変更があります")).toHaveCount(0);
+  expect(patches).toHaveLength(1);
+  const content = patches[0]!.content as { englishOnly?: boolean; japaneseOnly?: boolean; ja: { title: string }; jaDraft: { title: string }; translation: Record<string, string>; languageSync?: unknown };
+  expect(content.englishOnly).toBe(true);
+  expect(content.japaneseOnly).toBeUndefined();
+  expect(content.ja.title).toBe("");
+  expect(content.jaDraft.title).toBe("合成の商品");
+  expect(content.translation.confirmedSourceFingerprint).toMatch(/^[0-9a-f]{64}$/);
+  expect(content.languageSync).toEqual({ englishSourceFingerprint: "x" });
+  // The Japanese tab is still there as a draft, marked 掲載しない.
+  await page.getByRole("tab", { name: "体験ページ" }).click();
+  const tabs = page.getByRole("group", { name: "原稿の言語" }).getByRole("button");
+  await expect(tabs.nth(1)).toContainText("掲載しない");
+  await tabs.nth(1).click();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("合成の商品");
+});
+
+test("「英語から翻訳」 is on the Japanese tab, asks before replacing, and sends only the English", async ({ page }) => {
+  const translations: Array<Record<string, unknown>> = [];
+  await mountHost(page, baseProduct({}, { languageSync: { englishSourceFingerprint: "x" } }), [], translations);
+  await expect(page.getByRole("button", { name: "英語から翻訳", exact: true })).toHaveCount(0);
+  await page.getByRole("group", { name: "原稿の言語" }).getByRole("button").nth(1).click();
+  await expect(page.getByRole("button", { name: "日本語から翻訳", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "英語から翻訳", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "今の日本語を置き換えますか？" });
+  await dialog.getByRole("button", { name: "置き換える" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("翻訳された商品");
+  await expect(page.getByText("英語から翻訳しました。内容を確かめてから保存してください。")).toBeVisible();
+  expect(translations).toHaveLength(1);
+  expect(Object.keys(translations[0]!)).toEqual(["english"]);
+});
+
+test("saving a Japanese-only page keeps its English title draft for translation", async ({ page }) => {
+  const patches: Array<Record<string, unknown>> = [];
+  const translations: Array<Record<string, unknown>> = [];
+  await mountHost(page, baseProduct({}, { japaneseOnly: true, enTitleDraft: "Synthetic English title" }), patches, translations);
+  await page.getByRole("button", { name: "日本語", exact: true }).click();
+  await page.getByRole("textbox", { name: "ひとこと紹介", exact: true }).fill("更新した紹介文");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByText("未保存の変更があります")).toHaveCount(0);
+  expect(patches).toHaveLength(1);
+
+  await page.getByRole("button", { name: "英語から翻訳", exact: true }).click();
+  await page.getByRole("dialog", { name: "今の日本語を置き換えますか？" }).getByRole("button", { name: "置き換える" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("翻訳された商品");
+  await expect(page.getByText("英語から翻訳しました。内容を確かめてから保存してください。")).toBeVisible();
+  expect(translations).toHaveLength(1);
+});
+
+test("when the English is the source, a change to it is told on the Japanese tab only", async ({ page }) => {
+  await mountHost(page, baseProduct({}, { languageSync: { japaneseSourceFingerprint: "older-english" } }));
+  await expect(page.getByText("日本語を変えたあと、英語は変わっていません")).toHaveCount(0);
+  await page.getByRole("group", { name: "原稿の言語" }).getByRole("button").nth(1).click();
+  await expect(page.getByText("英語を変えたあと、日本語は変わっていません")).toBeVisible();
+  await expect(page.getByRole("button", { name: "英語から翻訳し直す" })).toBeVisible();
+  await page.getByRole("button", { name: "このままでよい" }).click();
+  await expect(page.getByText("英語を変えたあと、日本語は変わっていません")).toHaveCount(0);
 });
 
 test("the photo dialog asks both descriptions on a page in both languages", async ({ page }) => {
@@ -246,8 +324,10 @@ test("体験を作成 opens a dialog on the list and sends the name, price and a
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "体験を作成" }).click();
   const dialog = page.getByRole("dialog", { name: "体験を作成" });
-  await expect(dialog.getByRole("radio", { name: "英語と日本語" })).toBeChecked();
-  await dialog.getByRole("radio", { name: "日本語のみ" }).check();
+  await expect(dialog.getByRole("checkbox", { name: "英語" })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "日本語" })).not.toBeChecked();
+  await dialog.getByRole("checkbox", { name: "日本語" }).check();
+  await dialog.getByRole("checkbox", { name: "英語" }).uncheck();
   await dialog.getByRole("textbox", { name: "体験名", exact: true }).fill("Cook and Share a Community Dinner with Kamakura Locals");
   await dialog.getByRole("textbox", { name: "大人1人の料金（税込・円）", exact: true }).fill("3500");
   await dialog.getByRole("button", { name: "作成" }).click();
@@ -272,5 +352,9 @@ test("the create dialog tries a conflicting address once more with four digits",
   await expect.poll(() => sent.length).toBe(2);
   expect(sent[0]!.slug).toBe("tea-ceremony");
   expect(sent[1]!.slug).toMatch(/^tea-ceremony-\d{4}$/);
-  expect((sent[1]!.content as { japaneseOnly?: boolean }).japaneseOnly).toBeUndefined();
+  // Only English is checked by default: an English-only draft with no ja.
+  const content = sent[1]!.content as { japaneseOnly?: boolean; englishOnly?: boolean; ja?: unknown };
+  expect(content.japaneseOnly).toBeUndefined();
+  expect(content.englishOnly).toBe(true);
+  expect(content.ja).toBeUndefined();
 });

@@ -122,6 +122,14 @@ export function isJapaneseOnlyContent(content: unknown): boolean {
 }
 
 /**
+ * 英語のみで公開する商品の印（`content.englishOnly`）。日本語は公開しない: 日本語の下書き（`jaDraft`）は印とは別に持たれ、
+ * `content.ja` に文が残っていても公開の投影は日本語を null にする。
+ */
+export function isEnglishOnlyContent(content: unknown): boolean {
+  return isRecord(content) && content.englishOnly === true;
+}
+
+/**
  * 日本語のみの商品の「英語 fingerprint」。事務局の代理公開レビューの監査表（英語 fingerprint が NOT NULL）を
  * migration なしで使うため、英語原稿が無いことを表す固定の値で埋める。実際の英語原稿の fingerprint と衝突しない
  * （原稿は必ず title などの鍵を持つオブジェクトで、これは `japaneseOnly` だけを持つ）。
