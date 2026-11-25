@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "@/host/nav";
 import { hasOwnerMembership, nihoIdOrNull, providerRoleLabel, selectProvider, type HostConsoleChoice, type HostProviderRole } from "@/lib/host/providers";
-import { hostSupportPath, HOST_DAILY_NAV, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_NAV, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
+import { hostSupportPath, HOST_ACCOUNT_PATH, HOST_DAILY_NAV, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_MEMBERS_PATH, HOST_NAV, withProvider } from "@/lib/host/routes";
 import { HostIcon, type HostIconName } from "./HostIcon";
 import { AccountAvatar, InitialAvatar, type HostAccount } from "./ui";
 
@@ -18,6 +18,7 @@ const NAV_ICONS: Record<(typeof HOST_NAV)[number]["href"], HostIconName> = {
   "/host/calendar": "calendar",
   "/host/bookings": "bookings",
   "/host/sales": "sales",
+  "/host/members": "members",
   "/host/settings": "settings",
 };
 
@@ -57,21 +58,21 @@ const TAB_COLUMNS: Readonly<Record<number, string>> = { 1: "grid-cols-1", 2: "gr
 
 export function hostNavForRole(role: HostProviderRole | null | undefined) {
   if (role === "OWNER") return HOST_NAV;
-  if (role === "EDITOR") return HOST_NAV.filter((item) => item.href !== "/host/sales" && item.href !== "/host/bookings");
-  return HOST_NAV.filter((item) => item.href !== "/host/sales");
+  if (role === "EDITOR") return HOST_NAV.filter((item) => item.href !== "/host/sales" && item.href !== "/host/bookings" && item.href !== HOST_MEMBERS_PATH);
+  return HOST_NAV.filter((item) => item.href !== "/host/sales" && item.href !== HOST_MEMBERS_PATH);
 }
 
 export function hostNavForChoice(choice: HostConsoleChoice | null | undefined) {
   if (choice?.kind === "OPERATOR") {
     // A product operator's screens (docs/product-operators.md): カレンダー, 予約 for the OTA bookings of their products and
-    // 設定 for their own email address (#194).
+    // 設定 for their own email address (#194). They never see メンバー.
     const screens = choice.screens ?? ["/host/calendar"];
-    return HOST_NAV.filter((item) => item.href === "/host/calendar" || screens.includes(item.href));
+    return HOST_NAV.filter((item) => item.href !== HOST_MEMBERS_PATH && (item.href === "/host/calendar" || screens.includes(item.href)));
   }
   return hostNavForRole(choice?.memberRole);
 }
 
-/** Daily chrome excludes settings without changing the permissioned section set above. */
+/** The bottom tabs: the daily sections only (no メンバー or 設定), within the permissioned set above. */
 export function hostDailyNavForChoice(choice: HostConsoleChoice | null | undefined) {
   return hostNavForChoice(choice).filter((item) => HOST_DAILY_NAV.some((daily) => daily.href === item.href));
 }
@@ -85,6 +86,59 @@ function useProviderId(): string | null {
   return nihoIdOrNull(useSearchParams().get("providerId"));
 }
 
+/** What the person is to this provider ("オーナー"), or null when there is none to tell. */
+function choiceRoleLabel(choice: HostConsoleChoice): string | null {
+  return choice.kind === "OPERATOR" ? "商品運営者" : providerRoleLabel(choice.memberRole);
+}
+
+/** Fired when a header/sidebar menu opens, so the other one closes. */
+const MENU_OPENED_EVENT = "host-menu-opened";
+
+/**
+ * Shared behavior of the `<details>` menus: closes on an outside press and on Escape (focus returns to its summary),
+ * closes when the other menu opens, and, for the phone menus (`modal`), keeps #main inert while any of them is open.
+ */
+function useDetailsMenu(modal: boolean): { menu: RefObject<HTMLDetailsElement | null>; close: () => void } {
+  const menu = useRef<HTMLDetailsElement>(null);
+  const close = useCallback(() => menu.current?.removeAttribute("open"), []);
+  useEffect(() => {
+    const details = menu.current;
+    const syncMainInert = () => {
+      const main = document.getElementById("main");
+      if (main && modal) main.inert = document.querySelector("details[data-host-modal-menu][open]") !== null;
+    };
+    const onToggle = () => {
+      if (details?.open) document.dispatchEvent(new CustomEvent(MENU_OPENED_EVENT, { detail: details }));
+      syncMainInert();
+    };
+    const closeFromOther = (event: Event) => {
+      if (details?.open && (event as CustomEvent<unknown>).detail !== details) close();
+    };
+    const closeFromOutside = (event: PointerEvent) => {
+      if (details?.open && event.target instanceof Node && !details.contains(event.target)) close();
+    };
+    const closeFromKeyboard = (event: KeyboardEvent) => {
+      if (details?.open && event.key === "Escape") {
+        event.preventDefault();
+        close();
+        details.querySelector("summary")?.focus();
+      }
+    };
+    details?.addEventListener("toggle", onToggle);
+    document.addEventListener(MENU_OPENED_EVENT, closeFromOther);
+    document.addEventListener("pointerdown", closeFromOutside);
+    document.addEventListener("keydown", closeFromKeyboard);
+    return () => {
+      details?.removeEventListener("toggle", onToggle);
+      document.removeEventListener(MENU_OPENED_EVENT, closeFromOther);
+      document.removeEventListener("pointerdown", closeFromOutside);
+      document.removeEventListener("keydown", closeFromKeyboard);
+      if (modal) queueMicrotask(syncMainInert);
+    };
+  }, [close, modal]);
+  return { menu, close };
+}
+
 function ProviderLinks({ providers, currentId, onPick, basePath }: { providers: readonly HostConsoleChoice[]; currentId: string; onPick: () => void; basePath?: string }) {
   const pathname = usePathname();
   // A page under a section (one experience) may not exist for the other provider: switch to the section itself.
@@ -93,7 +147,7 @@ function ProviderLinks({ providers, currentId, onPick, basePath }: { providers: 
     <ul className="flex flex-col gap-0.5">
       {providers.map((provider) => {
         const selected = provider.id === currentId;
-        const role = provider.kind === "OPERATOR" ? "商品運営者" : providerRoleLabel(provider.memberRole);
+        const role = choiceRoleLabel(provider);
         return (
           <li key={provider.id}>
             <Link
@@ -123,10 +177,14 @@ function SidebarProviderSwitcher({ providers, providerIdOverride, basePath }: { 
   const menu = useRef<HTMLDetailsElement>(null);
   const { provider: current } = selectProvider(providers, providerId);
   if (!current) return null;
+  const role = choiceRoleLabel(current);
   const face = (
     <>
       <InitialAvatar name={current.displayName} />
-      <span className="min-w-0 flex-1 truncate text-[0.8125rem] leading-tight font-extrabold">{current.displayName}</span>
+      <span className="min-w-0 flex-1 leading-tight">
+        <span className="block truncate text-[0.8125rem] font-extrabold">{current.displayName}</span>
+        {role ? <span className="block truncate text-xs text-muted">あなたは{role}</span> : null}
+      </span>
     </>
   );
   if (providers.length === 1) return <div className="mb-3.5 flex items-center gap-2.5 rounded-xl border border-line px-2.5 py-2">{face}</div>;
@@ -145,8 +203,8 @@ function SidebarProviderSwitcher({ providers, providerIdOverride, basePath }: { 
 }
 
 /**
- * PC (md and up): the 232px sidebar with the brand, the provider and the daily
- * sections. Settings and the ways out live in the account menu at its foot.
+ * PC (md and up): the 232px sidebar with the brand, the provider (and the role in it), the sections the role may open
+ * (メンバー and 設定 included) and, at its foot, the traveler site and the person's own account menu.
  */
 export function HostSidebar({ account, providers, nihoAppUrl, writePath, writerNavigation, providerIdOverride }: HostChromeProps & { readonly writerNavigation?: HostWriterNavigation; readonly providerIdOverride?: string }) {
   const pathname = usePathname();
@@ -202,7 +260,7 @@ export function HostSidebar({ account, providers, nihoAppUrl, writePath, writerN
           <SidebarProviderSwitcher providers={providers} providerIdOverride={providerIdOverride} basePath={writerNavigation ? HOST_HOME_PATH : undefined} />
           <nav aria-label={NAV_LABEL}>
             <ul className="flex flex-col gap-0.5">
-              {hostDailyNavForChoice(current).map((item) => {
+              {hostNavForChoice(current).map((item) => {
                 const active = isHostNavActive(pathname, item.href);
                 return (
                   <li key={item.href}>
@@ -223,86 +281,48 @@ export function HostSidebar({ account, providers, nihoAppUrl, writePath, writerN
         </>
       ) : null}
       {providers.length === 0 && writerItem ? <nav aria-label={NAV_LABEL}><ul>{writerItem}</ul></nav> : null}
-      <div className="mt-auto pt-3">
-        <AccountMenu account={account} providers={providers} nihoAppUrl={nihoAppUrl} writePath={writePath} variant="sidebar" providerIdOverride={providerIdOverride} providerSwitchBasePath={writerNavigation ? HOST_HOME_PATH : undefined} />
+      {/* The account menu opens above this whole foot (anchored here), so it never half-covers 体験サイトを見る. */}
+      <div className="relative mt-auto pt-3">
+        {current?.kind !== "OPERATOR" ? <a href={TRAVELER_SITE_PATH} className="mb-2 flex h-10 items-center gap-2.5 rounded-[10px] px-2.5 font-bold text-ink-soft hover:bg-sand/60 hover:text-ink">
+          <HostIcon name="external" className="size-[18px]" />
+          <span>体験サイトを見る</span>
+        </a> : null}
+        <AccountMenu account={account} providers={providers} nihoAppUrl={nihoAppUrl} writePath={writePath} variant="sidebar" providerIdOverride={providerIdOverride} />
       </div>
     </header>
   );
 }
 
-/** Both widths use one account menu; the phone variant also owns the modal-like inert behavior. */
-function AccountMenu({ account, providers, nihoAppUrl, writePath, variant = "mobile", providerIdOverride, providerSwitchBasePath }: HostChromeProps & { variant?: "mobile" | "sidebar"; providerIdOverride?: string; providerSwitchBasePath?: string }) {
-  const pathname = usePathname();
+/** The person's own menu (not the provider's); both widths use it, the phone variant also owns the modal-like inert behavior. */
+function AccountMenu({ account, providers, nihoAppUrl, writePath, variant = "mobile", providerIdOverride }: HostChromeProps & { variant?: "mobile" | "sidebar"; providerIdOverride?: string }) {
   const routeProviderId = useProviderId();
   const providerId = providerIdOverride ?? routeProviderId;
-  const menu = useRef<HTMLDetailsElement>(null);
+  const sidebar = variant === "sidebar";
+  const { menu, close } = useDetailsMenu(!sidebar);
   const { provider: current } = selectProvider(providers, providerId);
   const writerHref = writePath && current?.kind !== "OPERATOR" && hasOwnerMembership(providers) ? writePath : undefined;
   const name = account.displayName || "NIHO アカウント";
-  const switchable = providers.length > 1 ? current : null;
-  const settingsAllowed = current?.kind === "OPERATOR"
-    ? (current.screens ?? ["/host/calendar"]).includes(HOST_SETTINGS_PATH)
-    : Boolean(current);
-  const close = useCallback(() => menu.current?.removeAttribute("open"), []);
-  useEffect(() => {
-    const details = menu.current;
-    const syncMainInert = () => {
-      const main = document.getElementById("main");
-      if (main && variant === "mobile") main.inert = Boolean(details?.open);
-    };
-    const closeFromOutside = (event: PointerEvent) => {
-      if (details?.open && event.target instanceof Node && !details.contains(event.target)) close();
-    };
-    const closeFromKeyboard = (event: KeyboardEvent) => {
-      if (details?.open && event.key === "Escape") {
-        event.preventDefault();
-        close();
-        details.querySelector("summary")?.focus();
-      }
-    };
-    details?.addEventListener("toggle", syncMainInert);
-    document.addEventListener("pointerdown", closeFromOutside);
-    document.addEventListener("keydown", closeFromKeyboard);
-    return () => {
-      details?.removeEventListener("toggle", syncMainInert);
-      document.removeEventListener("pointerdown", closeFromOutside);
-      document.removeEventListener("keydown", closeFromKeyboard);
-      const main = document.getElementById("main");
-      if (main && variant === "mobile") main.inert = false;
-    };
-  }, [close, variant]);
-  const sidebar = variant === "sidebar";
   return (
-    <details ref={menu} className="relative group">
+    <details ref={menu} data-host-modal-menu={sidebar ? undefined : ""} className={sidebar ? "group" : "relative group"}>
       <summary className={sidebar ? "flex min-h-12 cursor-pointer list-none items-center gap-2.5 border-t border-line px-2.5 pt-3 [&::-webkit-details-marker]:hidden" : "grid size-11 cursor-pointer list-none place-items-center rounded-full [&::-webkit-details-marker]:hidden"}>
         <AccountAvatar account={account} className="size-[30px] text-[0.8125rem]" />
-        {sidebar ? <><span className="min-w-0 flex-1 text-left"><span className="block truncate text-[0.78125rem] leading-[1.3] font-extrabold">{name}</span><span className="block text-xs leading-[1.3] text-muted">アカウント・設定</span></span><HostIcon name="chevronDown" className="size-4 text-muted group-open:rotate-180" /></> : null}
-        <span className="sr-only">{sidebar ? `${name}のアカウントメニュー` : switchable ? `${name}のアカウントと提供者の切り替え（表示中：${switchable.displayName}）` : `${name}のアカウント`}</span>
+        {sidebar ? <><span className="min-w-0 flex-1 text-left"><span className="block truncate text-[0.78125rem] leading-[1.3] font-extrabold">{name}</span><span className="block text-xs leading-[1.3] text-muted">あなたのアカウント</span></span><HostIcon name="chevronDown" className="size-4 text-muted group-open:rotate-180" /></> : null}
+        <span className="sr-only">{sidebar ? `${name}のアカウントメニュー` : `${name}のアカウント`}</span>
       </summary>
       <div className={sidebar ? "absolute bottom-[calc(100%+0.5rem)] left-0 z-30 w-[204px] rounded-2xl border border-line bg-canvas p-1.5 shadow-[var(--shadow-card)]" : "absolute top-full right-0 z-30 mt-1 w-64 max-w-[calc(100vw-1rem)] rounded-2xl border border-line bg-canvas p-1.5 shadow-[var(--shadow-card)]"}>
         <div className="px-2.5 pt-1.5 pb-2.5">
           <p className="font-extrabold break-words">{name}</p>
-          <p className="text-xs text-muted">NIHO アカウント</p>
+          <p className="text-xs text-muted">あなたのアカウント</p>
         </div>
-        {switchable ? (
-          <div className="border-t border-line pt-2 pb-1">
-            <p className="px-2.5 pb-1 text-xs font-bold text-muted">提供者</p>
-            <ProviderLinks providers={providers} currentId={switchable.id} onPick={close} basePath={providerSwitchBasePath} />
-          </div>
-        ) : null}
         <div className="flex flex-col gap-0.5 border-t border-line py-1">
-          {settingsAllowed ? <Link href={withProvider(HOST_SETTINGS_PATH, providerId)} aria-current={isHostNavActive(pathname, HOST_SETTINGS_PATH) ? "page" : undefined} onClick={close} className={MENU_LINK}>
+          <Link href={withProvider(HOST_ACCOUNT_PATH, providerId)} onClick={close} className={MENU_LINK}>
             <HostIcon name="settings" className="size-3.5" />
-            <span>設定</span>
-          </Link> : null}
+            <span>アカウント設定</span>
+          </Link>
           {!current ? <Link href={hostSupportPath()} onClick={close} className={MENU_LINK}>
             <HostIcon name="settings" className="size-3.5" />
             <span>NIHOサポート</span>
           </Link> : null}
-          {current?.kind !== "OPERATOR" ? <a href={TRAVELER_SITE_PATH} onClick={close} className={MENU_LINK}>
-            <HostIcon name="external" className="size-3.5" />
-            <span>体験サイトを見る</span>
-          </a> : null}
           {writerHref ? <a href={writerHref} onClick={close} className={MENU_LINK}>
             <HostIcon name="external" className="size-3.5" />
             <span>{WRITER_LINK_LABEL}</span>
@@ -322,21 +342,65 @@ function AccountMenu({ account, providers, nihoAppUrl, writePath, variant = "mob
   );
 }
 
-/** Phones, on the five top pages: brand and account. Pages under a section or ホーム (and one booking, `?booking=`) bring their own "‹ 体験" header. */
+/** Phones: the provider chip. Opens the provider's own places (メンバー・設定), the traveler site and, with several providers, the switcher. */
+function MobileProviderMenu({ providers, providerId, basePath }: { providers: readonly HostConsoleChoice[]; providerId: string | null; basePath?: string }) {
+  const { menu, close } = useDetailsMenu(true);
+  const pathname = usePathname();
+  const { provider: current } = selectProvider(providers, providerId);
+  if (!current) return null;
+  const extra = hostNavForChoice(current).filter((item) => !HOST_DAILY_NAV.some((daily) => daily.href === item.href));
+  return (
+    <details ref={menu} data-host-modal-menu="" className="group relative min-w-0">
+      <summary className="flex min-h-11 max-w-full cursor-pointer list-none items-center gap-2 rounded-xl pr-1.5 hover:bg-sand [&::-webkit-details-marker]:hidden">
+        <InitialAvatar name={current.displayName} />
+        <span className="min-w-0 flex-1 truncate text-[0.9375rem] leading-tight font-extrabold">{current.displayName}</span>
+        <HostIcon name="chevronDown" className="size-4 text-muted group-open:rotate-180" />
+        <span className="sr-only">{`${current.displayName}のメニュー`}</span>
+      </summary>
+      <div className="absolute top-full left-0 z-30 mt-1 w-64 max-w-[calc(100vw-1rem)] rounded-2xl border border-line bg-canvas p-1.5 shadow-[var(--shadow-card)]">
+        <div className="flex flex-col gap-0.5">
+          {extra.map((item) => (
+            <Link key={item.href} href={withProvider(item.href, providerId)} aria-current={isHostNavActive(pathname, item.href) ? "page" : undefined} onClick={close} className={MENU_LINK}>
+              <HostIcon name={NAV_ICONS[item.href]} className="size-3.5" />
+              <span>{item.label}</span>
+            </Link>
+          ))}
+          {current.kind !== "OPERATOR" ? <a href={TRAVELER_SITE_PATH} onClick={close} className={MENU_LINK}>
+            <HostIcon name="external" className="size-3.5" />
+            <span>体験サイトを見る</span>
+          </a> : null}
+        </div>
+        {providers.length > 1 ? (
+          <div className="mt-1 border-t border-line pt-2 pb-1">
+            <p className="px-2.5 pb-1 text-xs font-bold text-muted">提供者を切り替える</p>
+            <ProviderLinks providers={providers} currentId={current.id} onPick={close} basePath={basePath} />
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+/** Phones, on the top pages: the provider (brand when there is none) and the person's account. Pages under a section or ホーム (and one booking, `?booking=`) bring their own "‹ 体験" header. */
 export function HostMobileHeader(props: HostChromeProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const providerId = useProviderId();
   const providers = props.providers;
   if (hostBackLink(pathname, searchParams)) return null;
+  const hasProvider = selectProvider(providers, providerId).provider !== null;
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-canvas md:hidden">
       <div className="flex h-[52px] items-center gap-2.5 pr-2 pl-4">
-        <p className="min-w-0 flex-1 truncate">
-          <Link href={withProvider(selectProvider(providers, providerId).provider?.kind === "OPERATOR" ? "/host/calendar" : HOST_HOME_PATH, providerId)} className="font-display text-[1.0625rem] leading-none font-medium tracking-[-0.01em]">
-            NIHO Experience
-          </Link>
-        </p>
+        {hasProvider ? (
+          <div className="flex min-w-0 flex-1"><MobileProviderMenu providers={providers} providerId={providerId} /></div>
+        ) : (
+          <p className="min-w-0 flex-1 truncate">
+            <Link href={withProvider(HOST_HOME_PATH, providerId)} className="font-display text-[1.0625rem] leading-none font-medium tracking-[-0.01em]">
+              NIHO Experience
+            </Link>
+          </p>
+        )}
         <AccountMenu {...props} />
       </div>
     </header>

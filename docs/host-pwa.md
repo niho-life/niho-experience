@@ -65,7 +65,7 @@
 - **endpoint の許可リスト（SSRF 防止）**：https・既定のポート・認証情報なし・ブラウザが直列化した形で、host が `fcm.googleapis.com`・`updates.push.services.mozilla.com`・`web.push.apple.com`・`*.push.apple.com`・`*.notify.windows.com` のどれか、2048 文字まで。ほかは送る前に拒否する。redirect はたどらない。endpoint はログ・URL・エラー文に出さない。
 - **購読**：体験 DB の `host_push_subscriptions`（`packages/experience-store/migrations/0004_host_push_subscriptions.sql`）。NIHO user・接続・endpoint（一意。最後に購読した人の端末になる）・鍵・端末種別（User-Agent からの粗い区分）・`last_seen_at`・失敗回数。BFF は `/host/api/push-subscriptions`（登録 POST・解除 DELETE）・`/status`・`/test`（本人の端末だけ・30 秒に 1 回）。同一 origin とセッション cookie で確かめ、NIHO は呼ばない。DB 未設定は 503。mock は検証だけして保存も送信もしない。
 - **消す・送らない条件**：ログアウトと、NIHO が接続を終えた refresh（`rejected`）でその接続の購読を消す（成功した refresh は `last_seen_at` を進める。どちらも認証の流れを止めない）。30 日見ていない端末には送らない。push service が 404/410 を返したら消す。設定を開くたびに、端末の購読がまだ本人のものか確かめ、残っていれば今のセッションの接続へ付け替える（後からログインし直しても、古い接続の失効で消えない）。消えていれば「オフ」と出す。
-- **許可**：設定 › この端末 › 通知のボタンからだけ求める。iPhone・iPad はホーム画面に追加したアプリの中だけ。アイコンのバッジ（承認待ち＋未返信）は Badging API がある端末だけ：プッシュの `badge` と、アプリでホームを開いたとき（表示中の提供者の件数）。
+- **許可**：あなたのアカウント › この端末 › 通知のボタンからだけ求める。iPhone・iPad はホーム画面に追加したアプリの中だけ。アイコンのバッジ（承認待ち＋未返信）は Badging API がある端末だけ：プッシュの `badge` と、アプリでホームを開いたとき（表示中の提供者の件数）。
 - **環境変数**：`HOST_PUSH_ENABLED`（既定 `false`。`HOST_PWA_ENABLED=true` のときだけ効く）、`HOST_PUSH_VAPID_PUBLIC_KEY`、`HOST_PUSH_VAPID_PRIVATE_KEY`（Secret Manager だけ。リポ・`.env`・ログに書かない）、`HOST_PUSH_VAPID_SUBJECT`（`mailto:` か `https:`）。http mode で有効にして鍵・subject が欠ける・形が違う・対にならないと起動しない。mock は開発用の公開鍵（秘密鍵は捨ててある）で、送らない。stg・本番の workflow は、上の機能のフラグで渡す。2026-11-07 時点で staging は PWA・push とも ON（push の土台と Variable は下の「ステージングで有効にする」）、本番は未設定（OFF）。
 - **鍵の作り方**（root で 1 回。秘密鍵は Secret Manager へ直接入れ、端末に残さない）：
 
@@ -97,7 +97,7 @@ PWA は staging では `STG_HOST_PWA_ENABLED` が未設定なら ON（配備す�
 3. **Variable**（**`host-staging` と `host-staging-owner` の両方**の Environment。owner が実行する配備は `host-staging-owner` の Variable だけを読むため、片方だけでは候補の env に入らない。2026-11-07 に実際に入らなかった）：`STG_HOST_PUSH_ENABLED=true`、`STG_HOST_PUSH_VAPID_PUBLIC_KEY=<2 の公開鍵>`、`STG_HOST_PUSH_VAPID_SUBJECT=<mailto: か https:>`（連絡先。個人のメールを外部の push service へ渡さないよう、サイトの URL か運営の共有アドレスにする）、`STG_HOST_PUSH_VAPID_PRIVATE_KEY_REF=experience-stg-host-push-vapid-private-key:<2 の version 番号>`。
 4. **配備**：`Deploy host staging`（candidate → 確認 → promote）。体験 DB に `0004_host_push_subscriptions.sql` と runtime の grant が要る（`scripts/gcp/bootstrap-host-staging-db.mjs` が入れる）。
 5. **Scheduler を再開**：昇格のあと `gcloud scheduler jobs resume experience-host-push-drain-stg --project niho-app-stg --location asia-northeast1`。次の実行が 200 で終わることを Scheduler の実行記録で確かめる。
-6. **実機**：このファイル末尾の P0 の手順で、設定 › この端末 › 通知から購読し、「テスト通知」が届くことを確かめる。
+6. **実機**：このファイル末尾の P0 の手順で、あなたのアカウント › この端末 › 通知から購読し、「テスト通知」が届くことを確かめる。
 
 **実施記録（2026-11-07、staging）**：1〜5 を実施した。revision `niho-experience-host-stg-00035-qur`（SHA `7720fcb`、runtime image digest `sha256:e0f226447d86b39856a8b0180527b2886ece73d379341fdeb58d7ecb9d05959b`）を 100% にし、候補の env に `HOST_PUSH_ENABLED`・VAPID の公開鍵と subject・秘密鍵の Secret 参照（version 1）・push job の audience と service account が入っていること、`/host/manifest.webmanifest` と `/host/sw.js` が 200 であること、Scheduler `experience-host-push-drain-stg` の手動実行が 200 であることを確かめた。**6（実機）は未実施**。Scheduler は毎分動く。
 
@@ -164,6 +164,6 @@ iPhone・iPad・Android・Mac Safari・PC Chrome のそれぞれで確かめる�
 4. ブラウザが生きている：アプリで 1 時間以上使いNIHO Web access tokenが更新されたあとも、ブラウザ側のセッションがログアウトにならない。
 5. ログアウト：アプリでログアウトすると `/host/launch` に戻る。
 6. オフライン：機内モードでページを移ると、オフラインの案内が出て、通信が戻れば再読み込みで戻る。
-7. 通知（P2・stg で `HOST_PUSH_ENABLED=true` にしてから）：設定 › この端末 › 通知で許可→「テスト通知を送る」がロック画面に届き、タップでアプリの設定が開く。iPhone ではブラウザのタブに「ホーム画面に追加したアプリから」と出る。別の端末でログアウトすると、その端末の設定を開き直したとき「オフ」になる。
+7. 通知（P2・stg で `HOST_PUSH_ENABLED=true` にしてから）：あなたのアカウント › この端末 › 通知で許可→「テスト通知を送る」がロック画面に届き、タップでアプリの設定が開く。iPhone ではブラウザのタブに「ホーム画面に追加したアプリから」と出る。別の端末でログアウトすると、その端末の設定を開き直したとき「オフ」になる。
 8. Declarative Web Push（P3・iPhone / iPad の iOS 18.4+ と macOS の Safari）：「テスト通知を送る」と、実際の通知（新しい予約など）で、(1) 通知が 1 つだけ出る（2 つ並ばない）、(2) アプリを完全に終了してからでも出る、(3) タップでその予約・スレッドが開く、(4) アイコンのバッジが付く、を確かめる。Chrome（Android・PC）では従来どおり 1 つだけ出る。
 9. 共有された写真（P3・Android の Chrome でインストールしたアプリ）：ギャラリーで写真を選んで共有→「体験ホスト」を選ぶ。(1) アプリが開き 体験 に「共有された写真「…」を受け取りました」が出る、(2) ホームなどへ移っても残る、(3) 体験の編集画面で「この写真を使う」を押すと写真の入力が選ばれた状態になり、説明と権利の確認の入力は通常どおり、(4) 「この写真を使わない」で消える、(5) PDF など画像以外を共有すると「受け取れませんでした」が出る、(6) アプリを入れた直後（worker がまだ無い）に共有しても「受け取れませんでした」になり、もう一度共有すれば受け取れる。

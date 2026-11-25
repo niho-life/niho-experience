@@ -392,6 +392,15 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUEST_REVIEWS_ENABLED: "true" }).guestReviewsEnabled).toBe(true);
   });
 
+  it("opens the embed only with its own flag, in mock and http mode alike (#638)", () => {
+    expect(resolveConfig({}).embedEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_EMBED_ENABLED: "1" }).embedEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_EMBED_ENABLED: "1" }).embedEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_EMBED_ENABLED: "true" }).embedEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "mock", EXPERIENCE_EMBED_ENABLED: "true" }).embedEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_EMBED_ENABLED: "true" }).embedEnabled).toBe(true);
+  });
+
   it("opens Experience guest questions for the OWNER when the host console is available (#106)", () => {
     // No host console: nobody would see the question.
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);
@@ -527,6 +536,15 @@ describe("admin support console settings", () => {
     expect(resolveConfig(on).hostTeamEnabled).toBe(false);
     expect(resolveConfig({ ...on, EXPERIENCE_HOST_TEAM_ENABLED: "true" }).hostTeamEnabled).toBe(true);
     expect(() => resolveConfig({ ...mail, ...host, EXPERIENCE_HOST_TEAM_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_TEAM_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
+    // メンバーの招待 (#636): off by default, and it needs the team, the NIHO login and the host mail.
+    const invitations = { ...on, EXPERIENCE_HOST_TEAM_ENABLED: "true", EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", EXPERIENCE_HOST_MAIL_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.niho.example.test" };
+    expect(resolveConfig(invitations).hostTeamInvitationsEnabled).toBe(false);
+    expect(resolveConfig({ ...invitations, EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "true" }).hostTeamInvitationsEnabled).toBe(true);
+    expect(resolveConfig({ ...invitations, EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "1" }).hostTeamInvitationsEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "true" }).hostTeamInvitationsEnabled).toBe(false);
+    for (const missing of ["EXPERIENCE_HOST_TEAM_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"]) {
+      expect(() => resolveConfig({ ...invitations, [missing]: "false", EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "true" })).toThrow(`EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED=true needs ${missing}=true`);
+    }
     expect(() => resolveConfig({ ...on, HOST_CONSOLE_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
     expect(() => resolveConfig({ ...host, EXPERIENCE_API_MODE: "http", EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }))
       .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_DATABASE_URL");
@@ -580,7 +598,12 @@ describe("admin support console settings", () => {
     expect(resolveConfig({}).hostNihoLoginEnabled).toBe(false);
     expect(resolveConfig(accounts).hostNihoLoginEnabled).toBe(false);
     expect(resolveConfig({ ...on, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "1" }).hostNihoLoginEnabled).toBe(false);
-    expect(resolveConfig(on)).toMatchObject({ hostAccountsEnabled: true, hostNihoLoginEnabled: true });
+    expect(resolveConfig(on)).toMatchObject({ hostAccountsEnabled: true, hostNihoLoginEnabled: true, nihoLoginPromptEnabled: false });
+    // 「別の方法でやり直す」's account choice at NIHO (#632): only beside the NIHO account login, "true" only.
+    expect(resolveConfig({ ...on, EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "true" }).nihoLoginPromptEnabled).toBe(true);
+    expect(resolveConfig({ ...on, EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "1" }).nihoLoginPromptEnabled).toBe(false);
+    expect(() => resolveConfig({ ...accounts, EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED=true needs EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true");
     // The real NIHO: the bindings and sessions live in the host accounts' DB, and the identity call carries the service ID token.
     expect(() => resolveConfig({ ...mail, ...host, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" }))
       .toThrow("EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
@@ -641,6 +664,7 @@ describe("admin support console settings", () => {
     const on = { ...withoutAudience, NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" };
     expect(resolveConfig(on).nihoAccountStatusCheckEnabled).toBe(true);
     expect(resolveConfig(on).nihoIdentityLoginEnabled).toBe(false);
+    expect(resolveConfig(on).nihoLoginPromptEnabled).toBe(false);
     const identityOnly = {
       ...on,
       EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED: "true",

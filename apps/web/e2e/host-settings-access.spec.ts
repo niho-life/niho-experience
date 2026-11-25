@@ -82,7 +82,7 @@ test("a delayed mutation from a former provider cannot repopulate the current te
   try {
     await page.evaluate(() => window.mountHostTeam("provider-a"));
     await expect(page.getByText("owner-a@example.test", { exact: true })).toBeVisible();
-    await page.getByLabel("登録済み Experience ホストのメールアドレス").fill("member@example.test");
+    await page.getByLabel("相手のメールアドレス").fill("member@example.test");
     await page.getByRole("button", { name: "アカウントを確認", exact: true }).click();
     await page.getByRole("button", { name: /範囲を確認して/ }).click();
     await expect.poll(() => started).toBe(true);
@@ -120,7 +120,7 @@ test("unknown and unavailable mutation results keep one command until a verified
   page.on("dialog", (dialog) => dialog.accept());
   await page.evaluate(() => window.mountHostTeam("provider-a"));
   await expect(page.getByText("owner@example.test", { exact: true })).toBeVisible();
-  await page.getByLabel("登録済み Experience ホストのメールアドレス").fill("member@example.test");
+  await page.getByLabel("相手のメールアドレス").fill("member@example.test");
   await page.getByRole("button", { name: "アカウントを確認", exact: true }).click();
   await page.getByRole("button", { name: /範囲を確認して/ }).click();
   const retry = page.getByRole("button", { name: "同じ操作を再送", exact: true });
@@ -168,7 +168,7 @@ test("a list begun before adding a member cannot roll back the successful team r
   try {
     await page.evaluate(() => window.mountHostTeam("provider-a"));
     await expect.poll(() => listed).toBe(true);
-    await page.getByLabel("登録済み Experience ホストのメールアドレス").fill("member@example.test");
+    await page.getByLabel("相手のメールアドレス").fill("member@example.test");
     await page.getByRole("button", { name: "アカウントを確認", exact: true }).click();
     await page.getByRole("button", { name: /範囲を確認して/ }).click();
     await expect(page.getByRole("status")).toContainText("追加しました");

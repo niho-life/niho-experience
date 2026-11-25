@@ -89,6 +89,8 @@ type Props = {
   createHref?: string;
   /** 予約リンクをコピー (#531): the public site's origin the copied link points to; without it the button is not shown. */
   publicSiteOrigin?: string;
+  /** 自分のサイトに貼る (#638): EXPERIENCE_EMBED_ENABLED, read on the server. Off by default and never in admin-draft. */
+  embedEnabled?: boolean;
 };
 
 const blankContent = {
@@ -270,6 +272,7 @@ export function HostPublicationWorkspace({
   experiencesBase = "/host/experiences",
   createHref = "/host/experiences/new",
   publicSiteOrigin,
+  embedEnabled = false,
 }: Props) {
   const router = useRouter();
   const adminDraft = mode === "admin-draft";
@@ -1136,7 +1139,7 @@ export function HostPublicationWorkspace({
   if (!productId) return <HostPageBody><PageHead title={adminDraft ? "代理登録の商品" : "体験"}>{bookingGuideHref ? <Link className={consoleButtonClass("secondary")} href={bookingGuideHref}>予約後の集合案内</Link> : null}</PageHead><section className={`${HOST_SURFACE} p-4 md:p-6`}>
     <div className="mb-4 flex items-center justify-between gap-3"><p className="text-ink-soft">{adminDraft ? "事務局が作成した、一度も公開していない下書き" : "あなたが販売する体験"}</p>{adminDraft ? <Link className={consoleButtonClass("primary")} href={createHref}>商品を代理登録</Link> : <button type="button" className={consoleButtonClass("primary")} onClick={() => setCreateOpen(true)}>体験を作成</button>}</div>
     {error && !(createOpen && !adminDraft) ? <p role="alert" className={`mb-3 rounded-xl p-3 ${adminDraft ? "bg-rose-50 text-rose-900" : "bg-danger-pale text-danger"}`}>{error}</p> : null}
-    {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={`${experiencesBase}/${encodeURIComponent(item.id)}`}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p>{!adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) ? <HostBookingLinkCopy slug={item.draft.slug} origin={publicSiteOrigin} japaneseOnly={item.draft.content.japaneseOnly === true} /> : null}</div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}
+    {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={`${experiencesBase}/${encodeURIComponent(item.id)}`}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p>{!adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) ? <HostBookingLinkCopy slug={item.draft.slug} origin={publicSiteOrigin} japaneseOnly={item.draft.content.japaneseOnly === true} /> : null}{embedEnabled && !adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) && item.draft.content.japaneseOnly !== true ? <p className="mt-1.5"><Link className="text-sm font-bold text-moss underline underline-offset-4" href={`${experiencesBase}/${encodeURIComponent(item.id)}/embed`}>自分のサイトに貼る</Link></p> : null}</div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}
   </section>
   {!adminDraft ? <EditorDialog open={createOpen} onClose={closeCreateDialog} title="体験を作成">
     <form onSubmit={(event) => void createHostProduct(event)} className="space-y-1">
@@ -1589,6 +1592,7 @@ export function HostPublicationWorkspace({
           {product.status === "PUBLISHED" ? <button type="button" aria-label="そのほかの操作" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((current) => !current)} className={consoleButtonClass("secondary", "md", "w-[38px] px-0 text-lg tracking-[1px]")}>⋯</button> : null}
           {menuOpen ? <div role="menu" className="absolute top-12 right-0 z-20 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-canvas p-1.5 shadow-[0_10px_30px_rgb(28_28_26/0.12)]">
             {publicSiteOrigin && providerBookingLinkAvailable(product) ? <div className="px-3 py-2"><HostBookingLinkCopy slug={product.draft.slug} origin={publicSiteOrigin} japaneseOnly={japaneseOnly} /></div> : null}
+            {embedEnabled && publicHref && !japaneseOnly ? <Link role="menuitem" href={`${experiencesBase}/${encodeURIComponent(product.id)}/embed`} onClick={() => setMenuOpen(false)} className="block w-full rounded-[9px] px-3 py-2 text-left text-[0.8125rem] font-bold text-ink hover:bg-sand">自分のサイトに貼る</Link> : null}
             <button type="button" role="menuitem" disabled={busy || dirty || !!conflictProduct} onClick={() => { setMenuOpen(false); void changeState("stop"); }} className="block w-full rounded-[9px] px-3 py-2 text-left text-[0.8125rem] font-bold text-danger hover:bg-sand disabled:opacity-45">新しい予約を停止</button>
           </div> : null}
           {showPrimary ? <button type="button" disabled={busy || !!conflictProduct || product.status === "SUSPENDED"} className={`${consoleButtonClass("primary")} max-md:flex-1`} onClick={() => void requestPublish()}>{product.status === "STOPPED" ? "予約の受付を再開" : "同意して公開"}</button> : null}

@@ -6,11 +6,22 @@ import { japaneseTextOutsideNihoSans } from "./support/japanese-type";
 // (HOST_CONSOLE_ENABLED=true, mock mode; see playwright.config.ts): the mock sign-in
 // makes a session for the synthetic NIHO, and nothing here talks to NIHO.
 
-const CONSOLE_PAGES = ["/host/home", "/host/experiences", "/host/experiences/community-dinner", "/host/calendar", "/host/bookings", "/host/messages", "/host/reviews", "/host/sales", "/host/settings", "/host/register"];
+const CONSOLE_PAGES = ["/host/home", "/host/experiences", "/host/experiences/community-dinner", "/host/calendar", "/host/bookings", "/host/messages", "/host/reviews", "/host/sales", "/host/members", "/host/settings", "/host/account", "/host/register"];
 const PREVIEW_NOTE = "プレビュー（合成データ）· 体験・予約・売上・口座は架空で、保存されません";
 
 /** The sidebar (PC) and the bottom tabs (phones) share one name; only the one for the width is exposed. */
 const menu = (page: Page) => page.getByRole("navigation", { name: "ホストのメニュー" });
+/** The provider chip: the sidebar's on PC, the header's on phones. */
+const PROVIDER_MENU = /提供者を切り替える|のメニュー/;
+/** 設定 is in the sidebar on PC and in the provider chip's menu on phones. */
+async function openSettings(page: Page) {
+  const link = menu(page).getByRole("link", { name: "設定", exact: true });
+  if (await link.count()) await link.click();
+  else {
+    await page.locator("summary:visible", { hasText: PROVIDER_MENU }).click();
+    await page.getByRole("link", { name: "設定", exact: true }).click();
+  }
+}
 const isDesktop = (projectName: string) => projectName === "host-desktop";
 const overflowX = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
@@ -76,9 +87,11 @@ test("console links carry ?providerId=, and each provider has its own data", asy
   }
   await expect(menu(page).getByRole("link", { name: "予約" })).toHaveCount(0);
   await expect(menu(page).getByRole("link", { name: "売上" })).toHaveCount(0);
-  await page.locator("summary:visible", { hasText: "のアカウント" }).click();
-  await page.getByRole("link", { name: "設定", exact: true }).click();
+  // An editor has no メンバー; 設定 is theirs.
+  await expect(menu(page).getByRole("link", { name: "メンバー" })).toHaveCount(0);
+  await openSettings(page);
   await page.waitForURL("**/host/settings?providerId=sample-provider-studio");
+  await expect(page.getByRole("heading", { level: 1, name: "サンプル工房 の設定" })).toBeVisible();
   await page.locator("main").getByRole("link", { name: /提供者情報/ }).click();
   await page.waitForURL("**/host/settings?providerId=sample-provider-studio&section=provider");
   const provider = page.getByRole("region", { name: "提供者情報" });
@@ -94,7 +107,7 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
   const nav = menu(page);
   await expect(nav).toHaveCount(1);
   const dailyLinks = ["ホーム", "体験", "カレンダー", "予約", "売上"];
-  await expect(nav.getByRole("link")).toHaveText(isDesktop(testInfo.project.name) ? [...dailyLinks, "記事"] : dailyLinks);
+  await expect(nav.getByRole("link")).toHaveText(isDesktop(testInfo.project.name) ? [...dailyLinks, "メンバー", "設定", "記事"] : dailyLinks);
   await expect(nav.getByRole("link", { name: "ホーム" })).toHaveAttribute("aria-current", "page");
   const viewport = page.viewportSize()!;
   const navBox = (await nav.boundingBox())!;
@@ -102,14 +115,20 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
   const bannerBox = (await banner.boundingBox())!;
 
   if (isDesktop(testInfo.project.name)) {
-    // A 232px column the height of the window, with the ways out and the account at its foot.
+    // A 232px column the height of the window: the provider and its sections, then the traveler site and the account at its foot.
     expect(bannerBox).toEqual({ x: 0, y: 0, width: 232, height: viewport.height });
     expect(navBox.x + navBox.width).toBeLessThanOrEqual(232);
     await expect(banner.getByRole("link", { name: "NIHO Experience" })).toHaveAttribute("href", "/host/home");
-    await banner.locator("summary:visible", { hasText: "のアカウント" }).click();
-    await expect(banner.getByRole("link", { name: "設定", exact: true })).toHaveAttribute("href", "/host/settings");
-    for (const consolidated of ["販売者表示", "ホスト紹介", "NIHOサポート"]) await expect(banner.getByRole("link", { name: consolidated, exact: true })).toHaveCount(0);
+    await expect(banner).toContainText("あなたはオーナー");
+    await expect(nav.getByRole("link", { name: "メンバー" })).toHaveAttribute("href", "/host/members");
+    await expect(nav.getByRole("link", { name: "設定", exact: true })).toHaveAttribute("href", "/host/settings");
     await expect(banner.getByRole("link", { name: "体験サイトを見る" })).toHaveAttribute("href", "/experiences");
+    await banner.locator("summary:visible", { hasText: "のアカウント" }).click();
+    await expect(banner).toContainText("あなたのアカウント");
+    await expect(banner.getByRole("link", { name: "アカウント設定", exact: true })).toHaveAttribute("href", "/host/account");
+    // Neither the provider's 設定 nor the provider switch is in the person's menu.
+    await expect(banner.getByRole("link", { name: "設定", exact: true })).toHaveCount(1);
+    for (const consolidated of ["販売者表示", "ホスト紹介", "NIHOサポート"]) await expect(banner.getByRole("link", { name: consolidated, exact: true })).toHaveCount(0);
     await expect(banner.getByRole("link", { name: "NIHO アプリ" })).toHaveAttribute("href", "https://niho.life");
     await expect(banner.getByRole("link", { name: "記事を書く" })).toHaveAttribute("href", "/write");
     await expect(banner).toContainText("サンプル ホスト");
@@ -119,7 +138,7 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
     expect(title.x).toBeGreaterThanOrEqual(232);
     expect((await page.locator("main > div").first().boundingBox())!.width).toBeLessThanOrEqual(1040);
   } else {
-    // A 52px row (and its hairline) with the brand and the account, and the tabs on the bottom edge (12px labels).
+    // A 52px row (and its hairline) with the provider and the account, and the tabs on the bottom edge (12px labels).
     expect(bannerBox).toMatchObject({ x: 0, y: 0, width: viewport.width, height: 53 });
     expect(Math.round(navBox.y + navBox.height)).toBe(viewport.height);
     for (const label of ["ホーム", "体験", "カレンダー", "予約", "売上"]) {
@@ -131,6 +150,17 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
     await expect(nav.getByRole("link", { name: "売上" })).toHaveAttribute("aria-current", "page");
     await page.locator("summary:visible", { hasText: "のアカウント" }).click();
     await expect(page.getByRole("link", { name: "記事を書く" })).toHaveAttribute("href", "/write");
+    await expect(page.getByRole("link", { name: "アカウント設定", exact: true })).toHaveAttribute("href", "/host/account");
+    // The provider chip opens メンバー, 設定 and the traveler site (the other menu closes), and the switcher for several providers.
+    await page.locator("summary:visible", { hasText: PROVIDER_MENU }).click();
+    await expect(page.getByRole("link", { name: "記事を書く" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "メンバー" })).toHaveAttribute("href", "/host/members");
+    await expect(page.getByRole("link", { name: "設定", exact: true })).toHaveAttribute("href", "/host/settings");
+    await expect(page.getByRole("link", { name: "体験サイトを見る" })).toHaveAttribute("href", "/experiences");
+    await expect(page.getByText("提供者を切り替える", { exact: true })).toBeVisible();
+    await expect(page.locator("#main")).toHaveAttribute("inert", "");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#main")).not.toHaveAttribute("inert");
   }
 });
 
@@ -186,14 +216,14 @@ test("体験: the list, one experience, and back", async ({ page }, testInfo) =>
   await expect(page.getByRole("heading", { name: "ページが見つかりません" })).toBeVisible();
 });
 
-test("設定の後方互換表示 has nine panels, and 保存 checks the fields and keeps what NIHO has no API for on screen", async ({ page }, testInfo) => {
+test("設定の後方互換表示 has six panels, and 保存 checks the fields and keeps what NIHO has no API for on screen", async ({ page }, testInfo) => {
   await signIn(page);
-  await page.locator("summary:visible", { hasText: "のアカウント" }).click();
-  await page.getByRole("link", { name: "設定", exact: true }).click();
+  await openSettings(page);
   await page.waitForURL(/\/host\/settings$/);
-  await expect(page.getByRole("heading", { level: 1, name: "設定" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "サンプルの台所 の設定" })).toBeVisible();
+  await expect(page.locator("main").getByRole("link", { name: "アカウント設定" })).toHaveAttribute("href", "/host/account?providerId=sample-provider-kitchen");
   await page.goto("/host/settings?section=all");
-  await expect(page.locator("main").getByRole("heading", { level: 2 })).toHaveText(["提供者情報", "売上受取口座", "カレンダー", "既定の集合案内", "通知", "運営チーム", "NIHOサポート", "この端末", "アカウント"]);
+  await expect(page.locator("main").getByRole("heading", { level: 2 })).toHaveText(["提供者情報", "売上受取口座", "カレンダー", "既定の集合案内", "通知", "NIHOサポート"]);
 
   const provider = page.getByRole("region", { name: "提供者情報" });
   await expect(provider).not.toContainText("審査");
@@ -209,7 +239,9 @@ test("設定の後方互換表示 has nine panels, and 保存 checks the fields 
   await expect(payout.getByRole("link", { name: /Stripe で確認/ })).toBeVisible();
   // カレンダー and 通知 (#109): host-settings.spec.ts.
   await expect(page.getByRole("region", { name: "カレンダー" })).toContainText("接続中");
-  await expect(page.getByRole("region", { name: "通知" })).toContainText("kitchen@example.com");
+  // The address is the person's own: the provider's 通知 points to あなたのアカウント instead of showing it.
+  await expect(page.getByRole("region", { name: "通知" })).toContainText("宛先は、あなたのアカウントで変えられます。");
+  await expect(page.getByRole("region", { name: "通知" })).not.toContainText("kitchen@example.com");
   const meeting = page.getByRole("region", { name: "既定の集合案内" });
   await expect(meeting.getByRole("textbox", { name: "公開する大まかな場所" })).toHaveValue("Near Kamakura Station, 5-minute walk");
   const mapUrl = meeting.getByRole("textbox", { name: "地図 URL" });
@@ -217,10 +249,9 @@ test("設定の後方互換表示 has nine panels, and 保存 checks the fields 
   await expect(meeting.getByRole("textbox", { name: "住所" })).not.toHaveValue("");
   await expect(meeting.getByRole("textbox", { name: "入口・当日の案内" })).not.toHaveValue("");
   await expect(meeting).toContainText("予約が確定した方にだけ届きます");
-  const account = page.getByRole("region", { name: "アカウント" });
-  await expect(account).toContainText("サンプル ホスト");
-  await expect(account.getByRole("link", { name: "NIHO アプリ" })).toHaveAttribute("href", "https://niho.life");
-  await expect(account.getByRole("button", { name: "ログアウト" })).toBeVisible();
+  // The person's own settings are not on this page.
+  await expect(page.getByRole("region", { name: "ログイン" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "この端末" })).toHaveCount(0);
 
   const sent: string[] = [];
   page.on("request", (request) => sent.push(`${request.method()} ${request.url()} ${request.postData() ?? ""}`));
@@ -253,6 +284,33 @@ test("設定の後方互換表示 has nine panels, and 保存 checks the fields 
   }
   await page.mouse.wheel(0, -10_000);
   await expect(save).toBeInViewport();
+});
+
+test("あなたのアカウント holds the login, the address, this device and the providers, the same under every provider", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/host/account?providerId=sample-provider-studio");
+  await expect(page.getByRole("heading", { level: 1, name: "あなたのアカウント" })).toBeVisible();
+  await expect(page.locator("main")).toContainText("あなた個人の設定です。どの提供者を開いていても同じです。");
+  const login = page.getByRole("region", { name: "ログイン" });
+  await expect(login).toContainText("サンプル ホスト");
+  await expect(login.getByRole("link", { name: "NIHO アプリ" })).toHaveAttribute("href", "https://niho.life");
+  await expect(login.getByRole("button", { name: "ログアウト" })).toBeVisible();
+  const providers = page.getByRole("region", { name: "所属している提供者" });
+  await expect(providers.getByRole("listitem").filter({ hasText: "サンプル工房" })).toContainText("表示中");
+  await expect(providers.getByRole("listitem").filter({ hasText: "サンプルの台所" }).getByRole("link", { name: "開く" })).toHaveAttribute("href", "/host/home?providerId=sample-provider-kitchen");
+  // The old addresses of these sections land here.
+  await page.goto("/host/settings?providerId=sample-provider-kitchen&section=account");
+  await expect(page).toHaveURL(/\/host\/account\?providerId=sample-provider-kitchen$/);
+  await page.goto("/host/settings?section=device");
+  await expect(page).toHaveURL(/\/host\/account#account-device$/);
+  await page.goto("/host/settings?providerId=sample-provider-kitchen&section=team");
+  await expect(page).toHaveURL(/\/host\/members\?providerId=sample-provider-kitchen$/);
+  await expect(page.getByRole("heading", { level: 1, name: "メンバー" })).toBeVisible();
+  // No provider (a writer, an operator): still there.
+  await signIn(page, "?mock=empty");
+  await page.goto("/host/account");
+  await expect(page.getByRole("heading", { level: 1, name: "あなたのアカウント" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "所属している提供者" })).toHaveCount(0);
 });
 
 test("an account without a provider is led to registration, and registering opens the console", async ({ page }) => {
@@ -364,9 +422,9 @@ test.describe("320px narrow phone", () => {
     const draftEditors = page.getByRole("region", { name: "次にすること" }).getByRole("link", { name: "編集する" });
     await expect(draftEditors).toHaveCount(2);
     for (const link of await draftEditors.all()) await inside(link, "home: 編集する");
-    await page.locator("summary:visible", { hasText: "のアカウント" }).click();
-    await inside(page.getByRole("link", { name: /サンプル工房/ }), "account menu: provider");
-    expect(await overflowX(page), "account menu open").toBeLessThanOrEqual(0);
+    await page.locator("summary:visible", { hasText: PROVIDER_MENU }).click();
+    await inside(page.getByRole("link", { name: /サンプル工房/ }), "provider menu: provider");
+    expect(await overflowX(page), "provider menu open").toBeLessThanOrEqual(0);
     await page.goto("/host/experiences");
     // Page authoring is disabled in this legacy mock scenario, so there is no create action to activate.
     await expect(page.getByRole("button", { name: "新しい体験" })).toHaveCount(0);
@@ -376,7 +434,8 @@ test.describe("320px narrow phone", () => {
     const save = page.getByRole("button", { name: "保存", exact: true });
     await expect(save).toBeInViewport();
     await inside(save, "settings: 保存");
-    await inside(page.getByRole("region", { name: "アカウント" }).getByRole("button", { name: "ログアウト" }), "settings: ログアウト");
+    await page.goto("/host/account");
+    await inside(page.getByRole("region", { name: "ログイン" }).getByRole("button", { name: "ログアウト" }), "account: ログアウト");
     await page.goto("/host/register");
     await inside(page.getByRole("button", { name: "登録する" }), "register: 登録する");
   });

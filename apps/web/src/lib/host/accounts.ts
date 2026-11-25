@@ -12,6 +12,9 @@ import {
   hostCookieOptions,
   INVITE_BINDING_COOKIE,
   INVITE_BINDING_COOKIE_PATH,
+  TEAM_INVITE_BINDING_COOKIE,
+  TEAM_INVITE_BINDING_COOKIE_PATH,
+  TEAM_INVITE_BINDING_MAX_AGE_SECONDS,
   INVITE_BINDING_MAX_AGE_SECONDS,
   LINK_BINDING_COOKIE,
   LINK_BINDING_COOKIE_PATH,
@@ -160,6 +163,15 @@ export function setInviteBindingCookie(response: NextResponse, value: string) {
 
 export function clearInviteBindingCookie(response: NextResponse) {
   response.cookies.set(INVITE_BINDING_COOKIE, "", hostCookieOptions(INVITE_BINDING_COOKIE_PATH, 0));
+}
+
+/** The team invitation's cookie (#636): the same as the invitation link's, under its own name. */
+export function setTeamInviteBindingCookie(response: NextResponse, value: string) {
+  response.cookies.set(TEAM_INVITE_BINDING_COOKIE, value, hostCookieOptions(TEAM_INVITE_BINDING_COOKIE_PATH, TEAM_INVITE_BINDING_MAX_AGE_SECONDS));
+}
+
+export function clearTeamInviteBindingCookie(response: NextResponse) {
+  response.cookies.set(TEAM_INVITE_BINDING_COOKIE, "", hostCookieOptions(TEAM_INVITE_BINDING_COOKIE_PATH, 0));
 }
 
 /** Where the sign-in returns (an allowlisted path only), beside the link cookie for the link's 15 minutes. */

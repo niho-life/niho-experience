@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBookingAttributionStore } from "./booking-attribution";
+import { attributionWithDefault, createBookingAttributionStore } from "./booking-attribution";
 
 describe("booking UTM attribution", () => {
   it("keeps only the four safe UTM fields in volatile first-touch state", () => {
@@ -29,5 +29,20 @@ describe("booking UTM attribution", () => {
     const store = createBookingAttributionStore();
     store.capture("?utm_source=Guest%40Example.com&utm_campaign=valid_01&utm_id=visitor-1", "0");
     expect(store.read("0")).toEqual({ utmCampaign: "valid_01" });
+  });
+});
+
+describe("attributionWithDefault", () => {
+  const widget = { utmSource: "provider", utmMedium: "embed" };
+
+  it("puts what the visit captured over the default", () => {
+    expect(attributionWithDefault(widget, {}, "0")).toEqual(widget);
+    expect(attributionWithDefault(widget, { utmSource: "newsletter", utmCampaign: "spring" }, null)).toEqual({ utmSource: "newsletter", utmMedium: "embed", utmCampaign: "spring" });
+    expect(attributionWithDefault(undefined, { utmSource: "partner" }, undefined)).toEqual({ utmSource: "partner" });
+  });
+
+  it("sends nothing with Do Not Track, the default included", () => {
+    expect(attributionWithDefault(widget, {}, "1")).toEqual({});
+    expect(attributionWithDefault(widget, { utmSource: "newsletter" }, "yes")).toEqual({});
   });
 });
