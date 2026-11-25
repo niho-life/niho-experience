@@ -4,8 +4,8 @@ import { expect, test, type Page } from "@playwright/test";
 const ADMIN_COOKIE = "__Secure-niho_admin_preview";
 
 async function hostSignIn(page: Page) {
-  await page.goto("/host");
-  await page.getByRole("link", { name: "NIHO でログイン" }).click();
+  await page.goto("/ja/host");
+  await page.getByRole("link", { name: "ホスト画面にログイン" }).click();
   await page.waitForURL(/\/host\/home/);
 }
 

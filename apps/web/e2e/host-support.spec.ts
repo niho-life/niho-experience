@@ -14,8 +14,8 @@ const current = (host: HostFixture = spot, enabled = false, revision = 3): State
 const priorExperienceSetting = (): { setting: ExperienceSettingFixture } => ({ setting: { providerId: provider.id, supportEnabled: true, platformFeeBasisPoints: 1500, supportConsentVersion: "2026-01-01", supportAgreementRevision: 2, version: 3 } });
 
 async function signIn(page: Page, empty = false) {
-  await page.goto(`/host${empty ? "?mock=empty" : ""}`);
-  await page.getByRole("link", { name: "NIHO でログイン" }).click();
+  await page.goto(`/ja/host${empty ? "?mock=empty" : ""}`);
+  await page.getByRole("link", { name: "ホスト画面にログイン" }).click();
   await page.waitForURL(/\/host\/home/);
 }
 
