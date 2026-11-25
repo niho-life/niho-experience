@@ -14,8 +14,8 @@ test("設定の独立した画面から同じ提供者の一覧へ戻れる", as
     await expect(back).toBeVisible();
     await expect(back).toHaveAttribute("href", `/host/settings?providerId=${providerId}`);
     await back.click();
-    await expect(page.getByRole("heading", { level: 1, name: "設定", exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { level: 2 })).toHaveText(["販売者", "運営", "アカウント"]);
+    await expect(page.getByRole("heading", { level: 1, name: "サンプルの台所 の設定", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2 })).toHaveText(["掲載", "販売", "運営"]);
   }
 });
 
@@ -32,6 +32,19 @@ test("旧設定のブックマークは提供者・追加query・hashを保っ�
   await expect(page.getByRole("region", { name: "通知", exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "掲載名", exact: true })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "カレンダー", exact: true })).toHaveCount(0);
+});
+
+test("旧設定の「ログイン情報」「この端末」「チーム」の入口は新しい画面へ着く", async ({ page }) => {
+  await page.goto("/host/auth/mock-login");
+  await page.waitForURL(/\/host\/home/);
+  await page.goto("/host/settings?providerId=sample-provider-kitchen#settings-account");
+  await expect(page).toHaveURL(/\/host\/account\?providerId=sample-provider-kitchen$/);
+  await expect(page.getByRole("heading", { level: 1, name: "あなたのアカウント" })).toBeVisible();
+  await page.goto("/host/settings?providerId=sample-provider-kitchen#settings-device");
+  await expect(page).toHaveURL(/\/host\/account\?providerId=sample-provider-kitchen#account-device$/);
+  await page.goto("/host/settings?providerId=sample-provider-kitchen#settings-team");
+  await expect(page).toHaveURL(/\/host\/members\?providerId=sample-provider-kitchen$/);
+  await expect(page.getByRole("heading", { level: 1, name: "メンバー" })).toBeVisible();
 });
 
 test("項目別の設定は必要なパネルだけを開き、未保存の入力を守る", async ({ page }) => {
@@ -56,7 +69,7 @@ test("項目別の設定は必要なパネルだけを開き、未保存の入�
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
   await page.getByRole("link", { name: "設定へ戻る", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "設定", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "サンプルの台所 の設定", exact: true })).toBeVisible();
 });
 
 test("通知だけを開いた画面でも保存でき、他項目の非表示入力に妨げられない", async ({ page }) => {
@@ -70,5 +83,5 @@ test("通知だけを開いた画面でも保存でき、他項目の非表示�
   await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
   await expect(review).not.toBeChecked();
   await page.getByRole("link", { name: "設定へ戻る", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "設定", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "サンプルの台所 の設定", exact: true })).toBeVisible();
 });

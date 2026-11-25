@@ -15,12 +15,14 @@ const state = vi.hoisted(() => ({
     hostAccountsEnabled: true,
     hostNihoLoginEnabled: true,
     nihoIdentityLoginEnabled: false,
+    nihoLoginPromptEnabled: false,
     nihoWriterEnabled: false,
     hostPwaEnabled: false,
     hostPushEnabled: false,
     hostSessionSecret: "synthetic-route-test-secret-0123456789abcdef",
     nihoWebOrigin: "https://niho.example.test",
     nihoExperienceHostCommonContractAudience: "https://api.niho.example.test",
+    nihoLoginServiceAudience: "https://api.niho.example.test/niho-login/niho-experience",
     nihoArticleAuthorityOrigin: "https://api.niho.example.test",
     nihoArticleAuthorityAudience: "https://api.niho.example.test",
     siteUrl: "https://experience.example.test",
@@ -46,7 +48,7 @@ import { GET as login } from "@/app/(host)/host/auth/login/route";
 import { GET as callback } from "@/app/(host)/host/auth/callback/route";
 import { GET as mockLogin } from "@/app/(host)/host/auth/mock-login/route";
 import { cookieSealer } from "./cookie-seal";
-import { decodeLoginState, ACCOUNT_SESSION_COOKIE, LOGIN_COOKIE, SESSION_COOKIE } from "./session";
+import { decodeLoginState, ACCOUNT_SESSION_COOKIE, AUTO_LOGIN_COOKIE, LOGIN_COOKIE, RETURNING_HOST_COOKIE, SESSION_COOKIE } from "./session";
 import { startTravelerLogin } from "./niho-login";
 
 const SITE = state.config.siteUrl;
@@ -67,7 +69,7 @@ const calls: { url: URL; init: RequestInit }[] = [];
 
 beforeEach(() => {
   calls.length = 0;
-  Object.assign(state.config, { hostConsoleEnabled: true, hostAccountsEnabled: true, hostNihoLoginEnabled: true, nihoIdentityLoginEnabled: false, nihoWriterEnabled: false, apiMode: "http" });
+  Object.assign(state.config, { hostConsoleEnabled: true, hostAccountsEnabled: true, hostNihoLoginEnabled: true, nihoIdentityLoginEnabled: false, nihoLoginPromptEnabled: false, nihoWriterEnabled: false, apiMode: "http" });
   state.cookies = {};
   const opened = async (): Promise<NihoSessionResult> => ({ kind: "ok", sessionToken: SESSION_TOKEN, sessionRef: "0f8fad5b-d9cb-469f-a165-70867728950e", hostAccountId: HOST, absoluteExpiresAtUtc: new Date(Date.now() + 30 * DAY).toISOString() });
   state.identities = { startSessionForNihoIdentity: vi.fn(opened), startWriterSessionForNihoIdentity: vi.fn(opened) };
@@ -190,6 +192,60 @@ describe("starting the NIHO account login", () => {
     expect((await callback(new NextRequest(`${SITE}/host/auth/callback?code=c&state=s`))).status).toBe(404);
     state.config.hostAccountsEnabled = false;
     expect(new URL((await login(new NextRequest(`${SITE}/host/auth/login`))).headers.get("location")!).origin).toBe(NIHO);
+  });
+});
+
+describe("the returning host and the account switch (#632)", () => {
+  it("marks the browser of a host who signed in, and forgets it when a sign-in does not open a session", async () => {
+    const { response } = await signIn();
+    expect(response.headers.get("location")).toBe("/host/home");
+    const mark = setCookies(response).get(RETURNING_HOST_COOKIE)!;
+    expect(mark.value).toBe("1");
+    expect(mark.attributes).toMatch(/HttpOnly/);
+    expect(mark.attributes).toMatch(/Secure/);
+    expect(mark.attributes).toMatch(/SameSite=lax/i);
+    expect(mark.attributes).toMatch(/Path=\/(;|$)/);
+    expect(mark.attributes).toMatch(/Max-Age=34560000/);
+
+    state.identities!.startSessionForNihoIdentity.mockResolvedValue({ kind: "not-linked" });
+    const unregistered = await signIn();
+    expect(unregistered.response.headers.get("location")).toBe("/host/auth/error?reason=unregistered");
+    expect(setCookies(unregistered.response).get(RETURNING_HOST_COOKIE)?.attributes).toMatch(/Max-Age=0/);
+  });
+
+  it("starts NIHO by itself once in a short while, then leaves the browser at the entrance", async () => {
+    const first = await startLogin("?auto=1");
+    expect(first.location.origin).toBe(NIHO);
+    expect(first.location.searchParams.get("audience")).toBe("host");
+    const auto = setCookies(first.response).get(AUTO_LOGIN_COOKIE)!;
+    expect(auto.value).toBe("1");
+    expect(auto.attributes).toMatch(/Path=\/host\/auth/);
+    expect(auto.attributes).toMatch(/Max-Age=120/);
+
+    calls.length = 0;
+    const again = await login(new NextRequest(`${SITE}/host/auth/login?auto=1`, { headers: { cookie: `${AUTO_LOGIN_COOKIE}=1` } }));
+    expect(again.headers.get("location")).toBe("/host/auth/sign-in");
+    expect(again.headers.getSetCookie()).toEqual([]);
+    expect(calls).toEqual([]);
+
+    // The mock never signs in by itself.
+    state.config.apiMode = "mock";
+    expect((await login(new NextRequest(`${SITE}/host/auth/login?auto=1`))).headers.get("location")).toBe("/host/auth/sign-in");
+  });
+
+  it("asks NIHO for its account choice on 「別の方法でやり直す」 only while the flag is on, in both URL forms", async () => {
+    expect((await startLogin("?switch=1")).location.searchParams.get("prompt")).toBeNull();
+    state.config.nihoLoginPromptEnabled = true;
+    expect((await startLogin()).location.searchParams.get("prompt")).toBeNull();
+    const legacy = await startLogin("?switch=1");
+    expect(legacy.location.searchParams.get("prompt")).toBe("select_account");
+    expect(legacy.location.searchParams.get("v")).toBe("1");
+    state.config.nihoIdentityLoginEnabled = true;
+    const identity = await startLogin("?switch=1");
+    expect(identity.location.searchParams.get("prompt")).toBe("select_account");
+    expect(identity.location.searchParams.get("client_id")).toBe(contract.clientId);
+    // A re-login (a sensitive change) still asks for a recent sign-in beside it.
+    expect((await startLogin("?switch=1&reauth=1")).location.searchParams.get("max_age")).toBe("300");
   });
 });
 
@@ -357,6 +413,8 @@ describe("the callback", () => {
     expect(result.response.headers.get("location")).toBe("/write");
     expect(state.identities!.startWriterSessionForNihoIdentity).toHaveBeenCalledWith(expect.objectContaining({ nihoUserId: NIHO_USER }));
     expect(calls.some((call) => call.url.pathname === "/api/internal/editor-article-authority/check")).toBe(true);
+    // A writer's browser is marked like a host's (#632): once bound, its later sign-ins open like any host account's.
+    expect(setCookies(result.response).get(RETURNING_HOST_COOKIE)?.value).toBe("1");
 
     state.identities!.startWriterSessionForNihoIdentity.mockClear(); calls.length = 0;
     handler = niho({ authority: () => json(200, { version: 1, writer: false, links: [] }) });

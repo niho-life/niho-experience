@@ -227,6 +227,101 @@ export async function linkNihoIdentityIn(
   return bind(client, { hostAccountId, subject, via: input.via, at });
 }
 
+export type InvitedNihoIdentityResult =
+  | { readonly kind: "resolved"; readonly hostAccountId: string; readonly created: boolean }
+  | { readonly kind: "host-account-not-active" | "email-account-has-identity" };
+
+const INVITED_EMAIL = /^[^\s@]+@[^\s@]+$/;
+
+/**
+ * 招待を受けた NIHO アカウントのホストアカウントを決める (#636), inside the caller's transaction (the invitation is used up in
+ * the same one). The NIHO account is what counts; the invitation's address is only where the email went:
+ * - a NIHO account already bound to a host account: that account (an account without an address takes the invited one when
+ *   no other account has it);
+ * - otherwise the ACTIVE host account that has the invited address and no NIHO account: the NIHO account is bound to it
+ *   (opening the link proves the address, so it is marked verified);
+ * - an account with that address bound to another NIHO account is refused, and nothing is recorded (its owner may be someone
+ *   else); a suspended one is refused;
+ * - no account at all: a new one is made with the address and the NIHO account bound to it.
+ * The NIHO user ID never leaves this function. Locks: the NIHO account, then the host account, then its row.
+ */
+export async function resolveHostAccountForInvitedNihoIdentityIn(
+  client: PoolClient,
+  input: { readonly nihoUserId: string; readonly email: string; readonly emailKey: string; readonly nowUtc: string },
+): Promise<InvitedNihoIdentityResult> {
+  const subject = subjectOf(input?.nihoUserId);
+  const at = nowOf(input.nowUtc);
+  const { email, emailKey } = input;
+  if (typeof email !== "string" || typeof emailKey !== "string" || email.length < 3 || email.length > 254 || emailKey.length < 3 || emailKey.length > 254
+    || !INVITED_EMAIL.test(email) || !INVITED_EMAIL.test(emailKey)) {
+    throw new StoreValidationError("email must be an email address of 3-254 characters.");
+  }
+  await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${SUBJECT_LOCK_SEED}))`, [`niho-identity-subject:${subject}`]);
+  const bound = await client.query<DbRow>(
+    "SELECT host_account_id FROM host_account_identities WHERE provider = 'NIHO' AND subject = $1 AND unlinked_at IS NULL",
+    [subject],
+  );
+  if (bound.rows[0]) {
+    const hostAccountId = text(bound.rows[0], "host_account_id");
+    await lockBindings(client, hostAccountId, subject);
+    const again = await client.query("SELECT 1 FROM host_account_identities WHERE provider = 'NIHO' AND subject = $1 AND host_account_id = $2 AND unlinked_at IS NULL", [subject, hostAccountId]);
+    if ((again.rowCount ?? 0) === 0) throw new StoreConflictError("The NIHO account binding changed concurrently; try again.");
+    const account = await client.query<DbRow>("SELECT status, email_key FROM host_accounts WHERE id = $1 FOR UPDATE", [hostAccountId]);
+    if (account.rows[0]?.status !== "ACTIVE") return { kind: "host-account-not-active" };
+    if (account.rows[0].email_key === null) {
+      const taken = await client.query("SELECT 1 FROM host_accounts WHERE email_key = $1", [emailKey]);
+      if ((taken.rowCount ?? 0) === 0) {
+        try {
+          await client.query(
+            `UPDATE host_accounts SET email = $2, email_key = $3, email_verified_at = GREATEST($4::timestamptz, created_at), updated_at = GREATEST(updated_at, $4::timestamptz)
+              WHERE id = $1`,
+            [hostAccountId, email, emailKey, at],
+          );
+        } catch (error) {
+          if ((error as { code?: unknown } | null)?.code === UNIQUE_VIOLATION) throw new StoreConflictError("The address was taken concurrently; try again.");
+          throw error;
+        }
+      }
+    }
+    return { kind: "resolved", hostAccountId, created: false };
+  }
+
+  const byEmail = await client.query<DbRow>("SELECT id FROM host_accounts WHERE email_key = $1", [emailKey]);
+  if (byEmail.rows[0]) {
+    const hostAccountId = text(byEmail.rows[0], "id");
+    await lockBindings(client, hostAccountId, subject);
+    const account = await client.query<DbRow>("SELECT status FROM host_accounts WHERE id = $1 AND email_key = $2 FOR UPDATE", [hostAccountId, emailKey]);
+    if (!account.rows[0]) throw new StoreConflictError("The host account changed concurrently; try again.");
+    if (account.rows[0].status !== "ACTIVE") return { kind: "host-account-not-active" };
+    const other = await client.query("SELECT 1 FROM host_account_identities WHERE host_account_id = $1 AND provider = 'NIHO' AND unlinked_at IS NULL", [hostAccountId]);
+    if ((other.rowCount ?? 0) > 0) return { kind: "email-account-has-identity" };
+    const linked = await bind(client, { hostAccountId, subject, via: "INVITATION", at });
+    if (linked.kind !== "linked") throw new StoreError("The invited NIHO account could not be bound.");
+    await client.query(
+      `UPDATE host_accounts SET email_verified_at = COALESCE(email_verified_at, GREATEST($2::timestamptz, created_at)), updated_at = GREATEST(updated_at, $2::timestamptz)
+        WHERE id = $1`,
+      [hostAccountId, at],
+    );
+    return { kind: "resolved", hostAccountId, created: false };
+  }
+
+  const hostAccountId = `hst_${randomBytes(16).toString("hex")}`;
+  await lockBindings(client, hostAccountId, subject);
+  try {
+    await client.query(
+      `INSERT INTO host_accounts (id, email, email_key, email_verified_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz, $4::timestamptz)`,
+      [hostAccountId, email, emailKey, at],
+    );
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === UNIQUE_VIOLATION) throw new StoreConflictError("The address was taken concurrently; try again.");
+    throw error;
+  }
+  const linked = await bind(client, { hostAccountId, subject, via: "INVITATION", at });
+  if (linked.kind !== "linked") throw new StoreError("The invited NIHO account could not be bound.");
+  return { kind: "resolved", hostAccountId, created: true };
+}
+
 /** NIHO accounts bound to host accounts, and the NIHO sign-in that opens an Experience session for a bound one. */
 export class HostAccountIdentities {
   readonly #pool: Pool;

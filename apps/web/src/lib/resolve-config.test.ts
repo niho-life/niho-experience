@@ -536,6 +536,15 @@ describe("admin support console settings", () => {
     expect(resolveConfig(on).hostTeamEnabled).toBe(false);
     expect(resolveConfig({ ...on, EXPERIENCE_HOST_TEAM_ENABLED: "true" }).hostTeamEnabled).toBe(true);
     expect(() => resolveConfig({ ...mail, ...host, EXPERIENCE_HOST_TEAM_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_TEAM_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
+    // メンバーの招待 (#636): off by default, and it needs the team, the NIHO login and the host mail.
+    const invitations = { ...on, EXPERIENCE_HOST_TEAM_ENABLED: "true", EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", EXPERIENCE_HOST_MAIL_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.niho.example.test" };
+    expect(resolveConfig(invitations).hostTeamInvitationsEnabled).toBe(false);
+    expect(resolveConfig({ ...invitations, EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "true" }).hostTeamInvitationsEnabled).toBe(true);
+    expect(resolveConfig({ ...invitations, EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "1" }).hostTeamInvitationsEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "true" }).hostTeamInvitationsEnabled).toBe(false);
+    for (const missing of ["EXPERIENCE_HOST_TEAM_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"]) {
+      expect(() => resolveConfig({ ...invitations, [missing]: "false", EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "true" })).toThrow(`EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED=true needs ${missing}=true`);
+    }
     expect(() => resolveConfig({ ...on, HOST_CONSOLE_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
     expect(() => resolveConfig({ ...host, EXPERIENCE_API_MODE: "http", EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }))
       .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_DATABASE_URL");
@@ -589,7 +598,12 @@ describe("admin support console settings", () => {
     expect(resolveConfig({}).hostNihoLoginEnabled).toBe(false);
     expect(resolveConfig(accounts).hostNihoLoginEnabled).toBe(false);
     expect(resolveConfig({ ...on, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "1" }).hostNihoLoginEnabled).toBe(false);
-    expect(resolveConfig(on)).toMatchObject({ hostAccountsEnabled: true, hostNihoLoginEnabled: true });
+    expect(resolveConfig(on)).toMatchObject({ hostAccountsEnabled: true, hostNihoLoginEnabled: true, nihoLoginPromptEnabled: false });
+    // 「別の方法でやり直す」's account choice at NIHO (#632): only beside the NIHO account login, "true" only.
+    expect(resolveConfig({ ...on, EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "true" }).nihoLoginPromptEnabled).toBe(true);
+    expect(resolveConfig({ ...on, EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "1" }).nihoLoginPromptEnabled).toBe(false);
+    expect(() => resolveConfig({ ...accounts, EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED=true needs EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true");
     // The real NIHO: the bindings and sessions live in the host accounts' DB, and the identity call carries the service ID token.
     expect(() => resolveConfig({ ...mail, ...host, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" }))
       .toThrow("EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
@@ -650,8 +664,20 @@ describe("admin support console settings", () => {
     const on = { ...withoutAudience, NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" };
     expect(resolveConfig(on).nihoAccountStatusCheckEnabled).toBe(true);
     expect(resolveConfig(on).nihoIdentityLoginEnabled).toBe(false);
-    const identityOnly = { ...on, EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED: "true", EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true" };
-    expect(resolveConfig(identityOnly).nihoIdentityLoginEnabled).toBe(true);
+    expect(resolveConfig(on).nihoLoginPromptEnabled).toBe(false);
+    const identityOnly = {
+      ...on,
+      EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED: "true",
+      EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true",
+      NIHO_LOGIN_SERVICE_AUDIENCE: "https://api.example.test/niho-login/niho-experience",
+    };
+    expect(resolveConfig(identityOnly)).toMatchObject({
+      nihoIdentityLoginEnabled: true,
+      nihoLoginServiceAudience: "https://api.example.test/niho-login/niho-experience",
+    });
+    expect(() => resolveConfig({ ...identityOnly, NIHO_LOGIN_SERVICE_AUDIENCE: undefined })).toThrow("valid HTTPS NIHO_LOGIN_SERVICE_AUDIENCE");
+    expect(() => resolveConfig({ ...identityOnly, NIHO_LOGIN_SERVICE_AUDIENCE: "http://api.example.test/niho-login/niho-experience" })).toThrow("valid HTTPS NIHO_LOGIN_SERVICE_AUDIENCE");
+    expect(() => resolveConfig({ ...identityOnly, NIHO_LOGIN_SERVICE_AUDIENCE: "https://api.example.test/niho-login/niho-experience?x=1" })).toThrow("valid HTTPS NIHO_LOGIN_SERVICE_AUDIENCE");
     expect(() => resolveConfig({ ...identityOnly, EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "false" })).toThrow("needs NIHO account status checks");
     expect(() => resolveConfig({ ...identityOnly, NEXT_PUBLIC_NIHO_WEB_ORIGIN: "https://niho.example.test/discovery" })).toThrow("must contain only an origin");
     expect(resolveConfig({ ...on, EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "1" }).nihoAccountStatusCheckEnabled).toBe(false);

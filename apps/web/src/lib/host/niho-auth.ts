@@ -17,6 +17,8 @@ export interface NihoAuthDeps {
    * never an authorization: a call without it (or with one NIHO cannot verify) is simply counted by IP, as before.
    */
   serviceIdToken?: () => Promise<string | null>;
+  /** A separate, client-specific Google ID token for NIHO Login code exchange; never reuse the Host API audience token. */
+  nihoLoginServiceIdToken?: () => Promise<string | null>;
 }
 
 /** The header NIHO reads the service ID token from (the host `identity` call sends the same one). */
@@ -82,6 +84,12 @@ export const NIHO_CONNECT_METHODS = ["google", "apple", "line"] as const;
 export type NihoConnectMethod = (typeof NIHO_CONNECT_METHODS)[number];
 
 /**
+ * `prompt=select_account` (#632, niho-coliving/niho-app#21302): NIHO shows its confirmation, where the account is switched, even
+ * to a host it would otherwise pass straight back. Sent by 「別の方法でやり直す」 only, behind EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED.
+ */
+export type NihoConnectPrompt = "select_account";
+
+/**
  * How recent a sign-in a step-up asks NIHO for (`max_age`, in seconds; NIHO accepts 60 to 86400): a re-login for a sensitive
  * change, and the binding of a NIHO account. It only makes NIHO ask the person to sign in again when theirs is older: the
  * judgment of "recent" is Experience's, made from the `authTime` the exchange returns (HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes,
@@ -94,12 +102,13 @@ export const NIHO_REAUTHENTICATION_MAX_AGE_SECONDS = 300;
  * NIHO's confirmation page for this site. `maxAgeSeconds` asks NIHO to sign the person in again when their last sign-in
  * is older (`max_age`, 60 to 86400 seconds; niho-coliving/niho-app#20305): a sensitive change's re-authentication (#595).
  */
-export function nihoConnectUrl(nihoOrigin: string, params: { challenge: string; state: string; origin: string; audience?: NihoConnectAudience; method?: NihoConnectMethod; maxAgeSeconds?: number }): string {
+export function nihoConnectUrl(nihoOrigin: string, params: { challenge: string; state: string; origin: string; audience?: NihoConnectAudience; method?: NihoConnectMethod; maxAgeSeconds?: number; prompt?: NihoConnectPrompt }): string {
   const url = new URL("/connect/niho-experience", nihoOrigin);
   const search = new URLSearchParams({ v: "1", challenge: params.challenge, state: params.state, origin: params.origin });
   if (params.audience) search.set(NIHO_CONNECT_AUDIENCE_PARAM, params.audience);
   if (params.method) search.set("method", params.method);
   if (params.maxAgeSeconds !== undefined) search.set("max_age", String(params.maxAgeSeconds));
+  if (params.prompt) search.set("prompt", params.prompt);
   url.search = search.toString();
   return url.href;
 }

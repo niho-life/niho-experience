@@ -68,3 +68,40 @@ export function parseTeamResolveResult(value: unknown): { readonly contractVersi
   if (!record(candidate) || !exact(candidate, ["hostAccountId", "label"]) || typeof candidate.hostAccountId !== "string" || !ACCOUNT.test(candidate.hostAccountId) || typeof candidate.label !== "string") return null;
   return { contractVersion: 1, teamRevision: value.teamRevision as number, candidate: { hostAccountId: candidate.hostAccountId, label: candidate.label } };
 }
+
+/** A team invitation as the owner's screen shows it (#636). The link and its token are never part of it. */
+export type TeamInvitationView = {
+  readonly id: string;
+  readonly email: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly state: "QUEUED" | "SENT" | "OPENED";
+};
+
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
+const INVITATION_STATES = new Set(["QUEUED", "SENT", "OPENED"]);
+
+export function parseTeamInvitation(value: unknown): TeamInvitationView | null {
+  if (!record(value) || !exact(value, ["id", "email", "createdAt", "expiresAt", "state"])
+    || typeof value.id !== "string" || !UUID.test(value.id) || typeof value.email !== "string" || value.email.length < 1 || value.email.length > 254
+    || typeof value.createdAt !== "string" || !INSTANT.test(value.createdAt) || typeof value.expiresAt !== "string" || !INSTANT.test(value.expiresAt)
+    || typeof value.state !== "string" || !INVITATION_STATES.has(value.state)) return null;
+  return { id: value.id.toLowerCase(), email: value.email, createdAt: value.createdAt, expiresAt: value.expiresAt, state: value.state as TeamInvitationView["state"] };
+}
+
+/** The request body of an invitation: just the address. */
+export function parseTeamInvitationRequest(value: unknown): { readonly email: string } | null {
+  return parseTeamResolve(value);
+}
+
+export function parseTeamInvitations(value: unknown): { readonly contractVersion: 1; readonly invitations: readonly TeamInvitationView[] } | null {
+  if (!record(value) || !exact(value, ["contractVersion", "invitations"]) || value.contractVersion !== 1 || !Array.isArray(value.invitations)) return null;
+  const parsed = value.invitations.map(parseTeamInvitation);
+  return parsed.every((item) => item !== null) ? { contractVersion: 1, invitations: parsed as TeamInvitationView[] } : null;
+}
+
+export function parseTeamInvitationCreated(value: unknown): { readonly kind: "created"; readonly invitation: TeamInvitationView } | null {
+  if (!record(value) || !exact(value, ["kind", "invitation"]) || value.kind !== "created") return null;
+  const invitation = parseTeamInvitation(value.invitation);
+  return invitation ? { kind: "created", invitation } : null;
+}

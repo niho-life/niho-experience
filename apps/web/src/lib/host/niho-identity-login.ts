@@ -1,7 +1,7 @@
 import "server-only";
 import { createPublicKey, verify } from "node:crypto";
 import contract from "@niho-experience/api-client/niho-login-contract";
-import type { NihoAuthDeps, NihoConnectAudience, NihoConnectMethod } from "./niho-auth";
+import type { NihoAuthDeps, NihoConnectAudience, NihoConnectMethod, NihoConnectPrompt } from "./niho-auth";
 import { loginStatesMatch } from "./pkce";
 
 const secretPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -18,7 +18,7 @@ interface IdentityLoginInput {
 
 export function nihoIdentityAuthorizationUrl(
   nihoOrigin: string,
-  params: IdentityLoginInput & { challenge: string; state: string; audience: NihoConnectAudience; method?: NihoConnectMethod },
+  params: IdentityLoginInput & { challenge: string; state: string; audience: NihoConnectAudience; method?: NihoConnectMethod; prompt?: NihoConnectPrompt },
 ): string {
   const url = new URL(contract.authorizationPath, nihoOrigin);
   url.search = new URLSearchParams({
@@ -33,6 +33,7 @@ export function nihoIdentityAuthorizationUrl(
     audience: params.audience,
     ...(params.method ? { method: params.method } : {}),
     ...(params.maxAgeSeconds === undefined ? {} : { max_age: String(params.maxAgeSeconds) }),
+    ...(params.prompt ? { prompt: params.prompt } : {}),
   }).toString();
   return url.href;
 }
@@ -108,7 +109,7 @@ export async function exchangeNihoIdentity(
   try {
     const origin = new URL(deps.nihoOrigin).origin;
     if (!origin.startsWith("https://")) return { ok: false, reason: "unavailable" };
-    const serviceToken = await deps.serviceIdToken?.();
+    const serviceToken = await deps.nihoLoginServiceIdToken?.();
     if (!serviceToken) return { ok: false, reason: "unavailable" };
     const signal = AbortSignal.timeout(deps.timeoutMs ?? 10_000);
     const response = await deps.fetch(new URL(contract.tokenPath, origin), {

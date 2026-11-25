@@ -2,20 +2,21 @@ import "server-only";
 import { type NextRequest, type NextResponse } from "next/server";
 import type { NihoSessionResult } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
-import { hostAccountIdentities, hostAccounts, hostInvitations, travelerAccounts } from "@/lib/experience/store-server";
-import { clearInviteBindingCookie, isOpaqueSecret, linkBindingHash, nowUtc, readExperienceHostSession, setAccountSessionCookie } from "./accounts";
-import { NIHO_REAUTHENTICATION_MAX_AGE_SECONDS, deleteConnection, exchangeCode, nihoConnectUrl, type NihoConnectAudience, type NihoConnectMethod } from "./niho-auth";
+import { hostAccountIdentities, hostAccounts, hostInvitations, hostTeamInvitations, travelerAccounts } from "@/lib/experience/store-server";
+import { clearInviteBindingCookie, clearTeamInviteBindingCookie, isOpaqueSecret, linkBindingHash, nowUtc, readExperienceHostSession, setAccountSessionCookie } from "./accounts";
+import { NIHO_REAUTHENTICATION_MAX_AGE_SECONDS, deleteConnection, exchangeCode, nihoConnectUrl, type NihoConnectAudience, type NihoConnectMethod, type NihoConnectPrompt } from "./niho-auth";
 import { exchangeNihoIdentity, nihoIdentityAuthorizationUrl, nihoIdentityRedirectUri } from "./niho-identity-login";
 import type { NihoIdentityOutcome } from "./niho-identity";
 import { loginStatesMatch, createLoginState, createPkceVerifier, pkceChallenge } from "./pkce";
 import { nihoIdOrNull } from "./providers";
 import { forgetHostPushConnection } from "./push/server";
+import { clearReturningHostCookie, setReturningHostCookie } from "./returning-host";
 import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostAccountSettingsPath, hostInvitationPath, hostReturnPathOrNull, invitationIdOrNull, withProvider, withQuery, type LoginErrorReason } from "./routes";
 import { clearLoginCookie, hostNotFound, loginSealer, lookupNihoIdentity, nihoAuthDeps, seeOther, setLoginCookie, siteOrigin } from "./server";
 import { TRAVELER_HOME_PATH, TRAVELER_SIGN_IN_PATH, type TravelerLoginError } from "@/lib/traveler/paths";
 import { TRAVELER_LOGIN_HINT_COOKIE, TRAVELER_SESSION_COOKIE } from "@/lib/traveler/session";
 import { clearTravelerLoginHint, isTravelerSessionToken, setTravelerLoginHint, setTravelerSessionCookie } from "@/lib/traveler/server";
-import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_COOKIE, LOGIN_MAX_AGE_SECONDS, type HostLoginState } from "./session";
+import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_COOKIE, LOGIN_MAX_AGE_SECONDS, TEAM_INVITE_BINDING_COOKIE, type HostLoginState } from "./session";
 
 /*
  * 「NIHO アカウントでログイン」 (Epic #591, #594, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED): NIHO only proves who the host is.
@@ -31,6 +32,8 @@ import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_
  * the 「ホストに登録されていません」 page and nothing of Experience's changes.
  *
  * Two more uses of the same round trip (#595):
+ * - account switch (`switch=1`, #632): 「別の方法でやり直す」 asks NIHO for its confirmation, where the account is switched
+ *   (`prompt=select_account`), even when NIHO would pass a host it knows straight back. Behind EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED.
  * - re-login (`reauth=1`): a sensitive change asked for a recent sign-in; NIHO is asked to sign the person in again
  *   (`max_age`) and the return opens a new session whose `authenticated_at` is now.
  * - link (`purpose: "link"`): a signed-in host binds the NIHO account they come back with to their host account in 設定.
@@ -38,6 +41,9 @@ import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_
  * - invitation (`purpose: "invite"`, #596): the host opened an invitation link from ops. The return binds the NIHO account to
  *   the invited host account in the same transaction that uses the invitation up (the invitation belongs to the browser that
  *   opened it, whose binding cookie must come back), then opens that host account's session as a sign-in does.
+ * - team invitation (`purpose: "team-invite"`, #636): a person opened an invitation of a provider's OWNER. The return finds or
+ *   makes their host account, adds it to the team as COHOST and uses the invitation up in one transaction (the invitation
+ *   belongs to the browser that opened it), then opens that account's session at the provider's home.
  * - traveler (`purpose: "traveler"`, #597): a traveler logs in or signs up with Google, Apple or LINE (`audience=guest`, a
  *   `method`): NIHO goes straight to that provider and makes the NIHO account on the way. The return opens the traveler's
  *   own account and session (another table and cookie than a host's), never a host account's, and failures go to the
@@ -50,6 +56,8 @@ const MAX_CODE_LENGTH = 2048;
 function failed(reason: LoginErrorReason, login: HostLoginState | null = null): NextResponse {
   const response = seeOther(withQuery(HOST_AUTH_ERROR_PATH, { reason, invitationId: login?.invitationId ?? null }));
   clearLoginCookie(response);
+  // The next visit shows the entrance instead of going to NIHO by itself again (#632).
+  clearReturningHostCookie(response);
   return response;
 }
 
@@ -70,7 +78,13 @@ export function startNihoLogin(request: NextRequest): NextResponse {
   const returnPath = hostReturnPathOrNull(request.nextUrl.searchParams.get("returnTo"));
   const providerId = nihoIdOrNull(request.nextUrl.searchParams.get("providerId"));
   const reauth = request.nextUrl.searchParams.get("reauth") === "1";
-  return nihoRoundTrip({ providerId, ...(invitationId ? { invitationId } : {}), ...(returnPath ? { returnPath } : {}) }, reauth);
+  return nihoRoundTrip({ providerId, ...(invitationId ? { invitationId } : {}), ...(returnPath ? { returnPath } : {}) }, reauth, hostTarget(request));
+}
+
+/** The host's audience, with NIHO's account choice asked for when 「別の方法でやり直す」 sent the host here (#632). */
+function hostTarget(request: NextRequest): { audience: NihoConnectAudience; prompt?: NihoConnectPrompt } {
+  const switchAccount = config.nihoLoginPromptEnabled && request.nextUrl.searchParams.get("switch") === "1";
+  return { audience: "host", ...(switchAccount ? { prompt: "select_account" as const } : {}) };
 }
 
 /** A signed-in host's 「結び付ける」: the same round trip, which on return binds the NIHO account instead of opening a session. */
@@ -83,7 +97,13 @@ export function startNihoLink(providerId: string | null, hostAccountId: string):
 export function startNihoInvite(request: NextRequest): NextResponse {
   // The link's page set the browser's binding cookie when it opened the invitation; without it there is nothing to bind to.
   if (!isOpaqueSecret(request.cookies.get(INVITE_BINDING_COOKIE)?.value)) return failed("invite-invalid");
-  return nihoRoundTrip({ providerId: null, purpose: "invite" }, false);
+  return nihoRoundTrip({ providerId: null, purpose: "invite" }, false, hostTarget(request));
+}
+
+/** A person opened a team invitation link in this browser (#636): the same round trip, which on return joins them to the team. */
+export function startNihoTeamInvite(request: NextRequest): NextResponse {
+  if (!isOpaqueSecret(request.cookies.get(TEAM_INVITE_BINDING_COOKIE)?.value)) return failed("team-invite-invalid");
+  return nihoRoundTrip({ providerId: null, purpose: "team-invite" }, false, hostTarget(request));
 }
 
 /**
@@ -96,7 +116,7 @@ export function startTravelerLogin(method: NihoConnectMethod | null): NextRespon
   return response;
 }
 
-function nihoRoundTrip(intent: Pick<HostLoginState, "providerId" | "invitationId" | "returnPath" | "purpose" | "hostAccountId">, reauth: boolean, target: { audience: NihoConnectAudience; method?: NihoConnectMethod } = { audience: "host" }): NextResponse {
+function nihoRoundTrip(intent: Pick<HostLoginState, "providerId" | "invitationId" | "returnPath" | "purpose" | "hostAccountId">, reauth: boolean, target: { audience: NihoConnectAudience; method?: NihoConnectMethod; prompt?: NihoConnectPrompt } = { audience: "host" }): NextResponse {
   const verifier = createPkceVerifier();
   const state = createLoginState();
   const maxAgeSeconds = reauth ? NIHO_REAUTHENTICATION_MAX_AGE_SECONDS : undefined;
@@ -187,6 +207,7 @@ export async function completeNihoLogin(request: NextRequest, options: { host: b
   const code = onlyQueryValue(params, "code");
   if (!code || code.length > MAX_CODE_LENGTH) return link ? linkBack(login, "unavailable") : failed("rejected", login);
   if (link) return completeNihoLink(request, login, code);
+  if (login.purpose === "team-invite") return config.hostTeamInvitationsEnabled ? completeTeamInvite(request, login, code) : failed("team-invite-unavailable");
   return login.purpose === "invite" ? completeInvite(request, login, code) : completeSignIn(request, login, code);
 }
 
@@ -247,6 +268,9 @@ async function signedIn(request: NextRequest, login: HostLoginState, accounts: N
   const response = seeOther(login.invitationId ? hostInvitationPath(login.invitationId) : returnPath ?? withProvider(HOST_HOME_PATH, login.providerId));
   clearLoginCookie(response);
   setAccountSessionCookie(response, opened.sessionToken, opened.absoluteExpiresAtUtc, now);
+  // When this session runs out, the console signs the host in again by itself (#632). Writers get the mark too: their
+  // console pages use the same Experience host account session.
+  setReturningHostCookie(response);
   return response;
 }
 
@@ -298,6 +322,53 @@ async function completeInvite(request: NextRequest, login: HostLoginState, code:
   if (opened?.kind !== "ok") return failed("unavailable");
   const response = await signedIn(request, login, accounts, opened, now);
   clearInviteBindingCookie(response);
+  return response;
+}
+
+/**
+ * The return of a team invitation's sign-in (#636): the NIHO account that came back is joined to the provider's team as COHOST
+ * (its host account is found or made by the store) and the invitation is used up, in one transaction; then that host account's
+ * session opens and the person lands at the provider's home. A refusal changes nothing and the invitation stays usable. A
+ * session that fails to open after joining leaves the membership: the person signs in with the NIHO button as everyone does.
+ */
+async function completeTeamInvite(request: NextRequest, login: HostLoginState, code: string): Promise<NextResponse> {
+  const invitations = hostTeamInvitations();
+  const identities = hostAccountIdentities();
+  const accounts = hostAccounts();
+  if (!invitations || !identities || !accounts) return failed("team-invite-unavailable");
+  const binding = request.cookies.get(TEAM_INVITE_BINDING_COOKIE)?.value;
+  if (!isOpaqueSecret(binding)) return failed("team-invite-invalid");
+
+  const verified = await withNihoIdentity(code, login, async (nihoUserId, authTimeMs) => {
+    const now = Date.now();
+    let accepted;
+    try {
+      accepted = await invitations.accept({ browserBindingHash: linkBindingHash(binding), nihoUserId, nowUtc: nowUtc(now) });
+    } catch (error) {
+      // The transaction rolled back: the invitation is still open.
+      console.error(`[host-auth] team invitation not accepted: ${error instanceof Error ? error.name : "unknown error"}`);
+      return null;
+    }
+    if (accepted.kind !== "accepted") return { accepted, opened: null, now };
+    try {
+      return { accepted, opened: await identities.startSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) }), now };
+    } catch (error) {
+      console.error(`[host-auth] team invitation's session not opened: ${error instanceof Error ? error.name : "unknown error"}`);
+      return { accepted, opened: null, now };
+    }
+  });
+  if (!verified.ok || verified.value === null) return failed("team-invite-unavailable");
+  const { accepted, opened, now } = verified.value;
+  switch (accepted.kind) {
+    case "invalid": return failed("team-invite-invalid");
+    case "host-account-not-active": return failed("suspended");
+    case "email-account-has-identity": return failed("team-invite-mismatch");
+    case "accepted": break;
+  }
+  // Joined, but the session did not open: the invitation is used up, so the retry is the ordinary NIHO login.
+  if (opened?.kind !== "ok") return failed("unavailable");
+  const response = await signedIn(request, { ...login, providerId: accepted.providerId }, accounts, opened, now);
+  clearTeamInviteBindingCookie(response);
   return response;
 }
 

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { verifyNihoIdentityToken } from "./niho-identity-login";
+import { exchangeNihoIdentity, verifyNihoIdentityToken } from "./niho-identity-login";
 
 const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const kid = "test-key";
@@ -45,6 +45,54 @@ describe("NIHO Login ID token", () => {
     ["extended expiry", { exp: now + contract.idTokenTtlSeconds + 1 }],
   ])("rejects %s even for a valid signature", (_name, changed) => {
     expect(verifyNihoIdentityToken({ ...proof, token: token({ ...payload, ...changed }), maxAgeSeconds: 300 })).toBeNull();
+  });
+
+  it("exchanges with the client-specific NIHO Login identity token, never the shared Host token", async () => {
+    const sharedServiceIdToken = vi.fn(async () => "shared-host-token");
+    const nihoLoginServiceIdToken = vi.fn(async () => "niho-login-client-token");
+    const current = Math.floor(Date.now() / 1000);
+    const claims = { ...payload, auth_time: current - 30, iat: current, exp: current + contract.idTokenTtlSeconds };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith(contract.tokenPath)) {
+        expect(new Headers(init?.headers).get(contract.serviceIdentityHeader)).toBe("niho-login-client-token");
+        return new Response(JSON.stringify({ id_token: token(claims) }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ keys: [jwk] }), { status: 200 });
+    }) as typeof fetch;
+
+    const result = await exchangeNihoIdentity({
+      fetch: fetchMock,
+      nihoOrigin: "https://niho.example.test",
+      serviceIdToken: sharedServiceIdToken,
+      nihoLoginServiceIdToken,
+    }, {
+      code: "c".repeat(43),
+      verifier: "v".repeat(43),
+      nonce,
+      redirectUri: "https://experience.example.test/host/auth/callback",
+    });
+
+    expect(result).toEqual({ ok: true, value: { nihoUserId: payload.sub, authTimeMs: (current - 30) * 1000 } });
+    expect(nihoLoginServiceIdToken).toHaveBeenCalledOnce();
+    expect(sharedServiceIdToken).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the dedicated NIHO Login identity token is unavailable", async () => {
+    const sharedServiceIdToken = vi.fn(async () => "shared-host-token");
+    const fetchMock = vi.fn() as typeof fetch;
+    const result = await exchangeNihoIdentity({
+      fetch: fetchMock,
+      nihoOrigin: "https://niho.example.test",
+      serviceIdToken: sharedServiceIdToken,
+    }, {
+      code: "c".repeat(43),
+      verifier: "v".repeat(43),
+      nonce,
+      redirectUri: "https://experience.example.test/host/auth/callback",
+    });
+    expect(result).toEqual({ ok: false, reason: "unavailable" });
+    expect(sharedServiceIdToken).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown or duplicate key, an untrusted signature and unexpected JOSE fields", () => {

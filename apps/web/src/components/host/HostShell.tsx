@@ -5,10 +5,10 @@ import type { HostAccount } from "./ui";
 
 /**
  * The signed-in frame (mock v2 of the provider workspace, #84): on PC (md and up)
- * a 232px sidebar beside the page; on phones a brand header and five bottom tabs.
- * Settings and secondary destinations live in the account menu at both widths.
+ * a 232px sidebar beside the page (the provider's sections, 設定 and メンバー included, then the person's own account
+ * menu); on phones a provider menu and the account menu in the header, and five bottom tabs.
  * An account with no provider yet keeps the account/support exits, while the
- * provider-specific five-section menu stays hidden.
+ * provider-specific menu stays hidden.
  */
 export function HostShell({ account, providers, nihoAppUrl, writePath, preview, children }: { account: HostAccount; providers: readonly HostConsoleChoice[]; nihoAppUrl: string; writePath: string; preview: boolean; children: ReactNode }) {
   return (

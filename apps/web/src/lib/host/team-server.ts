@@ -1,7 +1,7 @@
 import "server-only";
-import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError, type HostTeamRepository } from "@niho-experience/experience-store";
+import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError, type HostTeamInvitations, type HostTeamRepository } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
-import { hostTeamRepository } from "@/lib/experience/store-server";
+import { hostTeamInvitations, hostTeamRepository } from "@/lib/experience/store-server";
 import { nihoIdOrNull } from "./providers";
 import { noStoreJson, readHostSession } from "./server";
 import { readBoundedJson, type BoundedJsonResult } from "./bounded-json";
@@ -20,6 +20,24 @@ export async function openNativeTeam(providerId: unknown): Promise<NativeTeamReq
   const repository = hostTeamRepository();
   if (!repository) return { response: noStoreJson({ error: "team_unavailable" }, 503) };
   return { providerId: id, hostAccountId: session.hostAccountId, repository };
+}
+
+export type NativeInvitationsRequest = { readonly providerId: string; readonly hostAccountId: string; readonly invitations: HostTeamInvitations };
+
+/** The invitations of the signed-in OWNER's provider (#636). 404 whenever EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED is off. */
+export async function openNativeInvitations(providerId: unknown): Promise<NativeInvitationsRequest | { readonly response: Response }> {
+  const closed = nativeInvitationsClosed();
+  if (closed) return { response: closed };
+  const opened = await openNativeTeam(providerId);
+  if ("response" in opened) return opened;
+  const invitations = hostTeamInvitations();
+  if (!invitations) return { response: noStoreJson({ error: "team_unavailable" }, 503) };
+  return { providerId: opened.providerId, hostAccountId: opened.hostAccountId, invitations };
+}
+
+/** The flag's own 404, for a route to answer before it reads anything else (a cross-site or malformed request included). */
+export function nativeInvitationsClosed(): Response | null {
+  return config.hostTeamInvitationsEnabled ? null : noStoreJson({ error: "not_found" }, 404);
 }
 
 export function nativeTeamFailure(error: unknown): Response {

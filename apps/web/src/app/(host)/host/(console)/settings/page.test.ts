@@ -41,8 +41,6 @@ vi.mock("@/lib/config", () => ({ config: {
 } }));
 
 import { HostSettingsIndex } from "@/components/host/HostSettingsIndex";
-import { HostSettingsForm } from "@/components/host/HostSettingsForm";
-import { HostOperatingTeamPanel } from "@/components/host/HostOperatingTeamPanel";
 import HostSettingsPage from "./page";
 
 function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
@@ -62,15 +60,15 @@ beforeEach(() => {
 });
 
 describe("host settings server assembly", () => {
-  it("connects the team section to Experience membership commands with the legacy API disabled", async () => {
-    state.sessionKind = "experience";
-    state.hostTeamEnabled = true;
-    state.loadConsole.mockResolvedValue({ settings: { notifications: null } });
-    state.loadExperiencePayout.mockResolvedValue({ status: "setup-required" });
-    const tree = elements(await HostSettingsPage({ searchParams: Promise.resolve({ providerId: "provider-one", section: "team" }) }));
-    const form = tree.find((element) => element.type === HostSettingsForm);
-    const team = elements(form?.props.account as ReactNode).find((element) => element.type === HostOperatingTeamPanel);
-    expect(team?.props).toMatchObject({ providerId: "provider-one", role: "OWNER", mode: "native" });
+  it("forwards the moved sections to their new screens before looking at the provider", async () => {
+    const redirected = async (query: Record<string, string | string[]>) => {
+      try { await HostSettingsPage({ searchParams: Promise.resolve(query) }); } catch (error) { return (error as { digest?: string }).digest ?? String(error); }
+      return null;
+    };
+    expect(await redirected({ providerId: "provider-one", section: "team" })).toContain("/host/members?providerId=provider-one");
+    expect(await redirected({ providerId: "provider-one", section: "account", niho: ["linked"] })).toContain("/host/account?providerId=provider-one&niho=linked");
+    expect(await redirected({ providerId: "provider-one", section: "device" })).toContain("/host/account?providerId=provider-one#account-device");
+    expect(state.loadConsole).not.toHaveBeenCalled();
   });
 
   it("renders the overview from provider context without loading every setting", async () => {
@@ -78,7 +76,6 @@ describe("host settings server assembly", () => {
     expect(tree.find((element) => element.type === HostSettingsIndex)?.props).toMatchObject({
       providerId: "provider-one",
       role: "OWNER",
-      deviceEnabled: true,
       articlesEnabled: true,
     });
     expect(state.loadConsole).not.toHaveBeenCalled();

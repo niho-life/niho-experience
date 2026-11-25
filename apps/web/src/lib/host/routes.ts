@@ -3,6 +3,8 @@ export const HOST_INTRO_PATH = "/host";
 export const HOST_HOME_PATH = "/host/home";
 export const HOST_REGISTER_PATH = "/host/register";
 export const HOST_LOGIN_PATH = "/host/auth/login";
+/** The NIHO sign-in a returning host's browser starts by itself when the console finds no session (#632, returning-host.ts). */
+export const HOST_AUTO_LOGIN_PATH = `${HOST_LOGIN_PATH}?auto=1`;
 export const HOST_MOCK_LOGIN_PATH = "/host/auth/mock-login";
 export const HOST_REFRESH_PATH = "/host/auth/refresh";
 export const HOST_LOGOUT_PATH = "/host/auth/logout";
@@ -20,6 +22,11 @@ export const HOST_LOGIN_LINK_PATH = "/host/auth/open";
  * is `/host/auth/login?invite=1` (HOST_LOGIN_PATH), whose return binds the NIHO account to the invited host account.
  */
 export const HOST_INVITE_PATH = "/host/auth/invite";
+/**
+ * The link of a provider's team invitation (#636): `/host/auth/team-invite#t=<token>` from the email. The same two steps as
+ * HOST_INVITE_PATH, with its own cookie; the sign-in that follows is `/host/auth/login?teaminvite=1`.
+ */
+export const HOST_TEAM_INVITE_PATH = "/host/auth/team-invite";
 export const HOST_INVITATIONS_PATH = "/host/invitations";
 export const HOST_API_PREFIX = "/host/api/";
 /** Creates a short-lived Express dashboard login link after server-side OWNER checks. */
@@ -46,6 +53,10 @@ export const HOST_BOOKINGS_PATH = "/host/bookings";
 export const HOST_BOOKING_SESSION_PATH = "/host/bookings/session";
 export const HOST_SALES_PATH = "/host/sales";
 export const HOST_SETTINGS_PATH = "/host/settings";
+/** メンバー: who runs this provider with the OWNER (it was 設定 › チーム). */
+export const HOST_MEMBERS_PATH = "/host/members";
+/** あなたのアカウント: the signed-in person's own settings, the same under every provider. */
+export const HOST_ACCOUNT_PATH = "/host/account";
 /** The confirmation link of a new notification address (#194): `#t=<token>`, outside the console frame. */
 export const HOST_NOTIFICATION_EMAIL_PATH = "/host/notification-email";
 /** 本人OWNERの通常Spot / 外部Providerに独立したNIHOサポート設定。 */
@@ -69,16 +80,16 @@ export const HOST_NAV = [
   { href: HOST_CALENDAR_PATH, label: "カレンダー" },
   { href: "/host/bookings", label: "予約" },
   { href: "/host/sales", label: "売上" },
+  { href: HOST_MEMBERS_PATH, label: "メンバー" },
   { href: "/host/settings", label: "設定" },
 ] as const;
 
 /**
- * The five places a host uses during day-to-day operations. Settings remains in
- * HOST_NAV because it is still a permissioned console section, but it is opened
- * from the account menu instead of competing with daily work in the sidebar or
- * phone tab bar.
+ * The five places a host uses during day-to-day operations (the phone tab bar). メンバー and 設定 stay in HOST_NAV
+ * because they are permissioned console sections, but they are opened from the sidebar or the provider menu instead of
+ * competing with daily work in the tab bar.
  */
-export const HOST_DAILY_NAV = HOST_NAV.filter((item) => item.href !== HOST_SETTINGS_PATH);
+export const HOST_DAILY_NAV = HOST_NAV.filter((item) => item.href !== HOST_SETTINGS_PATH && item.href !== HOST_MEMBERS_PATH);
 
 /**
  * `href` with these query values set, after the query it already has. Empty values are left
@@ -241,11 +252,13 @@ export function hostLandingPath(providerId: string | null, connect: unknown): st
  * unknown or no longer open when the NIHO sign-in came back (`invalid`); the NIHO account is bound to another host
  * account (`in-use`) or the invited host account has another NIHO account (`has-identity`), or the sign-in could not be
  * completed this time (`unavailable`: the invitation stays usable). `unverified`: NIHO did not say when the person signed in,
- * so no recent sign-in can be judged and nothing was opened or bound.
+ * so no recent sign-in can be judged and nothing was opened or bound. `team-invite-*` (#636): the same for a provider's team
+ * invitation (`mismatch`: the address's host account belongs to another NIHO account).
  */
 export const LOGIN_ERROR_REASONS = [
   "expired", "state", "denied", "rejected", "unavailable", "link", "unregistered", "suspended", "writer-revoked", "writer-unavailable",
   "invite-expired", "invite-used", "invite-browser", "invite-invalid", "invite-in-use", "invite-has-identity", "invite-unavailable",
   "unverified",
+  "team-invite-expired", "team-invite-used", "team-invite-browser", "team-invite-invalid", "team-invite-mismatch", "team-invite-unavailable",
 ] as const;
 export type LoginErrorReason = (typeof LOGIN_ERROR_REASONS)[number];

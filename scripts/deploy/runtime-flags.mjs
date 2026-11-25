@@ -329,6 +329,14 @@ export const FLAGS = Object.freeze([
     variable: "HOST_NIHO_LOGIN_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
   },
+  // ホストのアカウントの選び直し (#632): 「ホストに登録されていません」と招待の「別の NIHO アカウントでやり直す」で、NIHO に
+  // `prompt=select_account` を付けて接続の確認（アカウントの切替）を必ず出させる。NIHO が連携済みのホストの確認を省く（niho-coliving/niho-app#21302）と、
+  // 別の方法の NIHO アカウントで入ったホストが切り替えられなくなるため。NIHO 側の本番配備の前に ON にしない（URL ごと無効になる）。
+  {
+    env: "EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED",
+    variable: "NIHO_LOGIN_PROMPT_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED"],
+  },
   // 旅行者のアカウント (Epic #591, #597, ADR 0004 §8): Google / Apple / LINE のボタンから、NIHO の名前を出さずにアカウントを作る。
   // アカウントとセッション（migration 0085）は Experience の DB で、ホストアカウントとは別の表と cookie。NIHO の戻りは同じ callback なので
   // ホストのアカウント（HOST_ACCOUNTS_ENABLED。旧 NIHO トークン方式の callback に旅行者を入れないため）が前提。
@@ -340,11 +348,18 @@ export const FLAGS = Object.freeze([
     // The terms of service a traveler agrees to by logging in: linked beside the privacy notice while set.
     settings: [{ env: "EXPERIENCE_TERMS_URL", variable: "TERMS_URL", shape: "httpsUrl", optional: true }],
   },
-  // S1b. NIHO's status API contract is proposed but not deployed; keep this off until its fixed source SHA is accepted in staging.
+  // S1b. NIHO's status API contract is merged in niho-app#21003 but not deployed/accepted in staging; keep this off until its fixed source SHA is accepted there.
   {
     env: "EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED",
     variable: "NIHO_ACCOUNT_STATUS_CHECK_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
+  },
+  // NIHO Login (niho-app#20991): its code exchange uses a client-specific ID-token audience, and requires the S1b status check.
+  {
+    env: "EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED",
+    variable: "NIHO_IDENTITY_LOGIN_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED|EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED"],
+    settings: [{ env: "NIHO_LOGIN_SERVICE_AUDIENCE", variable: "NIHO_LOGIN_SERVICE_AUDIENCE", shape: "httpsUrl" }],
   },
   // 旅行者の入口の LINE (Epic #591, #597): LINE のボタンと `method=line`。**NIHO の LINE プロバイダーの切替（2027-01）のあとに ON にする。**
   // 今は LINE の同意画面に切替前のプロバイダー名が出て、LINE の `sub` はプロバイダーごとに違うので、いま作った旅行者のアカウントは
@@ -361,6 +376,13 @@ export const FLAGS = Object.freeze([
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
     // The dependency opens the native account mode, so the team switch has the same incompatible legacy consumers.
     conflicts: ["EXPERIENCE_PROVIDER_OPERATIONS_API_ENABLED", "EXPERIENCE_PROVIDER_PAGES_API_ENABLED", "EXPERIENCE_HOST_ARTICLE_LINKS_ENABLED"],
+  },
+  // メンバーの招待 (#636, docs/host-team.md): the OWNER invites a person by email address; they join as COHOST by signing in at NIHO.
+  // Needs the native team, the NIHO login and the host mail (the mail job sends the link). Migration 0088 and its grants first.
+  {
+    env: "EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED",
+    variable: "HOST_TEAM_INVITATIONS_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_TEAM_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"],
   },
   // 開催回の担当 (#535 v0, docs/occurrence-assignments.md): 承認後決済の開催回に1人の内部担当。報酬の計算・送金はしない。
   {

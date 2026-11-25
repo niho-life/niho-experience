@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTeamCommand, parseTeamMutation, parseTeamResolve, parseTeamResolveResult, parseTeamSnapshot, teamMutationMatchesCommand } from "./team-contract";
+import { parseTeamCommand, parseTeamInvitationCreated, parseTeamInvitationRequest, parseTeamInvitations, parseTeamMutation, parseTeamResolve, parseTeamResolveResult, parseTeamSnapshot, teamMutationMatchesCommand } from "./team-contract";
 
 const HOST = `hst_${"1a".repeat(16)}`;
 const COMMAND = "10000000-0000-4000-8000-000000000001";
@@ -31,5 +31,29 @@ describe("native host team contract v1", () => {
     expect(teamMutationMatchesCommand(parsed, { commandId: COMMAND, operation: "remove", target: HOST })).toBe(false);
     expect(teamMutationMatchesCommand({ ...parsed, members: [] }, { commandId: COMMAND, operation: "add", target: HOST })).toBe(false);
     expect(parseTeamMutation({ ...mutation, receipt: { ...mutation.receipt, snapshot: { email: "private@example.test" } } })).toBeNull();
+  });
+});
+
+describe("team invitation contract (#636)", () => {
+  const INVITATION = { id: "20000000-0000-4000-8000-000000000001", email: "invitee@example.test", createdAt: "2026-11-25T00:00:00.000Z", expiresAt: "2026-12-02T00:00:00.000Z", state: "SENT" };
+
+  it("accepts only the address as a request", () => {
+    expect(parseTeamInvitationRequest({ email: "invitee@example.test" })).toEqual({ email: "invitee@example.test" });
+    expect(parseTeamInvitationRequest({ email: "invitee@example.test", role: "OWNER" })).toBeNull();
+    expect(parseTeamInvitationRequest({ email: "x".repeat(255) })).toBeNull();
+    expect(parseTeamInvitationRequest("invitee@example.test")).toBeNull();
+  });
+
+  it("strictly validates the list and the created response", () => {
+    expect(parseTeamInvitations({ contractVersion: 1, invitations: [INVITATION] })).toEqual({ contractVersion: 1, invitations: [INVITATION] });
+    expect(parseTeamInvitations({ contractVersion: 1, invitations: [] })).toEqual({ contractVersion: 1, invitations: [] });
+    expect(parseTeamInvitations({ contractVersion: 2, invitations: [] })).toBeNull();
+    expect(parseTeamInvitations({ contractVersion: 1, invitations: [{ ...INVITATION, token: "leak" }] })).toBeNull();
+    expect(parseTeamInvitations({ contractVersion: 1, invitations: [{ ...INVITATION, state: "ACCEPTED" }] })).toBeNull();
+    expect(parseTeamInvitations({ contractVersion: 1, invitations: [{ ...INVITATION, id: "nope" }] })).toBeNull();
+    expect(parseTeamInvitations({ contractVersion: 1, invitations: [{ ...INVITATION, expiresAt: "tomorrow" }] })).toBeNull();
+    expect(parseTeamInvitationCreated({ kind: "created", invitation: INVITATION })).toEqual({ kind: "created", invitation: INVITATION });
+    expect(parseTeamInvitationCreated({ kind: "created", invitation: { ...INVITATION, hostAccountId: HOST } })).toBeNull();
+    expect(parseTeamInvitationCreated({ kind: "other", invitation: INVITATION })).toBeNull();
   });
 });
