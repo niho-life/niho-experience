@@ -43,7 +43,8 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
       title: category ? `${categoryLabel(category, "ja")}の体験` : "鎌倉の体験",
       description: category ? categoryLeadJa(category) : "鎌倉・逗子・葉山の人と活動に、会いにいく。体験を探せます。",
       alternates: { canonical: `${config.siteUrl}${canonicalPath}`, ...(category ? {} : { languages: { en: `${config.siteUrl}/experiences`, ja: `${config.siteUrl}/ja/experiences`, "x-default": `${config.siteUrl}/experiences` } }) },
-      robots: !hasFilter && count > 0 ? undefined : { index: false, follow: true },
+      // This value replaces the layout's robots, so the "search publishing is off" case (previews, staging) is said here too.
+      robots: !config.indexingAllowed ? { index: false, follow: false } : !hasFilter && count > 0 ? undefined : { index: false, follow: true },
     };
   } catch { return { title: "Japanese experiences unavailable", robots: { index: false, follow: false } }; }
 }

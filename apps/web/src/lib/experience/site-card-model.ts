@@ -107,3 +107,10 @@ export function scheduleDescription(offer: SitePublicOffer, locale: "en" | "ja" 
   const weekdays = offer.weekdays.length === 7 ? (locale === "ja" ? "毎日" : "Every day") : offer.weekdays.map((day) => (locale === "ja" ? ["日", "月", "火", "水", "木", "金", "土"] : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"])[day]).join(" · ");
   return `${weekdays} · ${formatClock(offer.startTime, locale)} JST`;
 }
+
+/** Cancellation lines by offer: one line when every offer says the same, else each offer's own. Always the product's own terms. */
+export function cancellationLines(offers: readonly SitePublicOffer[], locale: "en" | "ja" = "en"): { label: string | null; text: string }[] {
+  const lines = offers.map((offer) => ({ name: offer.name, text: cancellationSummary(offer, locale) }));
+  const distinct = [...new Set(lines.map((line) => line.text))];
+  return distinct.length <= 1 ? distinct.map((text) => ({ label: null, text })) : lines.map((line) => ({ label: line.name, text: line.text }));
+}

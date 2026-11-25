@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EXPERIENCE_CATEGORIES, type ExperienceCategoryId } from "@niho-experience/experience-domain";
-import { ALL_CATEGORIES_LABEL, categoryLabel, filterByCategory, parseCategoryParam, resolveCategories } from "./experience-categories";
+import { EXPERIENCE_AREAS } from "@niho-experience/experience-domain";
+import { ALL_CATEGORIES_LABEL, areaLabel, categoryLabel, filterByCategory, parseCategoryParam, resolveCategories } from "./experience-categories";
 
 describe("カテゴリーの名前（日英）", () => {
   it("すべての id に英語名と日本語名がある", () => {
@@ -39,5 +40,16 @@ describe("カテゴリーの絞り込み", () => {
   it("選んだカテゴリーの体験だけにする", () => {
     expect(filterByCategory([{ slug: "a" }, { slug: "b" }, { slug: "c" }, { slug: "d" }], bySlug, "walk").map((card) => card.slug)).toEqual(["a", "c"]);
     expect(filterByCategory([{ slug: "a" }, { slug: "d" }], bySlug, null)).toHaveLength(2);
+  });
+});
+
+describe("areaLabel (#658)", () => {
+  it("has an English name for every area, and the Japanese one is the classification's label", () => {
+    for (const { id, label } of EXPERIENCE_AREAS) {
+      expect(areaLabel(id, "en").trim()).not.toBe("");
+      expect(areaLabel(id, "ja")).toBe(label);
+    }
+    expect(areaLabel("kamakura", "en")).toBe("Around Kamakura Station");
+    expect(areaLabel("ofuna", "en")).toBe("Ofuna & the hills");
   });
 });

@@ -6,6 +6,7 @@ import { SAMPLE_TERMS } from "@/lib/testing/guest-booking-fixtures";
 const state = vi.hoisted(() => ({
   catalog: { experiences: [] as unknown[], claimedSlugs: [] as string[] } as { experiences: unknown[]; claimedSlugs: string[] } | Error,
   listed: [] as { slug: string; themes?: string[] }[] | null,
+  categories: null as Map<string, string> | null,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("./site-publications", () => ({
@@ -15,6 +16,9 @@ vi.mock("@/lib/experience-cards", () => ({
   readListedExperiences: vi.fn(async () => state.listed),
   cardsFor: vi.fn(async (summaries: { slug: string }[]) => summaries.map((summary) => ({ slug: summary.slug, title: `NIHO ${summary.slug}` }) as CardModel)),
 }));
+vi.mock("@/lib/experience-categories-server", () => ({ loadCategoryBySlug: vi.fn(async () => state.categories) }));
+vi.mock("@/lib/ja-people", () => ({ loadPeople: vi.fn(async () => []) }));
+vi.mock("@/lib/localized-content", () => ({ getJapaneseCopy: vi.fn(async () => { throw new Error("no copy in this test"); }) }));
 vi.mock("@/lib/journey", () => ({ getReviewSummaries: vi.fn(async () => new Map()) }));
 
 import { cardsFor } from "@/lib/experience-cards";
@@ -42,15 +46,16 @@ describe("relatedSiteExperienceCards (#146)", () => {
     vi.clearAllMocks();
     state.catalog = { experiences: [], claimedSlugs: [] };
     state.listed = [];
+    state.categories = null;
   });
 
   it("suggests up to three others in the list page's order, never the current one", async () => {
     state.catalog = { experiences: [native("here"), native("n1"), native("n2")], claimedSlugs: ["here", "n1", "n2"] };
     state.listed = [{ slug: "niho-a" }, { slug: "niho-b" }];
     expect(slugs(await relatedSiteExperienceCards("here"))).toEqual(["niho-a", "niho-b", "n1"]);
-    expect(slugs(await relatedSiteExperienceCards("here", 2))).toEqual(["niho-a", "niho-b"]);
+    expect(slugs(await relatedSiteExperienceCards("here", "en", 2))).toEqual(["niho-a", "niho-b"]);
     // From a NIHO page's point of view the same set applies, so a native one can be suggested too.
-    expect(slugs(await relatedSiteExperienceCards("niho-a", 5))).toEqual(["niho-b", "here", "n1", "n2"]);
+    expect(slugs(await relatedSiteExperienceCards("niho-a", "en", 5))).toEqual(["niho-b", "here", "n1", "n2"]);
   });
 
   it("keeps the list order when the current page is native, which has no themes to match", async () => {
@@ -67,7 +72,7 @@ describe("relatedSiteExperienceCards (#146)", () => {
   it("never lets a slug this site claims reveal the NIHO item with the same slug", async () => {
     state.catalog = { experiences: [native("n1")], claimedSlugs: ["n1", "stopped-here"] };
     state.listed = [{ slug: "stopped-here" }, { slug: "niho-a" }, { slug: "n1" }];
-    expect(slugs(await relatedSiteExperienceCards("elsewhere", 5))).toEqual(["niho-a", "n1"]);
+    expect(slugs(await relatedSiteExperienceCards("elsewhere", "en", 5))).toEqual(["niho-a", "n1"]);
     // The NIHO cards are read only for the ones picked.
     expect(vi.mocked(cardsFor).mock.calls[0]![0].map((summary) => summary.slug)).toEqual(["niho-a"]);
   });
@@ -82,6 +87,33 @@ describe("relatedSiteExperienceCards (#146)", () => {
     state.catalog = new Error("store unavailable");
     state.listed = [{ slug: "niho-a" }];
     expect(await relatedSiteExperienceCards("here")).toEqual([]);
+    expect(cardsFor).not.toHaveBeenCalled();
+  });
+
+  it("drops from the NIHO side every slug sold here, not only the claimed ones, and keeps the native card (#643, #658)", async () => {
+    // "sold" is published for a provider without a host seller profile: sold here but not in the claimed slugs.
+    state.catalog = { experiences: [native("sold"), native("n2")], claimedSlugs: ["n2"] };
+    state.listed = [{ slug: "niho-a" }, { slug: "sold" }, { slug: "n2" }];
+    const result = slugs(await relatedSiteExperienceCards("elsewhere", "en", 5));
+    expect(result).toEqual(["niho-a", "sold", "n2"]);
+    expect(result.filter((slug) => slug === "sold")).toHaveLength(1);
+    expect(vi.mocked(cardsFor).mock.calls[0]![0].map((summary) => summary.slug)).toEqual(["niho-a"]);
+  });
+
+  it("puts the experiences of the same category first, then the rest in the list's order, and never the current one", async () => {
+    state.catalog = { experiences: [native("here"), native("n1"), native("n2"), native("n3")], claimedSlugs: ["here", "n1", "n2", "n3"] };
+    state.listed = [{ slug: "niho-a" }, { slug: "niho-food" }];
+    state.categories = new Map([["here", "food"], ["niho-food", "food"], ["n3", "food"], ["n1", "walk"]]);
+    expect(slugs(await relatedSiteExperienceCards("here", "en", 3))).toEqual(["niho-food", "n3", "niho-a"]);
+    // Without a classification the list's order stands.
+    state.categories = null;
+    expect(slugs(await relatedSiteExperienceCards("here", "en", 3))).toEqual(["niho-a", "niho-food", "n1"]);
+  });
+
+  it("does not read the NIHO catalogue for the Japanese page, and suggests nothing when its words cannot be read", async () => {
+    state.catalog = { experiences: [native("here"), native("n1")], claimedSlugs: [] };
+    state.listed = [{ slug: "niho-a" }];
+    expect(await relatedSiteExperienceCards("here", "ja")).toEqual([]);
     expect(cardsFor).not.toHaveBeenCalled();
   });
 });

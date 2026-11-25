@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { JaBookingSummary } from "@/components/ja/JaBookingSummary";
-import { loadJaCards } from "@/lib/ja-catalog-server";
-import type { JaCard } from "@/lib/ja-catalog";
+import { BookingSummaryHeader } from "@/components/BookingSummaryHeader";
+import { loadClassificationOf } from "@/lib/experience-categories-server";
+import { loadPeople } from "@/lib/ja-people";
 import { BookingPageContent } from "@/components/pages/BookingPageContent";
 import { SitePublicationBooking } from "@/components/pages/SitePublicationBooking";
 import { attributionEnabled } from "@/lib/attribution-enabled";
@@ -16,9 +16,9 @@ export default async function JapaneseBookPage(props: { params: Promise<{ slug: 
   if (config.apiMode === "http") {
     const local = await getSitePublicExperience((await props.params).slug, "ja");
     if (local?.kind !== "published" || !local.item.publication.japanese) notFound();
-    const card = (await loadJaCards().catch(() => [] as readonly JaCard[])).find((entry) => entry.slug === local.item.publication.slug) ?? null;
-    const request = (local.item.saleTerms?.offers ?? []).some((offer) => offer.acceptanceMode === "APPROVAL");
-    return <div className="container-page max-w-3xl py-8 lg:py-12"><JaBookingSummary slug={local.item.publication.slug} title={local.item.publication.japanese.title} card={card} request={request} /><SitePublicationBooking item={local.item} siteOrigin={new URL(config.siteUrl).origin} consentVersion={config.guestBookingConsentVersion} bookingsEnabled={config.bookingsEnabled && config.guestBookingEnabled} locale="ja" attributionEnabled={attributionEnabled()} /></div>;
+    const slug = local.item.publication.slug;
+    const [classification, people] = await Promise.all([loadClassificationOf(slug), loadPeople()]);
+    return <div className="container-page max-w-3xl py-8 lg:py-12"><BookingSummaryHeader item={local.item} locale="ja" area={classification?.area ?? null} people={people.filter((entry) => entry.experienceSlugs.includes(slug))} /><SitePublicationBooking item={local.item} siteOrigin={new URL(config.siteUrl).origin} consentVersion={config.guestBookingConsentVersion} bookingsEnabled={config.bookingsEnabled && config.guestBookingEnabled} locale="ja" attributionEnabled={attributionEnabled()} /></div>;
   }
   return BookingPageContent({ ...props, locale: "ja" });
 }
