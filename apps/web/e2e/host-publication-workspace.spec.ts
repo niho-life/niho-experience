@@ -217,6 +217,23 @@ test("「英語から翻訳」 is on the Japanese tab, asks before replacing, an
   expect(Object.keys(translations[0]!)).toEqual(["english"]);
 });
 
+test("saving a Japanese-only page keeps its English title draft for translation", async ({ page }) => {
+  const patches: Array<Record<string, unknown>> = [];
+  const translations: Array<Record<string, unknown>> = [];
+  await mountHost(page, baseProduct({}, { japaneseOnly: true, enTitleDraft: "Synthetic English title" }), patches, translations);
+  await page.getByRole("button", { name: "日本語", exact: true }).click();
+  await page.getByRole("textbox", { name: "ひとこと紹介", exact: true }).fill("更新した紹介文");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByText("未保存の変更があります")).toHaveCount(0);
+  expect(patches).toHaveLength(1);
+
+  await page.getByRole("button", { name: "英語から翻訳", exact: true }).click();
+  await page.getByRole("dialog", { name: "今の日本語を置き換えますか？" }).getByRole("button", { name: "置き換える" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("翻訳された商品");
+  await expect(page.getByText("英語から翻訳しました。内容を確かめてから保存してください。")).toBeVisible();
+  expect(translations).toHaveLength(1);
+});
+
 test("when the English is the source, a change to it is told on the Japanese tab only", async ({ page }) => {
   await mountHost(page, baseProduct({}, { languageSync: { japaneseSourceFingerprint: "older-english" } }));
   await expect(page.getByText("日本語を変えたあと、英語は変わっていません")).toHaveCount(0);

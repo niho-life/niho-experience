@@ -746,7 +746,7 @@ export function HostPublicationWorkspace({
         if (savedContent && savedContent !== content) {
           // What was saved is the draft without its empty rows plus the confirmation: the form shows exactly that.
           japaneseSourceRef.current = japaneseManuscript(savedContent);
-          englishDraftRef.current = { title, content: savedContent };
+          englishDraftRef.current = { title: publicationEnglishTitle(savedContent, title), content: savedContent };
           setContent(savedContent);
         }
         publicationUpdated = Boolean((body as { publicationUpdated?: boolean }).publicationUpdated);
