@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-// The English header, its phone menu and the new About / Help pages (#645). The menu button is a <summary> (no "button" role),
-// so the tests find it as the details' summary. The mock preview registers the sample guides, so Journal is shown.
+// The English header, its phone menu and the new About / Help pages (#645). The menu trigger is an accessible button on its
+// native <summary>, with an expanded state. The mock preview registers the sample guides, so Journal is shown.
 
 test.describe("desktop header", () => {
   test.beforeEach(({}, testInfo) => test.skip(testInfo.project.name !== "desktop"));
@@ -11,7 +11,7 @@ test.describe("desktop header", () => {
     const nav = page.getByRole("navigation", { name: "Main" });
     await expect(nav.getByRole("link")).toHaveText(["Experiences", "Journal", "About", "Help"]);
     await expect(page.getByRole("banner").getByRole("link", { name: "Host with NIHO" })).toHaveCount(0);
-    await expect(page.getByRole("banner").locator("details > summary")).toBeHidden();
+    await expect(page.getByRole("banner").getByRole("button", { name: "Menu" })).toBeHidden();
   });
 
   test("About opens from the header with its heading", async ({ page }) => {
@@ -28,25 +28,30 @@ test.describe("phone menu", () => {
 
   test("opens with every destination, and navigating closes it", async ({ page }) => {
     await page.goto("/");
-    const button = page.getByRole("banner").locator("details > summary");
+    const button = page.getByRole("banner").getByRole("button", { name: "Menu" });
     await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link")).toHaveText(["Experiences"]);
+    await expect(button).toHaveAttribute("aria-expanded", "false");
     await button.click();
+    await expect(button).toHaveAttribute("aria-expanded", "true");
     const menu = page.getByRole("navigation", { name: "Menu" });
     for (const name of ["Experiences", "Journal", "About", "Help", "For hosts"]) await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
     await menu.getByRole("link", { name: "About" }).click();
     await expect(page).toHaveURL(/\/about$/);
     await expect(page.getByRole("navigation", { name: "Menu" })).toBeHidden();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
   test("Escape closes the menu and returns focus to its button", async ({ page }) => {
     await page.goto("/");
-    const button = page.getByRole("banner").locator("details > summary");
+    const button = page.getByRole("banner").getByRole("button", { name: "Menu" });
     await button.click();
     await expect(page.getByRole("navigation", { name: "Menu" })).toBeVisible();
+    await expect(button).toHaveAttribute("aria-expanded", "true");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("navigation", { name: "Menu" })).toBeHidden();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
     await expect(button).toBeFocused();
   });
 });

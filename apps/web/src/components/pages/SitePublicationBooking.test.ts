@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/browser-api", () => ({ getSiteBookingApi: () => ({ getAvailability: vi.fn(), startCheckout: vi.fn() }) }));
 
-import { SitePublicationBooking } from "./SitePublicationBooking";
+import { EmbedBookingUnavailable, SitePublicationBooking } from "./SitePublicationBooking";
 
 const offer = {
   id: "synthetic-offer", name: "Synthetic morning", shortDescription: null,
@@ -94,5 +94,69 @@ describe("site publication booking seller terms", () => {
     }));
     expect(html).toContain("Continue to secure checkout");
     expect(html).toContain("Stripe Checkout");
+  });
+
+  // ホストのサイトへの埋め込み (#638): the page keeps its one screen; only the date became a calendar.
+  it("keeps every field of the booking page on one screen, with a calendar for the date", () => {
+    const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: { publication: { slug: "paid-one", publicTitle: "Paid one", sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers: [offer] }, sellerDisclosure: null } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true,
+    }));
+    for (const field of ["Adults", "Full name", "Email", "Note", "Total", 'type="checkbox"', 'type="submit"', "Continue to secure checkout"]) expect(html, field).toContain(field);
+    expect(html).not.toContain("<select");
+    expect(html).toMatch(/<div role="group" aria-labelledby="([^"]+)"[^>]*><p id="\1">Date<\/p>/);
+    expect(html).toContain("Loading dates…");
+    expect(html).not.toContain("data-embed-root");
+    expect(html).not.toContain("Powered by NIHO Experience");
+    expect(html).not.toContain('aria-current="step"');
+  });
+
+  it("starts the embedded widget at the date step, without the contact fields", () => {
+    const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: { publication: { slug: "paid-one", publicTitle: "Paid one", sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers: [offer] }, sellerDisclosure: null } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true, layout: "embed",
+    }));
+    expect(html).toContain("data-embed-root");
+    expect(html).toContain("Book Paid one");
+    expect(html).toContain('<li aria-current="step"');
+    expect(html).toContain("1 Date");
+    expect(html).toContain("2 Details");
+    expect(html).toContain("3 Pay");
+    expect(html).toMatch(/<button type="button" disabled=""[^>]*>Continue<\/button>/);
+    expect(html).not.toContain("Full name");
+    expect(html).not.toContain('type="email"');
+    expect(html).not.toContain('type="submit"');
+    expect(html).toContain('href="https://experience.example.test" target="_blank" rel="noopener noreferrer"');
+    expect(html).toContain("Powered by NIHO Experience");
+    expect(html).not.toContain("Preview. Booking is turned off here.");
+  });
+
+  it("names the last step Done when nothing is paid in the widget", () => {
+    const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: { publication: { slug: "request-one", publicTitle: "Request one", sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers: [{ ...offer, acceptanceMode: "APPROVAL" }] }, sellerDisclosure: null } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true, layout: "embed",
+    }));
+    expect(html).toContain("3 Done");
+    expect(html).not.toContain("3 Pay");
+  });
+
+  it("turns booking off in the host's preview of the widget", () => {
+    const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: { publication: { slug: "paid-one", publicTitle: "Paid one", sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers: [offer] }, sellerDisclosure: null } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true, layout: "embed", preview: true,
+    }));
+    expect(html).toContain("Preview. Booking is turned off here.");
+    expect(html.indexOf("Preview. Booking is turned off here.")).toBeLessThan(html.indexOf(">Continue</button>"));
+    expect(html).toMatch(/<button type="button" disabled=""[^>]*>Continue<\/button>/);
+  });
+
+  it("says the widget cannot book, inside its frame, when booking is off", () => {
+    const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: { publication: { slug: "paid-one", publicTitle: "Paid one", sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers: [offer] }, sellerDisclosure: null } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: false, layout: "embed",
+    }));
+    expect(html).toContain("data-embed-root");
+    expect(html).toContain('<p role="status" class="rounded-2xl bg-sand p-5 text-ink-soft">Online booking is temporarily unavailable for this experience.</p>');
+    expect(renderToStaticMarkup(createElement(EmbedBookingUnavailable, { siteOrigin: "https://experience.example.test" }))).toContain('<p role="status" class="rounded-2xl bg-sand p-5 text-ink-soft">Online booking is temporarily unavailable for this experience.</p>');
   });
 });

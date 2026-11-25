@@ -63,9 +63,19 @@
 - **公開 read**：`getSitePublicExperience(slug, locale)`・`listSitePublicExperiences(locale)`・`listPublicationSummaries`・`getPublicationDetail` は、英語では印のある商品を除く（英語の詳細・予約は「予約済みの slug」として 404。同じ slug の NIHO の体験も出さない）。日本語では出す。`publicExperienceRouteAllowedForSlug`（空き・checkout・販売条件の route）は言語によらず許す。日本語の予約がこれを使う。
 - **sitemap・hreflang・言語切替**：`mapPublicationJapaneseExperiences` は印のある商品を `japaneseOnly` として持ち（売れる状態のものだけ）、`experienceCounterparts`（言語切替）には載せず、`sitemapEntries` は日本語の URL だけを hreflang なしで出す。日本語詳細の metadata は canonical だけ（存在しない英語を指さない）。
 - **保存の条件**：`japaneseOnly` の draft は `EXPERIENCE_JAPANESE_SITE_ENABLED` が `true` の環境でだけ保存できる（host・admin の draft API が `INVALID_INPUT` で拒否する）。既定は OFF なので、この flag を入れるまで日本語のみの商品は作れない。
-- **host・admin の編集画面**：原稿の節に「日本語のみで公開する」の選択肢がある。選ぶと英語の欄・翻訳・英語の確認が消え、事務局の代理公開は「日本語原稿を確認」になる。
+- **host・admin の編集画面**：host は「掲載設定 › 掲載言語」で日本語だけにチェックを入れる（#640）。admin の代理登録は、原稿の節に「日本語のみで公開する」の選択肢がある。選ぶと英語の欄・翻訳・英語の確認が消え、事務局の代理公開は「日本語原稿を確認」になる。
 - **あとから英語を足す**操作は v0 に無い（印を外して英語を確認すれば従来の商品になるが、公開上の商品名は日本語のまま残るので、英語の商品名を入れ直す）。英語を足した時点で英語側にも出す仕組みの整備は残作業。
 - **v0 の制約**：写真の説明（英語）は入力欄が必須のまま（日本語のみでも何か入れる）。`/api/public/experiences`（公開データの JSON）には印付きの商品も含まれる（`japaneseOnly: true` で区別できる。英語側の項目は空）。
+
+## 英語のみで掲載する商品（オーナー決定 2026-11-25、#640）
+
+host の「掲載設定 › 掲載言語」は「英語」「日本語」のチェックで、1つ以上を選ぶ。両方なら従来の日英の商品、日本語だけなら上の「日本語を原文にした商品」、英語だけなら次の形になる。
+
+- **印**：下書きの `content.englishOnly === true`。保存する `content.ja` は空の原稿にする。日本語の文は、掲載しない下書き（翻訳のもと）として `content.jaDraft` に持つ。`japaneseOnly` と同時には立てられない（draft API が `INVALID_INPUT` で拒否する）。
+- **公開 projection**：`englishOnly` の商品は、`content.ja` に文があっても `japanese` を出さない（`projectJapaneseManuscript` が null）。`/ja` の詳細・一覧・sitemap・hreflang・言語切替には載らない。英語側は従来の商品と同じ。
+- **公開条件**：英語の原稿と、空の日本語原稿に対する fingerprint の一致。写真の説明（日本語）はサーバーが必須にしているので、host の画面が保存時に英語の説明を写す（v0 の制約）。
+- **日本語のみの商品の英語**：英語の本文は下書きに残り、英語の体験名は `content.enTitleDraft` に持つ（`publicTitle` は日本語の体験名と同じでなければならないため）。掲載言語で英語にチェックを入れると、その体験名と本文が英語の原稿に戻る。
+- **掲載をやめた言語のページ**は、次の公開から出なくなる。
 
 ## 日本語のトップ（オーナー決定 2026-11-14、#561・#563）
 

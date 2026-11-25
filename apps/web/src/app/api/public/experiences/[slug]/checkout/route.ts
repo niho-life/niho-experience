@@ -3,7 +3,7 @@ import { createDirectCheckout, createPlatformCheckout, expireDirectCheckout, exp
 import { GuestCheckoutError, StoreNotFoundError, type GuestBookingStart } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { checkoutIpDigest } from "@/lib/experience/checkout-ip-limit";
-import { checkoutError, readGuestCheckout, storeCheckoutError } from "@/lib/experience/guest-booking-http";
+import { checkoutError, readGuestCheckout, storeCheckoutError, stripeReturnPath } from "@/lib/experience/guest-booking-http";
 import { fromThisSite, publicEmpty, publicJson } from "@/lib/experience/public-http";
 import { publicExperienceRouteAllowedForSlug } from "@/lib/experience/site-publications";
 import { guestBookingRepository } from "@/lib/experience/store-server";
@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const bookings = guestBookingRepository();
   const stripeKey = process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY;
   if (!bookings) return checkoutError("CHECKOUT_UNAVAILABLE");
-  const parsed = await readGuestCheckout(request);
+  const parsed = await readGuestCheckout(request, { embedEnabled: config.embedEnabled });
   if (!parsed.ok) return parsed.response;
   const guestLanguage = request.headers.get("accept-language")?.split(",", 1)[0]?.trim().toLowerCase().split("-", 1)[0] === "ja" ? "JA" : "EN";
   const returnPath = `${guestLanguage === "JA" ? "/ja" : ""}${RETURN_PATH}`;
@@ -133,7 +133,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     session = await createCheckout({
       booking: started.booking,
       returnOrigin: siteOrigin,
-      returnPath,
+      returnPath: stripeReturnPath(returnPath, started.embedOrigin),
       cancelPath: `${guestLanguage === "JA" ? "/ja" : ""}/experiences/${encodeURIComponent(slug)}?checkout=cancelled`,
       locale: guestLanguage === "JA" ? "ja" : "auto",
       ...(started.guestEmail === null ? {} : { customerEmail: started.guestEmail }),

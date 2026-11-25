@@ -34,7 +34,8 @@ export function PrivacyNotice({ policyUrl, analytics = false, inquiry = false }:
           <p>
             When you book: your name, your email address, your phone number if you give one, your note to the host, your answers to the booking
             questions, the booking itself (date, party size and amount) and your messages with the host. If the link you came from carried
-            campaign tags, we keep those too.
+            campaign tags, we keep those too. If you booked from a booking form on a host&apos;s own website, we keep that website&apos;s address
+            (not the page you were on).
           </p>
           <p>When you ask a host a question before booking: your name, your email address and your messages.</p>
         </Section>

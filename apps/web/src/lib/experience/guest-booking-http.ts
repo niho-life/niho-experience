@@ -84,18 +84,43 @@ export function storeCheckoutError(error: GuestCheckoutError): Response {
   });
 }
 
-type CheckoutBody = ExperienceCheckoutRequest & ExperienceCheckoutJourneyFields & { readonly salesPlanRevision?: number };
+type CheckoutBody = ExperienceCheckoutRequest & ExperienceCheckoutJourneyFields & { readonly salesPlanRevision?: number }
+  & { readonly salesChannel?: "embed"; readonly embedOrigin?: string };
 
 const UTM_KEYS = ["utmSource", "utmMedium", "utmCampaign", "utmContent"] as const satisfies readonly (keyof CheckoutBody)[];
 const REQUEST_KEYS: readonly string[] = [
   "offerId", "occurrenceDate", "adultCount", "childCount", "expectedTotalYen", "guestName", "guestEmail", "note", "answers",
   "bookingQuestionsFingerprint", "salesPlanRevision", "consent", "clientRequestKey", ...UTM_KEYS, "guestPhone", "conditionsConsent",
+  "salesChannel", "embedOrigin",
 ] satisfies readonly (keyof CheckoutBody)[];
 const STRING_FIELDS = ["offerId", "occurrenceDate", "guestName", "guestEmail", "bookingQuestionsFingerprint", "clientRequestKey"] as const;
 const NUMBER_FIELDS = ["adultCount", "childCount", "expectedTotalYen"] as const;
 
 /** What the page decides; the route adds the slug, the language and the current terms version. */
-export type GuestCheckoutFields = Omit<StartGuestBookingInput, "slug" | "guestLanguage" | "currentConsentVersion" | "holdSeconds">;
+export type GuestCheckoutFields = Omit<StartGuestBookingInput, "slug" | "guestLanguage" | "currentConsentVersion" | "holdSeconds" | "salesChannel" | "embedOrigin">
+  & { readonly salesChannel: "SITE" | "EMBED"; readonly embedOrigin: string | null };
+
+/** The store's shape (migration 0089): https, a lower-case host, an optional port, nothing after it. */
+const EMBED_ORIGIN = /^https:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$/;
+
+/**
+ * The framing site's origin as the widget sent it, or null when it is not one: the origin is optional extra
+ * information, so a value that is not an https origin is dropped rather than refusing the booking. Only the
+ * origin is kept, never a path, query or credentials.
+ */
+export function embedOriginOf(value: string): string | null {
+  if (value.length > 2048) return null;
+  let url: URL;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== "https:" || url.username !== "" || url.password !== "") return null;
+  const origin = url.origin.toLowerCase();
+  return origin.length <= 255 && EMBED_ORIGIN.test(origin) ? origin : null;
+}
+
+export interface ReadGuestCheckoutOptions {
+  /** EXPERIENCE_EMBED_ENABLED. Off, the widget's salesChannel and embedOrigin are dropped unread and the booking is the site's. */
+  readonly embedEnabled: boolean;
+}
 
 export type ParsedGuestCheckout = { ok: true; fields: GuestCheckoutFields } | { ok: false; response: Response };
 
@@ -117,7 +142,7 @@ const invalid = (field: string): ParsedGuestCheckout => refused(checkoutError("I
  * its field. The value rules (lengths, patterns, answers against the questions) are the store's, which
  * answers NIHO's codes. With `DNT: 1` the UTM fields are dropped unread, as NIHO does.
  */
-export async function readGuestCheckout(request: Request): Promise<ParsedGuestCheckout> {
+export async function readGuestCheckout(request: Request, options: ReadGuestCheckoutOptions = { embedEnabled: false }): Promise<ParsedGuestCheckout> {
   const body = await readPublicJsonObject(request, GUEST_CHECKOUT_BODY_LIMIT);
   if (!body.ok) return refused(checkoutError("VALIDATION_ERROR", body.tooLarge ? { status: 413 } : {}));
   const value = body.value;
@@ -144,6 +169,19 @@ export async function readGuestCheckout(request: Request): Promise<ParsedGuestCh
   if (answers !== undefined && !Array.isArray(answers)) return refused(checkoutError("ANSWERS_INVALID", { field: "answers" }));
   if (answers?.some((answer) => isObject(answer) && !onlyKeys(answer, ["questionId", "text", "optionIds"]))) {
     return refused(checkoutError("VALIDATION_ERROR"));
+  }
+
+  // 販売経路 (#638): only the booking widget on a host's site says "embed", with the framing origin if it knows it.
+  let salesChannel: "SITE" | "EMBED" = "SITE";
+  let embedOrigin: string | null = null;
+  if (options.embedEnabled) {
+    if (value.salesChannel !== undefined && value.salesChannel !== "embed") return invalid("salesChannel");
+    if (value.embedOrigin !== undefined) {
+      if (typeof value.embedOrigin !== "string" || value.salesChannel !== "embed") return invalid("embedOrigin");
+      // Do Not Track: the channel is kept, the framing site's origin is not (as the UTM fields below).
+      embedOrigin = request.headers.get("dnt") === "1" ? null : embedOriginOf(value.embedOrigin);
+    }
+    if (value.salesChannel === "embed") salesChannel = "EMBED";
   }
 
   let utm: Partial<Record<(typeof UTM_KEYS)[number], string>> | undefined;
@@ -176,6 +214,17 @@ export async function readGuestCheckout(request: Request): Promise<ParsedGuestCh
       note: (value.note as string | null | undefined) ?? null,
       utm,
       clientRequestKey: value.clientRequestKey as string,
+      salesChannel,
+      embedOrigin,
     },
   };
+}
+
+/**
+ * Where Stripe returns a guest from a new Checkout Session. A booking made from the widget on a host's site with a
+ * known origin also carries `cs={CHECKOUT_SESSION_ID}`, which Stripe fills with the Session's ID, so the return page
+ * can read that booking's origin for its "Back to {host}" link (#638). Every other booking returns as before.
+ */
+export function stripeReturnPath(returnPath: string, embedOrigin: string | null): string {
+  return embedOrigin ? `${returnPath}&cs={CHECKOUT_SESSION_ID}` : returnPath;
 }

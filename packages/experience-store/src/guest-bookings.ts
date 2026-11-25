@@ -322,7 +322,13 @@ export interface StartGuestBookingInput {
   readonly checkoutIpDigest?: string;
   /** Defaults to the repository's (35 minutes); 60-3600. */
   readonly holdSeconds?: number;
+  /** Where the booking is made: the experience site itself (default) or the widget framed on the host's site. */
+  readonly salesChannel?: GuestBookingSalesChannel;
+  /** EMBED only: the framing site's origin (https://host[:port], lower case). Never a path or query. */
+  readonly embedOrigin?: string | null;
 }
+
+export type GuestBookingSalesChannel = "SITE" | "EMBED";
 
 /** A new hold, or the earlier booking of the same request. */
 export interface GuestBookingStart {
@@ -338,6 +344,11 @@ export interface GuestBookingStart {
   readonly guestEmail: string | null;
   /** The Checkout Session already attached to this booking (a repeated request), or null. */
   readonly checkoutSessionRef: string | null;
+  /**
+   * The framing site's origin of this request: what a new EMBED booking stores, and for a repeated request the same value
+   * (the request's own, which the matching fingerprint shows is the one stored). null for SITE or an unknown origin.
+   */
+  readonly embedOrigin: string | null;
   /** For experience-payments' createDirectCheckout. */
   readonly booking: BookingRecord;
 }
@@ -379,6 +390,10 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE = /^\+?[0-9 ().-]+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SESSION_REF = /^[A-Za-z0-9_-]{1,256}$/;
+/** The same shape as booking_guests_embed_origin_check (migration 0089). */
+const EMBED_ORIGIN = /^https:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$/;
+/** A Stripe Checkout Session ID as the return page receives it. */
+const CHECKOUT_SESSION_ID = /^cs_[A-Za-z0-9_]{1,250}$/;
 const ENDED_SESSION_EVENTS: ReadonlySet<string> = new Set(["checkout.session.expired", "checkout.session.async_payment_failed"]);
 /** Control characters other than tab and line breaks. */
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
@@ -1150,6 +1165,8 @@ interface ValidRequest {
   readonly clientRequestKey: string;
   readonly checkoutIpDigest: string | null;
   readonly holdSeconds: number;
+  readonly salesChannel: GuestBookingSalesChannel;
+  readonly embedOrigin: string | null;
   /** SHA-256 of everything the guest sent, for REQUEST_MISMATCH. */
   readonly fingerprint: string;
 }
@@ -1270,6 +1287,16 @@ function validRequest(input: StartGuestBookingInput, defaultHoldSeconds: number)
   }
   if (input.guestLanguage !== "EN" && input.guestLanguage !== "JA") throw invalid("guestLanguage");
   const answers = answerShapes(input.answers);
+  const salesChannel = input.salesChannel ?? "SITE";
+  if (salesChannel !== "SITE" && salesChannel !== "EMBED") throw invalid("salesChannel");
+  let embedOrigin: string | null = null;
+  if (input.embedOrigin !== undefined && input.embedOrigin !== null) {
+    if (salesChannel !== "EMBED" || typeof input.embedOrigin !== "string"
+      || input.embedOrigin.length < 9 || input.embedOrigin.length > 255 || !EMBED_ORIGIN.test(input.embedOrigin)) {
+      throw invalid("embedOrigin");
+    }
+    embedOrigin = input.embedOrigin;
+  }
 
   const request = {
     offerId: input.offerId,
@@ -1295,8 +1322,13 @@ function validRequest(input: StartGuestBookingInput, defaultHoldSeconds: number)
     request.answers, request.termsConsentVersion, request.conditionsConsentVersion,
     request.guestName, request.guestEmail, request.guestPhone, request.guestLanguage, request.note,
     UTM_KEYS.map((key) => utm[key] ?? null),
+    // SITE adds nothing, so its fingerprint is what it was before the sales channel existed.
+    ...(salesChannel === "EMBED" ? ["EMBED", embedOrigin] : []),
   ]), "utf8").digest("hex");
-  return { ...request, slug: input.slug, currentConsentVersion: input.currentConsentVersion, clientRequestKey: input.clientRequestKey, checkoutIpDigest: input.checkoutIpDigest ?? null, holdSeconds, fingerprint };
+  return {
+    ...request, slug: input.slug, currentConsentVersion: input.currentConsentVersion, clientRequestKey: input.clientRequestKey,
+    checkoutIpDigest: input.checkoutIpDigest ?? null, holdSeconds, salesChannel, embedOrigin, fingerprint,
+  };
 }
 
 /** Answers against the offer's questions. Returns what is kept: answered questions only. */
@@ -1334,7 +1366,9 @@ function checkedAnswers(questions: readonly BookingQuestion[], answers: readonly
   return kept;
 }
 
-function startResult(booking: BookingRecord, productTitle: string, guestEmail: string | null, checkoutSessionRef: string | null): GuestBookingStart {
+function startResult(
+  booking: BookingRecord, productTitle: string, guestEmail: string | null, checkoutSessionRef: string | null, embedOrigin: string | null,
+): GuestBookingStart {
   return {
     publicBookingId: booking.publicBookingId,
     status: booking.status,
@@ -1346,6 +1380,7 @@ function startResult(booking: BookingRecord, productTitle: string, guestEmail: s
     productTitle,
     guestEmail,
     checkoutSessionRef,
+    embedOrigin,
     booking,
   };
 }
@@ -1938,6 +1973,9 @@ export class GuestBookingRepository {
           product.publicTitle,
           guestRow.guest_email === null ? null : String(guestRow.guest_email),
           guestRow.checkout_session_ref === null ? null : String(guestRow.checkout_session_ref),
+          // The fingerprint covers the sales channel and its origin, so a matching request names the origin that was kept:
+          // this read stays what it was before the sales channel existed.
+          request.embedOrigin,
         ) };
       }
 
@@ -2064,7 +2102,21 @@ export class GuestBookingRepository {
         if (error instanceof BookingUnavailableError) throw checkoutErrorFor(error);
         throw error;
       }
-      await client.query(
+      if (request.salesChannel === "EMBED") {
+        // The booking widget framed on the host's site: the same row plus where it was made.
+        await client.query(
+          `INSERT INTO booking_guests (
+             provider_id, booking_id, guest_name, guest_email, guest_email_key, guest_phone, guest_language, note,
+             answers, adult_count, child_count, terms_consent_version, conditions_consent_version,
+             client_request_key, request_fingerprint, utm, approval_status, sales_channel, embed_origin
+           ) VALUES ($1,$2,$3,$4,lower($4),$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,'EMBED',$17)`,
+          [
+            providerId, placed.bookingRowId, request.guestName, request.guestEmail, request.guestPhone, request.guestLanguage, request.note,
+            JSON.stringify(answers), request.adultCount, request.childCount, request.termsConsentVersion, request.conditionsConsentVersion,
+            request.clientRequestKey, request.fingerprint, JSON.stringify(request.utm), approvalRequest ? "PENDING" : null, request.embedOrigin,
+          ],
+        );
+      } else await client.query(
         `INSERT INTO booking_guests (
            provider_id, booking_id, guest_name, guest_email, guest_email_key, guest_phone, guest_language, note,
            answers, adult_count, child_count, terms_consent_version, conditions_consent_version,
@@ -2114,10 +2166,10 @@ export class GuestBookingRepository {
           providerId, aggregateType: "schedule_occurrence", aggregateId: booking.occurrenceId, cause: "booking_confirmed",
         });
         if (ipWindow) await countCheckoutIpAttempt(client, ipWindow);
-        return { kind: "started", booking: startResult(booking, product.publicTitle, request.guestEmail, null) };
+        return { kind: "started", booking: startResult(booking, product.publicTitle, request.guestEmail, null, request.embedOrigin) };
       }
       if (ipWindow) await countCheckoutIpAttempt(client, ipWindow);
-      return { kind: "started", booking: startResult(placed.booking, product.publicTitle, request.guestEmail, null) };
+      return { kind: "started", booking: startResult(placed.booking, product.publicTitle, request.guestEmail, null, request.embedOrigin) };
     });
     if (outcome.kind === "rate-limited") {
       throw new GuestCheckoutError("RATE_LIMITED", {
@@ -2126,6 +2178,32 @@ export class GuestBookingRepository {
       });
     }
     return outcome.booking;
+  }
+
+  /**
+   * The payment return page's "Back to {host}" link: the origin kept with the EMBED booking whose Checkout
+   * Session this is, only right after the request (`maxAgeSeconds`, two hours by default) and only while the
+   * booking is paid, under payment review or still an active hold. Otherwise null (a SITE booking, an unknown
+   * Session, no origin kept, erased data, an expired or cancelled booking, an old request), so a Session ID
+   * alone cannot keep a link on the return page. Read only; anything that is not a Checkout Session ID is null
+   * without touching the database.
+   */
+  async findEmbedReturnOrigin(checkoutSessionRef: string, options: { readonly maxAgeSeconds?: number } = {}): Promise<string | null> {
+    const maxAgeSeconds = options.maxAgeSeconds ?? 7_200;
+    if (!Number.isSafeInteger(maxAgeSeconds) || maxAgeSeconds < 1) throw new StoreValidationError("maxAgeSeconds must be a positive integer.");
+    if (typeof checkoutSessionRef !== "string" || !CHECKOUT_SESSION_ID.test(checkoutSessionRef)) return null;
+    const result = await this.#pool.query<DbRow>(
+      `SELECT g.embed_origin
+         FROM booking_guests g
+         JOIN bookings b ON b.provider_id = g.provider_id AND b.id = g.booking_id
+        WHERE g.checkout_session_ref = $1 AND g.sales_channel = 'EMBED' AND g.embed_origin IS NOT NULL
+          AND g.created_at > clock_timestamp() - make_interval(secs => $2)
+          AND (b.status IN ('CONFIRMED','PAYMENT_REVIEW') OR (b.status = 'HOLD' AND b.hold_expires_at > clock_timestamp()))
+        LIMIT 1`,
+      [checkoutSessionRef, maxAgeSeconds],
+    );
+    const origin = result.rows[0]?.embed_origin;
+    return typeof origin === "string" ? origin : null;
   }
 
   /**
@@ -2330,7 +2408,7 @@ export class GuestBookingRepository {
          UPDATE booking_guests g
             SET guest_name=NULL, guest_email=NULL, guest_email_key=NULL, guest_phone=NULL, note=NULL,
                 mail_suppressed_at=NULL, mail_suppression_classification=NULL,
-                answers=NULL, utm=NULL, pii_erased_at=clock_timestamp()
+                answers=NULL, utm=NULL, embed_origin=NULL, pii_erased_at=clock_timestamp()
            FROM due
           WHERE g.provider_id=due.provider_id AND g.booking_id=due.booking_id
           RETURNING g.provider_id, g.booking_id

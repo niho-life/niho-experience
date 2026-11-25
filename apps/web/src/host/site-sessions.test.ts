@@ -58,6 +58,7 @@ const STORED: HostGuestBooking = {
   adultCount: 2,
   childCount: 1,
   language: "EN",
+  salesChannel: "SITE",
   guest: { name: "Sample Guest", phone: "+81 90 0000 0000", note: "Sample note", answers: [{ questionId: "arrival", prompt: "Arrival station", text: "Kamakura", options: [] }] },
   currency: "JPY",
   adultUnitAmount: 4000,

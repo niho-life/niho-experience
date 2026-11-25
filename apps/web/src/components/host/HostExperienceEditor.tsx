@@ -63,6 +63,8 @@ export interface HostExperienceEditorProps {
   siteUrl: string;
   backHref: string;
   settingsHref: string;
+  /** 自分のサイトに貼る (#638): its address with the provider kept, or null while EXPERIENCE_EMBED_ENABLED is off. */
+  embedHref?: string | null;
 }
 
 /**
@@ -77,7 +79,7 @@ export interface HostExperienceEditorProps {
  * and the owner publishes, pauses and resumes the state shown here. Going back to
  * the list starts again from the synthetic data (the preview note says nothing is kept).
  */
-export function HostExperienceEditor({ experience, providerId, host, today, publication, siteUrl, backHref, settingsHref }: HostExperienceEditorProps) {
+export function HostExperienceEditor({ experience, providerId, host, today, publication, siteUrl, backHref, settingsHref, embedHref = null }: HostExperienceEditorProps) {
   const [content, setContent] = useState<HostExperienceContent>(() => experienceContent(experience));
   const [saved, setSaved] = useState<HostExperienceContent>(content);
   const [listing, setListing] = useState<HostListing>(() => ({ status: experience.status, liveSince: experience.liveSince }));
@@ -225,6 +227,7 @@ export function HostExperienceEditor({ experience, providerId, host, today, publ
                 }}
                 publicPath={publicPath}
                 publicUrl={listing.status === "live" ? `${siteUrl}${publicPath}` : null}
+                embedHref={embedHref}
                 offers={view.offers}
                 onOffers={(offers) => update({ offers })}
                 lang={tab}

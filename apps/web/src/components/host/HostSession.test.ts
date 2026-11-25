@@ -15,6 +15,7 @@ const CONFIRMED: HostGuestBooking = {
   publicBookingId: "00000000-0000-4000-8000-000000000285", productId: "tea", productTitle: "Synthetic tea ceremony", offerId: "sample-am", status: "CONFIRMED",
   localDate: "2026-11-01", localStartTime: "10:00", timeZone: "Asia/Tokyo", startUtc: "2026-11-01T01:00:00.000Z", endUtc: "2026-11-01T02:30:00.000Z",
   adultCount: 2, childCount: 1, language: "EN",
+  salesChannel: "SITE",
   guest: { name: "Sample Guest", phone: "+81 90 0000 0000", note: "Sample note", answers: [{ questionId: "arrival", prompt: "Arrival station", text: "Kamakura", options: [] }] },
   currency: "JPY", adultUnitAmount: 4000, childUnitAmount: 2000, totalAmount: 10000, platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000 },
   saleConditions: { minimumChargeableParticipants: 1, minimumAttendance: null, cancellationWindowMinutesBeforeStart: 1440, cancellationRefundBasisPoints: 10000 },

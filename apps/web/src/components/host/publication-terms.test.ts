@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  asPublicationPrice,
-  publicationTermsForm,
-  publicationTermsPayload,
-  type ExistingPublicationTerms,
-  type PublicationTermsForm,
-} from "./publication-terms";
+import { asPublicationPrice, publicationTermsForm, publicationTermsPayload, type ExistingPublicationTerms, type PublicationTermsForm, withBlankOfferPricesFilled } from "./publication-terms";
 
 const existing: NonNullable<ExistingPublicationTerms> = {
   offerPrices: [{ offerId: "dinner-evening", adultPriceYen: 3_500 }],
@@ -78,5 +72,27 @@ describe("publication sale terms form payload", () => {
       ...form,
       offerPrices: [{ offerId: "morning", adultPriceYen: "3000" }, { offerId: "evening", adultPriceYen: "" }],
     }, existing)).toBeNull();
+  });
+});
+
+describe("枠別料金 priced for some slots only", () => {
+  const form = (prices: string[]) => ({
+    ...publicationTermsForm(null, prices.map((_, at) => ({ id: `offer-${at}` }))),
+    offerPrices: prices.map((adultPriceYen, at) => ({ offerId: `offer-${at}`, adultPriceYen })),
+  });
+
+  it("gives the slots left empty the adult price, so the terms can be saved", () => {
+    const filled = withBlankOfferPricesFilled(form(["6000", "", ""]), "4500");
+    expect(filled.offerPrices.map((price) => price.adultPriceYen)).toEqual(["6000", "4500", "4500"]);
+  });
+
+  it("leaves the form alone when no slot or every slot has a price, or the adult price is not valid yet", () => {
+    const none = form(["", ""]);
+    const every = form(["6000", "5000"]);
+    const some = form(["6000", ""]);
+    expect(withBlankOfferPricesFilled(none, "4500")).toBe(none);
+    expect(withBlankOfferPricesFilled(every, "4500")).toBe(every);
+    expect(withBlankOfferPricesFilled(some, "30")).toBe(some);
+    expect(withBlankOfferPricesFilled(some, "")).toBe(some);
   });
 });
