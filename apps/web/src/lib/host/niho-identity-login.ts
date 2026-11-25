@@ -109,7 +109,7 @@ export async function exchangeNihoIdentity(
   try {
     const origin = new URL(deps.nihoOrigin).origin;
     if (!origin.startsWith("https://")) return { ok: false, reason: "unavailable" };
-    const serviceToken = await deps.serviceIdToken?.();
+    const serviceToken = await deps.nihoLoginServiceIdToken?.();
     if (!serviceToken) return { ok: false, reason: "unavailable" };
     const signal = AbortSignal.timeout(deps.timeoutMs ?? 10_000);
     const response = await deps.fetch(new URL(contract.tokenPath, origin), {

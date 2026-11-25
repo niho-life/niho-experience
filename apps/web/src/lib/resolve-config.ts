@@ -939,12 +939,23 @@ export function resolveConfig(env: Env) {
   const nihoLoginPromptEnabled = nihoLoginPromptSetting(env, hostNihoLoginEnabled);
   const nihoAccountStatusCheckEnabled = nihoAccountStatusCheckSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const nihoIdentityLoginEnabled = apiMode === "http" && env.EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED === "true";
+  let nihoLoginServiceAudience = "";
   if (nihoIdentityLoginEnabled) {
     if (!nihoAccountStatusCheckEnabled || (!hostNihoLoginEnabled && !travelerAccountsEnabled)) {
       throw new Error("EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED=true needs NIHO account status checks and a NIHO login entry");
     }
     const nihoOrigin = deploymentOrigin(env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life", "NEXT_PUBLIC_NIHO_WEB_ORIGIN");
     if (!nihoOrigin.startsWith("https://")) throw new Error("EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED=true needs a HTTPS NIHO Web origin");
+    nihoLoginServiceAudience = env.NIHO_LOGIN_SERVICE_AUDIENCE?.trim() ?? "";
+    let audienceUrl: URL;
+    try {
+      audienceUrl = new URL(nihoLoginServiceAudience);
+    } catch {
+      throw new Error("EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED=true needs a valid HTTPS NIHO_LOGIN_SERVICE_AUDIENCE");
+    }
+    if (audienceUrl.protocol !== "https:" || audienceUrl.username || audienceUrl.password || audienceUrl.search || audienceUrl.hash) {
+      throw new Error("EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED=true needs a valid HTTPS NIHO_LOGIN_SERVICE_AUDIENCE");
+    }
   }
   const travelerLineEnabled = travelerLineSetting(env, travelerAccountsEnabled);
   const occurrenceAssignmentEnabled = occurrenceAssignmentSetting(apiMode, env, hostConsoleEnabled);
@@ -1121,6 +1132,7 @@ export function resolveConfig(env: Env) {
     nihoIdentityLoginEnabled,
     // 「別の方法でやり直す」 sends NIHO `prompt=select_account` (#632): on after NIHO takes it (niho-coliving/niho-app#21302).
     nihoLoginPromptEnabled,
+    nihoLoginServiceAudience,
     // 旅行者の入口の LINE: after NIHO's LINE provider moves (2027-01); off until then.
     travelerLineEnabled,
     // Experience-native COHOST membership, independent from the legacy provider-operations consumer.

@@ -23,6 +23,15 @@ test("photo navigation is operable by buttons and keyboard, with a spoken positi
   await expect(gallery).toBeFocused();
 });
 
+test("a gallery photo opens the all-photos dialog on phones and desktop", async ({ page }, testInfo) => {
+  test.skip(!["mobile-360", "desktop"].includes(testInfo.project.name));
+  await page.goto(dinner);
+  await page.getByRole("button", { name: /^All photos:/ }).first().click();
+  const dialog = page.getByRole("dialog", { name: "All photos" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("img")).toHaveCount(4);
+});
+
 test("single-photo and empty galleries do not announce unavailable navigation help", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 780 });
 

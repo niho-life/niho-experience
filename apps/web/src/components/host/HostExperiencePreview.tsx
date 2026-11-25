@@ -30,7 +30,9 @@ function PreviewGallery({ model }: { model: DetailGalleryModelV1 }) {
   const [index, setIndex] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const primitives = { Link: PreviewLink, Image: PreviewImage };
-  return <><MobileGalleryViewV1 model={model} index={index} onPositionChange={setIndex} primitives={primitives} /><DesktopGalleryViewV1 model={model} dialogRef={dialog} onOpen={() => dialog.current?.showModal()} onClose={() => dialog.current?.close()} primitives={primitives} /></>;
+  const open = () => dialog.current?.showModal();
+  const close = () => dialog.current?.close();
+  return <><MobileGalleryViewV1 model={model} index={index} onPositionChange={setIndex} onPhotoClick={open} primitives={primitives} /><DesktopGalleryViewV1 model={model} dialogRef={dialog} onOpen={open} onClose={close} primitives={primitives} /></>;
 }
 
 function PreviewDates({ card }: { card: PreviewBookingCard }) {

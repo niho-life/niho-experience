@@ -1,10 +1,11 @@
 import { type Ref } from "react";
 import { type StaticCopyAccessorV1 } from "./static-copy.js";
 import { type DetailGalleryModelV1, type PresentationPrimitivesV1 } from "./types.js";
-export declare function MobileGalleryViewV1({ model, index, onPositionChange, primitives, copy }: {
+export declare function MobileGalleryViewV1({ model, index, onPositionChange, onPhotoClick, primitives, copy }: {
     model: DetailGalleryModelV1;
     index?: number;
     onPositionChange?: (index: number) => void;
+    onPhotoClick?: () => void;
     primitives?: Partial<PresentationPrimitivesV1>;
     copy?: StaticCopyAccessorV1;
 }): import("react").JSX.Element;

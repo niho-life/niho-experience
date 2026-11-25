@@ -22,6 +22,7 @@ const state = vi.hoisted(() => ({
     hostSessionSecret: "synthetic-route-test-secret-0123456789abcdef",
     nihoWebOrigin: "https://niho.example.test",
     nihoExperienceHostCommonContractAudience: "https://api.niho.example.test",
+    nihoLoginServiceAudience: "https://api.niho.example.test/niho-login/niho-experience",
     nihoArticleAuthorityOrigin: "https://api.niho.example.test",
     nihoArticleAuthorityAudience: "https://api.niho.example.test",
     siteUrl: "https://experience.example.test",

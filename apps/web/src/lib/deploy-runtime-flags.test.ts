@@ -115,6 +115,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "nihoLoginPromptEnabled",
   EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "travelerAccountsEnabled",
   EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "nihoAccountStatusCheckEnabled",
+  EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED: "nihoIdentityLoginEnabled",
   EXPERIENCE_TRAVELER_LINE_ENABLED: "travelerLineEnabled",
   EXPERIENCE_HOST_TEAM_ENABLED: "hostTeamEnabled",
   EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED: "occurrenceAssignmentEnabled",
@@ -198,6 +199,25 @@ describe("the deploy workflows' feature flags", () => {
     delete vars.STG_ADMIN_SESSION_SECRET_REF;
     expect(resolve("stg", vars).problems.join(" ")).toContain("STG_ADMIN_SESSION_SECRET_REF");
   });
+  it("wires NIHO Login with a client-specific audience behind the account-status check", () => {
+    const vars = closure("stg", "EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED");
+    const resolved = resolve("stg", vars);
+    expect(resolved.problems).toEqual([]);
+    expect(resolved.env.EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED).toBe("true");
+    expect(resolved.env.NIHO_LOGIN_SERVICE_AUDIENCE).toBe(SETTING.httpsUrl);
+    expect(resolveConfig(revision("stg", resolved))).toMatchObject({
+      nihoIdentityLoginEnabled: true,
+      nihoLoginServiceAudience: SETTING.httpsUrl,
+    });
+
+    const missingAudience = { ...vars };
+    delete missingAudience.STG_NIHO_LOGIN_SERVICE_AUDIENCE;
+    expect(resolve("stg", missingAudience).problems.join(" ")).toContain("STG_NIHO_LOGIN_SERVICE_AUDIENCE");
+
+    const missingStatusCheck = { ...vars, STG_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "false" };
+    expect(resolve("stg", missingStatusCheck).problems.join(" ")).toContain("EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED");
+  });
+
   it("keeps the two article service callers in one deployment value", () => {
     const vars = closure("prod", "EXPERIENCE_ARTICLE_AUTHORITY_API_ENABLED");
     vars.PROD_ARTICLE_AUTHORITY_SERVICE_ACCOUNT_EMAILS = "niho@sample-project.iam.gserviceaccount.com;editor@sample-project.iam.gserviceaccount.com";
