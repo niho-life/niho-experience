@@ -67,6 +67,16 @@ describe("messages to the parent page", () => {
     ]);
   });
 
+  it("says the same height again only when forced (a parent that started listening late)", () => {
+    const parent = { postMessage: vi.fn() };
+    const win = { parent, scrollY: 0 };
+    postEmbedHeight(root(500), win);
+    postEmbedHeight(root(500), win);
+    postEmbedHeight(root(500), win, true);
+    expect(parent.postMessage).toHaveBeenCalledTimes(2);
+    expect(parent.postMessage).toHaveBeenLastCalledWith({ type: "niho-experience-embed-resize", height: 500 }, "*");
+  });
+
   it("asks the parent to scroll to the frame with nothing else in the message", () => {
     const parent = { postMessage: vi.fn() };
     postEmbedTop({ parent, scrollY: 0 });

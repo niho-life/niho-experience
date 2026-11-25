@@ -61,8 +61,12 @@ const embedHeaders = [
   },
 ];
 
-/** The host's 自分のサイトに貼る frames its own widget as the preview; it is still never framed itself. */
-const hostEmbedPageHeaders = [{ key: "Content-Security-Policy", value: contentSecurityPolicy({ frameSrc: "'self'" }) }];
+/**
+ * The host console frames this site's own widget as the preview in 自分のサイトに貼る. The console moves between its pages
+ * without reloading the document, so the policy of whichever console page loaded first decides: every /host page may
+ * frame this origin (and of this origin only /embed lets itself be framed). The console itself is still never framed.
+ */
+const hostFrameHeaders = [{ key: "Content-Security-Policy", value: contentSecurityPolicy({ frameSrc: "'self' https://www.youtube-nocookie.com" }) }];
 
 /**
  * Crawlers that read `<head>` from the first HTML bytes and never run JavaScript.
@@ -143,9 +147,9 @@ const nextConfig: NextConfig = {
       { source: "/editor", headers: hostConsoleHeaders },
       { source: "/editor/:path+", headers: hostConsoleHeaders },
       // After "/:path*": for the same key the later rule wins (Next.js「Header Overriding Behavior」), so only these routes
-      // get their own Content-Security-Policy. /host/experiences/:id/embed keeps the host console's headers from "/host/:path+".
+      // get their own Content-Security-Policy. /host keeps the host console's other headers from "/host/:path+".
       { source: "/embed/:path*", headers: embedHeaders },
-      { source: "/host/experiences/:id/embed", headers: hostEmbedPageHeaders },
+      { source: "/host/:path*", headers: hostFrameHeaders },
     ];
   },
 };

@@ -34,7 +34,9 @@ const occurrence = (date: string, bookable: boolean, seatsLeft: number) => ({
 });
 
 /** The host's page frames the widget and keeps every message it gets from it. */
-async function openWidget(page: Page, acceptanceMode: "INSTANT" | "APPROVAL", checkoutUrl: string) {
+type WidgetOptions = { layout?: "page" | "embed"; preview?: boolean; refuseWith?: "FULL" };
+
+async function openWidget(page: Page, acceptanceMode: "INSTANT" | "APPROVAL", checkoutUrl: string, options: WidgetOptions = {}) {
   const checkouts: unknown[] = [];
   await page.route(`${HOST_SITE}/`, (route) => route.fulfill({ contentType: "text/html", body: `<!doctype html><meta charset="utf-8">
     <h1>A host's own site</h1><iframe id="widget" src="${EXPERIENCE}/frame" style="width:100%;max-width:520px;height:760px;border:0"></iframe>
@@ -45,6 +47,10 @@ async function openWidget(page: Page, acceptanceMode: "INSTANT" | "APPROVAL", ch
   } }));
   await page.route(`${EXPERIENCE}/api/public/experiences/synthetic-dinner/checkout`, async (route) => {
     checkouts.push(route.request().postDataJSON());
+    if (options.refuseWith) {
+      await route.fulfill({ status: 409, json: { error: { code: options.refuseWith, message: "Not enough seats are left.", retryable: false, field: null, questionId: null, seatsLeft: 0, currentTotalYen: null, occurrenceReason: null } } });
+      return;
+    }
     await route.fulfill({ status: 201, json: { checkoutUrl } });
   });
   await page.goto(`${HOST_SITE}/`);
@@ -52,12 +58,12 @@ async function openWidget(page: Page, acceptanceMode: "INSTANT" | "APPROVAL", ch
   if (!frame) throw new Error("The widget's frame did not load");
   await frame.evaluate(() => Object.defineProperty(globalThis, "process", { value: { env: { NODE_ENV: "development" } } }));
   await frame.addScriptTag({ content: bundle });
-  await frame.evaluate((mode) => window.mountEmbedBooking(mode), acceptanceMode);
+  await frame.evaluate(([mode, mount]) => window.mountEmbedBooking(mode, mount), [acceptanceMode, { layout: options.layout, preview: options.preview }] as const);
   return { widget: page.frameLocator("#widget"), checkouts };
 }
 
-async function fillDetails(page: Page, acceptanceMode: "INSTANT" | "APPROVAL", checkoutUrl: string) {
-  const opened = await openWidget(page, acceptanceMode, checkoutUrl);
+async function fillDetails(page: Page, acceptanceMode: "INSTANT" | "APPROVAL", checkoutUrl: string, options: WidgetOptions = {}) {
+  const opened = await openWidget(page, acceptanceMode, checkoutUrl, options);
   const { widget } = opened;
   // Only a bookable day can be pressed.
   await expect(widget.getByRole("button", { name: "Sat 12 Dec, unavailable" })).toBeDisabled();
@@ -68,6 +74,8 @@ async function fillDetails(page: Page, acceptanceMode: "INSTANT" | "APPROVAL", c
   await expect(widget.getByRole("button", { name: "Sat 5 Dec, 6 places left" })).toHaveAttribute("aria-pressed", "true");
   await expect(widget.getByText("6:00 PM JST · 6 places left")).toBeVisible();
   await continueButton.click();
+  // The step where the traveler agrees shows the conditions the consent refers to.
+  await expect(widget.getByText("50% refund when cancelled at least 24 hours before the start")).toBeVisible();
   await widget.getByLabel("Full name").fill(NAME);
   await widget.getByLabel("Email").fill(EMAIL);
   await widget.getByRole("checkbox").check();
@@ -117,4 +125,43 @@ test("a booking request ends inside the frame without leaving the host's page", 
   expect(page.frames().some((frame) => frame.url() === `${EXPERIENCE}/frame`)).toBe(true);
   const sent = JSON.stringify(await messagesOf(page));
   for (const secret of [NAME, EMAIL, "booking/return"]) expect(sent).not.toContain(secret);
+});
+
+test("a date that filled up brings the traveler back to the calendar, with the reason on top", async ({ page }) => {
+  const { widget, checkouts } = await fillDetails(page, "INSTANT", STRIPE, { refuseWith: "FULL" });
+  await widget.getByRole("button", { name: "Continue to secure checkout" }).click();
+  const alert = widget.getByRole("alert");
+  await expect(alert).toHaveText("That date is no longer available. Choose another date.");
+  await expect(widget.locator('[aria-current="step"]')).toHaveText("1 Date");
+  // Above the calendar: the host's page shows the frame from its top after a step changes.
+  const [alertBox, calendarBox] = await Promise.all([alert.boundingBox(), widget.getByRole("group", { name: "Date" }).boundingBox()]);
+  expect(alertBox!.y).toBeLessThan(calendarBox!.y);
+  expect(checkouts).toHaveLength(1);
+  expect(page.url()).toBe(`${HOST_SITE}/`);
+});
+
+test("the preview shows the calendar and takes no booking", async ({ page }) => {
+  const { widget, checkouts } = await openWidget(page, "INSTANT", STRIPE, { preview: true });
+  await widget.getByRole("button", { name: "Sat 5 Dec, 6 places left" }).click();
+  await expect(widget.getByText("6:00 PM JST · 6 places left")).toBeVisible();
+  await expect(widget.getByText("Preview. Booking is turned off here.")).toBeVisible();
+  await expect(widget.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
+  expect(checkouts).toHaveLength(0);
+});
+
+test("the public booking page keeps one screen: a date from the calendar, then checkout opens by itself", async ({ page }) => {
+  const { widget, checkouts } = await openWidget(page, "INSTANT", STRIPE, { layout: "page" });
+  await page.route("https://checkout.stripe.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Synthetic Stripe</title>" }));
+  const submit = widget.getByRole("button", { name: "Continue to secure checkout" });
+  await expect(submit).toBeDisabled();
+  await expect(widget.getByText("Powered by NIHO Experience")).toHaveCount(0);
+  await widget.getByRole("button", { name: "Sat 5 Dec, 6 places left" }).click();
+  await widget.getByLabel("Full name").fill(NAME);
+  await widget.getByLabel("Email").fill(EMAIL);
+  await widget.getByRole("checkbox").check();
+  await submit.click();
+  await expect.poll(() => page.frames().some((frame) => frame.url() === STRIPE)).toBe(true);
+  expect(checkouts).toHaveLength(1);
+  expect(checkouts[0]).toMatchObject({ occurrenceDate: "2026-12-05", adultCount: 1, expectedTotalYen: 5000 });
+  expect(checkouts[0]).not.toHaveProperty("utmMedium");
 });

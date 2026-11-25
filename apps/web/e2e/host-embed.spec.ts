@@ -28,6 +28,9 @@ test("the editor's ページ opens 自分のサイトに貼る, with the widget'
   const preview = panel(page, "プレビュー").locator("iframe");
   await expect(preview).toHaveAttribute("src", `/embed/experiences/${SLUG}/book?preview=1`);
   await expect(preview).toHaveAttribute("title", "予約ウィジェットのプレビュー");
+  // Reached through a link inside the console (the document was not reloaded): the frame still loads, so every console
+  // page's policy lets this origin be framed. Mock mode has no published experience, so the widget says so.
+  await expect(page.frameLocator('iframe[title="予約ウィジェットのプレビュー"]').getByText("Online booking is temporarily unavailable for this experience.")).toBeVisible();
   await expect(panel(page, "プレビュー")).toContainText("実際の表示です。プレビューでは予約できません。");
 
   const code = panel(page, "コード");

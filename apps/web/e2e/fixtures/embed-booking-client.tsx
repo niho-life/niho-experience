@@ -15,9 +15,10 @@ const offer = {
   acceptanceMode: "INSTANT", bookingQuestions: [], bookingQuestionsFingerprint: "0".repeat(64),
 };
 
-window.mountEmbedBooking = (acceptanceMode) => createRoot(document.getElementById("root")!).render(
+window.mountEmbedBooking = (acceptanceMode, options = {}) => createRoot(document.getElementById("root")!).render(
   <SitePublicationBooking
-    layout="embed"
+    layout={options.layout ?? "embed"}
+    preview={options.preview ?? false}
     item={{
       publication: { slug: "synthetic-dinner", publicTitle: "Synthetic dinner", sellerDisplayName: "Synthetic seller" },
       saleTerms: { sellerDisplayName: "Synthetic seller", offers: [{ ...offer, acceptanceMode }] },
@@ -27,6 +28,6 @@ window.mountEmbedBooking = (acceptanceMode) => createRoot(document.getElementByI
     consentVersion="terms-v1"
     bookingsEnabled
     attributionEnabled
-    defaultAttribution={{ utmSource: "provider", utmMedium: "embed" }}
+    defaultAttribution={options.layout === "page" ? undefined : { utmSource: "provider", utmMedium: "embed" }}
   />,
 );

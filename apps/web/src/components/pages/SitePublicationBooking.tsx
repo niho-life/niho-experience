@@ -6,8 +6,7 @@ import { createClientRequestKey } from "@niho-experience/api-client";
 import { getSiteBookingApi } from "@/lib/browser-api";
 import { formatYen } from "@/lib/format";
 import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-card-model";
-import { readBookingAttribution, type BookingAttribution } from "@/lib/booking-attribution";
-import { doNotTrackEnabled } from "@/lib/analytics";
+import { attributionWithDefault, readBookingAttribution, type BookingAttribution } from "@/lib/booking-attribution";
 import { bookingReturnCopy, readReturnType, type BookingReturnType } from "@/lib/booking-return-copy";
 import { calendarDayLabel, occurrenceStartTime } from "@/lib/experience/booking-calendar";
 import { leaveFrameTo, postEmbedTop, useEmbedFrame } from "@/lib/experience/embed-frame";
@@ -93,6 +92,8 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   useEffect(() => {
     if (!embed || shownStep.current === step) return;
     shownStep.current = step;
+    // A frame of fixed height (pasted as a URL only) scrolls inside itself: the new step starts at its top there too.
+    window.scrollTo(0, 0);
     postEmbedTop();
   }, [embed, step]);
 
@@ -200,6 +201,8 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
 
   const pricePerAdult = (item: SitePublicOffer) => `${formatYen(item.pricing.adultPriceYen, locale)} ${ja ? "/ 大人1名" : "per adult"}`;
   const heading = <h1 className="text-3xl">{approval ? (ja ? `${publication.japanese!.title}の予約リクエスト` : `Request to book ${publication.publicTitle}`) : (ja ? `${publication.japanese!.title}を予約` : `Book ${publication.publicTitle}`)}</h1>;
+  // The cancellation terms and the minimum charge, as one line: beside the dates, and again where the traveler agrees to them.
+  const cancellationLine = offer ? `${cancellationSummary(offer, locale)}${offer.minimumChargeableParticipants > 1 ? (ja ? ` · 最低請求人数は${offer.minimumChargeableParticipants}名` : ` · Minimum charge is ${offer.minimumChargeableParticipants} guests`) : ""}` : "";
   const offerAndSchedule = <>
       {offers.length > 1 ? <label className={FIELD_LABEL}>{ja ? "プラン" : "Option"}
         <select required value={offerId} onChange={(event) => { const next = offers.find((item) => item.id === event.target.value); setOfferId(event.target.value); setDate(""); setAnswers({}); if (!next?.pricing.child) setChildren(0); }} className={FIELD_SELECT}>
@@ -211,7 +214,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       </div>}
       {offer ? <>
         <p className="-mt-3 text-sm text-ink-soft">{scheduleDescription(offer, locale)} · {formatDurationLabel(offer.durationMinutes, locale)}</p>
-        <p className="-mt-4 text-sm text-ink-soft">{cancellationSummary(offer, locale)}{offer.minimumChargeableParticipants > 1 ? ja ? ` · 最低請求人数は${offer.minimumChargeableParticipants}名` : ` · Minimum charge is ${offer.minimumChargeableParticipants} guests` : ""}</p>
+        <p className="-mt-4 text-sm text-ink-soft">{cancellationLine}</p>
       </> : null}
   </>;
   const dateField = <>
@@ -282,6 +285,8 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
     <div className="flex justify-between gap-3"><span>{ja ? "日時" : "Date"}</span><b className="text-right">{calendarDayLabel(selectedOccurrence.date, locale)} · {occurrenceStartTime(selectedOccurrence.startAt, locale)} JST</b></div>
     <div className="flex justify-between gap-3"><span>{ja ? "人数" : "Guests"}</span><b className="text-right">{guestCountLabel(adults, children, locale)}</b></div>
     <div className="flex justify-between gap-3"><span>{ja ? "合計" : "Total"}</span><b>{total === null ? "" : formatYen(total, locale)}</b></div>
+    {/* The conditions the consent below refers to: step 1 showed them, and this step is where they are agreed to. */}
+    {cancellationLine ? <p className="border-t border-line-strong pt-2 text-ink-soft">{cancellationLine}</p> : null}
   </div> : null;
   const done = outcome?.kind === "done" ? bookingReturnCopy(outcome.type, outcome.free, locale) : null;
 
@@ -293,11 +298,12 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       </ol>
       <div className="mt-6 grid grid-cols-1 gap-5">
         {step === 1 ? <>
+          {/* On top: a date that filled up brings the traveler back here, and the parent page shows the frame from its top. */}
+          {problemAlert}
           {offerAndSchedule}
           {dateField}
           {guestCounts}
           {totalBox}
-          {problemAlert}
           {preview ? <p role="status" className="rounded-xl bg-sand p-3 text-center text-sm text-ink-soft">{ja ? "プレビューです。ここでは予約できません。" : "Preview. Booking is turned off here."}</p> : null}
           <button type="button" onClick={continueToDetails} disabled={preview || !selectedOccurrence?.bookable || total === null || loading || loadError} className={PRIMARY_BUTTON}>{ja ? "次へ" : "Continue"}</button>
         </> : null}
@@ -347,8 +353,7 @@ export function EmbedBookingUnavailable({ siteOrigin }: { siteOrigin: string }) 
 
 /** The mark sent with checkout: what this visit captured, over the widget's default; nothing at all with Do Not Track. */
 function attributionForCheckout(defaultAttribution: BookingAttribution | undefined): BookingAttribution {
-  const captured = readBookingAttribution(navigator.doNotTrack);
-  return doNotTrackEnabled(navigator.doNotTrack) ? captured : { ...defaultAttribution, ...captured };
+  return attributionWithDefault(defaultAttribution, readBookingAttribution(navigator.doNotTrack), navigator.doNotTrack);
 }
 
 function guestCountLabel(adults: number, children: number, locale: "en" | "ja"): string {

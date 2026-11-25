@@ -46,11 +46,11 @@ function framed(win: MessagingWindow): boolean {
   return (win.parent as unknown) !== win;
 }
 
-/** Tells the parent the widget's height (px), once per change. Nothing outside a frame. */
-export function postEmbedHeight(root: Pick<HTMLElement, "getBoundingClientRect">, win: MessagingWindow = window as unknown as MessagingWindow): void {
+/** Tells the parent the widget's height (px), once per change (or again with `force`). Nothing outside a frame. */
+export function postEmbedHeight(root: Pick<HTMLElement, "getBoundingClientRect">, win: MessagingWindow = window as unknown as MessagingWindow, force = false): void {
   if (!framed(win)) return;
   const height = Math.ceil(root.getBoundingClientRect().bottom + win.scrollY);
-  if (!Number.isFinite(height) || lastHeights.get(win) === height) return;
+  if (!Number.isFinite(height) || (!force && lastHeights.get(win) === height)) return;
   lastHeights.set(win, height);
   win.parent.postMessage({ type: EMBED_RESIZE_MESSAGE, height }, "*");
 }
@@ -67,9 +67,11 @@ export function useEmbedFrame(ref: RefObject<HTMLElement | null>, enabled: boole
     const root = ref.current;
     if (!enabled || !root) return;
     postEmbedHeight(root);
-    if (typeof ResizeObserver === "undefined") return;
+    // A parent page whose listener starts late missed the first height: say it once more.
+    const again = window.setTimeout(() => postEmbedHeight(root, undefined, true), 1500);
+    if (typeof ResizeObserver === "undefined") return () => window.clearTimeout(again);
     const observer = new ResizeObserver(() => postEmbedHeight(root));
     observer.observe(root);
-    return () => observer.disconnect();
+    return () => { window.clearTimeout(again); observer.disconnect(); };
   }, [ref, enabled]);
 }

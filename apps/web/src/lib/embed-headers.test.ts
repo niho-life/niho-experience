@@ -23,8 +23,8 @@ describe("embed headers (#638, docs/embed.md「ヘッダー」)", () => {
   });
 
   it("lets the host's embed page frame only this site, and nobody frame it", async () => {
-    const rule = (await rules()).find((candidate) => candidate.source === "/host/experiences/:id/embed");
-    expect(csp(rule)).toContain("frame-src 'self'");
+    const rule = (await rules()).find((candidate) => candidate.source === "/host/:path*");
+    expect(csp(rule)).toContain("frame-src 'self' https://www.youtube-nocookie.com");
     expect(csp(rule)).toContain("frame-ancestors 'none'");
   });
 
@@ -34,17 +34,17 @@ describe("embed headers (#638, docs/embed.md「ヘッダー」)", () => {
     expect(csp(site)).toContain("frame-ancestors 'none'");
     expect(csp(site)).toContain("frame-src https://www.youtube-nocookie.com");
     // Only the two embed rules set their own policy.
-    expect(all.filter((rule) => csp(rule) !== "").map((rule) => rule.source)).toEqual(["/:path*", "/embed/:path*", "/host/experiences/:id/embed"]);
+    expect(all.filter((rule) => csp(rule) !== "").map((rule) => rule.source)).toEqual(["/:path*", "/embed/:path*", "/host/:path*"]);
     // The policies differ only in frame-src and frame-ancestors.
     const without = (policy: string) => policy.split("; ").filter((directive) => !directive.startsWith("frame-")).join("; ");
-    for (const source of ["/embed/:path*", "/host/experiences/:id/embed"]) expect(without(csp(all.find((rule) => rule.source === source)))).toBe(without(csp(site)));
+    for (const source of ["/embed/:path*", "/host/:path*"]) expect(without(csp(all.find((rule) => rule.source === source)))).toBe(without(csp(site)));
   });
 
   it("puts the embed rules after the site-wide rule, so theirs win", async () => {
     const sources = (await rules()).map((rule) => rule.source);
     const site = sources.indexOf("/:path*");
     expect(sources.indexOf("/embed/:path*")).toBeGreaterThan(site);
-    expect(sources.indexOf("/host/experiences/:id/embed")).toBeGreaterThan(site);
-    expect(sources.indexOf("/host/experiences/:id/embed")).toBeGreaterThan(sources.indexOf("/host/:path+"));
+    expect(sources.indexOf("/host/:path*")).toBeGreaterThan(site);
+    expect(sources.indexOf("/host/:path*")).toBeGreaterThan(sources.indexOf("/host/:path+"));
   });
 });
