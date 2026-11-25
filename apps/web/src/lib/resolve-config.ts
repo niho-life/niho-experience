@@ -285,6 +285,18 @@ function hostNihoLoginSetting(apiMode: "mock" | "http", env: Env, hostConsoleEna
  * NIHO's service audience (the identity call carries Experience's service ID token); the preview (mock) only needs
  * the flag and walks a synthetic NIHO.
  */
+/**
+ * The host's 「別の方法でやり直す」 (#632): NIHO is sent `prompt=select_account`, so it shows its confirmation (where the account
+ * is switched) even to a host it would pass straight through (niho-coliving/niho-app#21302). Off until NIHO takes the parameter:
+ * before that, NIHO refuses the whole URL.
+ */
+function nihoLoginPromptSetting(env: Env, hostNihoLoginEnabled: boolean): boolean {
+  const name = "EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED";
+  if (env[name] !== "true") return false;
+  if (!hostNihoLoginEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true`);
+  return true;
+}
+
 function travelerAccountsSetting(apiMode: "mock" | "http", env: Env, hostConsoleEnabled: boolean, hostAccountsEnabled: boolean): boolean {
   const name = "EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED";
   if (env[name] !== "true") return false;
@@ -945,6 +957,7 @@ export function resolveConfig(env: Env) {
   const hostNihoLoginEnabled = hostNihoLoginSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const hostTeamInvitationsEnabled = hostTeamInvitationsSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostTeamEnabled, hostNihoLoginEnabled, hostMailEnabled });
   const travelerAccountsEnabled = travelerAccountsSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
+  const nihoLoginPromptEnabled = nihoLoginPromptSetting(env, hostNihoLoginEnabled);
   const nihoAccountStatusCheckEnabled = nihoAccountStatusCheckSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const nihoIdentityLoginEnabled = apiMode === "http" && env.EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED === "true";
   let nihoLoginServiceAudience = "";
@@ -1138,6 +1151,8 @@ export function resolveConfig(env: Env) {
     // S1b: off until NIHO's matching v1 status contract is fixed and deployed.
     nihoAccountStatusCheckEnabled,
     nihoIdentityLoginEnabled,
+    // 「別の方法でやり直す」 sends NIHO `prompt=select_account` (#632): on after NIHO takes it (niho-coliving/niho-app#21302).
+    nihoLoginPromptEnabled,
     nihoLoginServiceAudience,
     // 旅行者の入口の LINE: after NIHO's LINE provider moves (2027-01); off until then.
     travelerLineEnabled,

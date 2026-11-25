@@ -47,6 +47,20 @@ export const INVITE_BINDING_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 export const TEAM_INVITE_BINDING_COOKIE = "__Secure-niho_host_team_invite";
 export const TEAM_INVITE_BINDING_COOKIE_PATH = "/host/auth";
 export const TEAM_INVITE_BINDING_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+/**
+ * The returning host's mark (#632): this browser signed a host in with NIHO, and the session did not end with a logout. When
+ * the console finds no session (idle or absolute expiry, a revoked session), a browser with the mark starts the NIHO sign-in
+ * by itself, and NIHO passes a host who is still signed in there straight back. Logout clears it, so a logout is followed by the
+ * entrance and its one button, never by a sign-in nobody asked for. The value is a fixed "1": nothing about who signed in.
+ * `__Host-` and Path=/, since the console's pages read it; 400 days, the longest a browser keeps a cookie.
+ */
+export const RETURNING_HOST_COOKIE = "__Host-niho_host_returning";
+export const RETURNING_HOST_COOKIE_PATH = "/";
+export const RETURNING_HOST_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
+/** The automatic sign-in starts at most once in this many seconds, so a session that does not reopen cannot loop. */
+export const AUTO_LOGIN_COOKIE = "__Secure-niho_host_auto_login";
+export const AUTO_LOGIN_COOKIE_PATH = "/host/auth";
+export const AUTO_LOGIN_INTERVAL_SECONDS = 2 * 60;
 /** Browsers drop cookies whose name and value exceed 4096 bytes. */
 export const COOKIE_BYTES_LIMIT = 4096;
 

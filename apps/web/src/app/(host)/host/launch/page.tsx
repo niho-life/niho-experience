@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { HostLaunchScreen } from "@/components/host/HostLaunchScreen";
 import { HOST_HOME_PATH } from "@/lib/host/routes";
 import { config } from "@/lib/config";
+import { returningHostLoginPath } from "@/lib/host/returning-host";
 import { readHostSession, requireHostConsole } from "@/lib/host/server";
 import { sessionUsableInApp } from "@/lib/host/session";
 
@@ -18,5 +19,10 @@ export default async function HostLaunchPage() {
   requireHostConsole();
   const session = await readHostSession();
   if (session && sessionUsableInApp(session)) redirect(HOST_HOME_PATH);
+  // A returning host whose session ran out signs in by itself (#632); after a logout this screen waits for the button.
+  if (!session) {
+    const autoLogin = await returningHostLoginPath();
+    if (autoLogin) redirect(autoLogin);
+  }
   return <HostLaunchScreen hasSession={session !== null} emailLogin={config.hostAccountsEnabled} nihoLogin={config.hostNihoLoginEnabled} />;
 }

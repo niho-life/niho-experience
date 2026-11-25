@@ -112,6 +112,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_HOST_MAIL_ENABLED: "hostMailEnabled",
   EXPERIENCE_HOST_ACCOUNTS_ENABLED: "hostAccountsEnabled",
   EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "hostNihoLoginEnabled",
+  EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "nihoLoginPromptEnabled",
   EXPERIENCE_TRAVELER_ACCOUNTS_ENABLED: "travelerAccountsEnabled",
   EXPERIENCE_NIHO_ACCOUNT_STATUS_CHECK_ENABLED: "nihoAccountStatusCheckEnabled",
   EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED: "nihoIdentityLoginEnabled",

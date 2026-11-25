@@ -3,6 +3,8 @@ export const HOST_INTRO_PATH = "/host";
 export const HOST_HOME_PATH = "/host/home";
 export const HOST_REGISTER_PATH = "/host/register";
 export const HOST_LOGIN_PATH = "/host/auth/login";
+/** The NIHO sign-in a returning host's browser starts by itself when the console finds no session (#632, returning-host.ts). */
+export const HOST_AUTO_LOGIN_PATH = `${HOST_LOGIN_PATH}?auto=1`;
 export const HOST_MOCK_LOGIN_PATH = "/host/auth/mock-login";
 export const HOST_REFRESH_PATH = "/host/auth/refresh";
 export const HOST_LOGOUT_PATH = "/host/auth/logout";

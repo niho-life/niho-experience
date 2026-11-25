@@ -589,7 +589,12 @@ describe("admin support console settings", () => {
     expect(resolveConfig({}).hostNihoLoginEnabled).toBe(false);
     expect(resolveConfig(accounts).hostNihoLoginEnabled).toBe(false);
     expect(resolveConfig({ ...on, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "1" }).hostNihoLoginEnabled).toBe(false);
-    expect(resolveConfig(on)).toMatchObject({ hostAccountsEnabled: true, hostNihoLoginEnabled: true });
+    expect(resolveConfig(on)).toMatchObject({ hostAccountsEnabled: true, hostNihoLoginEnabled: true, nihoLoginPromptEnabled: false });
+    // 「別の方法でやり直す」's account choice at NIHO (#632): only beside the NIHO account login, "true" only.
+    expect(resolveConfig({ ...on, EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "true" }).nihoLoginPromptEnabled).toBe(true);
+    expect(resolveConfig({ ...on, EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "1" }).nihoLoginPromptEnabled).toBe(false);
+    expect(() => resolveConfig({ ...accounts, EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED: "true" }))
+      .toThrow("EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED=true needs EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true");
     // The real NIHO: the bindings and sessions live in the host accounts' DB, and the identity call carries the service ID token.
     expect(() => resolveConfig({ ...mail, ...host, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" }))
       .toThrow("EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
@@ -650,6 +655,7 @@ describe("admin support console settings", () => {
     const on = { ...withoutAudience, NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.example.test" };
     expect(resolveConfig(on).nihoAccountStatusCheckEnabled).toBe(true);
     expect(resolveConfig(on).nihoIdentityLoginEnabled).toBe(false);
+    expect(resolveConfig(on).nihoLoginPromptEnabled).toBe(false);
     const identityOnly = {
       ...on,
       EXPERIENCE_NIHO_IDENTITY_LOGIN_ENABLED: "true",

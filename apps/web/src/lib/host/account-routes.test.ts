@@ -315,6 +315,11 @@ describe("logout and refresh with host accounts", () => {
     expect(cookie.value).toBe("");
     expect(cookie.attributes).toMatch(/Max-Age=0/);
     expect(cookie.attributes).toMatch(/Path=\/(;|$)/);
+    // After a logout the console does not sign the host in again by itself (#632).
+    const returning = setCookies(response).get("__Host-niho_host_returning")!;
+    expect(returning.value).toBe("");
+    expect(returning.attributes).toMatch(/Max-Age=0/);
+    expect(returning.attributes).toMatch(/Path=\/(;|$)/);
     // With the app on, the host goes to its start page (the cookie does not say where it was signed in).
     state.config.hostPwaEnabled = true;
     const app = await logout(new NextRequest(`${SITE}/host/auth/logout`, { method: "POST", headers: { ...sameOrigin, cookie: `${ACCOUNT_SESSION_COOKIE}=${SESSION_TOKEN}` } }));
