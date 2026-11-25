@@ -8,8 +8,12 @@ export type HomeViewModelV1 = Readonly<{
     hero: DisplayImageV1;
     /** Optional extra layers inside the hero box, right after the hero image and under the gradient. */
     heroMedia?: ReactNode;
+    /** Optional replacement for the hero heading's children (`home.heroHeadingRich`). */
+    heroHeading?: ReactNode;
+    /** Optional replacement for the hero heading's class. */
+    heroHeadingClassName?: string;
     /** Optional replacement for the hero body text (`home.heroBody`). */
-    heroBody?: string;
+    heroBody?: ReactNode;
     /** Optional action rendered right below the hero body text. */
     heroAction?: ReactNode;
     finder: ReactNode;

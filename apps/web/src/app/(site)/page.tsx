@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { EN_STATIC_COPY_V1, HomeViewV1, type AssetBindingsV1, type DisplayImageV1, type DisplayVideoV1, type ExperienceCardModelV1, type HomeViewModelV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
-import { EmptyResults, ErrorState } from "@/components/States";
-import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
-import { CardDates, type CardDatesSource } from "@/components/CardDates";
+import { EN_STATIC_COPY_V1, type AssetBindingsV1, type DisplayImageV1, type DisplayVideoV1, type HomeViewModelV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
+import { ErrorState } from "@/components/States";
+import { HomePageView, type HomeRest } from "@/components/pages/HomePageView";
+import type { CardDatesSource } from "@/components/CardDates";
 import { guestBookingSources } from "@/lib/guest-booking-source";
 import { getApi, listExperiencesForSite } from "@/lib/api";
 import { buildCardModels, cardFaceOf, type CardModel, type Face } from "@/lib/card-model";
@@ -18,9 +18,7 @@ import type { ExperienceDetailForSite, PublicImageForSite } from "@/lib/experien
 import { imageAlt } from "@/lib/experience-copy";
 import { JsonLd } from "@/components/JsonLd";
 import { HomeJournal } from "@/components/HomeJournal";
-import { ButtonLink, buttonClass } from "@/components/ui";
-import { HomeHeroSlides } from "@/components/HomeHeroSlides";
-import { HomeLivingRoom } from "@/components/HomeLivingRoom";
+import { buttonClass } from "@/components/ui";
 import { guideCatalogForSite, hasGuidesPage } from "@/lib/guide-registry";
 import { homeJournal } from "@/lib/home-journal";
 import { LISTING_NAME, publicMetadata, SITE_DESCRIPTION, SITE_NAME } from "@/lib/public-metadata";
@@ -54,10 +52,6 @@ const publishedVideo = (assets: AssetBindingsV1 | null, id: keyof AssetBindingsV
 };
 const displayFace = (face: Face) => ({ ...face, image: displayImage(face.image) });
 
-function cardModel(card: CardModel): ExperienceCardModelV1 {
-  return { ...card, href: `/experiences/${card.slug}`, cover: displayImage(card.cover, card.title), face: displayFace(card.face), priceSuffix: " / adult" };
-}
-
 function hostRow(listed: ExperienceDetailForSite[], current: ExperienceDetailForSite, pilotPreview: boolean) {
   const rows: { face: Face; slug: string; name: string; current: boolean }[] = [];
   for (const item of [...listed.filter((experience) => experience.hosts.length), ...listed.filter((experience) => !experience.hosts.length)]) {
@@ -68,7 +62,7 @@ function hostRow(listed: ExperienceDetailForSite[], current: ExperienceDetailFor
   return rows;
 }
 
-function homeModel(summaries: { slug: string; title: string }[], cards: CardModel[], listed: ExperienceDetailForSite[], cardDates: CardDatesSource, copy: StaticCopyAccessorV1, assets: AssetBindingsV1 | null, afterCards?: HomeViewModelV1["afterCards"]): HomeViewModelV1 {
+function homeRest(summaries: { slug: string; title: string }[], cards: CardModel[], listed: ExperienceDetailForSite[], copy: StaticCopyAccessorV1, assets: AssetBindingsV1 | null): HomeRest {
   const story = isPilotPreview ? (listed.find((experience) => experience.slug === FEATURED_STORY.slug) ?? null) : null;
   const featured = story ? null : (listed.find((experience) => experience.photos.length >= 5) ?? null);
   const strips: { theme: Theme; slug: string; name: string; video: SiteVideo }[] = [];
@@ -96,13 +90,10 @@ function homeModel(summaries: { slug: string; title: string }[], cards: CardMode
     return { headingEyebrow: copy.text("home.hostFeatureEyebrow"), headingTitle: copy.text("home.hostFeatureTitle"), moreHostsLabel: copy.text("home.moreHosts"), name, role: editorial?.role ?? hostFeature.provider.tagline ?? undefined, story: editorial?.story ?? hostFeature.lead, cta: copy.text("home.hostFeatureCta", { name }), href: `/experiences/${hostFeature.slug}`, image: editorial ? undefined : (displayImage(hostFeature.cover) ?? undefined), video: editorial ? publishedVideo(assets, "home.strip.calligraphy", editorial.video) : undefined, faces: hostRow(listed, hostFeature, isPilotPreview).map((entry) => ({ face: displayFace(entry.face), href: `/experiences/${entry.slug}`, label: entry.name, current: entry.current })) };
   })() : undefined;
   return {
-    hero: publishedImage(assets, "home.hero", HERO_PHOTO), heroMedia: <HomeHeroSlides />, heroBody: "Small experiences with people who live here, one hour from Tokyo.", heroAction: <ButtonLink href="/experiences">See the experiences</ButtonLink>, finder: null, themes: [],
-    cardsEyebrow: cards.length ? "after the Great Buddha" : undefined, cardsTitle: <>Spend a few hours with a <span className="squig">neighbor</span></>,
-    cards: cards.map((card) => ({ model: cardModel(card), dates: <CardDates slug={card.slug} scheduleLabel={card.scheduleLabel} source={cardDates} /> })), empty: <EmptyResults clearHref={null} />, afterCards, feature,
+    hero: publishedImage(assets, "home.hero", HERO_PHOTO), feature,
     strips: strips.map((strip) => ({ key: strip.theme.key, href: `/experiences/${strip.slug}`, verb: strip.theme.verb, name: strip.name, video: publishedVideo(assets, `home.strip.${strip.theme.key}` as keyof AssetBindingsV1, strip.video) })),
     stripsEyebrow: copy.text(strips.length === 1 ? "home.stripsEyebrowOne" : "home.stripsEyebrowMany", { countWord: numberWord(strips.length) }), banner: publishedVideo(assets, "home.banner", BANNER_VIDEO), hostFeature: host, figures,
     postcards: POSTCARDS.map((card, index) => ({ id: card.src, image: publishedImage(assets, (["home.postcard.crossing", "home.postcard.enoden", "home.postcard.buddha", "home.postcard.fuji", "home.postcard.bamboo"] as const)[index]!, card), place: card.place, rotate: card.rotate })), hostBand: publishedVideo(assets, "home.hostBand", HOST_BAND_VIDEO),
-    layout: "journal",
   };
 }
 
@@ -119,6 +110,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   const guideEntry = journal.items.length ? <HomeJournal journal={journal} allHref={hasGuidesPage(guideCatalogResult) ? "/guides" : null} moreClassName={buttonClass("secondary")} /> : undefined;
   return <>
     <JsonLd data={siteJsonLd(config.siteUrl, SITE_NAME, LISTING_NAME)} />
-    <HomeViewV1 model={homeModel(summaries, cards, listed, cardDates, EN_STATIC_COPY_V1, null, <><HomeLivingRoom />{guideEntry}</>)} primitives={PRESENTATION_PRIMITIVES_V1} copy={EN_STATIC_COPY_V1} />
+    <HomePageView locale="en" copy={EN_STATIC_COPY_V1} cards={cards} cardDates={cardDates} rest={homeRest(summaries, cards, listed, EN_STATIC_COPY_V1, null)} journal={guideEntry} />
   </>;
 }

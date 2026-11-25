@@ -58,7 +58,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const legacyCards = buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview);
   const nativeCards = sitePublications
     .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && (!searchQuery || `${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${publication.providerPublicName ?? publication.sellerDisplayName}`.toLocaleLowerCase("en").includes(searchQuery)))
-    .map(sitePublicationCard);
+    .map((entry) => sitePublicationCard(entry));
   const cardsWithoutReviews = [...legacyCards, ...nativeCards];
   const cards = withReviewLines(cardsWithoutReviews, await getReviewSummaries(cardsWithoutReviews.map((card) => card.slug)));
   if (!result.ok && result.kind !== "not_found" && cards.length === 0) return <ErrorState title="We couldn't load experiences" />;

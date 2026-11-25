@@ -1,61 +1,65 @@
 import type { Metadata } from "next";
-import { EXPERIENCE_CATEGORIES } from "@niho-experience/experience-domain";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
-import { JaExperienceCard } from "@/components/ja/JaExperienceCard";
-import { HomeLivingRoom } from "@/components/HomeLivingRoom";
-import { JapaneseHero } from "@/components/ja-home/JapaneseHero";
-import { CategoryNav, ConsultBand, FeatureBand, GuidesBand, HomeFinder, HostBand, JapaneseHeroCopy, OccasionStrips, PeopleBand, PicksHeading } from "@/components/ja-home/JapaneseHomeSections";
+import { ConsultBand, GuidesBand, PeopleBand } from "@/components/ja-home/JapaneseHomeSections";
+import { HomePageView, type HomeRest } from "@/components/pages/HomePageView";
+import type { CardDatesSource } from "@/components/CardDates";
+import type { CardModel } from "@/lib/card-model";
+import { sitePublicationCard } from "@/lib/experience/site-card-model";
+import { listSitePublicExperiences } from "@/lib/experience/site-publications";
+import { guestBookingSources } from "@/lib/guest-booking-source";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
-import {
-  JA_HOME_FACES_LIMIT, JA_HOME_GUIDES_LIMIT, JA_HOME_HAND, JA_HOME_LEAD, JA_HOME_TITLE,
-  categoriesWithExperiences, occasionsWithExperiences, pickFeaturedPerson, pickHomeExperiences, pickHomeFeature,
-} from "@/lib/ja-home";
-import { loadJaCards } from "@/lib/ja-catalog-server";
+import { JA_HOME_FACES_LIMIT, JA_HOME_GUIDES_LIMIT, pickFeaturedPerson } from "@/lib/ja-home";
 import { loadJapaneseGuides } from "@/lib/ja-guides";
-import { loadPeoplePages } from "@/lib/ja-people";
+import { loadPeople, loadPeoplePages } from "@/lib/ja-people";
+import { peopleByExperience } from "@/lib/ja-people-links";
+import { getReviewSummaries } from "@/lib/journey";
+import type { StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
 import { getJapaneseCopy } from "@/lib/localized-content";
 import { japaneseStaticMetadata } from "@/lib/locale-metadata";
+import { withReviewLines } from "@/lib/reviews-ui";
+import { BANNER_VIDEO, HERO_PHOTO, HOST_BAND_VIDEO, POSTCARDS } from "@/lib/site-media";
 
 export async function generateMetadata(): Promise<Metadata> {
   try { return await japaneseStaticMetadata("home"); }
   catch { return { title: "Japanese version unavailable", robots: { index: false, follow: false } }; }
 }
 
+// 英語のトップと同じ部品（`HomePageView`）が描く。journal の構成では出ない項目（特集・帯・数字・絵はがき）は、型のために空か既定を渡す。
+const REST: HomeRest = {
+  hero: { src: HERO_PHOTO.src, alt: HERO_PHOTO.alt, position: HERO_PHOTO.position },
+  strips: [],
+  stripsEyebrow: "",
+  banner: { src: BANNER_VIDEO.src, poster: BANNER_VIDEO.poster },
+  figures: [],
+  postcards: POSTCARDS.map((postcard) => ({ id: postcard.src, image: { src: postcard.src, alt: postcard.alt, position: postcard.position }, place: postcard.place, rotate: postcard.rotate })),
+  hostBand: { src: HOST_BAND_VIDEO.src, poster: HOST_BAND_VIDEO.poster },
+};
+
 /**
- * 日本語のトップ（#563）。英語のトップの訳ではなく、日本語サイト独自の構成。上から：題と写真（英語のトップと同じ組み、#658）、さがす欄、カテゴリー、
- * おすすめの体験、特集、シーンからさがす、街のリビング（NIHOの帯、#658）、街の人、相談、読みもの、体験を載せる。中身がまだ無いまとまり（体験が0件のカテゴリー・
- * 該当の無い「シーンからさがす」・載っている人が0人・公開中の記事が無い）は、空の枠を見せずに出さない。体験のカードは一覧と同じ
- * （`JaExperienceCard`）で、予約の方式や販売者の札は並べない。
+ * 日本語のトップ（#563、#658）。英語のトップと同じ1つの部品で、文言と意図した差だけが違う（`lib/home-text.tsx`）。体験のカードは英語と同じ
+ * `ExperienceCardV1`（次の開催日つき）。中身がまだ無いまとまり（載っている人が0人・公開中の記事が無い）は出さない。
  */
 export default async function JapaneseHome() {
-  let cards;
+  let copy: StaticCopyAccessorV1;
+  let cards: CardModel[];
   try {
-    await getJapaneseCopy();
-    cards = await loadJaCards();
+    copy = (await getJapaneseCopy()).copy;
+    const [catalog, people] = await Promise.all([listSitePublicExperiences("ja"), loadPeople()]);
+    const guides = peopleByExperience(people);
+    cards = catalog.experiences.flatMap((item) => {
+      const card = sitePublicationCard(item, "ja", { people: guides.get(item.publication.slug) ?? [], copy });
+      return card ? [card] : [];
+    });
   } catch { return <JapaneseUnavailable />; }
-  const [people, allGuides] = await Promise.all([loadPeoplePages(), loadJapaneseGuides()]);
-  const picks = pickHomeExperiences(cards);
-  const categories = categoriesWithExperiences(EXPERIENCE_CATEGORIES, cards);
-  const occasions = occasionsWithExperiences(cards);
-  const featured = pickFeaturedPerson(people);
-  const feature = pickHomeFeature(cards);
+  const [peopleOnPages, allGuides] = await Promise.all([loadPeoplePages(), loadJapaneseGuides()]);
+  cards = withReviewLines(cards, await getReviewSummaries(cards.map((card) => card.slug)), "ja");
+  const cardDates: CardDatesSource = { kind: "read", preview: false, sources: await guestBookingSources(cards.map((card) => card.slug)) };
+  const featured = pickFeaturedPerson(peopleOnPages);
   const guides = allGuides.slice(0, JA_HOME_GUIDES_LIMIT);
-  return <>
-    <JapaneseHero><JapaneseHeroCopy title={JA_HOME_TITLE} hand={JA_HOME_HAND} lead={JA_HOME_LEAD} /></JapaneseHero>
-    {cards.length ? <HomeFinder categories={categories} /> : null}
-    {categories.length ? <CategoryNav categories={categories} /> : null}
-    {picks.length ? <section aria-labelledby="picks" className="container-page mt-14 sm:mt-16">
-      <div id="picks"><PicksHeading total={cards.length} /></div>
-      <div className="mt-7 grid gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
-        {picks.map((card, index) => <JaExperienceCard key={card.slug} card={card} priority={index < 3} />)}
-      </div>
-    </section> : null}
-    {feature ? <FeatureBand feature={feature} /> : null}
-    {occasions.length ? <OccasionStrips items={occasions} /> : null}
-    <HomeLivingRoom hand="it starts here" title="街のリビング、NIHO" body="鎌倉駅から歩いて2分。街の人がふらりと寄って、一緒につくり、話し、手を動かす場所です。" action={{ href: "/ja/about", label: "NIHOについて" }} alt="NIHOの長いテーブルを囲む街の人たち" titleClassName="mt-1 text-[2rem] leading-[1.25] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:text-[3rem]" />
-    {featured ? <PeopleBand featured={featured} people={people} facesLimit={JA_HOME_FACES_LIMIT} /> : null}
-    {groupInquiryOpen() ? <ConsultBand /> : null}
-    {guides.length ? <GuidesBand guides={guides} /> : null}
-    <HostBand />
-  </>;
+  return <HomePageView
+    locale="ja" copy={copy} cards={cards} cardDates={cardDates} rest={REST}
+    people={featured ? <PeopleBand featured={featured} people={peopleOnPages} facesLimit={JA_HOME_FACES_LIMIT} /> : undefined}
+    consult={groupInquiryOpen() ? <ConsultBand /> : undefined}
+    journal={guides.length ? <GuidesBand guides={guides} /> : undefined}
+  />;
 }
