@@ -12,6 +12,7 @@ vi.mock("@/components/ExperienceList", () => ({ ExperienceList: vi.fn(() => null
 vi.mock("@/components/ExperienceFiltersForm", () => ({ ExperienceFiltersForm: () => null }));
 vi.mock("@/components/States", () => ({ EmptyResults: () => null, ErrorState: () => null, StagingUnavailableState: () => createElement("div", null, "stg unavailable notice") }));
 vi.mock("@/components/GuideBlocks", () => ({ GuideTeasers: () => null }));
+vi.mock("@/components/BookingAssurance", () => ({ BookingAssurance: () => createElement("p", null, "booking assurance") }));
 vi.mock("@/lib/api", () => ({ getApi: async () => ({}), listExperiencesForSite: async () => ({ ok: true, data: { experiences: [{ slug: "native-card" }] } }) }));
 vi.mock("@/lib/catalog", () => ({ loadDetails: async () => new Map() }));
 vi.mock("@/lib/card-model", () => ({ buildCardModels: () => [] }));
@@ -44,6 +45,9 @@ it("keeps native products visible for a former theme URL and does not offer an u
   expect(search.props.filtersEnabled).toBe(false);
   // Native catalogs are not filtered by date server-side; keep the existing availability check active.
   expect(props?.catalogDateFiltered).toBe(false);
+  expect(props?.dayChips).toBe("available");
+  // Two weeks of days, as the home finder offers, plus a chip for the URL date outside that window.
+  expect(props?.days).toHaveLength(15);
 });
 
 it("shows the staging pause notice when the public catalog database is unavailable", async () => {

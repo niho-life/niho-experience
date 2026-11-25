@@ -122,7 +122,7 @@ test("the home journal follows the experience cards, and the experience list kee
   await expect(page.locator("#featured-heading-v1, #strips-heading-v1, #numbers-heading-v1, #walk-heading-v1")).toHaveCount(0);
 
   await page.goto("/experiences");
-  const plan = page.getByRole("region", { name: "Plan your day" });
+  const plan = page.getByRole("region", { name: "From the Journal" });
   await expect(plan.getByRole("listitem")).toHaveCount(3);
 });
 

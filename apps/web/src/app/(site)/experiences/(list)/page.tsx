@@ -5,6 +5,7 @@ import { TrackView } from "@/components/Analytics";
 import { ExperienceList } from "@/components/ExperienceList";
 import { ExperienceFiltersForm } from "@/components/ExperienceFiltersForm";
 import { EmptyResults, ErrorState, StagingUnavailableState } from "@/components/States";
+import { BookingAssurance } from "@/components/BookingAssurance";
 import { GuideTeasers } from "@/components/GuideBlocks";
 import { getApi, listExperiencesForSite } from "@/lib/api";
 import { buildCardModels } from "@/lib/card-model";
@@ -33,8 +34,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   };
 }
 
-/** Date chips cover a week; the home finder offers two weeks, so a later date from there gets its own chip. */
-const CHIP_DAYS = 7;
+/** The home finder and the list's date chips both cover two weeks; the chips show only days with something on. A later date in the URL gets its own chip. */
 const FINDER_DAYS = 14;
 
 export default async function ExperiencesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -71,7 +71,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const initialDate = catalogDate ?? parseDateParam(query.date, finderDays);
   const date = config.publicApiVersion === "1.2" ? normalizeExperienceDate(query.date) : undefined;
   const initialGuests = parseGuestsParam(query.guests);
-  const days = upcomingDays(now, CHIP_DAYS);
+  const days = upcomingDays(now, FINDER_DAYS);
   if (initialDate && !days.some((day) => day.key === initialDate)) days.push(dayOption(initialDate));
 
   const searchProps = {
@@ -83,7 +83,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
     filtersActive: Boolean(searchQuery || theme || date || initialGuests !== null),
   };
   const listContent = (
-    <CatalogueViewV1 copy={copy} heading="Kamakura experiences with local hosts" intro="Small groups, hosted by people who live here. One hour from Tokyo, two minutes from Kamakura Station." content={
+    <CatalogueViewV1 copy={copy} heading="Kamakura experiences with local hosts" intro="Hosted by people who live here, one hour from Tokyo." content={
       <ExperienceList
         key={JSON.stringify([searchQuery, theme, initialDate, initialGuests])}
         cards={cards}
@@ -97,6 +97,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
         search={<ExperienceFiltersForm key="bar-search" {...searchProps} placement="bar" />}
         inlineSearch={<ExperienceFiltersForm key="inline-search" {...searchProps} placement="inline" />}
         columns="three"
+        dayChips="available"
         empty={<EmptyResults key="empty-results" clearHref={searchQuery || theme || date || initialGuests !== null ? "/experiences" : null} searchActive={Boolean(searchQuery)} />}
       />
     } />
@@ -104,11 +105,12 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   return <>
     <TrackView event="list_view" props={{ theme: theme ?? "all", date_filtered: initialDate !== null, result_count: cards.length }} />
     {listContent}
+    <BookingAssurance />
     {guideCatalogResult.guides.length ? (
       <section className="container-page pt-16 lg:pt-[88px]" aria-labelledby="catalogue-guides-heading">
         <div className="mb-5 flex items-end justify-between gap-4">
-          <div><p className="eyebrow">Guides</p><h2 id="catalogue-guides-heading" className="mt-1 text-[2rem] lg:text-[2.75rem]">Plan your day</h2></div>
-          <Link href="/guides" className="link-leaf shrink-0 text-sm">See all guides</Link>
+          <div><p className="eyebrow">plan your day</p><h2 id="catalogue-guides-heading" className="mt-1 text-[2rem] lg:text-[2.75rem]">From the Journal</h2></div>
+          <Link href="/guides" className="link-leaf shrink-0 text-sm">See all</Link>
         </div>
         <GuideTeasers guides={guideCatalogResult.guides.slice(0, 3)} draftSlugs={guideCatalogResult.draftSlugs} columns="three" descriptions={false} />
       </section>

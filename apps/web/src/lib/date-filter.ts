@@ -103,3 +103,22 @@ export function nextBookableDays(occurrences: readonly Occurrence[], limit: numb
   }
   return selected;
 }
+
+/**
+ * Which day chips the list shows. "all" keeps every day (empty days are disabled by the caller).
+ * "available" shows only days with something on: while loading or when the server already
+ * filtered by date, just the selected day; otherwise days with a count above 0 plus the selected day.
+ */
+export function visibleDayChips({ mode, days, counts, selected, failed, catalogDateFiltered }: {
+  mode: "all" | "available";
+  days: readonly DayOption[];
+  /** Per-day counts once availability has loaded; null while loading. */
+  counts: ReadonlyMap<string, number> | null;
+  selected: string | null;
+  failed: boolean;
+  catalogDateFiltered: boolean;
+}): DayOption[] {
+  if (mode === "all" || failed) return [...days];
+  if (catalogDateFiltered || !counts) return days.filter((day) => day.key === selected);
+  return days.filter((day) => day.key === selected || (counts.get(day.key) ?? 0) > 0);
+}

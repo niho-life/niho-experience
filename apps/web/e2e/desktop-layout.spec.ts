@@ -44,7 +44,7 @@ test("home finder is one pill over the hero", async ({ page }) => {
 
 test("list puts the guests pill and the day chips on one row", async ({ page }) => {
   await page.goto("/experiences?guests=2");
-  const pill = await box(page.locator("label").filter({ has: page.locator("select", { has: page.locator("option", { hasText: "Any group" }) }) }));
+  const pill = await box(page.locator("label").filter({ has: page.locator("select", { has: page.locator("option", { hasText: "Any group size" }) }) }));
   const chip = await box(page.getByRole("group", { name: "Date (Japan time)" }).getByRole("button").first());
   expect(Math.abs(pill.y + pill.height / 2 - (chip.y + chip.height / 2))).toBeLessThanOrEqual(8);
   expect(chip.x).toBeGreaterThan(pill.x + pill.width);

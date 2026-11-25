@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Occurrence } from "@niho-experience/api-client";
-import { dayOption, fitsPartySize, jstToday, matchingOccurrence, nextBookable, parseDateParam, parseGuestsParam, upcomingDays } from "./date-filter";
+import { dayOption, fitsPartySize, jstToday, matchingOccurrence, nextBookable, parseDateParam, parseGuestsParam, upcomingDays, visibleDayChips } from "./date-filter";
 
 const occurrence = (overrides: Partial<Occurrence>): Occurrence => ({
   offerId: "offer_a",
@@ -90,5 +90,31 @@ describe("matching a party to a day", () => {
       occurrence({ date: "2026-10-24", startAt: "2026-10-24T09:00:00.000Z" }),
     ];
     expect(nextBookable(list, 3).map((item) => item.date)).toEqual(["2026-10-24", "2026-10-27"]);
+  });
+});
+
+describe("visibleDayChips", () => {
+  const days = upcomingDays(new Date("2026-10-24T00:00:00Z"), 4);
+  const [d0, d1, d2, d3] = days.map((day) => day.key) as [string, string, string, string];
+  const base = { days, selected: null, failed: false, catalogDateFiltered: false } as const;
+  const counts = new Map([[d0, 0], [d1, 2], [d2, 0], [d3, 1]]);
+  const keys = (list: { key: string }[]) => list.map((day) => day.key);
+
+  it('"all" mode returns every day', () => {
+    expect(keys(visibleDayChips({ ...base, mode: "all", counts }))).toEqual([d0, d1, d2, d3]);
+    expect(keys(visibleDayChips({ ...base, mode: "all", counts: null }))).toEqual([d0, d1, d2, d3]);
+  });
+  it("shows no days while loading, only the selected one", () => {
+    expect(visibleDayChips({ ...base, mode: "available", counts: null })).toEqual([]);
+    expect(keys(visibleDayChips({ ...base, mode: "available", counts: null, selected: d2 }))).toEqual([d2]);
+  });
+  it("shows only days with something on once loaded, in order", () => {
+    expect(keys(visibleDayChips({ ...base, mode: "available", counts }))).toEqual([d1, d3]);
+  });
+  it("keeps a selected day whose count is 0", () => {
+    expect(keys(visibleDayChips({ ...base, mode: "available", counts, selected: d2 }))).toEqual([d1, d2, d3]);
+  });
+  it("shows only the selected day when the server filtered by date", () => {
+    expect(keys(visibleDayChips({ ...base, mode: "available", counts, selected: d1, catalogDateFiltered: true }))).toEqual([d1]);
   });
 });

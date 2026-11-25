@@ -37,6 +37,29 @@ test("date chips show experiences with available sessions and keep the URL in sy
   await expect(status).toContainText("4 experiences");
 });
 
+test("the list offers only days with something on, none disabled, and ?date= preselects", async ({ page }) => {
+  await page.goto("/experiences");
+  const chips = page.getByRole("group", { name: "Date (Japan time)" });
+  const dayChips = chips.getByRole("button", { name: /, \d+ experiences?$/ });
+  await expect(dayChips.first()).toBeVisible();
+  await expect(chips.getByRole("button", { name: "Any day" })).toBeVisible();
+  // Every chip after "Any day" has a count; none is disabled and none says "nothing on this day".
+  const all = chips.getByRole("button");
+  await expect(all).toHaveCount((await dayChips.count()) + 1);
+  await expect(chips.locator("button:disabled")).toHaveCount(0);
+  await expect(chips.getByRole("button", { name: /nothing on this day/ })).toHaveCount(0);
+  expect(await dayChips.count()).toBeLessThanOrEqual(14);
+
+  const label = ((await dayChips.first().getAttribute("aria-label")) ?? "").split(", ")[0] ?? "";
+  await dayChips.first().click();
+  await expect(page).toHaveURL(/[?&]date=(\d{4}-\d{2}-\d{2})/);
+  const url = new URL(page.url());
+  const date = url.searchParams.get("date")!;
+
+  await page.goto(`/experiences?date=${date}`);
+  await expect(chips.getByRole("button", { pressed: true })).toHaveAccessibleName(new RegExp(`^${label}`));
+});
+
 test("the home finder carries the date and party size to the list", async ({ page }) => {
   await page.goto("/");
   const finder = page.getByRole("search", { name: "Find experiences" });
