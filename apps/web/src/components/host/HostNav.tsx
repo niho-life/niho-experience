@@ -281,7 +281,8 @@ export function HostSidebar({ account, providers, nihoAppUrl, writePath, writerN
         </>
       ) : null}
       {providers.length === 0 && writerItem ? <nav aria-label={NAV_LABEL}><ul>{writerItem}</ul></nav> : null}
-      <div className="mt-auto pt-3">
+      {/* The account menu opens above this whole foot (anchored here), so it never half-covers 体験サイトを見る. */}
+      <div className="relative mt-auto pt-3">
         {current?.kind !== "OPERATOR" ? <a href={TRAVELER_SITE_PATH} className="mb-2 flex h-10 items-center gap-2.5 rounded-[10px] px-2.5 font-bold text-ink-soft hover:bg-sand/60 hover:text-ink">
           <HostIcon name="external" className="size-[18px]" />
           <span>体験サイトを見る</span>
@@ -302,7 +303,7 @@ function AccountMenu({ account, providers, nihoAppUrl, writePath, variant = "mob
   const writerHref = writePath && current?.kind !== "OPERATOR" && hasOwnerMembership(providers) ? writePath : undefined;
   const name = account.displayName || "NIHO アカウント";
   return (
-    <details ref={menu} data-host-modal-menu={sidebar ? undefined : ""} className="relative group">
+    <details ref={menu} data-host-modal-menu={sidebar ? undefined : ""} className={sidebar ? "group" : "relative group"}>
       <summary className={sidebar ? "flex min-h-12 cursor-pointer list-none items-center gap-2.5 border-t border-line px-2.5 pt-3 [&::-webkit-details-marker]:hidden" : "grid size-11 cursor-pointer list-none place-items-center rounded-full [&::-webkit-details-marker]:hidden"}>
         <AccountAvatar account={account} className="size-[30px] text-[0.8125rem]" />
         {sidebar ? <><span className="min-w-0 flex-1 text-left"><span className="block truncate text-[0.78125rem] leading-[1.3] font-extrabold">{name}</span><span className="block text-xs leading-[1.3] text-muted">あなたのアカウント</span></span><HostIcon name="chevronDown" className="size-4 text-muted group-open:rotate-180" /></> : null}

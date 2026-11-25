@@ -157,7 +157,7 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
     await expect(page.getByRole("link", { name: "メンバー" })).toHaveAttribute("href", "/host/members");
     await expect(page.getByRole("link", { name: "設定", exact: true })).toHaveAttribute("href", "/host/settings");
     await expect(page.getByRole("link", { name: "体験サイトを見る" })).toHaveAttribute("href", "/experiences");
-    await expect(page.getByText("提供者を切り替える")).toBeVisible();
+    await expect(page.getByText("提供者を切り替える", { exact: true })).toBeVisible();
     await expect(page.locator("#main")).toHaveAttribute("inert", "");
     await page.keyboard.press("Escape");
     await expect(page.locator("#main")).not.toHaveAttribute("inert");
@@ -221,7 +221,7 @@ test("設定の後方互換表示 has six panels, and 保存 checks the fields a
   await openSettings(page);
   await page.waitForURL(/\/host\/settings$/);
   await expect(page.getByRole("heading", { level: 1, name: "サンプルの台所 の設定" })).toBeVisible();
-  await expect(page.locator("main").getByRole("link", { name: "アカウント設定" })).toHaveAttribute("href", "/host/account");
+  await expect(page.locator("main").getByRole("link", { name: "アカウント設定" })).toHaveAttribute("href", "/host/account?providerId=sample-provider-kitchen");
   await page.goto("/host/settings?section=all");
   await expect(page.locator("main").getByRole("heading", { level: 2 })).toHaveText(["提供者情報", "売上受取口座", "カレンダー", "既定の集合案内", "通知", "NIHOサポート"]);
 
@@ -239,7 +239,9 @@ test("設定の後方互換表示 has six panels, and 保存 checks the fields a
   await expect(payout.getByRole("link", { name: /Stripe で確認/ })).toBeVisible();
   // カレンダー and 通知 (#109): host-settings.spec.ts.
   await expect(page.getByRole("region", { name: "カレンダー" })).toContainText("接続中");
-  await expect(page.getByRole("region", { name: "通知" })).toContainText("kitchen@example.com");
+  // The address is the person's own: the provider's 通知 points to あなたのアカウント instead of showing it.
+  await expect(page.getByRole("region", { name: "通知" })).toContainText("宛先は、あなたのアカウントで変えられます。");
+  await expect(page.getByRole("region", { name: "通知" })).not.toContainText("kitchen@example.com");
   const meeting = page.getByRole("region", { name: "既定の集合案内" });
   await expect(meeting.getByRole("textbox", { name: "公開する大まかな場所" })).toHaveValue("Near Kamakura Station, 5-minute walk");
   const mapUrl = meeting.getByRole("textbox", { name: "地図 URL" });
