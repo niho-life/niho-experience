@@ -13,7 +13,7 @@ export function HomeLivingRoom() {
         <p className="hand text-[1.75rem] text-leaf">it starts here</p>
         <h2 id="home-living-room" className="mt-1 max-w-[16ch] text-[2.25rem] leading-[1.05] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:text-[3.5rem]">NIHO, the town&rsquo;s living room</h2>
         <p className="mt-3.5 max-w-[30rem] text-[1.0625rem] text-white/90">Two minutes from Kamakura Station. People of the town drop in to cook, talk and make things together.</p>
-        <p className="mt-6"><ButtonLink href="/about">About NIHO Experience</ButtonLink></p>
+        <p className="mt-6"><ButtonLink href="/about">About NIHO Travel</ButtonLink></p>
       </div>
     </div>
   </section>;
