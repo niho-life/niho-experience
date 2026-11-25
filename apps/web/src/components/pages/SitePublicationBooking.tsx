@@ -51,6 +51,8 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   // traveler chooses a date, and the date chooses the offer; until then the first offer stands for the terms all offers share.
   const [offerId, setOfferId] = useState(firstOffer?.id ?? "");
   const [availability, setAvailability] = useState<{ state: "loading" | "failed" | "ready"; occurrences: Occurrence[] }>({ state: "loading", occurrences: [] });
+  // Counts the availability reads asked for: one on arrival, one more after a date turned out to be taken.
+  const [availabilityRead, setAvailabilityRead] = useState(0);
   const loading = availability.state === "loading";
   const loadError = availability.state === "failed";
   // Every offer's dates in one calendar. One array per availability read: the calendar keeps the month the traveler turned
@@ -116,7 +118,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       setAvailability({ state: "ready", occurrences: result.data.occurrences });
     }).catch(() => { if (active) { setAvailability({ state: "failed", occurrences: [] }); setDate(""); } });
     return () => { active = false; };
-  }, [api, publication.slug, sold]);
+  }, [api, publication.slug, sold, availabilityRead]);
 
   /** A day of the calendar, or one of its start times: the date and the offer held then. */
   function chooseOccurrence(occurrence: Occurrence) {
@@ -180,6 +182,9 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
         if (code === "FULL" || code === "OCCURRENCE_INVALID" || code === "UNAVAILABLE") {
           setProblem(ja ? "この日時は予約できなくなりました。別の日時を選んでください。" : "That date is no longer available. Choose another date.");
           setDate("");
+          // What the calendar shows is from before: read it again, so the start that just filled up is not chosen again.
+          setAvailability({ state: "loading", occurrences: [] });
+          setAvailabilityRead((count) => count + 1);
           if (embed) setStep(1);
           return;
         }
@@ -232,7 +237,10 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   const oneOffer = offers.length === 1;
   const chosen = oneOffer || Boolean(selectedOccurrence);
   const onePrice = offers.every((item) => item.pricing.adultPriceYen === firstOffer.pricing.adultPriceYen);
-  const lowestPrice = formatYen(Math.min(...offers.map((item) => item.pricing.adultPriceYen)), locale);
+  // "From": the lowest price a traveler can book now, not one of an offer without an open date.
+  const open = new Set(occurrences.filter((occurrence) => occurrence.bookable).map((occurrence) => occurrence.offerId));
+  const bookableOffers = offers.filter((item) => open.has(item.id));
+  const lowestPrice = formatYen(Math.min(...(bookableOffers.length > 0 ? bookableOffers : offers).map((item) => item.pricing.adultPriceYen)), locale);
   const shownOffer = offer ?? firstOffer;
   const scheduleLine = oneOffer
     ? `${scheduleDescription(shownOffer, locale)} · ${formatDurationLabel(shownOffer.durationMinutes, locale)}`

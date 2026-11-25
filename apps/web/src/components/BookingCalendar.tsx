@@ -82,7 +82,7 @@ export function BookingCalendar({ occurrences, value, offerId, onChange, noteOf,
             : day.state === "bookable"
               ? "cursor-pointer bg-leaf-pale font-extrabold text-ink hover:bg-leaf"
               : day.state === "unavailable" ? "text-muted line-through" : "text-muted opacity-50";
-          return <button key={day.date} type="button" className={`${DAY} ${look}`} disabled={day.state !== "bookable"} aria-pressed={day.state === "bookable" ? pressed : undefined} aria-label={dayAriaLabel(day, locale)} onClick={() => { if (day.occurrence) onChange(day.occurrence); }}>{day.day}</button>;
+          return <button key={day.date} type="button" className={`${DAY} ${look}`} disabled={day.state !== "bookable"} aria-pressed={day.state === "bookable" ? pressed : undefined} aria-label={dayAriaLabel(day, locale)} onClick={() => { if (day.occurrence && !pressed) onChange(day.occurrence); }}>{day.day}</button>;
         })}
       </div>
       <p className="mx-0.5 mt-2.5 flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted">
@@ -90,19 +90,23 @@ export function BookingCalendar({ occurrences, value, offerId, onChange, noteOf,
         <span><i aria-hidden="true" className="mr-1.5 inline-block size-3 rounded-[4px] border border-line-strong bg-white align-[-1px]" />{ja ? "満席・開催なし" : "Full or not offered"}</span>
       </p>
     </div> : null}
+    {/* Always in the page, so every choice is read out: the day, the start chosen on it, and that other starts exist. */}
+    <p className="sr-only" aria-live="polite">{selected ? ja
+      ? `選択中：${calendarDayLabel(selected.date, locale)}、${occurrenceStartTime(selected.startAt, locale)} JST、${placesLeftLabel(selected.seatsLeft, locale)}。${starts.length > 1 ? `この日の開始時刻は${starts.length}つあります。` : ""}`
+      : `Selected: ${calendarDayLabel(selected.date, locale)}, ${occurrenceStartTime(selected.startAt, locale)} JST, ${placesLeftLabel(selected.seatsLeft, locale)}.${starts.length > 1 ? ` ${starts.length} start times that day.` : ""}` : ""}</p>
     {bookableCount > 0 ? selected
       ? starts.length > 1
         ? <div role="radiogroup" aria-label={ja ? `${calendarDayLabel(selected.date, locale)}の開始時刻` : `Start time on ${calendarDayLabel(selected.date, locale)}`} className="grid grid-cols-1 gap-2 rounded-xl bg-sand px-3 py-2.5 text-sm">
           <p><b>{calendarDayLabel(selected.date, locale)}</b> · {ja ? "開始時刻を選んでください" : "Choose a start time"}</p>
           {starts.map((occurrence) => {
             const note = occurrence.bookable ? noteOf?.(occurrence) ?? null : null;
-            return <label key={occurrence.offerId} className={`flex min-h-11 items-center gap-2.5 ${occurrence.bookable ? "cursor-pointer" : "text-muted"}`}>
+            return <label key={`${occurrence.offerId}|${occurrence.startAt}`} className={`flex min-h-11 items-center gap-2.5 ${occurrence.bookable ? "cursor-pointer" : "text-muted"}`}>
               <input type="radio" name={startsName} className="size-4 shrink-0" checked={occurrence.offerId === selected.offerId} disabled={!occurrence.bookable} onChange={() => onChange(occurrence)} />
               <span className="min-w-0 wrap-anywhere">{occurrenceStartTime(occurrence.startAt, locale)} JST · {occurrence.bookable ? placesLeftLabel(occurrence.seatsLeft, locale) : closedLabel(occurrence, locale)}{note ? ` · ${note}` : ""}</span>
             </label>;
           })}
         </div>
-        : <p className="rounded-xl bg-sand px-3 py-2.5 text-sm" aria-live="polite"><b>{calendarDayLabel(selected.date, locale)}</b> · {occurrenceStartTime(selected.startAt, locale)} JST · {placesLeftLabel(selected.seatsLeft, locale)}</p>
+        : <p className="rounded-xl bg-sand px-3 py-2.5 text-sm"><b>{calendarDayLabel(selected.date, locale)}</b> · {occurrenceStartTime(selected.startAt, locale)} JST · {placesLeftLabel(selected.seatsLeft, locale)}</p>
       : <p className="text-sm text-muted">{ja ? "日にちを選ぶと、開始時刻と残りの席数が出ます。" : "Choose a date to see the time and the places left."}</p>
       : null}
   </div>;

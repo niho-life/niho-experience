@@ -136,6 +136,23 @@ describe("site publication booking seller terms", () => {
     expect(otherPrice).not.toContain("<b>¥5,000</b>");
   });
 
+  it("says the same in Japanese when several offers are priced differently", () => {
+    const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: {
+        publication: { slug: "paid-one", publicTitle: "Paid one", sellerDisplayName: "NIHO", japanese: { title: "体験サンプル" } },
+        saleTerms: { sellerDisplayName: "NIHO", offers: [offer, { ...offer, id: "synthetic-offer-2", startTime: "18:00", pricing: { ...offer.pricing, adultPriceYen: 4000 } }] },
+        sellerDisclosure: null,
+      } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true, locale: "ja",
+    }));
+    expect(html).not.toContain("<select");
+    // 日本語の金額は既存の表記（全角の円記号）のまま。
+    expect(html).toContain("￥4,000〜 / 大人1名");
+    expect(html).toContain("所要時間：1時間 30分");
+    expect(html).toContain("<b>日にちを選んでください</b>");
+    expect(html).not.toMatch(/From |Duration|Choose a date/);
+  });
+
   it("starts the embedded widget at the date step, without the contact fields", () => {
     const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
       item: { publication: { slug: "paid-one", publicTitle: "Paid one", sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers: [offer] }, sellerDisclosure: null } as never,
