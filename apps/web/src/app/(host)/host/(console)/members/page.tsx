@@ -19,7 +19,9 @@ export default async function HostMembersPage({ searchParams }: { searchParams: 
     <HostPageBody>
       <PageHead title="メンバー" />
       <p className="-mt-1.5 mb-3.5 text-ink-soft md:mb-[18px]">{provider.displayName} を一緒に運営する人です。</p>
-      <HostOperatingTeamPanel providerId={provider.id} role={provider.memberRole} mode={hostTeamMode(session)} />
+      {/* Keyed by provider and role: switching the provider starts from that provider's own team, never from the other one's
+          candidate, typed address or ended state (it used to sit inside 設定's form, which is keyed the same way). */}
+      <HostOperatingTeamPanel key={`${provider.id}:${provider.memberRole ?? "none"}`} providerId={provider.id} role={provider.memberRole} mode={hostTeamMode(session)} />
     </HostPageBody>
   );
 }
