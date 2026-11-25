@@ -12,7 +12,7 @@ import { getReviewSummaries } from "@/lib/journey";
 import { withReviewLines } from "@/lib/reviews-ui";
 import { config, isExperienceStaging, isPilotPreview, isPreview } from "@/lib/config";
 import { dayOption, parseDateParam, parseGuestsParam, upcomingDays } from "@/lib/date-filter";
-import { filterExperienceSummaries, normalizeExperienceDate, normalizeExperienceQuery, normalizeExperienceTheme, type SearchParams } from "@/lib/filters";
+import { filterExperienceSummaries, matchesExperienceQuery, normalizeExperienceDate, normalizeExperienceQuery, normalizeExperienceTheme, type SearchParams } from "@/lib/filters";
 import { EXPERIENCE_LIST_DESCRIPTION, EXPERIENCE_LIST_TITLE, publicMetadata } from "@/lib/public-metadata";
 import { englishAlternates } from "@/lib/locale-metadata";
 import { guideCatalogForSite } from "@/lib/guide-registry";
@@ -34,6 +34,13 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     ...(filtered ? { robots: { index: false, follow: true } } : {}),
   };
 }
+
+/**
+ * The native cards are searched by the same rule and the same fields as the legacy summaries (`filterExperienceSummaries`): every
+ * word, in any order, over the title, the lead, the provider and the region. With the duplicates gone (#643) a product sold here
+ * is found only through its native card, so a search that found it before must still find it.
+ */
+const NATIVE_REGION_NAME = "Kamakura";
 
 /** The home finder and the list's date chips both cover two weeks; the chips show only days with something on. A later date in the URL gets its own chip. */
 const FINDER_DAYS = 14;
@@ -62,7 +69,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const items = filterExperienceSummaries(catalog, searchQuery);
   const legacyCards = buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview);
   const nativeCards = sitePublications
-    .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && (!searchQuery || `${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${publication.providerPublicName ?? publication.sellerDisplayName}`.toLocaleLowerCase("en").includes(searchQuery)))
+    .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && matchesExperienceQuery(`${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${publication.providerPublicName ?? publication.sellerDisplayName} ${NATIVE_REGION_NAME}`, searchQuery))
     .map((entry) => sitePublicationCard(entry));
   const bySlug = await loadCategoryBySlug();
   const { available: categories, selected: category } = resolveCategories(
