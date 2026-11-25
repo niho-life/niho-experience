@@ -2,6 +2,8 @@
 
 Experienceの公開商品は `packages/experience-store` が開催枠・予約・決済の正本を持つ。旧NIHO体験販売との商品ごとの切替は行わない。公開版が有効であることを、残席照会・Checkoutの両方で確認する。予約者の連絡先は体験の1年後に消す。NIHOの手数料はサポートOFF 10%・ON 15%（決済手数料込み）で、予約時の値をsnapshotする。
 
+ホストのサイトに iframe で貼る予約ウィジェット（`/embed`）も、同じ残席照会と申込を使う。枠の中の流れ・ヘッダー・親ページへのメッセージは [ホストのサイトへの埋め込み](embed.md)。
+
 **現在地**：Checkout・予約・返金・予約者メール・予約ページ・ホスト通知/予約画面はExperience Storeを使う。有効な公開版だけが新規予約対象。旧NIHO体験商品への移行・Checkout fallbackは廃止し、本人の商品作成と公開は[Host API契約](experience-publication-api.md)で進める。旅行者の連絡先は体験終了から1年後に消去する。
 
 ## 流れ

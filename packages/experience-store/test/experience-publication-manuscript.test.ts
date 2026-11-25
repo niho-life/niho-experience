@@ -208,3 +208,15 @@ describe("Japanese-only publication (#59)", () => {
     assert.equal(publication.japaneseOnly, false);
   });
 });
+
+// 英語のみの商品: 日本語の下書きが content.ja に残っていても、日本語は公開しない。
+describe("English-only publication", () => {
+  it("does not project the Japanese manuscript of an English-only product", () => {
+    const content = confirmed(englishContent, japanese, PRE_FAQ_JAPANESE_FINGERPRINT, PRE_FAQ_ENGLISH_FINGERPRINT);
+    assert.ok(projectPublicExperiencePublication(publicRow(content) as never)?.japanese);
+    const publication = projectPublicExperiencePublication(publicRow({ ...content, englishOnly: true }) as never);
+    assert.ok(publication);
+    assert.equal(publication.japanese, null);
+    assert.equal(publication.japaneseOnly, false);
+  });
+});

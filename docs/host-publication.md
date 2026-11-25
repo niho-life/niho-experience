@@ -54,15 +54,21 @@ ExperienceはNIHO v1選別client、本人／local OWNER／exact Connect boundary
 
 合成DB通し検証では、NIHO v1 identity/Connect応答からExperience OWNERを結び、商品作成・公開・公開read・予約holdまで確認する。追加のライフサイクル／SEO／Checkout route確認は対象テストで行う。残る条件はNIHO v1のstaging配備・service identity/origin設定、Experience DB migration/grants、GCS bucket/IAM、承認済みfee・販売者・同意文、Eの画面接続とstaging受入。本番データ・実口座・個人情報はPR検証に使わない。
 
-## 手入力・代理登録された英語原稿の確認
+## 英語原稿の確認（保存＝確認、オーナー決定 2026-11-25、#640）
 
-OWNERはAI翻訳の生成履歴がなくても、現在の日英原稿を照合して「英語原稿を確認」を実行できる。事務局が準備した原稿も同じ操作で引き継ぐ。確認は現在の日本語と英語それぞれのfingerprintへ結び、確認処理中の変更は受け付けない。日本語・英語の再編集は確認を解除する。確認操作は外部翻訳APIを呼ばず、保存・公開時のサーバーによる原稿・fingerprint・OWNER・掲載同意の検証を通す。
+通常の Host 画面には「英語を確認」の段を置かない。OWNER が保存すると、その時点の日英原稿を OWNER が確認した内容として、現在の日本語と英語それぞれの fingerprint へ結ぶ（`content.translation`）。AI 翻訳の生成履歴が無い手入力の英語も、事務局が準備した原稿も同じ扱いで引き継ぐ。翻訳は OWNER が「日本語から翻訳」「英語から翻訳」を押したときだけ行い、原稿を自動では書き換えない。確認は外部翻訳APIを呼ばず、保存・公開時のサーバーによる原稿・fingerprint・OWNER・掲載同意の検証を通す。日英どちらかの必須項目（商品名・紹介文・説明・当日の言語）が欠けている間は確認済みにせず、公開条件（`MANUSCRIPT_REQUIRED`）で止める。
+
+両方の言語を掲載している商品では、「もと」の言語を後から変えてもう一方がそのままのとき、公開を止めずにもう一方の原稿の上で知らせる（「翻訳し直す」／「このままでよい」）。もとは、最後に翻訳した向きで決まる（既定は日本語。日本語が未記入で英語だけ書いて保存したときは英語）。下書きの `content.languageSync` に、もと＝日本語なら `englishSourceFingerprint`（英語が最後に揃った時点の日本語 fingerprint）、もと＝英語なら `japaneseSourceFingerprint`（そのときの英語 fingerprint）のどちらか一方を持つ。派生した側を直しても知らせは出ない。この鍵は画面だけが使い、公開投影には出ない。
+
+## 掲載言語（オーナー決定 2026-11-25、#640）
+
+OWNER は「掲載設定 › 掲載言語」で「英語」「日本語」を選ぶ（1つ以上）。両方＝日英の商品、日本語だけ＝下の「日本語のみで公開する」、英語だけ＝英語のページだけを公開する。原稿の画面には常に両方の言語のタブがあり、掲載しない言語は翻訳のもとになる下書きとして使える（公開されない）。形と公開側の境界は [localization-consumer.md](localization-consumer.md)「英語のみで掲載する商品」。体験の作成は一覧の上のダイアログで、掲載言語・体験名・料金を聞く（既定は英語だけ）。
 
 Admin代理公開では、手入力の日英原稿をAdmin reviewとして別のimmutable行に記録する。OWNER本人が確認した表示やdraft内のOWNER確認fingerprintは作らない。公開transactionは現在revisionと日英fingerprintに一致する同じAdmin actorのreviewを要求し、原稿再編集後は再reviewが必要になる。
 
 ## 日本語のみで公開する（#59）
 
-地域の担い手が日本語で書く商品のため、OWNER・事務局は原稿の節で「日本語のみで公開する」を選べる（`content.japaneseOnly`。`EXPERIENCE_JAPANESE_SITE_ENABLED` が `true` の環境でだけ保存できる）。英語の原稿と「英語原稿を確認」は要らず、日本語原稿が揃えば公開できる（事務局の代理公開は「日本語原稿を確認」）。公開上の商品名は日本語の商品名と同じ。公開すると日本語のページ（`/ja/experiences/{slug}`）にだけ載り、英語のページ・一覧・sitemap には出ない。詳しい境界は [localization-consumer.md](localization-consumer.md)「日本語を原文にした商品」。
+地域の担い手が日本語で書く商品のため、OWNERは「掲載設定 › 掲載言語」の「日本語のみ」を、事務局は原稿の節の「日本語のみで公開する」を選べる（`content.japaneseOnly`。`EXPERIENCE_JAPANESE_SITE_ENABLED` が `true` の環境でだけ保存できる）。英語の原稿は要らず、日本語原稿が揃えば公開できる（事務局の代理公開は「日本語原稿を確認」）。公開上の商品名は日本語の商品名と同じ。公開すると日本語のページ（`/ja/experiences/{slug}`）にだけ載り、英語のページ・一覧・sitemap には出ない。詳しい境界は [localization-consumer.md](localization-consumer.md)「日本語を原文にした商品」。
 
 ## よくある質問（FAQ・任意）
 

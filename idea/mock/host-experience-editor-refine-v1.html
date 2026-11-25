@@ -1,0 +1,859 @@
+<!doctype html>
+<!--
+  mock: NIHO Experience ホスト「体験の編集」（/host/experiences/[id]）の整理案 v1（2026-11-25）。Epic #84 / #89。
+  対象: apps/web/src/components/host/HostPublicationWorkspace.tsx（通常 host mode）と ProductClassificationPanel.tsx。
+  論点:
+    1. まず掲載言語（英語／日本語、両方可）を選ぶ（一覧の「体験を作成」から出るダイアログ。作成用のページは作らない）。タブは「英語／日本語」で英語が先。どちらも直接書ける。
+       翻訳は「日本語から翻訳」「英語から翻訳」を押したときだけ。「英語を確認（確定）」の段はなくし、保存した内容が公開内容。
+       もう一方の言語を後から変えたら、公開を止めずに知らせる。
+    2. 「日本語サイトでの分類」「日本語のみで公開する」「体験ページのアドレス」を冒頭・レールから「掲載設定」へ移す。
+    3. 「公開前の確認」の開閉も冒頭の不足一覧もやめ、足りないものは「公開」を押したときだけダイアログで出す。ページのアドレスは自動で作る。
+    4. 「体験ページ／料金・予約／日程／掲載設定」をすべて画面内のタブにする（日程だけ別ページへ飛ばない）。
+    5. 保存は変更があるときだけ出る帯 1 つ（分類の個別保存をなくす）。状態と公開・停止は題名の行へ。
+    6. 説明文は「i」に格納し、押したときだけ吹き出しで出す。状態・不足の案内・短い但し書き（任意・税込）は外に残す。
+  参照: docs/design-system.md（ホストの画面）、docs/host-publication.md、idea/mock/host-workspace-simple-v1.html。
+  このモックは目標の形。#640 の第1段（API 契約を変えない範囲）で作った部分と差は docs/design-system.md「体験の編集」を参照。
+  現行に無く API の追加が要る: 英語のみの掲載（日本語原稿なし）、英語→日本語の翻訳、写真の説明・集合の概要の言語別と翻訳、確定なしの公開、ずれの知らせ。
+  作っていない: API・認証・実保存・翻訳の実呼び出し（用意した文を入れる）・写真のアップロード、admin-draft mode、販売プラン切替、競合解消、スマホの細部。
+  体験名と分類の選択肢以外の文・料金・開催枠・写真はすべて合成。サーバー通信・storage・実サービスへの遷移なし。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>NIHO Experience — 体験の編集 整理案 v1</title>
+<style>
+:root{
+  --canvas:#fff;--sand:#f5f5f2;--ink:#1c1c1a;--soft:#4b4b47;--muted:#6c6c67;--line:#e8e8e4;--line-strong:#d4d4cf;
+  --moss:#355e1f;--leaf:#b2d67c;--leaf-hover:#a3c86b;--leaf-pale:#eef5e3;--danger:#a8321e;--danger-pale:#fcece8;--warn:#7a4b00;--warn-pale:#fff3dc;
+  --font:"Nunito","Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+  --font-bold:"Nunito","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#ecece8;color:var(--ink);font:14px/1.65 var(--font)}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0}
+b,strong,h2,h3,label,.btn,.pill,.tab,.seg button,legend{font-family:var(--font-bold)}
+h1,h2,h3,p{margin:0}
+a{color:inherit}
+:focus-visible{outline:3px solid var(--moss);outline-offset:2px;border-radius:6px}
+[hidden]{display:none!important}
+
+/* ── モックの操作（画面の外） ── */
+.review{max-width:1320px;margin:auto;padding:14px 20px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;font-size:12px;color:#55554f}
+.review b{font-size:13px;color:var(--ink)}
+.review .grp{display:flex;align-items:center;gap:6px}
+.rseg{display:inline-flex;border:1px solid #d6d6d0;border-radius:999px;background:#fff;padding:2px}
+.rseg button{height:26px;padding:0 11px;border-radius:999px;font-size:12px;font-weight:700;color:#55554f}
+.rseg button[aria-pressed=true]{background:var(--ink);color:#fff}
+
+/* ── 端末の枠 ── */
+.device{max-width:1320px;margin:0 auto 18px;background:var(--canvas);border:1px solid #d9d9d3;border-radius:14px;overflow:clip;box-shadow:0 10px 30px rgb(28 28 26/.08)}
+.urlbar{display:flex;align-items:center;gap:12px;padding:9px 14px;background:#f4f4f1;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}
+.urlbar i{display:inline-block;width:10px;height:10px;border-radius:50%;background:#d9d9d3;margin-right:5px}
+.urlbar strong{color:var(--ink);font-weight:600}
+.workspace{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:860px}
+.sidebar{border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;gap:4px}
+.brand{font-size:19px;padding:2px 10px 14px}
+.provider{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:14px;padding:9px 11px;margin-bottom:14px;font-weight:800;font-family:var(--font-bold);font-size:13px}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--leaf-pale);color:var(--moss);display:grid;place-items:center;font-weight:800;font-size:13px}
+.nav{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:12px;font-weight:700;font-family:var(--font-bold);color:var(--soft)}
+.nav[aria-current=page]{background:var(--sand);color:var(--ink)}
+.nav svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.sidebar hr{border:0;border-top:1px solid var(--line);margin:10px 4px;width:calc(100% - 8px)}
+.account{margin-top:auto;display:flex;align-items:center;gap:10px;padding:12px 8px 0;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.account b{display:block;color:var(--ink);font-size:13px}
+
+.main{min-width:0;position:relative;display:flex;flex-direction:column}
+.page{width:100%;max-width:1040px;margin:0 auto;padding:22px 32px 40px;flex:1}
+
+/* ── 題名の行 ── */
+.back{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:700;font-family:var(--font-bold);color:var(--muted);margin-bottom:6px;text-decoration:none}
+.back:hover{color:var(--ink)}
+.titlebar{display:flex;align-items:flex-start;gap:14px;margin-bottom:14px}
+.titlebar h1{font-size:25px;line-height:1.35;font-weight:500;flex:1;min-width:0;overflow-wrap:anywhere}
+.titlebar h1 .pill{vertical-align:middle;margin-left:10px;position:relative;top:-2px}
+.actions{display:flex;align-items:center;gap:8px;flex-shrink:0;position:relative;padding-top:2px}
+.pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:999px;font-size:12px;font-weight:800;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.live{background:var(--leaf-pale);color:var(--moss)}
+.pill.draft{background:var(--sand);color:var(--soft)}
+.pill.stop{background:var(--danger-pale);color:var(--danger)}
+.pill.warn{background:var(--warn-pale);color:var(--warn)}
+.pill.sm{height:20px;padding:0 8px;font-size:11px}
+.pill.plain::before{display:none}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 16px;border-radius:999px;border:1px solid var(--line-strong);background:var(--canvas);font-size:13.5px;font-weight:800;white-space:nowrap;text-decoration:none;line-height:1}
+.btn:hover{background:var(--sand)}
+.btn.primary{background:var(--leaf);border-color:transparent}
+.btn.primary:hover{background:var(--leaf-hover)}
+.btn.ghost{border-color:transparent;color:var(--soft)}
+.btn.sm{height:30px;padding:0 12px;font-size:12.5px}
+.btn.lg{height:46px;padding:0 26px;font-size:15px}
+.btn.danger{color:var(--danger)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.icon{width:38px;padding:0;font-size:18px;letter-spacing:1px}
+.menu{position:absolute;right:0;top:46px;z-index:5;min-width:210px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:6px;box-shadow:0 10px 30px rgb(28 28 26/.12)}
+.menu button{display:block;width:100%;text-align:left;padding:9px 12px;border-radius:9px;font-weight:700;font-family:var(--font-bold);font-size:13px}
+.menu button:hover{background:var(--sand)}
+
+/* ── 足りないときだけ出る案内 ── */
+.alert{border-radius:16px;padding:14px 18px;margin-bottom:16px;background:var(--warn-pale);color:var(--warn)}
+.alert h2{font-size:14px;font-weight:800;color:var(--warn)}
+.alert ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:2px}
+.alert li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid rgb(122 75 0/.14);color:var(--ink)}
+.alert li button{font-weight:800;font-family:var(--font-bold);color:var(--moss);text-decoration:underline;text-underline-offset:4px;white-space:nowrap;font-size:13px}
+.alert.one{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.alert.one p{color:var(--ink)}
+
+/* ── タブ ── */
+.tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-bottom:20px;overflow-x:auto}
+.tab{position:relative;height:44px;flex-shrink:0;font-size:14px;font-weight:700;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--ink)}
+.tab .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#c98a14;margin-left:6px;vertical-align:middle}
+
+/* ── 本文 ── */
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 176px;gap:32px;align-items:start}
+.cols.single{grid-template-columns:minmax(0,720px)}
+.stack{display:grid;gap:16px;min-width:0}
+.surface{border:1px solid var(--line);border-radius:16px;padding:22px 24px;scroll-margin-top:18px}
+.surface>h2{font-size:16px;font-weight:800;margin-bottom:14px}
+.surface>.lead{color:var(--soft);font-size:13px;margin-bottom:14px}
+.surface>h2+.field,.surface>h2+.sub{margin-top:0}
+.plain{color:var(--soft);font-size:13.5px}
+.sub{font-size:13.5px;font-weight:800;margin:20px 0 6px}
+.sub small,.field>label small,legend small,.surface>h2 small{font-weight:400;font-family:var(--font);color:var(--muted);margin-left:6px;font-size:12px}
+.field{display:block;margin-top:14px}
+.field>label,.field>legend{display:block;font-size:13px;font-weight:700;color:var(--soft);margin-bottom:5px;padding:0}
+.field .help{font-size:12px;color:var(--muted);margin-top:5px}
+fieldset{border:0;padding:0;margin:0;min-width:0}
+.input,select.input,textarea.input{display:block;width:100%;min-height:40px;border:1px solid var(--line-strong);border-radius:10px;background:#fff;padding:8px 12px;font-size:14px;line-height:1.6}
+textarea.input{resize:vertical}
+.input:focus-visible{outline:none;border-color:var(--moss);box-shadow:0 0 0 3px rgb(53 94 31/.18)}
+.input.bad{border-color:#c98a14;background:#fffaf0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid2 .field{margin-top:0}
+.unit{display:flex;align-items:center;gap:8px}
+.unit .input{width:120px;text-align:right;font-variant-numeric:tabular-nums}
+.unit span{color:var(--soft);font-size:13px}
+
+/* 言語の切替 */
+.langbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.linkbtn{font-weight:800;font-family:var(--font-bold);color:var(--moss);text-decoration:underline;text-underline-offset:4px;font-size:13px;margin-left:8px}
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:12px;padding:3px;background:#fff}
+.seg button{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 18px;border-radius:9px;font-size:13.5px;font-weight:800;color:var(--muted)}
+.seg button[aria-pressed=true]{background:var(--sand);color:var(--ink)}
+.langbar p{font-size:13px;color:var(--soft);flex:1;min-width:220px}
+.langbar p button{font-weight:800;font-family:var(--font-bold);color:var(--moss);text-decoration:underline;text-underline-offset:4px}
+.enstate{border-radius:16px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.enstate.ok{background:var(--leaf-pale)}
+.enstate.todo{background:var(--warn-pale)}
+.enstate p{flex:1;min-width:160px}
+.enstate .row{display:flex;gap:8px;flex-wrap:wrap}
+.ref{font-size:12.5px;color:var(--muted);margin-top:5px;padding-left:10px;border-left:2px solid var(--line);white-space:pre-line}
+.ref::before{content:attr(data-l)"　";font-weight:800;font-family:var(--font-bold);font-size:11px;color:var(--soft)}
+.shared{font-size:12.5px;color:var(--muted);text-align:center;padding:4px 0}
+
+.grow{flex:1}
+.seg .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#c98a14}
+#langnote:empty{display:none}
+.btn.ghost[aria-pressed=true]{background:var(--sand);color:var(--ink)}
+.btn.ghost[aria-pressed=true]::before{content:"✓"}
+.choice span span{font-variant-numeric:tabular-nums}
+
+/* 写真 */
+.photos{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.ph{position:relative;aspect-ratio:4/3;border-radius:12px;overflow:hidden;border:2px solid transparent;display:block;width:100%}
+.ph[aria-pressed=true]{border-color:var(--ink)}
+.ph .tag{position:absolute;left:7px;top:7px;background:#fff;border-radius:999px;padding:1px 9px;font-size:11px;font-weight:800;font-family:var(--font-bold)}
+.ph .miss{position:absolute;right:7px;bottom:7px;background:var(--warn-pale);color:var(--warn);border-radius:999px;padding:1px 9px;font-size:11px;font-weight:800;font-family:var(--font-bold)}
+.ph .num{position:absolute;right:8px;top:6px;color:#fff;font-size:11px;font-weight:800;text-shadow:0 1px 2px rgb(0 0 0/.35)}
+.ph.add{border:1.5px dashed var(--line-strong);background:var(--sand);color:var(--soft);font-weight:800;font-family:var(--font-bold);font-size:13px;display:grid;place-items:center}
+.ph.add:hover{background:#efefea}
+.phedit{margin-top:12px;border-radius:14px;background:var(--sand);padding:16px 18px}
+.phedit .head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:2px}
+.phedit .ops{display:flex;gap:6px;flex-wrap:wrap}
+.phedit .field{margin-top:10px}
+.enphoto{display:grid;grid-template-columns:76px 1fr;gap:12px;align-items:start;margin-top:12px}
+.enphoto .thumb{aspect-ratio:4/3;border-radius:9px}
+
+/* 行の項目 */
+.rows{display:grid;gap:7px}
+.rowitem{display:grid;grid-template-columns:1fr 34px;gap:6px;align-items:start}
+.rowitem .input{background:var(--sand);border-color:transparent}
+.rowitem .input:focus-visible{background:#fff}
+.x{width:34px;height:40px;border-radius:9px;color:var(--muted);font-size:17px}
+.x:hover{background:var(--sand);color:var(--ink)}
+.addrow{justify-self:start;font-weight:800;font-family:var(--font-bold);color:var(--moss);font-size:13px;padding:6px 2px}
+.tl{display:grid;gap:8px}
+.tlitem{display:grid;grid-template-columns:96px 1fr 34px;gap:8px;align-items:start;background:var(--sand);border-radius:12px;padding:10px}
+.tlitem .body{display:grid;gap:6px}
+.faq{display:grid;gap:8px}
+.faqitem{display:grid;grid-template-columns:1fr 34px;gap:8px;background:var(--sand);border-radius:12px;padding:10px}
+.faqitem .body{display:grid;gap:6px}
+
+/* 選択 */
+.choice{display:grid;gap:8px}
+.choice label{display:flex;gap:11px;align-items:center;border:1px solid var(--line-strong);border-radius:12px;padding:11px 14px;cursor:pointer;font-family:var(--font)}
+.choice label:has(input:checked){border-color:var(--ink);background:var(--sand)}
+.choice input{margin:0;accent-color:var(--moss)}
+.choice b{display:block;font-size:13.5px}
+.choice span span{display:block;font-size:12.5px;color:var(--soft)}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--line-strong);font-size:13px;font-weight:700;font-family:var(--font-bold);color:var(--soft);background:#fff}
+.chip[aria-pressed=true]{background:var(--leaf-pale);border-color:var(--moss);color:var(--moss)}
+.chip[aria-pressed=true]::before{content:"✓ "}
+.switchrow{display:flex;align-items:center;margin-top:16px}
+.switch{display:flex;align-items:center;gap:11px;cursor:pointer;font-weight:700;font-family:var(--font-bold);font-size:13.5px}
+.switch input{appearance:none;width:38px;height:22px;border-radius:999px;background:var(--line-strong);position:relative;transition:background .15s;flex-shrink:0;margin:0}
+.switch input::after{content:"";position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s}
+.switch input:checked{background:var(--moss)}
+.switch input:checked::after{transform:translateX(16px)}
+.nested{margin-top:10px;border-left:2px solid var(--line);padding-left:16px}
+.slug{display:flex;align-items:center;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden;background:#fff}
+.slug span{padding:8px 0 8px 12px;color:var(--muted);white-space:nowrap;font-size:13.5px}
+.slug input{flex:1;min-width:80px;border:0;padding:8px 12px 8px 2px;font-size:14px;outline:none;font-weight:700;font-family:var(--font-bold)}
+.slug:focus-within{border-color:var(--moss);box-shadow:0 0 0 3px rgb(53 94 31/.18)}
+.exprow{display:flex;align-items:center;gap:14px;width:100%;text-align:left;border-radius:10px}
+.exprow .thumb{width:76px;aspect-ratio:4/3;border-radius:10px;flex-shrink:0}
+.exprow b{display:block;font-size:14px}
+.exprow .grow span{color:var(--muted);font-size:12.5px}
+dialog .sub{margin-top:16px}
+.slugauto{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.addr{color:var(--muted);overflow-wrap:anywhere}
+.addr b{color:var(--ink)}
+button.pill{cursor:pointer}
+button.pill:hover{filter:brightness(.97)}
+.offer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.offer:first-of-type{border-top:0}
+.offer b{display:block}
+.offer span{color:var(--muted);font-size:12.5px}
+.linkrow{display:flex;align-items:center;justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.host{display:flex;align-items:center;gap:14px}
+.host .face{width:56px;height:56px;border-radius:50%;background:var(--leaf-pale);color:var(--moss);display:grid;place-items:center;font-weight:800;font-size:20px;flex-shrink:0}
+
+/* 説明の「i」と吹き出し */
+.info{position:relative;display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1.5px solid #9a9a94;color:var(--muted);font:italic 700 11.5px/1 Georgia,"Times New Roman",serif;margin-left:7px;vertical-align:middle;top:-1px;flex-shrink:0;background:#fff}
+.info::after{content:"";position:absolute;inset:-11px}
+.info:hover,.info[aria-expanded=true]{border-color:var(--ink);color:#fff;background:var(--ink)}
+.tip{position:fixed;inset:auto;margin:0;overflow:visible;z-index:30;width:max-content;max-width:min(300px,calc(100vw - 24px));background:#fff;border:1px solid var(--line-strong);border-radius:12px;padding:11px 14px;font-size:12.5px;line-height:1.75;color:var(--soft);box-shadow:0 10px 30px rgb(28 28 26/.14)}
+.tip::before{content:"";position:absolute;top:-6px;left:var(--arrow,16px);width:10px;height:10px;background:#fff;border-left:1px solid var(--line-strong);border-top:1px solid var(--line-strong);transform:rotate(45deg)}
+
+/* 目次 */
+.toc{position:sticky;top:18px;display:grid;gap:2px;font-size:13px}
+.toc b{font-size:11px;color:var(--muted);letter-spacing:.04em;margin-bottom:6px}
+.toc button{text-align:left;padding:6px 10px;border-radius:8px;color:var(--soft);display:flex;align-items:center;justify-content:space-between;gap:6px}
+.toc button:hover{background:var(--sand);color:var(--ink)}
+.toc .dot{width:7px;height:7px;border-radius:50%;background:#c98a14}
+
+/* 保存の帯 */
+.savebar{position:sticky;bottom:0;z-index:4;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 32px;background:rgb(255 255 255/.94);backdrop-filter:blur(6px);border-top:1px solid var(--line)}
+.savebar p{font-weight:700;font-family:var(--font-bold);font-size:13.5px}
+.savebar div{display:flex;gap:8px}
+.foot{font-size:11.5px;color:var(--muted);text-align:center;padding:26px 0 0}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:999px;padding:9px 20px;font-weight:700;font-family:var(--font-bold);font-size:13px;z-index:20;box-shadow:0 10px 30px rgb(28 28 26/.2)}
+dialog{border:0;border-radius:18px;padding:24px 26px;max-width:460px;width:calc(100% - 32px);box-shadow:0 20px 60px rgb(28 28 26/.25)}
+dialog::backdrop{background:rgb(28 28 26/.35)}
+dialog h2{font-size:17px;font-weight:800;margin-bottom:8px}
+dialog .todo{list-style:none;margin:12px 0 0;padding:0}
+dialog .todo li{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 0;border-top:1px solid var(--line)}
+dialog .todo button{font-weight:800;font-family:var(--font-bold);color:var(--moss);text-decoration:underline;text-underline-offset:4px;white-space:nowrap;font-size:13px}
+dialog p{color:var(--soft)}
+dialog .row{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+
+/* ── 変更点（画面の外） ── */
+.notes{max-width:1320px;margin:0 auto 40px;padding:0 20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;font-size:12.5px;color:#55554f}
+.notes div{background:#fff;border:1px solid #dcdcd6;border-radius:12px;padding:12px 14px}
+.notes b{display:block;color:var(--ink);font-size:13px;margin-bottom:3px}
+.notes s{color:#8a8a84}
+
+/* ── スマホ ── */
+.device.phone{max-width:390px}
+.device.phone .workspace{grid-template-columns:1fr;min-height:760px}
+.device.phone .sidebar{display:none}
+.device.phone .page{padding:16px 16px 28px}
+.device.phone .titlebar{flex-direction:column;gap:10px}
+.device.phone .titlebar h1{font-size:20px}
+.device.phone .actions{width:100%}
+.device.phone .actions .btn:not(.icon){flex:1}
+.device.phone .cols{grid-template-columns:1fr}
+.device.phone .toc{display:none}
+.device.phone .surface{padding:16px}
+.device.phone .photos{grid-template-columns:repeat(3,1fr)}
+.device.phone .grid2{grid-template-columns:1fr}
+.device.phone .tlitem{grid-template-columns:1fr 34px}
+.device.phone .tlitem>.input{grid-column:1}
+.device.phone .tlitem .body{grid-column:1}
+.device.phone .tlitem .x{grid-column:2;grid-row:1}
+.device.phone .savebar{padding:10px 16px}
+.device.phone .savebar p{display:none}
+.device.phone .savebar div{flex:1}
+.device.phone .savebar .btn.primary{flex:1;height:46px}
+.device.phone .input,.device.phone .slug input{font-size:16px}
+.device.phone .tabs{gap:20px}
+.device.phone .langbar .grow{flex-basis:100%;height:0}
+@media(max-width:900px){.workspace{grid-template-columns:1fr}.sidebar{display:none}.cols{grid-template-columns:1fr}.toc{display:none}.page{padding:18px 18px 30px}.photos{grid-template-columns:repeat(3,1fr)}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<header class="review">
+  <span><b>体験の編集 · 整理案 v1</b>　合成データ</span>
+  <span class="grp">掲載<span class="rseg" data-ctl="status"><button data-v="new">新規作成</button><button data-v="draft">下書き</button><button data-v="published">公開中</button><button data-v="stopped">停止中</button></span></span>
+  <span class="grp">掲載言語<span class="rseg" data-ctl="listing"><button data-v="both">英語＋日本語</button><button data-v="en">英語のみ</button><button data-v="ja">日本語のみ</button></span></span>
+  <span class="grp">原稿<span class="rseg" data-ctl="manuscript"><button data-v="both">両方あり</button><button data-v="ja">日本語だけ書いた</button><button data-v="en">英語だけ書いた</button><button data-v="stale">日本語を後から変えた</button></span></span>
+  <span class="grp">端末<span class="rseg" data-ctl="device"><button data-v="desktop">PC</button><button data-v="phone">スマホ</button></span></span>
+</header>
+
+<div class="device" id="device">
+  <div class="urlbar"><span aria-hidden="true"><i></i><i></i><i></i></span><span>experience.niho.life<strong id="urlpath">/host/experiences/sample-dinner</strong></span></div>
+  <div class="workspace">
+    <aside class="sidebar" aria-label="ホストのメニュー">
+      <div class="brand">NIHO Experience</div>
+      <div class="provider"><span class="avatar">N</span>NIHO kamakura</div>
+      <span class="nav"><svg viewBox="0 0 20 20"><path d="m3 10 7-6 7 6v7H6v-7"/></svg>ホーム</span>
+      <span class="nav" aria-current="page"><svg viewBox="0 0 20 20"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></svg>体験</span>
+      <span class="nav"><svg viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="12" rx="2"/><path d="M6 3v4m8-4v4M3 9h14"/></svg>カレンダー</span>
+      <span class="nav"><svg viewBox="0 0 20 20"><path d="M4 4h12v13H4zM7 8h6m-6 4h6"/></svg>予約</span>
+      <span class="nav"><svg viewBox="0 0 20 20"><path d="M4 17V9m6 8V4m6 13v-6"/></svg>売上</span>
+      <hr>
+      <span class="nav"><svg viewBox="0 0 20 20"><path d="M5 3h7l3 3v11H5zM8 9h4m-4 3h4"/></svg>記事</span>
+      <div class="account"><span class="avatar">T</span><span><b>ホスト アカウント</b>アカウント・設定</span></div>
+    </aside>
+    <div class="main">
+      <div class="page">
+        <a class="back" id="back" href="#" data-act="back" onclick="return false">‹ 体験</a>
+        <div class="titlebar" id="titlebar"></div>
+        <div id="alert"></div>
+        <div class="tabs" role="tablist" aria-label="体験の編集" id="tabs"></div>
+        <div id="panel"></div>
+        <p class="foot">モック（合成データ）· 文・料金・開催枠・写真は架空で、保存されません</p>
+      </div>
+      <div class="savebar" id="savebar" hidden>
+        <p>未保存の変更があります</p>
+        <div><button type="button" class="btn ghost" data-act="discard">元に戻す</button><button type="button" class="btn primary" data-act="save">保存</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section class="notes" aria-label="現行からの変更点">
+  <div><b>1. まず掲載言語を選ぶ</b>「体験を作成」を押すと小さなダイアログが出て、英語ページと日本語ページを両方作るか片方だけかを選ぶ（既定は英語）。作成用のページは作らない。あとから「掲載設定 › 掲載言語」で変えられる。「日本語のみで公開する」のチェックはこれに置き換える。</div>
+  <div><b>2. タブは「英語／日本語」</b>英語が先で既定。どちらのタブも直接書ける。掲載しない言語のタブは「掲載しない」と出し、翻訳のもとの下書きとして使える。項目名の「（日本語）」「（英語）」は外す。</div>
+  <div><b>3. 翻訳は押したときだけ</b>タブの右の「日本語から翻訳」「英語から翻訳」。書いてある原稿を置き換えるときは確かめる。自動では書き換わらない。「見比べる」で、もう一方の言語を各欄の下に出せる。</div>
+  <div><b>4. 「確定」をなくす</b>「英語を確認／この英語を確認」の段をやめ、保存した内容がそのまま公開内容。もう一方の言語を後から変えたときは、公開を止めずにタブの中で知らせる（翻訳し直す／このままでよい）。</div>
+  <div><b>5. 冒頭の「分類」を掲載設定へ</b>任意の項目が題名の直後を占めていた。日本語ページを作るときだけ「掲載設定」に出す。「分類を保存」は無くし、保存は1つ。</div>
+  <div><b>6. 足りないものは「公開」を押したときだけ</b>「公開前の確認」の開閉も、冒頭の不足一覧もやめる。入力中は何も出さず、「同意して公開」を押したときにダイアログで足りないものを出す。そのあとだけ該当の欄に印を付ける。</div>
+  <div><b>7. タブはすべて画面内・アドレスは自動</b>「日程」も画面内で開催枠を見せ、編集はボタンでカレンダーへ。右レールの面は廃止。「ページのアドレス」は体験名から自動で作り、変えたいときだけ「変更」。</div>
+  <div><b>8. 状態と公開・停止は題名の行へ</b>状態ピルは題名の横、「公開ページを見る」は右、停止は「⋯」の中。保存は変更があるときだけ下に出る帯。</div>
+  <div><b>9. 説明文は「i」の中へ</b>見出しや項目の下に常に出ていた説明を「i」に格納し、押したときだけ小さな吹き出しで出す。状態・不足の案内と、「任意」「税込」の短い但し書きは外に残す。</div>
+</section>
+
+<dialog id="dialog"></dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+<div class="tip" id="tip" role="note" popover="manual" hidden></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const NAME = { en: "英語", ja: "日本語" };
+const other = (l) => (l === "en" ? "ja" : "en");
+
+const CATEGORIES = ["歩く", "つくる・食べる", "手を動かす", "禅と寺", "朝と夜", "海", "人に会う", "団体・チームで"];
+const AREAS = ["鎌倉駅まわり", "北鎌倉", "長谷・由比ヶ浜", "材木座", "二階堂・十二所", "腰越", "大船・山のほう", "逗子", "葉山"];
+const COMPANIONS = ["ひとりで", "ふたりで", "友人と", "子どもと"];
+const OCCASIONS = ["雨の日に", "特別な日に"];
+const OFFERS = [{ label: "毎週 金曜 18:00–20:30", note: "150分・定員8人" }, { label: "土日 11:30–14:00", note: "150分・定員6人" }];
+
+const emptyDoc = () => ({ title: "", lead: "", language: "", description: "", highlights: [], included: [], notIncluded: [], timeline: [], know: [], notFor: [], faq: [], meetingOverview: "" });
+const SAMPLE = {
+  slug: "community-dinner",
+  slugAuto: false,
+  listing: { en: true, ja: true },
+  // その言語を書いたあとで、もう一方の言語が変わった（知らせるだけで、公開は止めない）
+  stale: { en: false, ja: false },
+  cls: { category: "つくる・食べる", area: "鎌倉駅まわり", companions: ["ひとりで", "ふたりで", "友人と"], occasions: ["雨の日に"] },
+  terms: { adult: "3500", child: false, childPrice: "", childMin: "", childMax: "", perOffer: false, minP: "1", maxP: "6", minCharge: "", minAttend: "", cancel: "24h", cancelValue: "3", cancelUnit: "日前", cancelPct: "100" },
+  disclosure: "AFTER",
+  photos: [
+    { id: 1, hue: 28, alt: { ja: "大きな食卓を囲む参加者", en: "Guests around a large dinner table" }, credit: "" },
+    { id: 2, hue: 95, alt: { ja: "台所で野菜を切る手元", en: "Hands chopping vegetables in the kitchen" }, credit: "" },
+    { id: 3, hue: 200, alt: { ja: "できあがった季節の家庭料理", en: "Seasonal home cooking, ready to serve" }, credit: "" },
+    { id: 4, hue: 340, alt: { ja: "会場の入口", en: "The entrance of the venue" }, credit: "" },
+  ],
+  doc: {
+    ja: {
+      title: "鎌倉の住民と作って囲むコミュニティディナー",
+      lead: "鎌倉で暮らす人たちと台所に立ち、同じ食卓を囲む夜。",
+      language: "日本語・かんたんな英語",
+      description: "地元の人が集まるキッチンで、その日の食材を一緒に料理します。作り方を教わる教室ではなく、手を動かしながら話す時間です。\n料理ができたら、大きな食卓を全員で囲みます。",
+      highlights: ["住民と一緒に季節の家庭料理を作る", "大きな食卓を全員で囲む", "ひとりでも参加しやすい"],
+      included: ["夕食", "飲みもの1杯"],
+      notIncluded: ["会場までの交通費"],
+      timeline: [
+        { time: "18:00", title: "集合・自己紹介", text: "今日の献立と役割を決めます。" },
+        { time: "18:20", title: "みんなで料理", text: "切る、炒める、盛りつける。得意なところから。" },
+        { time: "19:15", title: "食卓を囲む", text: "できた料理を並べて、いただきます。" },
+      ],
+      know: ["動きやすい服装でお越しください", "食物アレルギーは予約のときにお知らせください"],
+      notFor: [],
+      faq: [{ q: "ひとりでも参加できますか？", a: "はい。ひとりで来る方が多い会です。" }],
+      meetingOverview: "鎌倉駅から歩ける会場です。詳しい場所は予約の確定後にお知らせします。",
+    },
+    en: {
+      title: "Cook and Share a Community Dinner with Kamakura Locals",
+      lead: "An evening in the kitchen and around one table with people who live in Kamakura.",
+      language: "Japanese and simple English",
+      description: "In a kitchen where neighbors gather, we cook the day's ingredients together. It is not a cooking class but time to talk while your hands are busy.\nWhen the food is ready, everyone sits at one large table.",
+      highlights: ["Cook seasonal home dishes with locals", "Share one large table with everyone", "Easy to join on your own"],
+      included: ["Dinner", "One drink"],
+      notIncluded: ["Transport to the venue"],
+      timeline: [
+        { time: "18:00", title: "Meet and say hello", text: "We decide today's menu and who does what." },
+        { time: "18:20", title: "Cook together", text: "Chop, stir-fry, plate. Start with what you like." },
+        { time: "19:15", title: "Around the table", text: "Set out the dishes and enjoy." },
+      ],
+      know: ["Wear clothes that are easy to move in", "Tell us about food allergies when you book"],
+      notFor: [],
+      faq: [{ q: "Can I join on my own?", a: "Yes. Many guests come alone." }],
+      meetingOverview: "The venue is within walking distance of Kamakura Station. We share the exact place once your booking is confirmed.",
+    },
+  },
+};
+
+const ui = { device: "desktop", status: "published", tab: "page", lang: "en", dirty: false, menu: false, photo: null, compare: false, checked: false };
+const preset = { listing: "both", manuscript: "both" };
+function build() {
+  const s = structuredClone(SAMPLE);
+  s.listing = { en: preset.listing !== "ja", ja: preset.listing !== "en" };
+  if (preset.manuscript === "ja") { s.doc.en = emptyDoc(); for (const p of s.photos) p.alt.en = ""; }
+  if (preset.manuscript === "en") { s.doc.ja = emptyDoc(); for (const p of s.photos) p.alt.ja = ""; }
+  if (preset.manuscript === "stale") s.stale.en = true;
+  if (ui.status === "draft") { s.terms.cancel = ""; s.photos[2].alt = { en: "", ja: "" }; s.slug = ""; s.slugAuto = true; }
+  return s;
+}
+function blank(listing) {
+  const s = structuredClone(SAMPLE);
+  return { ...s, slug: "", slugAuto: true, listing, doc: { en: emptyDoc(), ja: emptyDoc() }, photos: [], cls: { category: "", area: "", companions: [], occasions: [] }, terms: { ...s.terms, adult: "", cancel: "" } };
+}
+let state = build();
+let saved = JSON.stringify(state);
+
+const hasContent = (l) => { const d = state.doc[l]; return Boolean(d.title.trim() || d.lead.trim() || d.description.trim()); };
+const complete = (l) => { const d = state.doc[l]; return Boolean(d.title.trim() && d.lead.trim() && d.description.trim()); };
+/** ページのアドレスは自動：英語の体験名から作り、無ければ短い ID。公開したときに固定する。（規則は案） */
+function autoSlug() {
+  const words = [];
+  for (const word of state.doc.en.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean)) {
+    if ([...words, word].join("-").length > 36) break;
+    words.push(word);
+  }
+  // 途中で切れたときに "…-in" "…-with" で終わらせない
+  while (words.length > 1 && ["a", "an", "and", "at", "for", "in", "of", "on", "the", "to", "with"].includes(words.at(-1))) words.pop();
+  return words.join("-") || "experience-7k2m";
+}
+const effSlug = () => (state.slugAuto || !state.slug.trim() ? autoSlug() : state.slug.trim());
+const siteUrl = (l) => `experience.niho.life${l === "ja" ? "/ja" : ""}/experiences/${effSlug()}`;
+
+/* ── 足りないもの：入力中は出さない。「公開」を押したときだけダイアログで出し、そのあとは該当の欄に印を付ける。 ── */
+function issues() {
+  const list = [];
+  if (!state.photos.length) list.push({ text: "表紙の写真を追加してください", tab: "page", target: "sec-photos" });
+  for (const l of ["en", "ja"]) {
+    if (!state.listing[l]) continue;
+    if (!complete(l)) { list.push({ text: `${NAME[l]}の原稿を書いてください`, tab: "page", lang: l, target: "sec-intro" }); continue; }
+    const n = state.photos.findIndex((p) => !p.alt[l].trim());
+    if (n >= 0) list.push({ text: `写真 ${n + 1} の${NAME[l]}の説明を入力してください`, tab: "page", lang: l, target: "sec-photos", photo: state.photos[n].id });
+  }
+  if (!String(state.terms.adult).trim()) list.push({ text: "大人1人の料金を入力してください", tab: "pricing", target: "sec-price" });
+  if (!state.terms.cancel) list.push({ text: "取消条件を選んでください", tab: "pricing", target: "sec-cancel" });
+  return list;
+}
+
+/* ── 描画 ── */
+function render() { renderChrome(); renderPanel(); syncReview(); }
+
+/* 説明は「i」の中へ：押したときだけ小さな吹き出しで出す。状態・不足の案内・短い但し書き（任意・税込）は外に残す。 */
+const info = (text, label) => `<button type="button" class="info" data-tip="${esc(text)}" aria-label="${esc(label)}の説明" aria-expanded="false">i</button>`;
+
+function renderChrome() {
+  closeTip();
+  const creating = ui.status === "new";
+  $("#tabs").hidden = creating;
+  $("#back").hidden = creating;
+  $("#urlpath").textContent = creating ? "/host/experiences" : "/host/experiences/sample-dinner";
+  if (creating) { $("#titlebar").innerHTML = '<h1>体験</h1><div class="actions"><button type="button" class="btn primary" data-act="new">＋ 体験を作成</button></div>'; $("#alert").innerHTML = ""; $("#savebar").hidden = true; return; }
+  const list = issues();
+  const pill = ui.status === "published" ? '<span class="pill live">公開中</span>' : ui.status === "stopped" ? '<span class="pill stop">停止中</span>' : '<span class="pill draft">下書き</span>';
+  const actions = ui.status === "published"
+    ? `<a class="btn" href="#" onclick="return false">公開ページを見る <span aria-hidden="true">↗</span></a>
+       <button type="button" class="btn icon" aria-label="そのほかの操作" aria-expanded="${ui.menu}" data-act="menu">⋯</button>
+       ${ui.menu ? '<div class="menu" role="menu"><button role="menuitem" data-act="copylink">予約リンクをコピー</button><button role="menuitem" style="color:var(--danger)" data-act="stop">新しい予約を停止</button></div>' : ""}`
+    : `<button type="button" class="btn primary" data-act="publish">${ui.status === "stopped" ? "予約の受付を再開" : "同意して公開"}</button>`;
+  const title = state.doc[ui.lang].title || state.doc[other(ui.lang)].title || "体験を編集";
+  const pending = ui.status === "published" && list.length ? '<button type="button" class="pill warn" data-act="pending">未反映の変更あり</button>' : "";
+  $("#titlebar").innerHTML = `<h1>${esc(title)}${pill}${pending}</h1><div class="actions">${actions}</div>`;
+
+$("#alert").innerHTML = "";
+
+  const dot = (tab) => ui.checked && list.some((i) => i.tab === tab) ? '<span class="dot" aria-label="確認が必要"></span>' : "";
+  $("#tabs").innerHTML = [["page", "体験ページ"], ["pricing", "料金・予約"], ["schedule", "日程"], ["settings", "掲載設定"]]
+    .map(([id, label]) => `<button type="button" role="tab" class="tab" aria-selected="${ui.tab === id}" data-tab="${id}">${label}${dot(id)}</button>`).join("");
+
+  const bar = $("#langbar"); if (bar) bar.innerHTML = langbar();
+  const note = $("#langnote"); if (note) note.innerHTML = langNote();
+  $("#savebar").hidden = !ui.dirty;
+}
+
+/* 英語／日本語：どちらも直接書ける。翻訳はボタンを押したときだけ。 */
+function langbar() {
+  const L = ui.lang, O = other(L), can = hasContent(O);
+  const tab = (l) => {
+    const mark = !state.listing[l] ? '<span class="pill draft sm plain">掲載しない</span>'
+      : !complete(l) && (hasContent(other(l)) || ui.checked) ? '<span class="pill warn sm plain">未入力</span>'
+      : state.stale[l] ? `<span class="dot" aria-label="${NAME[other(l)]}のほうが新しい"></span>` : "";
+    return `<button type="button" aria-pressed="${L === l}" data-lang="${l}">${NAME[l]}${mark}</button>`;
+  };
+  const lead = can && !hasContent(L) && state.listing[L];
+  return `<div class="seg" role="group" aria-label="原稿の言語">${tab("en")}${tab("ja")}</div>${info("「英語」は英語ページ、「日本語」は日本語ページの原稿です。直接書いても、もう一方の言語から翻訳しても作れます。翻訳はボタンを押したときだけ行われ、自動では書き換わりません。掲載しない言語は、翻訳のもとになる下書きとして使えます。写真の並び・料金・日程は共通です。", "原稿の言語")}<span class="grow"></span>
+    ${can && hasContent(L) ? `<button type="button" class="btn sm ghost" aria-pressed="${ui.compare}" data-act="compare">${NAME[O]}と見比べる</button>` : ""}
+    <button type="button" class="btn sm ${lead ? "primary" : ""}" data-act="translate" ${can ? "" : "disabled"} title="${can ? "" : `${NAME[O]}の原稿がまだありません`}">${NAME[O]}から翻訳</button>`;
+}
+
+function langNote() {
+  const L = ui.lang, O = other(L);
+  if (!state.listing[L] || !hasContent(L) || !state.stale[L]) return "";
+  return `<section class="enstate todo"><p><b>${NAME[O]}を変えたあと、${NAME[L]}は変わっていません</b>${info("もう一方の言語を変えても、こちらは自動では書き換わりません。翻訳し直すか、このままでよければ知らせを消せます。公開は止まりません。", "言語のずれ")}</p><div class="row"><button type="button" class="btn sm" data-act="translate">${NAME[O]}から翻訳し直す</button><button type="button" class="btn sm ghost" data-act="keep">このままでよい</button></div></section>`;
+}
+
+const tile = (hue) => `background:linear-gradient(135deg,hsl(${hue} 42% 82%),hsl(${hue + 24} 38% 62%))`;
+const field = (label, path, opt = {}) => {
+  const value = get(path), ms = opt.ms ? `data-ms="${opt.ms}"` : "";
+  const control = opt.rows
+    ? `<textarea class="input" rows="${opt.rows}" data-bind="${path}" ${ms}>${esc(value)}</textarea>`
+    : `<input class="input" data-bind="${path}" value="${esc(value)}" ${ms}>`;
+  return `<div class="field"><label>${label}${opt.small ? `<small>${opt.small}</small>` : ""}${opt.info ? info(opt.info, label) : ""}</label>${control}${opt.after ?? ""}</div>`;
+};
+
+function renderPanel() {
+  closeTip();
+  const panel = $("#panel");
+  if (ui.status === "new") panel.innerHTML = listView();
+  else if (ui.tab === "page") panel.innerHTML = page();
+  else if (ui.tab === "pricing") panel.innerHTML = pricing();
+  else if (ui.tab === "schedule") panel.innerHTML = schedule();
+  else panel.innerHTML = settings();
+}
+
+function listingCards(creating) {
+  return ["en", "ja"].map((l) => `<label><input type="checkbox" data-listing="${l}" ${state.listing[l] ? "checked" : ""}>${creating ? `<b>${NAME[l]}</b>` : `<span><b>${NAME[l]}</b><span data-url="${l}">${esc(siteUrl(l))}</span></span>`}</label>`).join("");
+}
+
+/** 体験の一覧（作成のダイアログの後ろに見える画面）。 */
+function listView() {
+  return `<section class="surface"><button type="button" class="exprow" data-act="open"><span class="thumb" style="${tile(28)}"></span><span class="grow"><b>${esc(SAMPLE.doc.ja.title)}</b><span>${OFFERS[0].label} ほか</span></span><span class="pill live sm">公開中</span></button></section>`;
+}
+
+/** 体験を作成：聞くのは掲載言語だけなので、ページにせず小さなダイアログで聞く。 */
+function createDialog() {
+  state = blank({ en: true, ja: false });
+  const d = $("#dialog");
+  d.innerHTML = `<h2>体験を作成</h2><p class="sub">掲載言語${info("英語ページは海外からの旅行者向け、日本語ページは日本語で探す人向けです。両方作ることも、片方だけにすることもできます。あとから掲載設定で変えられます。", "掲載言語")}</p><div class="choice">${listingCards(true)}</div><div class="row"><button type="button" class="btn ghost" data-close>やめる</button><button type="button" class="btn primary" data-ok>作成</button></div>`;
+  d.onclick = (e) => {
+    if (e.target.closest("[data-close]")) d.close();
+    if (e.target.closest("[data-ok]")) {
+      d.close(); ui.status = "draft"; saved = JSON.stringify(state);
+      Object.assign(ui, { dirty: false, photo: null, tab: "page", compare: false, checked: false, lang: state.listing.en ? "en" : "ja" });
+      render(); toast("下書きを作成しました");
+    }
+  };
+  d.showModal();
+}
+
+function toc(items) {
+  const list = issues();
+  return `<nav class="toc" aria-label="このページの項目"><b>このページ</b>${items.map(([id, label]) => `<button type="button" data-act="scroll" data-target="${id}">${label}${ui.checked && list.some((i) => i.target === id && (!i.lang || i.lang === ui.lang)) ? '<span class="dot" aria-label="確認が必要"></span>' : ""}</button>`).join("")}</nav>`;
+}
+
+function page() {
+  const L = ui.lang, O = other(L), d = state.doc[L], o = state.doc[O];
+  const cmp = ui.compare && hasContent(O);
+  const ref = (v) => (cmp ? `<p class="ref" data-l="${NAME[O]}">${esc(v || "（未入力）")}</p>` : "");
+  const f = (label, key, opt = {}) => field(label, `doc.${L}.${key}`, { ...opt, ms: L, after: ref(o[key]) });
+  const rows = (title, key, small) => `<p class="sub">${title}${small ? `<small>${small}</small>` : ""}</p><div class="rows">${d[key].map((v, i) => `<div><div class="rowitem"><input class="input" data-bind="doc.${L}.${key}.${i}" data-ms="${L}" value="${esc(v)}" aria-label="${title} ${i + 1}"><button type="button" class="x" aria-label="${title} ${i + 1} を削除" data-act="rm" data-path="doc.${L}.${key}" data-i="${i}">×</button></div>${ref(o[key][i])}</div>`).join("")}<button type="button" class="addrow" data-act="add" data-path="doc.${L}.${key}">＋ 行を足す</button></div>`;
+
+  const sel = state.photos.find((p) => p.id === ui.photo), idx = state.photos.indexOf(sel), need = state.listing[L];
+  const photos = `<section class="surface" id="sec-photos"><h2>写真${info("1枚目が体験ページの表紙です。写真を選ぶと、説明と並び順を変えられます。並び順は英語と日本語で共通です。", "写真")}</h2>
+    <div class="photos">${state.photos.map((p, i) => `<button type="button" class="ph" style="${tile(p.hue)}" aria-pressed="${p.id === ui.photo}" aria-label="写真 ${i + 1}${i === 0 ? "（表紙）" : ""}を編集" data-act="photo" data-id="${p.id}">${i === 0 ? '<span class="tag">表紙</span>' : `<span class="num">${i + 1}</span>`}${!ui.checked || !need || p.alt[L].trim() ? "" : '<span class="miss">説明なし</span>'}</button>`).join("")}
+      <button type="button" class="ph add" data-act="addphoto">＋ 写真を追加</button></div>
+    ${sel ? `<div class="phedit"><div class="head"><b>写真 ${idx + 1}${idx === 0 ? " · 表紙" : ""}</b><div class="ops">
+        <button type="button" class="btn sm" data-act="cover" ${idx === 0 ? "disabled" : ""}>表紙にする</button>
+        <button type="button" class="btn sm" data-act="move" data-d="-1" ${idx === 0 ? "disabled" : ""}>前へ</button>
+        <button type="button" class="btn sm" data-act="move" data-d="1" ${idx === state.photos.length - 1 ? "disabled" : ""}>後ろへ</button>
+        <button type="button" class="btn sm danger" data-act="rmphoto">外す</button></div></div>
+        <div class="field"><label>写真の説明${info("何が写っているかを一言で書きます。読み上げと検索に使われます。", "写真の説明")}</label><input class="input ${!ui.checked || !need || sel.alt[L].trim() ? "" : "bad"}" data-bind="photos.${idx}.alt.${L}" ${need ? "data-alt" : ""} value="${esc(sel.alt[L])}">${ref(sel.alt[O])}</div>
+        <div class="field"><label>クレジット<small>任意</small></label><input class="input" data-bind="photos.${idx}.credit" value="${esc(sel.credit)}" placeholder="撮影者名など"></div></div>` : ""}
+  </section>`;
+
+  return `<div class="langbar" id="langbar">${langbar()}</div>
+  <div class="cols"><div class="stack">
+    <div id="langnote">${langNote()}</div>
+    ${photos}
+    <section class="surface" id="sec-intro"><h2>紹介</h2>
+      ${f("体験名", "title")}
+      ${f("ひとこと紹介", "lead", { rows: 2 })}
+      ${f("当日の言語", "language")}
+      ${f("詳しい説明", "description", { rows: 6 })}
+    </section>
+    <section class="surface" id="sec-high"><h2>見どころ・含まれるもの</h2>
+      ${rows("見どころ", "highlights")}${rows("含まれるもの", "included")}${rows("含まれないもの", "notIncluded")}
+    </section>
+    <section class="surface" id="sec-timeline"><h2>当日の流れ</h2>
+      <div class="tl">${d.timeline.map((t, i) => `<div><div class="tlitem"><input class="input" data-bind="doc.${L}.timeline.${i}.time" data-ms="${L}" value="${esc(t.time)}" aria-label="時刻 ${i + 1}"><div class="body"><input class="input" data-bind="doc.${L}.timeline.${i}.title" data-ms="${L}" value="${esc(t.title)}" aria-label="見出し ${i + 1}"><input class="input" data-bind="doc.${L}.timeline.${i}.text" data-ms="${L}" value="${esc(t.text)}" aria-label="説明 ${i + 1}"></div><button type="button" class="x" aria-label="項目 ${i + 1} を削除" data-act="rm" data-path="doc.${L}.timeline" data-i="${i}">×</button></div>${ref(o.timeline[i] ? `${o.timeline[i].title}　${o.timeline[i].text}` : "")}</div>`).join("")}
+      <button type="button" class="addrow" data-act="addtl">＋ 項目を足す</button></div>
+    </section>
+    <section class="surface" id="sec-meeting"><h2>集合場所</h2>
+      <fieldset class="field"><legend>集合場所を見せる時期${info("「予約が確定してから案内する」では、公開ページに「集合の概要」だけが出ます。「予約前から公開する」では、公開ページに集合場所が出ます。英語と日本語で共通です。", "集合場所を見せる時期")}</legend><div class="choice">
+        <label><input type="radio" name="disc" value="AFTER" data-bind="disclosure" ${state.disclosure === "AFTER" ? "checked" : ""}><b>予約が確定してから案内する</b></label>
+        <label><input type="radio" name="disc" value="PUBLIC" data-bind="disclosure" ${state.disclosure === "PUBLIC" ? "checked" : ""}><b>予約前から公開する</b></label></div></fieldset>
+      ${f("集合の概要", "meetingOverview", { rows: 2, info: "予約前の公開ページに出る、大まかな場所の案内です。" })}
+    </section>
+    <section class="surface" id="sec-notes"><h2>注意事項・よくある質問</h2>
+      ${rows("参加前の注意", "know")}${rows("参加に向かない条件", "notFor", "任意")}
+      <p class="sub">よくある質問<small>任意</small>${info("予約前によく聞かれることを、質問と答えの組で書きます。書かなければ公開ページに出ません。", "よくある質問")}</p>
+      <div class="faq">${d.faq.map((q, i) => `<div><div class="faqitem"><div class="body"><input class="input" data-bind="doc.${L}.faq.${i}.q" data-ms="${L}" value="${esc(q.q)}" placeholder="質問" aria-label="質問 ${i + 1}"><textarea class="input" rows="2" data-bind="doc.${L}.faq.${i}.a" data-ms="${L}" placeholder="答え" aria-label="答え ${i + 1}">${esc(q.a)}</textarea></div><button type="button" class="x" aria-label="質問 ${i + 1} を削除" data-act="rm" data-path="doc.${L}.faq" data-i="${i}">×</button></div>${ref(o.faq[i] ? `${o.faq[i].q}　${o.faq[i].a}` : "")}</div>`).join("")}
+      <button type="button" class="addrow" data-act="addfaq">＋ 質問を足す</button></div>
+    </section>
+    <section class="surface" id="sec-host"><h2>迎える人${info("販売者の表示と、提供者の写真・ロゴです。すべての体験に同じ内容が出ます。", "迎える人")}</h2>
+      <div class="host"><span class="face">N</span><b style="flex:1">NIHO kamakura</b><button type="button" class="btn sm" data-act="noop">写真を変える</button></div>
+    </section>
+  </div>${toc([["sec-photos", "写真"], ["sec-intro", "紹介"], ["sec-high", "見どころ"], ["sec-timeline", "当日の流れ"], ["sec-meeting", "集合場所"], ["sec-notes", "注意・質問"], ["sec-host", "迎える人"]])}</div>`;
+}
+
+function pricing() {
+  const t = state.terms;
+  const num = (label, path, unit, opt = {}) => `<div class="field"><label>${label}${opt.small ? `<small>${opt.small}</small>` : ""}${opt.info ? info(opt.info, label) : ""}</label><div class="unit">${unit === "円" ? "<span>¥</span>" : ""}<input class="input" inputmode="numeric" data-bind="${path}" value="${esc(get(path))}"><span>${unit === "円" ? "" : unit}</span></div></div>`;
+  const cancel = [["24h", "開始24時間前まで無料"], ["48h", "開始48時間前まで無料"], ["none", "返金なし"], ["custom", "期限と返金割合を決める"]];
+  return `<div class="cols single"><div class="stack">
+    <section class="surface" id="sec-price"><h2>料金</h2>
+      ${num("大人1人", "terms.adult", "円", { small: "税込", info: "無料の体験は0円にします。有料は50円以上にしてください。" })}
+      <div class="switchrow"><label class="switch"><input type="checkbox" data-bind="terms.child" ${t.child ? "checked" : ""}>子ども料金を設定する</label></div>
+      ${t.child ? `<div class="nested">${num("子ども1人", "terms.childPrice", "円", { small: "税込" })}<div class="field"><label>対象の年齢</label><div class="unit"><input class="input" inputmode="numeric" data-bind="terms.childMin" value="${esc(t.childMin)}" style="width:72px"><span>〜</span><input class="input" inputmode="numeric" data-bind="terms.childMax" value="${esc(t.childMax)}" style="width:72px"><span>歳</span></div></div></div>` : ""}
+      <div class="switchrow"><label class="switch"><input type="checkbox" data-bind="terms.perOffer" ${t.perOffer ? "checked" : ""}>開催枠ごとに料金を変える</label>${info("枠ごとに大人1人の料金を変えられます。空欄の枠は、上の大人1人の料金を使います。", "開催枠ごとの料金")}</div>
+      ${t.perOffer ? `<div class="nested">${OFFERS.map((o) => `<div class="field"><label>${o.label}<small>${o.note}</small></label><div class="unit"><span>¥</span><input class="input" inputmode="numeric" placeholder="${esc(t.adult)}"></div></div>`).join("")}</div>` : ""}
+    </section>
+    <section class="surface" id="sec-party"><h2>人数</h2>
+      <div class="field"><label>1組の人数</label><div class="unit"><input class="input" inputmode="numeric" data-bind="terms.minP" value="${esc(t.minP)}" style="width:72px"><span>〜</span><input class="input" inputmode="numeric" data-bind="terms.maxP" value="${esc(t.maxP)}" style="width:72px"><span>人</span></div></div>
+      ${num("最少課金人数", "terms.minCharge", "人", { small: "任意", info: "少ない人数の予約でも、この人数分の料金をいただく場合に入れます。" })}
+      ${num("最少催行人数", "terms.minAttend", "人", { small: "任意", info: "管理用の記録です。旅行者には表示されず、自動の中止・返金もありません。" })}
+    </section>
+    <section class="surface" id="sec-cancel"><h2>取消条件${info("無料の期限を過ぎた取消には返金しません。「返金なし」は、予約後の取消に返金しません。確定している条件を選んでください。", "取消条件")}</h2>
+      <div class="choice">${cancel.map(([v, b]) => `<label><input type="radio" name="cancel" value="${v}" data-bind="terms.cancel" ${t.cancel === v ? "checked" : ""}><b>${b}</b></label>`).join("")}</div>
+      ${t.cancel === "custom" ? `<div class="nested"><div class="field"><label>無料で取り消せる期限</label><div class="unit"><span>開始の</span><input class="input" inputmode="numeric" data-bind="terms.cancelValue" value="${esc(t.cancelValue)}" style="width:72px"><select class="input" data-bind="terms.cancelUnit" style="width:auto">${["日前", "時間前", "分前"].map((u) => `<option ${t.cancelUnit === u ? "selected" : ""}>${u}</option>`).join("")}</select><span>まで</span></div></div>${num("期限内の返金割合", "terms.cancelPct", "%")}</div>` : ""}
+    </section>
+    <section class="surface"><h2>申込時の質問${info("この画面では、まだ追加・変更できません。保存しても、今の質問はそのまま残ります。", "申込時の質問")}</h2><p class="plain">2件（食べものの希望・到着の方法）</p></section>
+  </div></div>`;
+}
+
+function schedule() {
+  return `<div class="cols single"><div class="stack">
+    <section class="surface"><h2>開催枠${info("旅行者が選べる曜日と時刻です。枠の追加・休止・回ごとの変更は、カレンダーで行います。", "開催枠")}</h2>
+      ${OFFERS.map((o) => `<div class="offer"><div><b>${o.label}</b><span>${o.note}</span></div><span class="pill live sm">受付中</span></div>`).join("")}
+      <div class="linkrow"><a class="btn" href="#" onclick="return false">カレンダーで日程を編集 <span aria-hidden="true">→</span></a></div>
+    </section>
+  </div></div>`;
+}
+
+function settings() {
+  const c = state.cls;
+  const chips = (list, key) => `<div class="chips">${list.map((v) => `<button type="button" class="chip" aria-pressed="${c[key].includes(v)}" data-act="chip" data-key="${key}" data-v="${v}">${v}</button>`).join("")}</div>`;
+  return `<div class="cols single"><div class="stack">
+    <section class="surface" id="sec-listing"><h2>掲載言語${info("英語ページは海外からの旅行者向け、日本語ページは日本語で探す人向けです。両方作ることも、片方だけにすることもできます。選んだ言語の原稿が必要です。", "掲載言語")}</h2>
+      <div class="choice">${listingCards(false)}</div>
+    </section>
+    <section class="surface" id="sec-slug"><h2>ページのアドレス${info("体験名から自動で決まり、公開したときに固定されます。変えたいときだけ「変更」を押してください。半角の英小文字・数字・ハイフンが使えます。英語ページと日本語ページで共通です。", "ページのアドレス")}</h2>
+      ${state.slugAuto
+        ? `<div class="slugauto"><span class="addr">/experiences/<b>${esc(effSlug())}</b></span><span class="pill draft sm plain">自動</span><span class="grow"></span><button type="button" class="btn sm" data-act="slug-edit">変更</button></div>`
+        : `<div class="slug"><span>/experiences/</span><input id="slug" data-bind="slug" value="${esc(state.slug)}" spellcheck="false" aria-label="ページのアドレス"></div>${ui.status === "draft" ? '<button type="button" class="addrow" data-act="slug-auto">自動に戻す</button>' : ""}`}
+    </section>
+    ${state.listing.ja ? `<section class="surface" id="sec-cls"><h2>日本語の一覧での分類<small>任意</small>${info("日本語の一覧で、カテゴリーやエリアから探せるようになります。決めなくても掲載できます。「だれと」「こんな日に」は、当てはまるものをすべて選べます。", "日本語の一覧での分類")}</h2>
+      <div class="grid2">
+        <div class="field"><label for="cat">カテゴリー</label><select id="cat" class="input" data-bind="cls.category"><option value="">決めない</option>${CATEGORIES.map((v) => `<option ${c.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+        <div class="field"><label for="area">エリア</label><select id="area" class="input" data-bind="cls.area"><option value="">決めない</option>${AREAS.map((v) => `<option ${c.area === v ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+      </div>
+      <fieldset class="field"><legend>だれと</legend>${chips(COMPANIONS, "companions")}</fieldset>
+      <fieldset class="field"><legend>こんな日に</legend>${chips(OCCASIONS, "occasions")}</fieldset>
+    </section>` : ""}
+  </div></div>`;
+}
+
+/* ── 「i」の吹き出し ── */
+let tipFor = null;
+function closeTip() {
+  if (tipFor) tipFor.setAttribute("aria-expanded", "false");
+  tipFor = null;
+  const tip = $("#tip");
+  if (tip.hidePopover && !tip.hidden) tip.hidePopover();
+  tip.hidden = true;
+}
+function openTip(button) {
+  closeTip();
+  const tip = $("#tip");
+  tip.textContent = button.dataset.tip; tip.hidden = false;
+  if (tip.showPopover) tip.showPopover();
+  button.setAttribute("aria-expanded", "true"); tipFor = button;
+  const r = button.getBoundingClientRect();
+  const left = Math.max(12, Math.min(r.left - 14, innerWidth - tip.offsetWidth - 12));
+  tip.style.left = `${left}px`; tip.style.top = `${r.bottom + 8}px`;
+  tip.style.setProperty("--arrow", `${Math.max(12, r.left + r.width / 2 - left - 6)}px`);
+}
+addEventListener("scroll", () => { if (tipFor) closeTip(); }, { passive: true, capture: true });
+
+/* ── 値の読み書き ── */
+function get(path) { return path.split(".").reduce((o, k) => o?.[k], state); }
+function set(path, value) { const keys = path.split("."); const last = keys.pop(); keys.reduce((o, k) => o[k], state)[last] = value; }
+function touch() { ui.dirty = JSON.stringify(state) !== saved; renderChrome(); syncReview(); }
+/** その言語を書き換えた：掲載しているもう一方の言語に、ずれの知らせを立てる。 */
+function edited(l) { const o = other(l); if (state.listing[o] && hasContent(o)) state.stale[o] = true; }
+function toast(text) { const t = $("#toast"); t.textContent = text; t.hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.hidden = true; }, 2800); }
+function confirmDialog(title, body, label, onOk, danger) {
+  const d = $("#dialog");
+  d.innerHTML = `<h2>${title}</h2><p>${body}</p><div class="row"><button type="button" class="btn ghost" data-close>やめる</button><button type="button" class="btn ${danger ? "danger" : "primary"}" data-ok>${label}</button></div>`;
+  d.onclick = (e) => { if (e.target.closest("[data-close]")) d.close(); if (e.target.closest("[data-ok]")) { d.close(); onOk(); } };
+  d.showModal();
+}
+function issueDialog() {
+  const list = issues(), d = $("#dialog");
+  const goal = ui.status === "published" ? "公開中のページに反映する" : ui.status === "stopped" ? "再開する" : "公開する";
+  d.innerHTML = `<h2>${goal}には、あと${list.length}つ必要です</h2><ul class="todo">${list.map((i, n) => `<li><span>${esc(i.text)}</span><button type="button" data-n="${n}">入力する</button></li>`).join("")}</ul><div class="row"><button type="button" class="btn" data-close>閉じる</button></div>`;
+  d.onclick = (e) => {
+    if (e.target.closest("[data-close]")) d.close();
+    const item = list[Number(e.target.closest("[data-n]")?.dataset.n)];
+    if (item) { d.close(); if (item.photo) ui.photo = item.photo; go(item.tab, item.lang, item.target); }
+  };
+  d.showModal();
+}
+function go(tab, lang, target) {
+  ui.tab = tab; if (lang) ui.lang = lang; ui.menu = false; render();
+  if (target) requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+}
+/** 翻訳は押したときだけ。書いてある原稿を置き換えるときは確かめる。（モックは用意した文を入れる） */
+function translate() {
+  const L = ui.lang, O = other(L);
+  if (!hasContent(O)) return;
+  const run = () => {
+    state.doc[L] = structuredClone(SAMPLE.doc[L]);
+    state.photos.forEach((p, i) => { if (!p.alt[L].trim() && p.alt[O].trim()) p.alt[L] = SAMPLE.photos[i]?.alt[L] ?? ""; });
+    state.stale[L] = false; ui.compare = true;
+    touch(); renderPanel(); toast(`${NAME[O]}から翻訳しました。確かめてから保存してください`);
+  };
+  if (hasContent(L)) confirmDialog(`今の${NAME[L]}を置き換えますか？`, `${NAME[O]}の原稿から翻訳し直します。${NAME[L]}に手で書いた内容は消えます。`, "置き換える", run, true);
+  else run();
+}
+function syncReview() {
+  const listing = state.listing.en && state.listing.ja ? "both" : state.listing.en ? "en" : "ja";
+  for (const seg of document.querySelectorAll(".rseg")) {
+    const ctl = seg.dataset.ctl;
+    const current = ctl === "status" ? ui.status : ctl === "listing" ? listing : ctl === "manuscript" ? preset.manuscript : ui.device;
+    for (const b of seg.children) b.setAttribute("aria-pressed", String(b.dataset.v === current));
+  }
+  $("#device").classList.toggle("phone", ui.device === "phone");
+}
+
+/* ── 操作 ── */
+document.addEventListener("input", (e) => {
+  const el = e.target.closest("[data-bind]"); if (!el) return;
+  if (el.type === "checkbox") { set(el.dataset.bind, el.checked); touch(); renderPanel(); return; }
+  if (el.type === "radio") { set(el.dataset.bind, el.value); touch(); renderPanel(); return; }
+  set(el.dataset.bind, el.value);
+  if (el.dataset.bind === "slug") for (const n of document.querySelectorAll("[data-url]")) n.textContent = siteUrl(n.dataset.url);
+  if (el.hasAttribute("data-alt")) el.classList.toggle("bad", ui.checked && !el.value.trim());
+  if (el.dataset.ms) edited(el.dataset.ms);
+  touch();
+});
+document.addEventListener("change", (e) => {
+  const el = e.target.closest("[data-listing]"); if (!el) return;
+  const next = { ...state.listing, [el.dataset.listing]: el.checked };
+  if (!next.en && !next.ja) { el.checked = true; toast("掲載言語は1つ以上必要です"); return; }
+  state.listing = next;
+  if (ui.status === "new") return;
+  touch(); renderPanel();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && tipFor) { e.preventDefault(); const button = tipFor; closeTip(); button.focus(); } });
+document.addEventListener("click", (e) => {
+  const tipButton = e.target.closest(".info");
+  if (tipButton) { if (tipFor === tipButton) closeTip(); else openTip(tipButton); return; }
+  if (!e.target.closest("#tip")) closeTip();
+  const rs = e.target.closest(".rseg button");
+  if (rs) {
+    const ctl = rs.parentElement.dataset.ctl, v = rs.dataset.v;
+    if (ctl === "device") ui.device = v;
+    else {
+      if (ctl === "status") ui.status = v;
+      if (ctl === "listing") preset.listing = v;
+      if (ctl === "manuscript") preset.manuscript = v;
+      if (ctl !== "status" && ui.status === "new") ui.status = "draft";
+      state = ui.status === "new" ? blank({ en: true, ja: false }) : build();
+      saved = JSON.stringify(state);
+      Object.assign(ui, { dirty: false, photo: null, tab: "page", compare: false, checked: false, lang: state.listing.en ? "en" : "ja" });
+    }
+    ui.menu = false; render(); if (ctl === "status" && v === "new") createDialog(); return;
+  }
+  const tab = e.target.closest("[data-tab]"); if (tab) { go(tab.dataset.tab); return; }
+  const lang = e.target.closest("[data-lang]"); if (lang) { ui.lang = lang.dataset.lang; ui.photo = null; render(); return; }
+  const act = e.target.closest("[data-act]");
+  if (!act) { if (ui.menu) { ui.menu = false; renderChrome(); } return; }
+  const a = act.dataset.act, L = ui.lang;
+  if (a === "menu") { ui.menu = !ui.menu; renderChrome(); return; }
+  ui.menu = false;
+  if (a === "scroll") { document.getElementById(act.dataset.target)?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+  if (a === "photo") { const id = Number(act.dataset.id); ui.photo = ui.photo === id ? null : id; renderPanel(); return; }
+  if (a === "translate") { translate(); return; }
+  if (a === "compare") { ui.compare = !ui.compare; renderChrome(); renderPanel(); return; }
+  if (a === "keep") { state.stale[L] = false; touch(); return; }
+  if (a === "new") { createDialog(); return; }
+  if (a === "open") {
+    ui.status = "published"; state = build(); saved = JSON.stringify(state);
+    Object.assign(ui, { dirty: false, photo: null, tab: "page", compare: false, checked: false, lang: state.listing.en ? "en" : "ja" });
+    render(); return;
+  }
+  if (a === "back") {
+    const leave = () => { ui.status = "new"; ui.dirty = false; render(); };
+    if (ui.dirty) confirmDialog("保存せずに戻りますか？", "保存していない入力は消えます。", "保存せずに戻る", leave, true); else leave();
+    return;
+  }
+  if (a === "addphoto") { const id = Math.max(0, ...state.photos.map((p) => p.id)) + 1; state.photos.push({ id, hue: (id * 67) % 360, alt: { en: "", ja: "" }, credit: "" }); ui.photo = id; touch(); renderPanel(); toast("モック：写真の選択と掲載許諾の確認のあとに追加されます"); }
+  else if (a === "cover" || a === "move" || a === "rmphoto") {
+    const i = state.photos.findIndex((p) => p.id === ui.photo); const [p] = state.photos.splice(i, 1);
+    if (a === "cover") state.photos.unshift(p); else if (a === "move") state.photos.splice(i + Number(act.dataset.d), 0, p); else ui.photo = null;
+    touch(); renderPanel();
+  }
+  else if (a === "add") { get(act.dataset.path).push(""); edited(L); touch(); renderPanel(); document.querySelector(`[data-bind="${act.dataset.path}.${get(act.dataset.path).length - 1}"]`)?.focus(); }
+  else if (a === "addtl") { state.doc[L].timeline.push({ time: "", title: "", text: "" }); edited(L); touch(); renderPanel(); }
+  else if (a === "addfaq") { state.doc[L].faq.push({ q: "", a: "" }); edited(L); touch(); renderPanel(); }
+  else if (a === "rm") { get(act.dataset.path).splice(Number(act.dataset.i), 1); edited(L); touch(); renderPanel(); }
+  else if (a === "chip") { const l = state.cls[act.dataset.key], v = act.dataset.v; const i = l.indexOf(v); if (i >= 0) l.splice(i, 1); else l.push(v); touch(); renderPanel(); }
+  else if (a === "save") { saved = JSON.stringify(state); ui.dirty = false; render(); toast(ui.status !== "published" ? "保存しました" : issues().length ? "保存しました。公開中のページには、まだ反映されていません" : "保存しました。公開ページに反映されます"); }
+  else if (a === "discard") confirmDialog("変更を元に戻しますか？", "保存していない入力は消えます。", "元に戻す", () => { state = JSON.parse(saved); ui.dirty = false; ui.photo = null; render(); }, true);
+  else if (a === "publish" || a === "pending") {
+    if (issues().length) { ui.checked = true; render(); issueDialog(); return; }
+    if (a === "pending") return;
+    const again = ui.status === "stopped";
+    confirmDialog(again ? "予約の受付を再開しますか？" : "この体験を公開しますか？", `${ui.dirty ? "変更を保存して公開します。" : ""}掲載条件を確認し、公開内容と販売条件に同意します。`, again ? "同意して再開する" : "同意して公開する", () => {
+      if (state.slugAuto) { state.slug = effSlug(); state.slugAuto = false; }
+      saved = JSON.stringify(state); Object.assign(ui, { status: "published", dirty: false, checked: false }); render(); toast(again ? "予約の受付を再開しました" : "公開しました");
+    });
+    return;
+  }
+  else if (a === "slug-edit") { state.slug = effSlug(); state.slugAuto = false; touch(); renderPanel(); $("#slug")?.focus(); }
+  else if (a === "slug-auto") { state.slug = ""; state.slugAuto = true; touch(); renderPanel(); }
+  else if (a === "stop") { renderChrome(); confirmDialog("新しい予約を停止しますか？", "この体験の新しい予約を止めます。受け付けた予約はそのまま残ります。", "停止する", () => { ui.status = "stopped"; render(); toast("新しい予約を停止しました"); }, true); return; }
+  else if (a === "copylink") toast("予約リンクをコピーしました");
+  else if (a === "noop") toast("モック：提供者の写真・ロゴの変更");
+  renderChrome();
+});
+
+render();
+</script>
+</body>
+</html>

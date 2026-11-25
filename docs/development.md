@@ -81,6 +81,7 @@ packages/api-client/      NIHO選別公開APIのOpenAPI・型・クライアン�
 | `BOOKINGS_ENABLED` | `true` | `false` で新規予約を止める（障害時。#15の手順） |
 | `HOST_SIGNUP_MODE` | `pilot` | `open` はNIHO側のセルフ登録（連携B）が使えるようになってから |
 | `NIHO_HOST_START_URL` / `HOST_PILOT_CONTACT_URL` / `NIHO_BOOKING_HELP_URL` | なし | NIHO側の遷移先。固定URLのみ。利用者入力で戻り先を変えない |
+| `EXPERIENCE_EMBED_ENABLED` | `false` | `true` で予約ウィジェットの `/embed/experiences/{slug}/book` と、ホストの「自分のサイトに貼る」（`/host/experiences/{id}/embed`）を開く（#638、[embed.md](embed.md)）。mock でも http でも同じ。off の間はどちらも 404 で入口も出ない |
 | `HOST_CONSOLE_ENABLED` | `false` | `true` でホストの画面（`/host/*`）とログインを開く（#84）。off の間は今の紹介ページのまま。mock のプレビュー（`deploy-preview.yml`）は `true` で、合成のログインで見られる |
 | `HOST_PWA_ENABLED` | `false` | `true` でホストの画面をホーム画面・Dock に追加できるようにする（manifest・Service Worker・設定「この端末」。#177）。`HOST_CONSOLE_ENABLED=true` のときだけ効く。`false` に戻すと自分を解除する Service Worker を返す（[host-pwa.md](host-pwa.md)）。mock のプレビューと stg は `true` |
 | `HOST_PUSH_ENABLED` | `false` | `true` でアプリへのプッシュ通知（設定 › この端末 › 通知と `/host/api/push-subscriptions`。#177 P2）を開く。`HOST_PWA_ENABLED=true` のときだけ効く。出来事からの送信は通知 job（下の 2 つ）が担う（[host-pwa.md](host-pwa.md#プッシュ通知p2)）。どの workflow でも未設定 |

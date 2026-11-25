@@ -24,3 +24,25 @@ export function publicationCanPublish(input: {
 }): boolean {
   return !input.dirty && !input.suspended && input.blockers.length === 0;
 }
+
+/** Where a saved publication blocker is fixed: a tab of the editor, the calendar, or a page elsewhere. `null`: nothing to do here. */
+export type PublicationBlockerDestination =
+  | { readonly kind: "calendar" }
+  | { readonly kind: "tab"; readonly tab: "page" | "pricing" | "settings" }
+  | { readonly kind: "href"; readonly href: string }
+  | { readonly kind: "payment-consent" };
+
+export function publicationBlockerDestination(blocker: string): PublicationBlockerDestination | null {
+  switch (blocker) {
+    case "SCHEDULE_REQUIRED": return { kind: "calendar" };
+    case "PRICE_REQUIRED":
+    case "CANCELLATION_TERMS_REQUIRED": return { kind: "tab", tab: "pricing" };
+    case "MANUSCRIPT_REQUIRED":
+    case "PUBLIC_CONTENT_INVALID":
+    case "PHOTOS_REQUIRED": return { kind: "tab", tab: "page" };
+    case "SLUG_IN_USE": return { kind: "tab", tab: "settings" };
+    case "SUPPORT_CONSENT_REQUIRED": return { kind: "href", href: "/host/settings#settings-support" };
+    case "PAYMENT_REUSE_CONSENT_REQUIRED": return { kind: "payment-consent" };
+    default: return null;
+  }
+}

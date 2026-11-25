@@ -44,6 +44,7 @@ describe("English header (#562)", () => {
     expect(row).not.toContain("Host with NIHO");
     const menu = /<details[\s\S]*<\/details>/.exec(html)?.[0] ?? "";
     expect(menu).toContain('aria-label="Menu"');
+    expect(menu).toContain('role="button" aria-label="Menu" aria-expanded="false" aria-controls="site-menu-panel"');
     const hrefs = [...menu.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
     expect(hrefs).toEqual(["/experiences", "/guides", "/about", "/help", "/ja", "/host"]);
     expect(menu).toContain(">For hosts<");

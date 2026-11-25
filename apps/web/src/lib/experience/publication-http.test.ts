@@ -441,6 +441,33 @@ describe("Experience owner product API", () => {
       expect((await empty.json()).sourceFingerprint).toBe(publicationManuscriptFingerprint(japanese));
     });
 
+    it("translates an English manuscript into Japanese when the body is { english }, with the same FAQ row count", async () => {
+      const sourceEnglish = { ...japanese, title: "Synthetic dinner", lead: "Lead", description: "Description", language: "English", faq: [{ question: "Can children join?", answer: "From age 6." }] };
+      const translatedJapanese = { ...japanese, faq: [{ question: "子どもも参加できますか？", answer: "6歳から参加できます。" }] };
+      mocks.translator.mockResolvedValueOnce({ ok: true, text: JSON.stringify(translatedJapanese) });
+      const response = await translateProduct(request(`/host/api/products/${product.id}/translation`, "POST", { english: sourceEnglish }), context);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ sourceFingerprint: publicationManuscriptFingerprint(sourceEnglish), japanese: translatedJapanese });
+
+      mocks.translator.mockResolvedValueOnce({ ok: true, text: JSON.stringify({ ...translatedJapanese, faq: [] }) });
+      expect((await translateProduct(request(`/host/api/products/${product.id}/translation`, "POST", { english: sourceEnglish }), context)).status).toBe(503);
+    });
+
+    it("rejects a translation body with both manuscripts, neither, or an invalid English one before the translator", async () => {
+      for (const body of [{ japanese, english: japanese }, {}, { english: { ...japanese, notes: "x" } }]) {
+        const response = await translateProduct(request(`/host/api/products/${product.id}/translation`, "POST", body), context);
+        expect(response.status).toBe(400);
+      }
+      expect(mocks.translator).not.toHaveBeenCalled();
+    });
+
+    it("rejects a draft that is both Japanese-only and English-only", async () => {
+      const both = { ...draft, content: { ...draft.content, japaneseOnly: true, englishOnly: true } };
+      const created = await createProduct(request("/host/api/products", "POST", both));
+      expect(created.status).toBe(400);
+      expect(mocks.repository.createDraft).not.toHaveBeenCalled();
+    });
+
     it("asks the translator for a manuscript-sized answer: a FAQ makes the JSON longer than a message may be (#146)", async () => {
       const longFaq = Array.from({ length: 4 }, (_, index) => ({ question: `Q${index}?`, answer: "a".repeat(1_000) }));
       const source = { ...japanese, faq: longFaq.map(({ question }) => ({ question, answer: "こ".repeat(1_000) })) };

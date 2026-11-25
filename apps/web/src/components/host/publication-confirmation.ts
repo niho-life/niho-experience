@@ -35,15 +35,16 @@ export function fingerprintablePublicationManuscript(value: unknown): unknown {
   return Object.fromEntries(Object.entries(record).filter(([key]) => key !== "faq"));
 }
 
-async function fingerprint(value: unknown): Promise<string> {
+export async function publicationManuscriptFingerprint(value: unknown): Promise<string> {
   const bytes = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalPublicationJson(fingerprintablePublicationManuscript(value))));
   return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /** The OWNER confirms the current copy, whether entered manually or produced by translation. */
-export async function confirmPublicationEnglish(readCurrent: () => Manuscripts) {
+export async function confirmPublicationEnglish(readCurrent: () => Manuscripts, options: { readonly allowEmptyJapanese?: boolean } = {}) {
   const manuscripts = readCurrent();
-  for (const manuscript of [manuscripts.japanese, manuscripts.english]) {
+  // An English-only page has an empty Japanese manuscript: only its shape has to be valid.
+  for (const manuscript of options.allowEmptyJapanese ? [manuscripts.english] : [manuscripts.japanese, manuscripts.english]) {
     if (["title", "lead", "description", "language"].some((key) => typeof manuscript[key] !== "string" || !manuscript[key].trim())) {
       throw new Error("日本語と英語の商品名・紹介文・説明・当日の言語を入力してから確認してください。");
     }
@@ -53,7 +54,7 @@ export async function confirmPublicationEnglish(readCurrent: () => Manuscripts) 
   if (faqProblem) throw new Error(faqProblem);
   const snapshot = canonicalPublicationJson(manuscripts);
   const [sourceFingerprint, confirmedEnglishFingerprint] = await Promise.all([
-    fingerprint(manuscripts.japanese), fingerprint(manuscripts.english),
+    publicationManuscriptFingerprint(manuscripts.japanese), publicationManuscriptFingerprint(manuscripts.english),
   ]);
   if (canonicalPublicationJson(readCurrent()) !== snapshot) {
     throw new Error("確認中に原稿が変更されました。日英の内容を照合し、もう一度確認してください。");

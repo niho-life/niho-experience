@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { publicationCanPublish, publicationNextAction } from "./publication-workflow";
+import { publicationBlockerDestination, publicationCanPublish, publicationNextAction } from "./publication-workflow";
 
 describe("host publication next action", () => {
   it("guides a saved new product through schedule, pricing, content and publish", () => {
@@ -28,5 +28,21 @@ describe("host publication next action", () => {
     expect(publicationNextAction({ dirty: false, blockers: [...blockers, "SCHEDULE_REQUIRED"], published: false })).toBe("SCHEDULE");
     expect(publicationNextAction({ dirty: false, blockers: [...blockers, "SUPPORT_CONSENT_REQUIRED"], published: false })).toBe("SUPPORT");
     expect(publicationCanPublish({ dirty: false, blockers, suspended: false })).toBe(false);
+  });
+});
+
+describe("publication blocker destination", () => {
+  it("sends each blocker to the place that fixes it", () => {
+    expect(publicationBlockerDestination("SCHEDULE_REQUIRED")).toEqual({ kind: "calendar" });
+    expect(publicationBlockerDestination("PRICE_REQUIRED")).toEqual({ kind: "tab", tab: "pricing" });
+    expect(publicationBlockerDestination("CANCELLATION_TERMS_REQUIRED")).toEqual({ kind: "tab", tab: "pricing" });
+    for (const blocker of ["MANUSCRIPT_REQUIRED", "PUBLIC_CONTENT_INVALID", "PHOTOS_REQUIRED"]) expect(publicationBlockerDestination(blocker)).toEqual({ kind: "tab", tab: "page" });
+    expect(publicationBlockerDestination("SLUG_IN_USE")).toEqual({ kind: "tab", tab: "settings" });
+    expect(publicationBlockerDestination("SUPPORT_CONSENT_REQUIRED")).toEqual({ kind: "href", href: "/host/settings#settings-support" });
+    expect(publicationBlockerDestination("PAYMENT_REUSE_CONSENT_REQUIRED")).toEqual({ kind: "payment-consent" });
+  });
+
+  it("has no destination for the rest", () => {
+    for (const blocker of ["CONNECT_NOT_READY", "FEE_SETTINGS_REQUIRED", "OPERATIONS_SUSPENDED", "UNKNOWN"]) expect(publicationBlockerDestination(blocker)).toBeNull();
   });
 });

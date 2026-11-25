@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { EDITOR_LIMITS, emptyOffer, moveItem, offerChildPriceLabel, offerPriceLabel, offerScheduleLabel } from "@/host/editor";
 import { fullDateJa } from "@/host/format";
@@ -265,7 +266,7 @@ const KV_KEY = "text-xs font-extrabold text-muted";
  * 日本語 keeps the English as it is as the confirmed English; going back to English asks first
  * (the Japanese stays, and comes back with 日本語).
  */
-function PagePanel({ language, onLanguage, publicUrl }: { language: HostWritingLanguage; onLanguage: (language: HostWritingLanguage) => void; publicUrl: string | null }) {
+function PagePanel({ language, onLanguage, publicUrl, embedHref }: { language: HostWritingLanguage; onLanguage: (language: HostWritingLanguage) => void; publicUrl: string | null; embedHref: string | null }) {
   const [copied, setCopied] = useState<"done" | "failed" | null>(null);
   const [asking, setAsking] = useState(false);
   const stay = useRef<HTMLButtonElement>(null);
@@ -319,6 +320,12 @@ function PagePanel({ language, onLanguage, publicUrl }: { language: HostWritingL
             </span>
           </div>
         ) : null}
+        {publicUrl && embedHref ? (
+          <div className={KV}>
+            <span className={KV_KEY}>埋め込み</span>
+            <Link href={embedHref} className="w-fit text-[0.8125rem] font-bold text-moss underline underline-offset-4">自分のサイトに貼る</Link>
+          </div>
+        ) : null}
       </div>
       <p className="mt-1 text-xs leading-normal text-muted">{language === "ja" ? "日本語で書くと、英語の下書きを NIHO が作ります。体験サイトには確定した英語が出ます。" : "体験サイトには、書いた英語がそのまま出ます。"}</p>
       <p role="status" className="text-xs font-bold text-moss">
@@ -358,6 +365,8 @@ export interface HostEditorRailProps {
   publicPath: string;
   /** The public page's full address, shown while the listing is live. */
   publicUrl: string | null;
+  /** 自分のサイトに貼る (#638), with the provider kept: shown while the listing is live; null while EXPERIENCE_EMBED_ENABLED is off. */
+  embedHref?: string | null;
   /** As the tab shows them: names and questions in its language. */
   offers: readonly HostOffer[];
   onOffers: (offers: HostOffer[]) => void;
@@ -373,12 +382,12 @@ export interface HostEditorRailProps {
 }
 
 /** The right rail (mock v2 `.rail`): 掲載, 申込の設定 and ページ. */
-export function HostEditorRail({ className = "", listing, requirements, settingsHref, dirty, owner, consent, onConsent, actions, publicPath, publicUrl, offers, onOffers, lang, offersMarker, englishBehind, language, onLanguage, today }: HostEditorRailProps) {
+export function HostEditorRail({ className = "", listing, requirements, settingsHref, dirty, owner, consent, onConsent, actions, publicPath, publicUrl, embedHref = null, offers, onOffers, lang, offersMarker, englishBehind, language, onLanguage, today }: HostEditorRailProps) {
   return (
     <div className={`flex min-w-0 flex-col gap-3.5 ${className}`.trim()}>
       <ListingPanel listing={listing} requirements={requirements} settingsHref={settingsHref} dirty={dirty} owner={owner} consent={consent} onConsent={onConsent} publicPath={publicPath} englishBehind={englishBehind} actions={actions} />
       <OffersPanel offers={offers} onOffers={onOffers} today={today} lang={lang} marker={offersMarker} />
-      <PagePanel language={language} onLanguage={onLanguage} publicUrl={publicUrl} />
+      <PagePanel language={language} onLanguage={onLanguage} publicUrl={publicUrl} embedHref={embedHref} />
     </div>
   );
 }
