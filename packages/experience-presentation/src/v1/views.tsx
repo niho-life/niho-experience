@@ -8,9 +8,17 @@ import { DetailGalleryV1 } from "./gallery.js";
 
 export type HomeViewModelV1 = Readonly<{
   hero: DisplayImageV1;
+  /** Optional extra layers inside the hero box, right after the hero image and under the gradient. */
+  heroMedia?: ReactNode;
+  /** Optional replacement for the hero body text (`home.heroBody`). */
+  heroBody?: string;
+  /** Optional action rendered right below the hero body text. */
+  heroAction?: ReactNode;
   finder: ReactNode;
   themes: readonly { key: string; href: string; icon: HandIconName; label: string }[];
   cardsEyebrow?: string;
+  /** Optional replacement for the cards section title (`home.hostedHeadingRich`). */
+  cardsTitle?: ReactNode;
   cards: readonly { model: ExperienceCardModelV1; dates?: ReactNode }[];
   empty?: ReactNode;
   /** Consumer-owned editorial entry placed directly after the experience-card section. */
@@ -34,6 +42,8 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
   const { Link, Image } = primitivesV1(primitives);
   const steps = [["cal", "home.pickDateTitle", "home.pickDateBody"], ["card", "home.payTitle", "home.payBody"], ["mail", "home.meetTitle", "home.meetBody"]] as const;
   const journal = model.layout === "journal";
+  // No finder hangs over the hero's bottom edge: the hero is taller, the text sits lower and the heading may run wider.
+  const openHero = journal && !model.finder;
   const stepList = (label?: string) => <ol aria-label={label} className="grid gap-3 lg:grid-cols-3 lg:gap-4">{steps.map(([icon, title, body]) => <li key={title} className="flex items-start gap-4 rounded-[22px] bg-sand p-[22px]">
 <HandIcon name={icon} className="size-[46px]" />
 <div>
@@ -43,14 +53,14 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
 </li>)}</ol>;
   return <>
     <section className="relative" aria-label={copy.text("home.welcome")}>
-<div className={`relative overflow-hidden bg-[#222] ${journal ? "h-[460px] lg:h-[560px]" : "h-[560px] lg:h-[680px]"}`}>
-      <Image src={model.hero.src} srcSet={model.hero.srcset} alt={model.hero.alt} priority sizes="100vw" className="absolute inset-0 h-full w-full object-cover" style={{ objectPosition: model.hero.position }} />
+<div className={`relative overflow-hidden bg-[#222] ${journal && !openHero ? "h-[460px] lg:h-[560px]" : "h-[560px] lg:h-[680px]"}`}>
+      <Image src={model.hero.src} srcSet={model.hero.srcset} alt={model.hero.alt} priority sizes="100vw" className="absolute inset-0 h-full w-full object-cover" style={{ objectPosition: model.hero.position }} />{model.heroMedia ?? null}
       <div aria-hidden className="absolute inset-0 bg-[linear-gradient(180deg,rgb(0_0_0/0)_32%,rgb(0_0_0/0.64)_100%)] lg:bg-[linear-gradient(90deg,rgb(0_0_0/0.42),rgb(0_0_0/0)_62%),linear-gradient(180deg,rgb(0_0_0/0)_40%,rgb(0_0_0/0.5)_100%)]" />
-      <div className="absolute inset-x-0 bottom-16 z-[2] text-white lg:bottom-[116px]">
+      <div className={openHero ? "absolute inset-x-0 bottom-10 z-[2] text-white lg:bottom-14" : "absolute inset-x-0 bottom-16 z-[2] text-white lg:bottom-[116px]"}>
 <div className="container-page">
-<h1 className="max-w-[12ch] text-[2.625rem] leading-[1.02] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:max-w-[13ch] lg:text-[4.875rem]"><RichMessageV1 segments={copy.rich("home.heroHeadingRich")} emphasisClassName="hand inline-block -rotate-3 text-[1.22em] text-leaf" />
+<h1 className={openHero ? "max-w-[12ch] text-[2.625rem] leading-[1.02] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:max-w-[20ch] lg:text-[4.875rem]" : "max-w-[12ch] text-[2.625rem] leading-[1.02] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:max-w-[13ch] lg:text-[4.875rem]"}><RichMessageV1 segments={copy.rich("home.heroHeadingRich")} emphasisClassName="hand inline-block -rotate-3 text-[1.22em] text-leaf" />
 </h1>
-<p className="mt-3.5 max-w-[30rem] text-[1.0625rem] text-white/90 lg:text-[1.1875rem]">{copy.text("home.heroBody")}</p>
+<p className="mt-3.5 max-w-[30rem] text-[1.0625rem] text-white/90 lg:text-[1.1875rem]">{model.heroBody ?? copy.text("home.heroBody")}</p>{model.heroAction ? <div className="mt-5">{model.heroAction}</div> : null}
 </div>
 </div>
       <RubberStamp className="absolute top-[18px] right-4 z-[2] size-24 -rotate-12 text-white opacity-90 lg:top-11 lg:right-14 lg:size-[134px]" />
@@ -58,7 +68,7 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
     {model.themes.length ? <nav aria-label={copy.text("home.themes")} className="scrollbar-none flex gap-0.5 overflow-x-auto px-3 pt-9 lg:justify-center lg:gap-7 lg:pt-[88px]">{model.themes.map((theme) => <Link key={theme.key} href={theme.href} className="flex w-[92px] shrink-0 flex-col items-center gap-2 rounded-[18px] px-1 py-2.5 text-center text-sm leading-tight font-bold text-ink-soft hover:bg-sand">
 <HandIcon name={theme.icon} className="size-[46px] text-ink" />{theme.label}</Link>)}</nav> : null}
     <section className="container-page pt-14 lg:pt-[88px]" aria-labelledby="home-cards-v1">
-<SectionHeadingV1 id="home-cards-v1" eyebrow={model.cardsEyebrow} title={<RichMessageV1 segments={copy.rich("home.hostedHeadingRich")} emphasisClassName="squig" />} action={model.cards.length ? <Link href="/experiences" className="link-leaf">{copy.text("home.seeAll")}</Link> : null} />
+<SectionHeadingV1 id="home-cards-v1" eyebrow={model.cardsEyebrow} title={model.cardsTitle ?? <RichMessageV1 segments={copy.rich("home.hostedHeadingRich")} emphasisClassName="squig" />} action={model.cards.length ? <Link href="/experiences" className="link-leaf">{copy.text("home.seeAll")}</Link> : null} />
       {model.cards.length ? <ul className="scrollbar-none -mx-5 grid snap-x snap-mandatory auto-cols-[80%] grid-flow-col gap-[18px] overflow-x-auto px-5 pt-1 pb-7 sm:-mx-6 sm:auto-cols-[44%] sm:px-6 lg:mx-0 lg:grid-flow-row lg:grid-cols-3 lg:gap-x-7 lg:gap-y-[52px] lg:overflow-visible lg:p-0">{model.cards.map((card, index) => <li key={card.model.slug} className="snap-center">
 <ExperienceCardV1 card={card.model} dates={card.dates} priority={index === 0} primitives={primitives} copy={copy} />
 </li>)}<li className="snap-center">

@@ -6,6 +6,12 @@ import { type DetailBookingCardModelV1 } from "./detail-booking.js";
 import { type DetailGalleryModelV1, type DisplayImageV1, type DisplayVideoV1, type FaceV1, type PresentationPrimitivesV1 } from "./types.js";
 export type HomeViewModelV1 = Readonly<{
     hero: DisplayImageV1;
+    /** Optional extra layers inside the hero box, right after the hero image and under the gradient. */
+    heroMedia?: ReactNode;
+    /** Optional replacement for the hero body text (`home.heroBody`). */
+    heroBody?: string;
+    /** Optional action rendered right below the hero body text. */
+    heroAction?: ReactNode;
     finder: ReactNode;
     themes: readonly {
         key: string;
@@ -14,6 +20,8 @@ export type HomeViewModelV1 = Readonly<{
         label: string;
     }[];
     cardsEyebrow?: string;
+    /** Optional replacement for the cards section title (`home.hostedHeadingRich`). */
+    cardsTitle?: ReactNode;
     cards: readonly {
         model: ExperienceCardModelV1;
         dates?: ReactNode;

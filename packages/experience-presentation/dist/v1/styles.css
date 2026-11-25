@@ -304,6 +304,9 @@
   .bottom-4 {
     bottom: calc(var(--spacing) * 4);
   }
+  .bottom-10 {
+    bottom: calc(var(--spacing) * 10);
+  }
   .bottom-16 {
     bottom: calc(var(--spacing) * 16);
   }
@@ -2058,6 +2061,9 @@
     }
     .lg\:right-14 {
       right: calc(var(--spacing) * 14);
+    }
+    .lg\:bottom-14 {
+      bottom: calc(var(--spacing) * 14);
     }
     .lg\:bottom-\[116px\] {
       bottom: 116px;

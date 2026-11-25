@@ -19,7 +19,21 @@ export type Postcard = SitePhoto & { place: string; rotate: number };
 const photo = (file: string) => `/sample/photos/${file}`;
 const video = (name: string): SiteVideo => ({ src: `/sample/video/${name}.mp4`, poster: `/sample/video/${name}.jpg` });
 
+/** The English home hero (#646): the still underneath. HOME_HERO_SLIDES cross-fade over it. */
 export const HERO_PHOTO: SitePhoto = {
+  src: photo("niho-dinner-1.jpg"),
+  alt: "Neighbors and guests talking over drinks in the NIHO living room",
+  position: "50% 55%",
+};
+
+/** Two more hero photos, decorative: they fade in over HERO_PHOTO by opacity only (never scaled or moved). */
+export const HOME_HERO_SLIDES: readonly [SitePhoto, SitePhoto] = [
+  { src: photo("niho-cd-kitchen-together.jpg"), alt: "", position: "60% 40%" },
+  { src: photo("niho-cd-table-01.jpg"), alt: "", position: "40% 50%" },
+];
+
+/** The still behind the living-room band on the English home (#646). */
+export const HOME_LIVING_ROOM: SitePhoto = {
   src: photo("niho-cd-table-02.jpg"),
   alt: "Neighbors around the long table at NIHO",
   position: "62% 45%",
@@ -64,7 +78,7 @@ export const HOST_BAND_VIDEO: SiteVideo = video("coast-tram");
 /** Every file referenced above, for the test that keeps them in public/sample and CREDITS.md. */
 export function siteMediaFiles(): string[] {
   const videos = [BANNER_VIDEO, HOST_BAND_VIDEO, CALLIGRAPHY_VIDEO, ...Object.values(STRIP_VIDEOS)].flatMap((item) => [item.src, item.poster]);
-  return [HERO_PHOTO.src, ...FEATURE_MOSAIC.map((item) => item.src), GUIDE_FACE, ...POSTCARDS.map((card) => card.src), ...videos];
+  return [HERO_PHOTO.src, ...HOME_HERO_SLIDES.map((item) => item.src), HOME_LIVING_ROOM.src, ...FEATURE_MOSAIC.map((item) => item.src), GUIDE_FACE, ...POSTCARDS.map((card) => card.src), ...videos];
 }
 
 /** The About page (#645): NIHO's own photos only, never listing photos from the API. */

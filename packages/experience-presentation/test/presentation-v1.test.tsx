@@ -249,6 +249,24 @@ describe("v1 portable presentation", () => {
     expect(journal).toContain("h-[460px]");
   });
 
+  it("lets a consumer add hero media, body, action and a cards title without changing the default home", () => {
+    const journal = { ...home, layout: "journal" as const, afterCards: <section>Synthetic guide shelf</section> };
+    const base = renderToStaticMarkup(<HomeViewV1 model={journal} />);
+    expect(renderToStaticMarkup(<HomeViewV1 model={{ ...journal, heroMedia: undefined, heroBody: undefined, heroAction: undefined, cardsTitle: undefined }} />)).toBe(base);
+    expect(base).not.toContain("Synthetic slides");
+    expect(base).not.toContain('class="mt-5"');
+    const html = renderToStaticMarkup(<HomeViewV1 model={{ ...journal, finder: null, themes: [], heroMedia: <img data-slide="" alt="" src="/synthetic/slide.svg" />, heroBody: "Synthetic slides body", heroAction: <a href="/experiences">Synthetic action</a>, cardsTitle: <>Spend a few hours with a <span className="squig">neighbor</span></> }} />);
+    expect(html).not.toContain("Find experiences");
+    expect(html).not.toContain('aria-label="Browse by theme"');
+    const gradient = html.indexOf("bg-[linear-gradient(180deg");
+    expect(html.indexOf("<img data-slide")).toBeGreaterThan(html.indexOf('src="/synthetic/image.svg"'));
+    expect(html.indexOf("<img data-slide")).toBeLessThan(gradient);
+    expect(html).toContain("Synthetic slides body");
+    expect(html.indexOf("Synthetic slides body")).toBeLessThan(html.indexOf('<div class="mt-5"><a href="/experiences">Synthetic action</a></div>'));
+    expect(html).toContain('<div class="mt-5"><a href="/experiences">Synthetic action</a></div>');
+    expect(html).toContain('Spend a few hours with a <span class="squig">neighbor</span>');
+  });
+
   it("adds a review line to a card only when the consumer supplies one", () => {
     const model = { ...card, href: card.href };
     expect(renderToStaticMarkup(<ExperienceCardV1 card={model} />)).not.toContain("★");
