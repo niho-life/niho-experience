@@ -15,9 +15,9 @@ import { inquiryHref } from "@/lib/group-inquiry-entry";
 export function JapaneseHeroCopy({ title, hand, lead }: { title: string; hand: string; lead: string }) {
   const [first, second] = title.split("、");
   return <>
-    <h1 className="text-[2.25rem] leading-[1.25] font-medium sm:text-[3.25rem]">{second ? <>{first}、<br />{second}</> : title}<span className="hand mt-1 block text-[1.75rem] font-normal text-white/90 sm:text-[2.25rem]">{hand}</span></h1>
-    <p className="mt-4 max-w-[34rem] text-[1.0625rem] leading-relaxed text-white [text-shadow:0_1px_10px_rgba(0,0,0,0.5)]">{lead}</p>
-    <div className="mt-6"><Link href="/ja/experiences" className={buttonClass("primary")}>体験をさがす</Link></div>
+    <h1 className="text-[2.375rem] leading-[1.2] font-medium [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:text-[4rem]">{second ? <>{first}、<br />{second}</> : title}<span className="hand mt-1 block text-[1.75rem] font-normal text-leaf lg:text-[2.5rem]">{hand}</span></h1>
+    <p className="mt-3.5 max-w-[34rem] text-[1.0625rem] text-white/90 [word-break:auto-phrase] lg:text-[1.1875rem]">{lead}</p>
+    <div className="mt-5"><Link href="/ja/experiences" className={buttonClass("primary")}>体験をさがす</Link></div>
   </>;
 }
 
@@ -43,7 +43,7 @@ export function ConsultBand() {
   return <Band id="consult-band" hand="ask the town" title="企業・学校・グループのご相談" tone="leaf">
     <p className="mt-3 max-w-[40rem] text-ink-soft">学校や会社、グループでの参加、探している体験や人のこと。体験を選び切れなくても、日にちが決まっていなくても大丈夫です。目的を聞かせてください。はじめの相談は無料です。</p>
     <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
-      <a href={inquiryHref("ja")} className={buttonClass("primary", "w-full sm:w-auto")}>相談する</a>
+      <a href={inquiryHref("ja")} className={buttonClass("primary", "max-sm:w-full")}>相談する</a>
       <Link href="/ja/business" className="font-extrabold underline underline-offset-4">企業・学校の方へ</Link>
     </div>
   </Band>;
@@ -53,7 +53,7 @@ export function ConsultBand() {
 export function HostBand() {
   return <Band id="host-band" hand="share your craft" title="ホストになる" tone="sand">
     <p className="mt-3 max-w-[40rem] text-ink-soft">教えていること、案内していることを、体験として載せられます。予約の受付と支払いはこのサイトが引き受けます。</p>
-    <div className="mt-6"><Link href="/ja/host" className={buttonClass("secondary", "w-full sm:w-auto")}>ホストになる</Link></div>
+    <div className="mt-6"><Link href="/ja/host" className={buttonClass("secondary", "max-sm:w-full")}>ホストになる</Link></div>
   </Band>;
 }
 
@@ -75,7 +75,7 @@ export function PeopleBand({ featured, people, facesLimit }: { featured: PublicP
         <p className="text-ink-soft">{featured.roleJa}・{featured.areaJa}</p>
         {featured.quoteJa ? <p className="mt-4 text-[1.1875rem] leading-snug">「{featured.quoteJa}」</p> : null}
         {featured.introJa ? <p className="mt-3 line-clamp-3 max-w-[40rem] text-ink-soft">{featured.introJa}</p> : null}
-        <div className="mt-5"><Link href={`/ja/people/${featured.slug}`} className={buttonClass("primary", "w-full sm:w-auto")}>この人に会いにいく</Link></div>
+        <div className="mt-5"><Link href={`/ja/people/${featured.slug}`} className={buttonClass("primary", "max-sm:w-full")}>この人に会いにいく</Link></div>
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <ul className="flex flex-wrap gap-2" aria-label="街の人">
             {faces.map((person) => <li key={person.slug}>
@@ -114,7 +114,7 @@ export function GuidesBand({ guides }: { guides: readonly Guide[] }) {
 /** さがす欄（なにをする／だれと）：JS なしで動く GET フォーム。一覧（`/ja/experiences`）の `category`・`with` に渡す。 */
 export function HomeFinder({ categories }: { categories: readonly { id: string; label: string }[] }) {
   const field = "mt-0.5 block w-full min-w-0 bg-transparent text-[1rem] font-extrabold text-ink outline-none";
-  return <form method="get" action="/ja/experiences" role="search" aria-label="体験をさがす" className="container-page relative z-10 -mt-7">
+  return <form method="get" action="/ja/experiences" role="search" aria-label="体験をさがす" className="container-page mt-8">
     <div className="grid gap-3 rounded-[22px] border border-line bg-white p-4 shadow-[0_10px_30px_rgba(0,0,0,0.08)] sm:grid-cols-[1fr_1fr_auto] sm:items-center sm:gap-4 sm:p-5">
       <label className="block rounded-xl bg-sand/60 px-4 py-2.5"><small className="block text-[0.75rem] font-bold text-ink-soft">なにをする</small>
         <select name="category" defaultValue="" className={field}><option value="">すべての体験</option>{categories.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
@@ -122,7 +122,7 @@ export function HomeFinder({ categories }: { categories: readonly { id: string; 
       <label className="block rounded-xl bg-sand/60 px-4 py-2.5"><small className="block text-[0.75rem] font-bold text-ink-soft">だれと</small>
         <select name="with" defaultValue="" className={field}><option value="">決めていない</option>{EXPERIENCE_COMPANIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
       </label>
-      <button type="submit" className={buttonClass("primary", "w-full sm:w-auto")}>さがす</button>
+      <button type="submit" className={buttonClass("primary", "max-sm:w-full")}>さがす</button>
     </div>
   </form>;
 }
@@ -148,7 +148,7 @@ export function FeatureBand({ feature }: { feature: HomeFeature }) {
         <span className="hand text-[1.5rem] text-moss">{feature.hand}</span>
         <h2 id="feature-band" className="text-[1.75rem] leading-snug sm:text-[2.25rem]">{feature.title[0]}{feature.title[1] ? <><br />{feature.title[1]}</> : null}</h2>
         <p className="mt-3 max-w-[34rem] text-ink-soft">{feature.text}</p>
-        <div className="mt-6"><Link href={`/ja/experiences?category=${feature.categoryId}`} className={buttonClass("primary", "w-full sm:w-auto")}>{feature.cta}</Link></div>
+        <div className="mt-6"><Link href={`/ja/experiences?category=${feature.categoryId}`} className={buttonClass("primary", "max-sm:w-full")}>{feature.cta}</Link></div>
       </div>
       <ul className="grid grid-cols-3 gap-2" aria-hidden="true">
         {feature.photos.map((photo) => <li key={photo.src}><Photo image={{ url: photo.src, alt: "" }} alt="" sizes="(min-width: 768px) 20vw, 30vw" aspect="aspect-[3/4]" rounded="rounded-[14px]" imgClassName="" /></li>)}

@@ -19,54 +19,79 @@ const render = (props: { hostSignedIn?: boolean; inquiryOpen?: boolean; guidesOp
 const navItems = (html: string) => [...html.slice(html.indexOf('<nav aria-label="メイン"'), html.indexOf("</nav>")).matchAll(/<li([^>]*)>(.*?)<\/li>/g)].map((match) => ({ cls: (match[1] ?? "").match(/class="([^"]*)"/)?.[1] ?? "", html: match[2] ?? "" }));
 const hrefOf = (html: string) => html.match(/href="([^"]*)"/)?.[1] ?? null;
 
-describe("日本語サイトのヘッダーとフッター（#562、#612）", () => {
-  it("ヘッダーは1行：ロゴ・ナビ・言語のボタン。上に言語だけの行は無い", () => {
+/** メニュー（<details>）の中の項目：href と文言。 */
+const menuRows = (html: string) => {
+  const menu = html.slice(html.indexOf("<details"), html.indexOf("</details>"));
+  return [...menu.slice(menu.indexOf('<nav aria-label="メニュー"')).matchAll(/<li([^>]*)>(.*?)<\/li>/g)].map((match) => ({ cls: (match[1] ?? "").match(/class="([^"]*)"/)?.[1] ?? "", html: match[2] ?? "", text: (match[2] ?? "").replace(/<[^>]*>/g, "") }));
+};
+/** ヘッダーのうち、メニューより前（ロゴ・ナビ・言語のボタン）。 */
+const headerRow = (html: string) => html.slice(html.indexOf("<header"), html.indexOf("<details"));
+
+describe("日本語サイトのヘッダーとフッター（#562、#612、#658）", () => {
+  it("ヘッダーは1行：ロゴ・ナビ・言語のボタン・メニュー。上に言語だけの行は無い", () => {
     const html = render({});
     expect(html.match(/<header/g)).toHaveLength(1);
     expect(html).not.toContain("bg-sand\"><div class=\"container-page flex justify-end");
-    for (const text of ["体験を", "さがす", "企業・学校", "相談", "ホストになる"]) expect(html).toContain(text);
+    for (const text of ["体験を", "さがす", "企業・学校", "NIHOについて", "ヘルプ"]) expect(headerRow(html)).toContain(text);
     expect(html).toContain('href="/ja/experiences"');
     expect(html).toContain('href="/ja/business"');
-    expect(html).toContain('href="/ja/inquiry"');
-    expect(html).toContain('href="/ja/host"');
+    expect(html).toContain('href="/ja/about"');
+    expect(html).toContain('href="/ja/help"');
     expect(html).toContain(">EN<");
     // 古い言い方は残さない
     for (const old of ["法人・学校", "ホストの方", "相談する"]) expect(html).not.toContain(old);
-    // 右端は押せないものではなく、言語を切り替えるボタン
     expect(html).not.toContain("日本語 · ¥");
   });
 
-  it("PC 幅：左に体験をさがす（と読みもの）、右端に企業・学校とホストになる（文字だけ）と EN。相談は PC 幅のナビに無い", () => {
+  it("ナビの順番と class：体験をさがす、読みもの、NIHOについて、企業・学校、ヘルプ（2つ目以降は max-md:hidden）", () => {
     const items = navItems(render({ guidesOpen: true }));
-    // 左：さがす、読みもの。つぎに相談（スマホ幅だけ）、右へ寄せる空き、企業・学校、ホストになる、EN
-    expect(items.slice(0, 6).map((item) => hrefOf(item.html))).toEqual(["/ja/experiences", "/ja/guides", "/ja/inquiry", null, "/ja/business", "/ja/host"]);
-    const [search, guides, consult, spacer, business, host, language] = items;
-    expect(search!.cls).toBe("");
-    expect(guides!.cls).toBe("hidden sm:block");
-    // 相談はスマホ幅だけ
-    expect(consult!.cls).toBe("sm:hidden");
-    expect(spacer!.html).toBe("");
-    expect(spacer!.cls).toBe("hidden sm:block sm:flex-1");
-    expect(business!.cls).toBe("hidden sm:block");
-    expect(host!.cls).toBe("hidden sm:block");
-    expect(business!.html).toContain("企業・学校");
-    expect(host!.html).toContain("ホストになる");
-    // 右端の2つは文字だけの控えめなリンク（背景の丸は付けない）
-    for (const quiet of [business!, host!]) expect(quiet.html).toContain("text-ink-soft");
-    expect(language!.html).toContain("EN");
+    expect(items.map((item) => hrefOf(item.html))).toEqual(["/ja/experiences", "/ja/guides", "/ja/about", "/ja/business", "/ja/help"]);
+    expect(items[0]!.cls).toBe("");
+    for (const item of items.slice(1)) expect(item.cls).toBe("max-md:hidden");
+    // 1つ目は、lg 未満では短い「さがす」、lg 以上では「体験をさがす」
+    expect(items[0]!.html).toContain('<span class="lg:hidden">さがす</span><span class="max-lg:hidden">体験をさがす</span>');
+    expect(items[0]!.html).toContain("rounded-full px-2.5 py-2 whitespace-nowrap hover:bg-sand md:px-3");
+    expect(items.slice(1).map((item) => item.html.replace(/<[^>]*>/g, ""))).toEqual(["読みもの", "NIHOについて", "企業・学校", "ヘルプ"]);
   });
 
-  it("スマホ幅では「さがす」「相談」と言語のボタンだけ（ほかは sm 以上）", () => {
-    const items = navItems(render({ guidesOpen: true }));
-    const visibleOnPhone = items.filter((item) => !/(^| )hidden( |$)/.test(item.cls)).map((item) => item.html);
-    expect(visibleOnPhone).toHaveLength(3);
-    expect(visibleOnPhone[0]).toContain("さがす");
-    expect(visibleOnPhone[1]).toContain("相談");
-    expect(visibleOnPhone[2]).toContain("EN");
-    expect(render({}).includes("max-sm:hidden")).toBe(true);
+  it("スマホ幅の行に残るのは「さがす」だけ。言語のボタンは行の外（max-[359px]:hidden）", () => {
+    const html = render({ guidesOpen: true, hostSignedIn: true });
+    const items = navItems(html);
+    const visibleOnPhone = items.filter((item) => !/(^| )max-(md|lg):hidden( |$)/.test(item.cls));
+    expect(visibleOnPhone).toHaveLength(1);
+    expect(visibleOnPhone[0]!.html).toContain("さがす");
+    expect(html).toContain("max-[359px]:hidden");
   });
 
-  it("街の人は、ヘッダーにもフッターにも出さない（人物ページを止めている、#612）。まだ無いページ（カテゴリー）へのリンクも出さない", () => {
+  it("ヘッダーの行に「ホストになる」と「相談」は無い（メニューとフッターにある）", () => {
+    const row = headerRow(render({}));
+    expect(row).not.toContain("ホストになる");
+    expect(row).not.toContain("相談");
+    expect(row).not.toContain('href="/ja/host"');
+    expect(row).not.toContain('href="/ja/inquiry"');
+  });
+
+  it("メニュー（details、aria-label=メニュー）の中身と順番", () => {
+    const html = render({ guidesOpen: true });
+    expect(html).toContain('aria-label="メニュー"');
+    expect(html).toContain('<details class="md:hidden"');
+    const rows = menuRows(html);
+    expect(rows.map((row) => row.text)).toEqual(["体験をさがす", "読みもの", "NIHOについて", "企業・学校の方へ", "ご相談", "ヘルプ", "English", "ホストになる"]);
+    expect(rows.map((row) => hrefOf(row.html))).toEqual(["/ja/experiences", "/ja/guides", "/ja/about", "/ja/business", "/ja/inquiry", "/ja/help", "/", "/ja/host"]);
+    expect(rows[6]!.cls).toContain("empty:hidden");
+    expect(rows[7]!.html).toContain("text-ink-soft");
+  });
+
+  it("メニューの出し分け：読みものは記事があるときだけ、相談の flag が閉じていれば企業・学校・ご相談を出さない、ホストとしてログイン中は「ホスト画面」", () => {
+    const closed = menuRows(render({ inquiryOpen: false })).map((row) => row.text);
+    expect(closed).toEqual(["体験をさがす", "NIHOについて", "ヘルプ", "English", "ホストになる"]);
+    const signedIn = menuRows(render({ hostSignedIn: true }));
+    expect(signedIn.at(-1)!.text).toBe("ホスト画面");
+    expect(hrefOf(signedIn.at(-1)!.html)).toBe("/host/home");
+    expect(signedIn.some((row) => row.text === "ホストになる")).toBe(false);
+  });
+
+  it("街の人は、ヘッダー・メニュー・フッターのどこにも出さない（人物ページを止めている、#612）。まだ無いページへのリンクも出さない", () => {
     const html = render({});
     expect(html).not.toContain("/ja/people");
     expect(html).not.toContain("街の人");
@@ -74,10 +99,10 @@ describe("日本語サイトのヘッダーとフッター（#562、#612）", ()
     expect(html).not.toContain("読みもの");
   });
 
-  it("読みものは、公開中の記事があるときだけ、ヘッダー（スマホ幅では出さない）とフッターに出る", () => {
+  it("読みものは、公開中の記事があるときだけ、ヘッダー（md 未満では行に出さずメニューへ）とフッターに出る", () => {
     const html = render({ guidesOpen: true });
-    expect(html).toMatch(/<li class="hidden sm:block"><a[^>]*href="\/ja\/guides"[^>]*>読みもの<\/a><\/li>/);
-    expect(html.match(/href="\/ja\/guides"/g)).toHaveLength(2);
+    expect(html).toMatch(/<li class="max-md:hidden"><a[^>]*href="\/ja\/guides"[^>]*>読みもの<\/a><\/li>/);
+    expect(html.match(/href="\/ja\/guides"/g)).toHaveLength(3);
     expect(render({ guidesOpen: false })).not.toContain("/ja/guides");
   });
 
@@ -89,14 +114,17 @@ describe("日本語サイトのヘッダーとフッター（#562、#612）", ()
     expect(html).toContain('href="/ja/host"');
   });
 
-  it("ホストとしてログインしている人には「ホストになる」の代わりに「ホスト画面」", () => {
+  it("ホストとしてログインしている人には、ヘッダーの行に「ホスト画面」（lg 以上。md では5つのタブで幅がいっぱい）。「ホストになる」はどこにも出ない", () => {
     const html = render({ hostSignedIn: true });
     expect(html).toContain('href="/host/home"');
-    expect(html).toContain("ホスト画面");
-    expect(navItems(html).some((item) => item.html.includes("ホストになる"))).toBe(false);
+    const hostItem = navItems(html).find((item) => item.html.includes("ホスト画面"));
+    expect(hostItem?.cls).toBe("max-lg:hidden");
+    expect(hrefOf(hostItem!.html)).toBe("/host/home");
+    expect(headerRow(html)).not.toContain("ホストになる");
+    expect(html.slice(0, html.indexOf("<footer"))).not.toContain("ホストになる");
   });
 
-  it("フッターは運営の一文と、2列のリンク（企業・学校の方へ・ホストになる・ホストログイン・English・プライバシー）", () => {
+  it("フッターは運営の一文と、2列のリンク（NIHOについて・企業・学校の方へ・ホストになる・ホストログイン・English・プライバシー）", () => {
     const html = render({});
     expect(JAPANESE_SITE_DESCRIPTION).toBe("運営：NIHO kamakura（鎌倉駅西口から歩いて2分）");
     expect(html).toContain("NIHO Travel 鎌倉");
@@ -106,7 +134,9 @@ describe("日本語サイトのヘッダーとフッター（#562、#612）", ()
     // 以前の説明文は残さない
     expect(html).not.toContain("会いにいくための予約窓口です");
     expect(html).toContain("grid grid-cols-2");
-    for (const text of ["ご相談", "企業・学校の方へ", "ホストになる", "ホストログイン", "English", "プライバシー"]) expect(html).toContain(text);
+    const footer = html.slice(html.indexOf("<footer"));
+    for (const text of ["NIHOについて", "ご相談", "企業・学校の方へ", "ホストになる", "ホストログイン", "English", "プライバシー"]) expect(footer).toContain(text);
+    expect(footer).toContain('href="/ja/about"');
     for (const old of ["法人・団体の方へ", "体験を載せる", "個別の相談"]) expect(html).not.toContain(old);
     expect(html).not.toContain('href="/ja/schools"');
     expect(html).toContain('href="/host/auth/sign-in"');

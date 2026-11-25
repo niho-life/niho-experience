@@ -5,14 +5,32 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("next/image", () => ({ default: () => null }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/ja", useSearchParams: () => new URLSearchParams() }));
 
-import { JA_HOME_HAND, JA_HOME_HERO_PHOTOS, JA_HOME_LEAD, JA_HOME_TITLE } from "@/lib/ja-home";
+import { JA_HOME_HAND, JA_HOME_LEAD, JA_HOME_TITLE } from "@/lib/ja-home";
+import { HomeLivingRoom } from "../HomeLivingRoom";
 import { JapaneseHero } from "./JapaneseHero";
 import { JA_HOME_OCCASIONS, pickHomeFeature } from "@/lib/ja-home";
 import { CategoryNav, ConsultBand, FeatureBand, GuidesBand, HomeFinder, HostBand, JapaneseHeroCopy, OccasionStrips, PeopleBand, PicksHeading } from "./JapaneseHomeSections";
 
 describe("日本語トップ（#563）", () => {
-  it("題・手書き風の英語・説明が指定どおりで、写真の点がある", () => {
-    const html = renderToStaticMarkup(createElement(JapaneseHero, { photos: JA_HOME_HERO_PHOTOS } as never, createElement(JapaneseHeroCopy, { title: JA_HOME_TITLE, hand: JA_HOME_HAND, lead: JA_HOME_LEAD })));
+  it("街のリビングの帯：日本語の見出し・説明・NIHOについてへのリンク。英語の既定の文は出ない", () => {
+    const html = renderToStaticMarkup(createElement(HomeLivingRoom, { hand: "it starts here", title: "街のリビング、NIHO", body: "鎌倉駅から歩いて2分。街の人がふらりと寄って、一緒につくり、話し、手を動かす場所です。", action: { href: "/ja/about", label: "NIHOについて" }, alt: "NIHOの長いテーブルを囲む街の人たち", titleClassName: "mt-1 text-[2rem]" } as never));
+    expect(html).toContain("街のリビング、NIHO");
+    expect(html).toContain("it starts here");
+    expect(html).toContain("鎌倉駅から歩いて2分。");
+    expect(html).toContain('href="/ja/about"');
+    expect(html).toContain("NIHOについて");
+    expect(html).not.toContain("living room");
+    expect(html).not.toContain("About NIHO Travel");
+  });
+
+  it("街のリビングの帯：props が無ければ英語のまま", () => {
+    const html = renderToStaticMarkup(createElement(HomeLivingRoom));
+    expect(html).toContain("NIHO, the town’s living room");
+    expect(html).toContain('href="/about"');
+  });
+
+  it("題・手書き風の英語・説明が指定どおりで、写真は不透明度だけで入れ替わる（点のボタンは無い）", () => {
+    const html = renderToStaticMarkup(createElement(JapaneseHero, null, createElement(JapaneseHeroCopy, { title: JA_HOME_TITLE, hand: JA_HOME_HAND, lead: JA_HOME_LEAD })));
     expect(JA_HOME_TITLE).toBe("鎌倉の人に、会いにいく。");
     expect(html).toContain("鎌倉の人に、");
     expect(html).toContain("会いにいく。");
@@ -21,9 +39,19 @@ describe("日本語トップ（#563）", () => {
     // 架空の人の文は残さない
     expect(html).not.toContain("五十年彫りつづける");
     expect(html).toContain('href="/ja/experiences"');
-    for (let n = 1; n <= JA_HOME_HERO_PHOTOS.length; n += 1) expect(html).toContain(`aria-label="写真 ${n}"`);
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("写真の切り替え");
+    expect(html).toContain("hero-fade-2");
+    expect(html).toContain("hero-fade-3");
+    expect(html).toMatch(/class="hand mt-1 block [^"]*text-leaf/);
     // 文字が読めるよう、写真の上に暗い覆いがある
-    expect(html).toContain("bg-gradient-to-t");
+    expect(html).toContain("rgb(0_0_0/0.64)");
+  });
+
+  it("さがす欄はヒーローに重ねない", () => {
+    const html = renderToStaticMarkup(createElement(HomeFinder, { categories: [{ id: "walk", label: "歩く" }] }));
+    expect(html).toContain("container-page mt-8");
+    expect(html).not.toContain("-mt-7");
   });
 
   it("おすすめの見出しは日付の条件を言わず、件数と一覧への入口を出す", () => {

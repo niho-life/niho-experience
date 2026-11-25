@@ -23,7 +23,7 @@ export async function JapaneseHostPage({ searchParams }: { searchParams: Promise
         <h1 className="mt-1 max-w-[16ch] text-[2rem] leading-tight sm:text-[2.75rem]">{HOST_PAGE.title}</h1>
         <p className="mt-4 max-w-[40rem] text-[1.0625rem] text-ink-soft">{HOST_PAGE.lead}</p>
         <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
-          {talkHref ? <TrackedLink href={talkHref} event="host_start" props={{ signup_mode: "ja" }} className={buttonClass("primary", "w-full sm:w-auto")}>{HOST_PAGE.talk}</TrackedLink> : null}
+          {talkHref ? <TrackedLink href={talkHref} event="host_start" props={{ signup_mode: "ja" }} className={buttonClass("primary", "max-sm:w-full")}>{HOST_PAGE.talk}</TrackedLink> : null}
           {/* A plain link: the console has its own root layout and login is a route handler. */}
           {consoleEntry ? <a href={consoleEntry.loginHref} lang="ja" className="font-extrabold underline underline-offset-4">{HOST_PAGE.loginLabel}</a> : null}
         </div>
@@ -79,7 +79,7 @@ export async function JapaneseHostPage({ searchParams }: { searchParams: Promise
         <section className="mt-6 rounded-[22px] bg-leaf-pale px-6 py-8 sm:px-10">
           <h2 className="text-[1.5rem]">{HOST_PAGE.closing.title}</h2>
           <p className="mt-2 text-ink-soft">{HOST_PAGE.closing.body}</p>
-          <a href={talkHref} className={buttonClass("primary", "mt-5 w-full sm:w-auto")}>{HOST_PAGE.talk}</a>
+          <a href={talkHref} className={buttonClass("primary", "mt-5 max-sm:w-full")}>{HOST_PAGE.talk}</a>
         </section>
       ) : null}
     </div>
