@@ -71,6 +71,8 @@ export interface HostGuestBooking {
   readonly adultCount: number;
   readonly childCount: number;
   readonly language: "EN" | "JA";
+  /** Where the guest booked: the experience site or the widget on the host's own site (#638). The framing origin is never returned. */
+  readonly salesChannel: "SITE" | "EMBED";
   /** null once the guest's details were erased (a year after the experience, eraseGuestData). */
   readonly guest: HostGuestBookingGuest | null;
   readonly currency: string;
@@ -286,7 +288,7 @@ const SELECT_HOST_BOOKINGS = `
            SELECT min(e.occurred_at) FROM stripe_webhook_events e
             WHERE e.provider_id = b.provider_id AND e.booking_id = b.id AND e.outcome IN ('CONFIRMED', 'PAYMENT_REVIEW')
          )) AS paid_at,
-         g.guest_name, g.guest_phone, g.note, g.answers, g.guest_language, g.adult_count, g.child_count,
+         g.guest_name, g.guest_phone, g.note, g.answers, g.guest_language, g.adult_count, g.child_count, g.sales_channel,
          g.pii_erased_at IS NOT NULL AS erased, ${GUEST_MAIL_SUPPRESSION_CLASSIFICATION}, t.booking_questions,
          b.cancelled_by, b.cancellation_reason, b.cancellation_note,
          (SELECT COALESCE(sum(r.amount) FILTER (WHERE r.status = 'SUCCEEDED'), 0)::text
@@ -535,6 +537,7 @@ export function hostGuestBookingFromRow(row: DbRow): HostGuestBooking {
     adultCount: amount(row.adult_count, "adult_count"),
     childCount: amount(row.child_count, "child_count"),
     language: row.guest_language === "JA" ? "JA" : "EN",
+    salesChannel: row.sales_channel === "EMBED" ? "EMBED" : "SITE",
     guest: erased ? null : {
       name: text(row.guest_name, "guest_name"),
       phone: optionalText(row.guest_phone),

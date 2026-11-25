@@ -44,3 +44,11 @@ export function bookingReturnCopy(type: BookingReturnType | null, freeBooking: b
             : "We email you about your booking. If the host needs to approve your request, the email says so.",
   };
 }
+
+/** Where a traveler who booked from the widget on a host's site goes back to (#638): that site's origin, read from the booking. */
+export type BookingReturnBackTo = { readonly href: string; readonly host: string };
+
+/** The words of the "back to the host's site" link on the return page. */
+export function bookingReturnBackLabel(host: string, locale: "en" | "ja" = "en"): string {
+  return locale === "ja" ? `${host} に戻る` : `Back to ${host}`;
+}

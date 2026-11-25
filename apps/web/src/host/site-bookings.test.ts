@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { refundedFeeShare, type HostGuestBooking } from "@niho-experience/experience-store";
 import { bookingActions, bookingGroups, bookingRequestRows, bookingsHref, bookingStateRows, bookingStatusLabel, matchesBookingFilter, refundedFeeShareYen, siteFeeBreakdown } from "./bookings";
-import { mergeSiteBookings, mergeSiteExperiences, SITE_BOOKING_ERASED_TEXT, siteBooking, siteBookingExperiences, siteCancellationLines } from "./site-bookings";
+import { mergeSiteBookings, mergeSiteExperiences, SITE_BOOKING_EMBED_CHANNEL, SITE_BOOKING_ERASED_TEXT, siteBooking, siteBookingExperiences, siteCancellationLines } from "./site-bookings";
 
 /** 予約 for this site's bookings (#285 slice 8): the experience DB's booking as the screen shows it. Synthetic data. */
 const STORED: HostGuestBooking = {
@@ -18,6 +18,7 @@ const STORED: HostGuestBooking = {
   adultCount: 2,
   childCount: 1,
   language: "EN",
+  salesChannel: "SITE",
   guest: {
     name: "Sample Guest",
     phone: "+81 90 0000 0000",
@@ -48,6 +49,12 @@ const STORED: HostGuestBooking = {
 };
 
 describe("siteBooking", () => {
+  it("names a booking from the widget on the host's own site as its 申込経路, without the site's address (#638)", () => {
+    expect(siteBooking({ ...STORED, salesChannel: "EMBED" }).channel).toBe(SITE_BOOKING_EMBED_CHANNEL);
+    expect(SITE_BOOKING_EMBED_CHANNEL).toBe("自分のサイト（埋め込み）");
+    expect(siteBooking(STORED).channel).toBe("体験サイト");
+  });
+
   it("shows the occurrence, the party, the guest's words and the snapshot's money, never a phone or an address", () => {
     const booking = siteBooking(STORED);
     expect(booking).toEqual({

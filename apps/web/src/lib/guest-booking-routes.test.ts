@@ -4,7 +4,7 @@ import { GuestCheckoutError, StoreConflictError, StoreNotFoundError, type Bookin
 
 /** The public availability and checkout of 旅行者の予約 (#285) against a stubbed store and a stubbed Stripe SDK. */
 const state = vi.hoisted(() => ({
-  config: { apiMode: "http" as "http" | "mock", experiencePublicationsEnabled: true, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10" },
+  config: { apiMode: "http" as "http" | "mock", experiencePublicationsEnabled: true, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: "https://experience.example", guestBookingConsentVersion: "sample-terms-2026-10", embedEnabled: false },
   repository: null as null | Record<string, ReturnType<typeof vi.fn>>,
   publications: null as null | Record<string, ReturnType<typeof vi.fn>>,
   stripeKeys: [] as string[],
@@ -88,7 +88,7 @@ function started(overrides: Partial<GuestBookingStart> = {}, holdMinutes = 35): 
   };
   return {
     publicBookingId: BOOKING_ID, status: "HOLD", holdExpiresAt, totalAmount: 8000, currency: "JPY", stripeConnectAccountRef: "acct_SampleA0001",
-    sellerDisplayName: "Sample Seller", productTitle: "Synthetic tea ceremony", guestEmail: "guest@example.com", checkoutSessionRef: null, booking, ...overrides,
+    sellerDisplayName: "Sample Seller", productTitle: "Synthetic tea ceremony", guestEmail: "guest@example.com", checkoutSessionRef: null, embedOrigin: null, booking, ...overrides,
   };
 }
 
@@ -116,7 +116,7 @@ const slugParams = (slug = "sample-tea") => ({ params: Promise.resolve({ slug })
 beforeEach(() => {
   vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_sample");
   vi.stubEnv("EXPERIENCE_CHECKOUT_IP_HMAC_KEY", CHECKOUT_IP_KEY);
-  state.config = { apiMode: "http", experiencePublicationsEnabled: true, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10" };
+  state.config = { apiMode: "http", experiencePublicationsEnabled: true, guestBookingEnabled: true, bookingsEnabled: true, siteUrl: ORIGIN, guestBookingConsentVersion: "sample-terms-2026-10", embedEnabled: false };
   state.repository = {
     publicBookingTerms: vi.fn(async () => ({ conditionsVersion: null, offers: [] })),
     listPublicAvailability: vi.fn(async () => AVAILABILITY),
@@ -212,6 +212,8 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
       note: "Window seat please",
       utm: { utmSource: "newsletter" },
       clientRequestKey: KEY,
+      salesChannel: "SITE",
+      embedOrigin: null,
       checkoutIpDigest: CHECKOUT_IP_DIGEST,
       managedSalesEnabled: false,
     });
@@ -317,6 +319,53 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     expect(limited.headers.get("retry-after")).toBe("73");
     expect(JSON.stringify(await limited.json())).not.toContain("checkout-ip-10m");
     expect(log).toHaveBeenCalledWith("Experience guest checkout rate limited", { reason: "checkout-ip-10m" });
+  });
+
+  it("drops the widget's sales channel and origin unread while the embed flag is off (#638)", async () => {
+    const response = await checkout(post({ ...CHECKOUT, salesChannel: "embed", embedOrigin: "https://host-site.example.test" }), slugParams());
+    expect(response.status).toBe(201);
+    expect(state.repository?.startGuestBooking).toHaveBeenLastCalledWith(expect.objectContaining({ salesChannel: "SITE", embedOrigin: null }));
+    const [params] = state.stripeCreate!.mock.calls[0]!;
+    expect(params).toMatchObject({ success_url: `${ORIGIN}/booking/return?type=instant` });
+    // Off, even a malformed value is not read.
+    expect((await checkout(post({ ...CHECKOUT, salesChannel: "partner", embedOrigin: 7 }), slugParams())).status).toBe(201);
+  });
+
+  it("records an embedded booking's origin and has Stripe return with the Session's ID only then (#638)", async () => {
+    state.config = { ...state.config, embedEnabled: true };
+    state.repository!.startGuestBooking!.mockResolvedValueOnce(started({ embedOrigin: "https://host-site.example.test" }));
+    const response = await checkout(post({ ...CHECKOUT, salesChannel: "embed", embedOrigin: "https://Host-Site.example.test/book?x=1" }), slugParams());
+    expect(response.status).toBe(201);
+    expect(state.repository?.startGuestBooking).toHaveBeenLastCalledWith(expect.objectContaining({ salesChannel: "EMBED", embedOrigin: "https://host-site.example.test" }));
+    const [params, options] = state.stripeCreate!.mock.calls[0]!;
+    expect(params).toMatchObject({
+      success_url: `${ORIGIN}/booking/return?type=instant&cs={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${ORIGIN}/experiences/sample-tea?checkout=cancelled`,
+      payment_intent_data: { application_fee_amount: 1200 },
+    });
+    expect(options).toEqual({ stripeAccount: "acct_SampleA0001", idempotencyKey: `experience-checkout:${BOOKING_ID}` });
+
+    // Embedded without a known origin, and the site's own page: Stripe returns as before.
+    await checkout(post({ ...CHECKOUT, salesChannel: "embed", embedOrigin: "http://host-site.example.test" }), slugParams());
+    expect(state.repository?.startGuestBooking).toHaveBeenLastCalledWith(expect.objectContaining({ salesChannel: "EMBED", embedOrigin: null }));
+    expect(state.stripeCreate!.mock.calls[1]![0]).toMatchObject({ success_url: `${ORIGIN}/booking/return?type=instant` });
+    await checkout(post(CHECKOUT), slugParams());
+    expect(state.repository?.startGuestBooking).toHaveBeenLastCalledWith(expect.objectContaining({ salesChannel: "SITE", embedOrigin: null }));
+  });
+
+  it("refuses a channel other than embed and an origin without it while the embed flag is on (#638)", async () => {
+    state.config = { ...state.config, embedEnabled: true };
+    for (const [body, field] of [
+      [{ ...CHECKOUT, salesChannel: "partner" }, "salesChannel"],
+      [{ ...CHECKOUT, salesChannel: "EMBED" }, "salesChannel"],
+      [{ ...CHECKOUT, embedOrigin: "https://host-site.example.test" }, "embedOrigin"],
+      [{ ...CHECKOUT, salesChannel: "embed", embedOrigin: 7 }, "embedOrigin"],
+    ] as const) {
+      const response = await checkout(post(body), slugParams());
+      expect(response.status).toBe(422);
+      expect((await response.json()).error).toMatchObject({ code: "INPUT_INVALID", field });
+    }
+    expect(state.repository?.startGuestBooking).not.toHaveBeenCalled();
   });
 
   it("passes the provider link's mark (#531) to the booking as sent, and nothing the link did not carry", async () => {

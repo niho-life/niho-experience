@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { leaveFrameTo, postEmbedHeight, postEmbedTop } from "./embed-frame";
+import { embedParentOrigin, leaveFrameTo, postEmbedHeight, postEmbedTop } from "./embed-frame";
 
 const STRIPE = "https://checkout.stripe.com/c/pay/cs_test_synthetic";
 
@@ -89,5 +89,43 @@ describe("messages to the parent page", () => {
     postEmbedHeight(root(500), win as never);
     postEmbedTop(win as never);
     expect(win.postMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("embedParentOrigin", () => {
+  const OWN = "https://experience.example";
+  function framedIn(options: { ancestors?: string[]; referrer?: string; nested?: boolean; top?: boolean }) {
+    const top = {};
+    const win: Record<string, unknown> = {
+      top,
+      location: { origin: OWN, ...(options.ancestors ? { ancestorOrigins: options.ancestors } : {}) },
+      document: { referrer: options.referrer ?? "" },
+    };
+    win.parent = options.top ? win : options.nested ? {} : top;
+    if (options.top) win.top = win;
+    return win as never;
+  }
+
+  it("is null outside a frame", () => {
+    expect(embedParentOrigin(framedIn({ top: true, ancestors: [], referrer: "https://host-site.example.test/page" }))).toBeNull();
+  });
+
+  it("takes the top page's origin from ancestorOrigins, without its path", () => {
+    expect(embedParentOrigin(framedIn({ ancestors: ["https://host-site.example.test"] }))).toBe("https://host-site.example.test");
+    expect(embedParentOrigin(framedIn({ ancestors: ["https://sandbox.example-cdn.test", "https://host-site.example.test:8443"], nested: true })))
+      .toBe("https://host-site.example.test:8443");
+  });
+
+  it("falls back to the referrer only for a frame directly on the top page", () => {
+    expect(embedParentOrigin(framedIn({ referrer: "https://host-site.example.test/tours/tea?ref=1" }))).toBe("https://host-site.example.test");
+    expect(embedParentOrigin(framedIn({ referrer: "https://sandbox.example-cdn.test/frame", nested: true }))).toBeNull();
+    expect(embedParentOrigin(framedIn({ referrer: "" }))).toBeNull();
+  });
+
+  it("keeps only https origins other than this site", () => {
+    for (const value of ["null", "http://host-site.example.test", OWN, "file:///tmp/page.html", "not a url"]) {
+      expect(embedParentOrigin(framedIn({ ancestors: [value] })), value).toBeNull();
+      expect(embedParentOrigin(framedIn({ referrer: value })), value).toBeNull();
+    }
   });
 });

@@ -100,6 +100,8 @@ test("a paid booking holds the seats in the frame and pays on Stripe in the top 
   // The provider's mark goes with the request (no utm_* on the frame URL).
   expect(checkouts).toHaveLength(1);
   expect(checkouts[0]).toMatchObject({ guestName: NAME, guestEmail: EMAIL, utmSource: "provider", utmMedium: "embed", occurrenceDate: "2026-12-05" });
+  // 販売経路: the widget says it is embedded, with the host page's origin only (no path).
+  expect(checkouts[0]).toMatchObject({ salesChannel: "embed", embedOrigin: HOST_SITE });
 
   const messages = await messagesOf(page);
   expect(messages.length).toBeGreaterThan(0);
@@ -164,4 +166,6 @@ test("the public booking page keeps one screen: a date from the calendar, then c
   expect(checkouts).toHaveLength(1);
   expect(checkouts[0]).toMatchObject({ occurrenceDate: "2026-12-05", adultCount: 1, expectedTotalYen: 5000 });
   expect(checkouts[0]).not.toHaveProperty("utmMedium");
+  expect(checkouts[0]).not.toHaveProperty("salesChannel");
+  expect(checkouts[0]).not.toHaveProperty("embedOrigin");
 });

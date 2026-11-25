@@ -378,6 +378,7 @@ export type {
   ChildPricing,
   GuestBookingAnswer,
   GuestBookingStart,
+  GuestBookingSalesChannel,
   GuestBookingUtm,
   GuestHoldRelease,
   OfferPriceInput,

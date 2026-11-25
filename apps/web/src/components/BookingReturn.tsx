@@ -1,6 +1,6 @@
 import { HandIcon, type HandIconName } from "./HandIcon";
-import { ButtonLink } from "./ui";
-import { bookingReturnCopy, type BookingReturnType } from "@/lib/booking-return-copy";
+import { ButtonLink, buttonClass } from "./ui";
+import { bookingReturnBackLabel, bookingReturnCopy, type BookingReturnBackTo, type BookingReturnType } from "@/lib/booking-return-copy";
 
 export { readReturnType, type BookingReturnType } from "@/lib/booking-return-copy";
 
@@ -14,8 +14,8 @@ type Step = { icon: HandIconName; title: string; text: string };
  * says what to expect next, and its wording may follow the kind of booking (a fixed word on the URL, never free text, so
  * nobody can put their own wording on this page).
  */
-export function BookingReturn({ type, showReview, freeBooking = false, locale = "en" }: { type: BookingReturnType | null; showReview: boolean; freeBooking?: boolean; locale?: "en" | "ja" }) {
-  if (locale === "ja") return <BookingReturnJa type={type} showReview={showReview} freeBooking={freeBooking} />;
+export function BookingReturn({ type, showReview, freeBooking = false, locale = "en", backTo }: { type: BookingReturnType | null; showReview: boolean; freeBooking?: boolean; locale?: "en" | "ja"; backTo?: BookingReturnBackTo }) {
+  if (locale === "ja") return <BookingReturnJa type={type} showReview={showReview} freeBooking={freeBooking} backTo={backTo} />;
   const approval = type === "approval";
   const managedRequest = type === "managed-request";
   const { eyebrow, heading, lead } = bookingReturnCopy(type, freeBooking, "en");
@@ -50,6 +50,7 @@ export function BookingReturn({ type, showReview, freeBooking = false, locale = 
       <div className="mt-6 flex flex-wrap gap-3">
         <ButtonLink href="/help">Didn&apos;t get the email?</ButtonLink>
         <ButtonLink href="/experiences" variant="secondary">Browse experiences</ButtonLink>
+        {backTo ? <BackToHostSite backTo={backTo} locale="en" /> : null}
       </div>
     </div>
   );
@@ -59,7 +60,7 @@ export function BookingReturn({ type, showReview, freeBooking = false, locale = 
  * 日本語の戻りページ（#59）。英語版と同じ事実だけを言う：このページは予約の状況を示さず、次に何が起きるかだけを言う。
  * 種別は URL の固定語（自由記入ではない）で決まり、誰も自分の文言を差し込めない。
  */
-function BookingReturnJa({ type, showReview, freeBooking }: { type: BookingReturnType | null; showReview: boolean; freeBooking: boolean }) {
+function BookingReturnJa({ type, showReview, freeBooking, backTo }: { type: BookingReturnType | null; showReview: boolean; freeBooking: boolean; backTo?: BookingReturnBackTo }) {
   const approval = type === "approval";
   const managedRequest = type === "managed-request";
   const { eyebrow, heading, lead } = bookingReturnCopy(type, freeBooking, "ja");
@@ -93,7 +94,16 @@ function BookingReturnJa({ type, showReview, freeBooking }: { type: BookingRetur
       <div className="mt-6 flex flex-wrap gap-3">
         <ButtonLink href="/ja/help">メールが届かないとき</ButtonLink>
         <ButtonLink href="/ja/experiences" variant="secondary">体験を探す</ButtonLink>
+        {backTo ? <BackToHostSite backTo={backTo} locale="ja" /> : null}
       </div>
     </div>
   );
+}
+
+/**
+ * The host's own site, for a traveler who booked from the widget there (#638). The address is the origin kept with the
+ * booking (the page reads it by the Checkout Session), never anything from the URL or the framing page.
+ */
+function BackToHostSite({ backTo, locale }: { backTo: BookingReturnBackTo; locale: "en" | "ja" }) {
+  return <a href={backTo.href} rel="noopener noreferrer" className={buttonClass("secondary")}>{bookingReturnBackLabel(backTo.host, locale)}</a>;
 }

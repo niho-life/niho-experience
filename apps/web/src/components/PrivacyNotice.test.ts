@@ -33,6 +33,7 @@ describe("the privacy notice", () => {
   it("says what is kept, who handles it, and for how long, as the code does it", () => {
     const words = text(html());
     expect(words).toContain("your name, your email address, your phone number if you give one, your note to the host, your answers to the booking questions");
+    expect(words).toContain("If you booked from a booking form on a host's own website, we keep that website's address (not the page you were on).");
     expect(words).toContain("The host never sees your email address.");
     expect(words).toContain("phone number, if you gave one, appears only on the host's page for your date");
     expect(words).toContain("we never see them");

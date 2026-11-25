@@ -4,7 +4,7 @@
 
 STUDIO・WordPress・Wix などで自分のサイトを持つホストが、コードを 1 回貼ると、訪問者がそのサイト上で日程を選び、決済へ進める。価格・在庫・販売者・決済の正本と経路は [旅行者の予約](guest-booking.md) のまま変えない。
 
-**現在地**：第1段（予約ウィジェットと予約ボタン）。`EXPERIENCE_EMBED_ENABLED` は既定 OFF で、下の「受入」が済むまで本番で ON にしない。
+**現在地**：第1段（予約ウィジェットと予約ボタン）と、予約への販売経路の記録・ホストの申込経路・完了ページの戻るリンク（PR 2）。`EXPERIENCE_EMBED_ENABLED` は既定 OFF で、下の「受入」が済むまで本番で ON にしない。
 
 ## 決めたこと
 
@@ -74,11 +74,19 @@ niho-app の公開埋め込み（`specs/initiatives/public-embeds.md`）と同�
 
 支払い後は今までどおり `/booking/return?type=instant`、取りやめは体験ページ（どちらもこのサイト、最上位）。戻り先 URL を query や親ページから受け取らない。
 
+埋め込み先のオリジンを予約に保存できたとき（下の「流入の印」）だけ、この申込で新しく作る Stripe の Session の戻り先に `&cs={CHECKOUT_SESSION_ID}` を足す（Stripe が Session の ID に置き換える）。完了ページは `cs` の Session の予約から保存したオリジンを読み（`findEmbedReturnOrigin`）、ほかの操作の並びに「Back to {ホストのサイト}」（`/ja` は「{ホストのサイト} に戻る」）のリンクを 1 つ出す。リンク先はオリジン（`https://host[:port]`）だけで、path・query を付けない。
+
+- **出す条件**：埋め込みの予約で、オリジンを保存していて、予約が支払い済み・支払いの確認中、または仮押さえが生きている（`HOLD` で期限前）こと、かつ申込から 2 時間以内。取消・期限切れ・古い予約、体験サイトの予約、知らない Session、`cs` の形の誤り（`cs_` で始まる英数字と `_` だけ。合わなければ DB を読まない）、DB が 1.5 秒以内に答えない・読めない、flag が OFF のときは出さず、ページは今までと同じ。承認後にメールの支払いリンクから払う予約リクエストには出さない（その Session の戻り先は今までどおり）。
+- **`cs` の扱い**：`cs` は URL の query に載るので、基盤（Cloudflare・Cloud Run）のアクセスログには残る（[guest-booking.md](guest-booking.md) の前提どおり、query はアクセスログへ漏れるものとして扱う）。アプリのログ・計測（完了ページの計測は query を落とす）・Referer（`no-referrer`、戻るリンクは `rel="noopener noreferrer"`）には出さず、DB の新しい場所にも保存しない。`cs` を知っても読めるのは、上の条件を満たす間の埋め込み先のオリジンだけで、予約の内容・状態・予約者は読めない。
+- 完了ページは今までどおり予約の内容・状態を出さない。
+
 公開サイトの `/experiences/{slug}/book` も同じカレンダーを使う。そちらは今までどおり 1 画面で、申込のあと自動で決済へ移る。
 
 ### 流入の印
 
-埋め込みの申込には、流入の印が無ければ `utm_source=provider`・`utm_medium=embed` を付ける。既存の「提供者経由の予約リンク」（#531、`utm_source=provider`）と同じ系列で、Do Not Track なら送らない。iframe の URL に `utm_*` を付ければそちらを使う。予約に販売経路を固定で持つのは次の PR（下の「次の段」）。
+埋め込みの申込には、流入の印が無ければ `utm_source=provider`・`utm_medium=embed` を付ける。既存の「提供者経由の予約リンク」（#531、`utm_source=provider`）と同じ系列で、Do Not Track なら送らない。iframe の URL に `utm_*` を付ければそちらを使う。
+
+流入の印とは別に、予約は販売経路を固定で持つ（`booking_guests.sales_channel`：体験サイトは `SITE`、埋め込みは `EMBED`。migration `0089`）。埋め込みの申込は `salesChannel: "embed"` と、分かれば `embedOrigin` を送る。Do Not Track のときはオリジンを送らず、サーバーも `DNT: 1` の申込ではオリジンを保存しない（流入の印と同じ扱い。`salesChannel` は送り、保存する）。オリジンは `location.ancestorOrigins` の最後（最上位のページ）から、無いブラウザでは枠が最上位のページの直接の子のときだけ `document.referrer` から取り、`https:` で、このサイトでないものだけを使う。サーバーは `https:` のオリジン（小文字、255 文字まで）に直し、形の合わないものは「無し」として申込を受ける。同じ `clientRequestKey` で経路やオリジンだけが違う再送は `REQUEST_MISMATCH`。体験サイトの申込の保存と `request_fingerprint` は経路を足す前と同じ。ホストの予約一覧・詳細の申込経路は、埋め込みからの予約を「自分のサイト（埋め込み）」と出す（オリジンはホストに出さない）。
 
 ## ホストが貼るもの
 
@@ -121,13 +129,15 @@ script は `event.origin` と `event.source` を確かめ、iframe の高さと�
 | --- | --- |
 | 名前・メールアドレス・回答・メモ | 枠の中のページからこのサイトの API へだけ送る。親ページの JS からは読めない（別オリジンの iframe） |
 | 決済 URL・予約 ID | 親ページへ渡さない |
-| 埋め込み先のサイトの URL | 第1段では読まない・保存しない |
+| 埋め込み先のサイトの URL | オリジン（`https://host`）だけを予約に保存する。path・query は保存しない。Do Not Track なら送らない・保存しない。体験の 1 年後に予約者の情報と一緒に消す。ホストには出さない。プライバシー通知に書く |
 | 計測 | 枠の中では Umami・GA4 を読み込まない |
 
 ## flag と配備
 
 - `EXPERIENCE_EMBED_ENABLED`（既定 `false`、repo variable は `EMBED_ENABLED`、配備の前提は「ホストの画面」）。OFF の間 `/embed/*` は 404、ホストの入口と発行画面は出ない。予約そのものは `EXPERIENCE_GUEST_BOOKING_ENABLED` と `BOOKINGS_ENABLED` に従う。mock mode では公開版が無いので、枠の中は「予約できません」の表示になる（ホストの発行画面は合成データで見られる）。
-- migration・新しい Secret・runtime role の権限は増えない。
+- migration `0089_booking_sales_channel.sql`（`booking_guests` に `sales_channel`・`embed_origin` と制約、`checkout_session_ref` の部分 index）を、新しい版より先に適用する（列を足すだけで、今の版はこの列を読み書きしない）。新しい Secret・runtime role の権限は増えない（`booking_guests` は今までどおり INSERT・UPDATE）。
+- `0089` が未適用のまま新しい版が動くと、列が無いため次が失敗する：ホストの予約一覧・詳細・この回の名簿・通訳の予約読込み（`sales_channel` を読む）、予約者情報の消去の段（`embed_origin` を消す）、埋め込みの申込（列を足した INSERT）。体験サイトの申込・再送は SQL が変わらないので動く。完了ページの戻るリンクは読めずに出ないだけ。
+- `EXPERIENCE_EMBED_ENABLED` が OFF の間、申込の `salesChannel`・`embedOrigin` は読み捨てて体験サイトの予約として保存し、完了ページは `cs` があっても DB を読まずリンクを出さない。ON から OFF に戻すと、開いたままのウィジェットからの再送（同じ `clientRequestKey`）は経路が変わるため内容不一致（`REQUEST_MISMATCH`）になる。ウィジェットを読み直せば新しい申込として申し込み直せる。
 - ヘッダーはビルド時に決まるので、flag が OFF でも `/embed/:path*` の CSP は `frame-ancestors https:` になる。ページが 404 なので、枠に入るものは無い。
 
 ## 受入（flag を ON にする前）
@@ -138,11 +148,11 @@ script は `event.origin` と `event.source` を確かめ、iframe の高さと�
 4. `/embed` 以外のルートが iframe に入らないこと、`/embed` のページがホスト・Admin の cookie を読まないことを確かめる。
 5. 埋め込み経由の予約で、確認メール・予約ページ・返金・ホストへの通知が今までどおり動くことを確かめる。
 6. 貼り方の文言を、各サービスの実機の画面に合わせて直す。
+7. プライバシー通知（`/privacy`「What we keep」）の、ホストのサイトの予約フォームから予約したときにサイトのアドレスを保存する文言を、オーナーが確認する。
 
 ## 次の段
 
 | 段 | 内容 |
 | --- | --- |
-| PR 2 | 予約に販売経路（体験サイト／埋め込み）と埋め込み先のオリジンを記録する（migration を先に適用）。ホストの予約一覧の申込経路に「自分のサイト（埋め込み）」。完了ページの「Back to {ホストのサイト}」（分かるときだけ。戻り先を query で受け取らず、予約から読む） |
 | 第2段 | 企画ページ丸ごとの埋め込み。パンくず・ほかの体験・ガイド記事・写真の拡大表示は出さない |
 | 第3段 | 背景透明・ボタン色、日本語、必要ならウィジェット内での決済 |

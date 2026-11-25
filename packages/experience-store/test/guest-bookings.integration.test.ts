@@ -1256,7 +1256,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
         {
           publicBookingId: undefined, status: "HOLD", holdExpiresAt: undefined, totalAmount: 10_000, currency: "JPY",
           stripeConnectAccountRef: "acct_SampleA0001", sellerDisplayName: "Sample Seller A", productTitle: "Synthetic tea ceremony",
-          guestEmail: "Parent@Example.com", checkoutSessionRef: null, booking: undefined,
+          guestEmail: "Parent@Example.com", checkoutSessionRef: null, embedOrigin: null, booking: undefined,
         },
       );
       assert.equal(family.booking.seats, 3);
@@ -1637,7 +1637,7 @@ describe("PostgreSQL guest bookings for the host's 予約 (#285 slice 8)", { ski
       assert.deepEqual(shown, {
         publicBookingId: tea.publicBookingId, productId: "tea", productTitle: "Synthetic tea ceremony", offerId: "sample-am", status: "CONFIRMED",
         localDate: day(2), localStartTime: "10:00", timeZone: "Asia/Tokyo", startUtc: snapshot.startUtc, endUtc: snapshot.endUtc,
-        adultCount: 2, childCount: 1, language: "EN",
+        adultCount: 2, childCount: 1, language: "EN", salesChannel: "SITE",
         guest: {
           name: "Sample Guest", phone: "+81 90 1234 5678", note: "Sample note",
           answers: [
@@ -2021,6 +2021,197 @@ describe("PostgreSQL guest sessions for the host's ホーム and この回 (#285
         commandId: randomUUID(), reason: "GUEST_REQUEST", note: null, refund: { kind: "FULL" },
       });
       assert.ok((await support.claimDueSettlements()).includes(settledBeforeRefund.publicBookingId));
+    });
+  });
+});
+
+/** The SITE fingerprint as it was before the sales channel existed (#638), for a request without answers. */
+function siteFingerprintBefore638(input: StartGuestBookingInput): string {
+  return createHash("sha256").update(JSON.stringify([
+    input.offerId, input.occurrenceDate, input.adultCount, input.childCount, input.expectedTotalYen,
+    input.bookingQuestionsFingerprint, [], input.termsConsentVersion, input.conditionsConsentVersion ?? null,
+    input.guestName, input.guestEmail, null, input.guestLanguage, null,
+    ["utmSource", "utmMedium", "utmCampaign", "utmContent"].map((key) => input.utm?.[key as keyof typeof input.utm] ?? null),
+  ]), "utf8").digest("hex");
+}
+
+async function channelOf(pool: Pool, start: GuestBookingStart): Promise<{ sales_channel: string; embed_origin: string | null; request_fingerprint: string }> {
+  const result = await pool.query(
+    `SELECT g.sales_channel, g.embed_origin, g.request_fingerprint FROM booking_guests g
+       JOIN bookings b ON b.provider_id=g.provider_id AND b.id=g.booking_id WHERE b.public_booking_id=$1`,
+    [start.publicBookingId],
+  );
+  return result.rows[0];
+}
+
+describe("PostgreSQL guest bookings made from the widget on the host's site (#638 PR 2)", { skip: databaseUrl === undefined }, () => {
+  const ORIGIN = "https://host-site.example.test";
+
+  it("keeps the sales channel and the framing origin, and a SITE booking exactly as before", async () => {
+    await withSchema(async ({ pool, guests, addRule }) => {
+      await addRule("walk", rule("sample-walk-am"));
+      const siteRequest = walkRequest({ guestEmail: "site@example.com", utm: { utmSource: "newsletter" } });
+      const site = await guests.startGuestBooking(siteRequest);
+      assert.equal(site.embedOrigin, null);
+      assert.deepEqual(await channelOf(pool, site), { sales_channel: "SITE", embed_origin: null, request_fingerprint: siteFingerprintBefore638(siteRequest) });
+
+      const embedRequest = walkRequest({ guestEmail: "embed@example.com", occurrenceDate: day(3), salesChannel: "EMBED", embedOrigin: ORIGIN });
+      const embed = await guests.startGuestBooking(embedRequest);
+      assert.equal(embed.embedOrigin, ORIGIN);
+      const stored = await channelOf(pool, embed);
+      assert.deepEqual([stored.sales_channel, stored.embed_origin], ["EMBED", ORIGIN]);
+      assert.notEqual(stored.request_fingerprint, siteFingerprintBefore638(embedRequest));
+
+      // An embedded booking whose origin is not known keeps the channel without an origin.
+      const unknown = await guests.startGuestBooking(walkRequest({ guestEmail: "unknown@example.com", occurrenceDate: day(4), salesChannel: "EMBED" }));
+      assert.equal(unknown.embedOrigin, null);
+      assert.deepEqual([(await channelOf(pool, unknown)).sales_channel, (await channelOf(pool, unknown)).embed_origin], ["EMBED", null]);
+    });
+  });
+
+  it("returns the same booking and origin for the same request, and refuses another channel or origin under its key", async () => {
+    await withSchema(async ({ guests, addRule }) => {
+      await addRule("walk", rule("sample-walk-am"));
+      const key = randomUUID();
+      const first = await guests.startGuestBooking(walkRequest({ clientRequestKey: key, salesChannel: "EMBED", embedOrigin: ORIGIN }));
+      const again = await guests.startGuestBooking(walkRequest({ clientRequestKey: key, salesChannel: "EMBED", embedOrigin: ORIGIN }));
+      assert.deepEqual(again, first);
+      assert.equal(again.embedOrigin, ORIGIN);
+      for (const changed of [
+        { salesChannel: "SITE" as const },
+        {},
+        { salesChannel: "EMBED" as const, embedOrigin: "https://other-site.example.test" },
+        { salesChannel: "EMBED" as const, embedOrigin: null },
+      ] satisfies Partial<StartGuestBookingInput>[]) {
+        await refused(guests.startGuestBooking(walkRequest({ clientRequestKey: key, ...changed })), "REQUEST_MISMATCH");
+      }
+      // A SITE booking repeated as embedded is another request too.
+      const siteKey = randomUUID();
+      const site = await guests.startGuestBooking(walkRequest({ clientRequestKey: siteKey, guestEmail: "site@example.com", occurrenceDate: day(3) }));
+      assert.equal((await guests.startGuestBooking(walkRequest({ clientRequestKey: siteKey, guestEmail: "site@example.com", occurrenceDate: day(3) }))).embedOrigin, null);
+      await refused(guests.startGuestBooking(walkRequest({ clientRequestKey: siteKey, guestEmail: "site@example.com", occurrenceDate: day(3), salesChannel: "EMBED" })), "REQUEST_MISMATCH");
+      assert.equal(site.embedOrigin, null);
+    });
+  });
+
+  it("refuses an unknown channel, a malformed origin and an origin on a SITE booking", async () => {
+    await withSchema(async ({ pool, guests, addRule }) => {
+      await addRule("walk", rule("sample-walk-am"));
+      await refused(guests.startGuestBooking(walkRequest({ salesChannel: "PARTNER" as never })), "INPUT_INVALID", { field: "salesChannel" });
+      await refused(guests.startGuestBooking(walkRequest({ embedOrigin: ORIGIN })), "INPUT_INVALID", { field: "embedOrigin" });
+      await refused(guests.startGuestBooking(walkRequest({ salesChannel: "SITE", embedOrigin: ORIGIN })), "INPUT_INVALID", { field: "embedOrigin" });
+      for (const origin of [
+        "http://host-site.example.test", "https://Host-Site.example.test", "https://host-site.example.test/", "https://host-site.example.test/book?x=1",
+        "https://user@host-site.example.test", "https://", "null", `https://${"a".repeat(250)}.test`, 42 as never,
+      ]) {
+        await refused(guests.startGuestBooking(walkRequest({ salesChannel: "EMBED", embedOrigin: origin })), "INPUT_INVALID", { field: "embedOrigin" });
+      }
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM booking_guests")).rows[0].n, 0);
+      // The database refuses the same shapes on its own.
+      const ok = await guests.startGuestBooking(walkRequest({ salesChannel: "EMBED", embedOrigin: "https://host-site.example.test:8443" }));
+      assert.equal(ok.embedOrigin, "https://host-site.example.test:8443");
+      await assert.rejects(() => pool.query("UPDATE booking_guests SET embed_origin='https://host-site.example.test/path'"), /booking_guests_embed_origin_check/);
+      await assert.rejects(() => pool.query("UPDATE booking_guests SET sales_channel='SITE'"), /booking_guests_embed_origin_check/);
+      await assert.rejects(() => pool.query("UPDATE booking_guests SET sales_channel='PARTNER', embed_origin=NULL"), /check/);
+    });
+  });
+
+  it("finds the return origin by the attached Checkout Session, only for an embedded booking with one", async () => {
+    await withSchema(async ({ guests, addRule }) => {
+      await addRule("walk", rule("sample-walk-am"));
+      const embed = await guests.startGuestBooking(walkRequest({ guestEmail: "embed@example.com", salesChannel: "EMBED", embedOrigin: ORIGIN }));
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_embed1"), null);
+      await guests.attachCheckoutSession(embed.publicBookingId, "cs_test_embed1");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_embed1"), ORIGIN);
+
+      const site = await guests.startGuestBooking(walkRequest({ guestEmail: "site@example.com", occurrenceDate: day(3) }));
+      await guests.attachCheckoutSession(site.publicBookingId, "cs_test_site1");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_site1"), null);
+      const noOrigin = await guests.startGuestBooking(walkRequest({ guestEmail: "no-origin@example.com", occurrenceDate: day(4), salesChannel: "EMBED" }));
+      await guests.attachCheckoutSession(noOrigin.publicBookingId, "cs_test_noorigin1");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_noorigin1"), null);
+
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_unknown"), null);
+      for (const malformed of ["", "cs_", "pi_test_embed1", "cs_test-embed1", "cs_test embed1", `cs_${"a".repeat(251)}`, "{CHECKOUT_SESSION_ID}", 7 as never]) {
+        assert.equal(await guests.findEmbedReturnOrigin(malformed), null, String(malformed));
+      }
+    });
+  });
+
+  it("returns the origin only right after the request, for a paid booking or an active hold", async () => {
+    await withSchema(async ({ pool, store, guests, addRule }) => {
+      await addRule("walk", rule("sample-walk-am"));
+      const embedded = async (email: string, date: number, session: string) => {
+        const start = await guests.startGuestBooking(walkRequest({ guestEmail: email, occurrenceDate: day(date), salesChannel: "EMBED", embedOrigin: ORIGIN }));
+        await guests.attachCheckoutSession(start.publicBookingId, session);
+        return start;
+      };
+      const held = await embedded("held@example.com", 2, "cs_test_held");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_held"), ORIGIN);
+
+      const paid = await embedded("paid@example.com", 3, "cs_test_paid");
+      await payFor(store, paid, 3000, "embed-paid");
+      assert.equal(await statusOf(pool, paid), "CONFIRMED");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_paid"), ORIGIN);
+
+      const lapsed = await embedded("lapsed@example.com", 4, "cs_test_lapsed");
+      await lapse(pool, [lapsed]);
+      assert.equal(await statusOf(pool, lapsed), "HOLD");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_lapsed"), null);
+
+      const expired = await embedded("expired@example.com", 5, "cs_test_expired");
+      await endSession(guests, expired, "cs_test_expired", "embed-expired");
+      assert.equal(await statusOf(pool, expired), "EXPIRED");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_expired"), null);
+
+      const cancelled = await embedded("cancelled@example.com", 6, "cs_test_cancelled");
+      await payFor(store, cancelled, 3000, "embed-cancelled");
+      await pool.query("UPDATE bookings SET status='CANCELLED', confirmed_at=NULL, cancelled_at=clock_timestamp() WHERE public_booking_id=$1", [cancelled.publicBookingId]);
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_cancelled"), null);
+
+      // An old request has no link, even while it is paid.
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_paid", { maxAgeSeconds: 1 }), null);
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_paid"), ORIGIN);
+      for (const maxAgeSeconds of [0, -1, 1.5, Number.NaN]) {
+        await assert.rejects(() => guests.findEmbedReturnOrigin("cs_test_paid", { maxAgeSeconds }), StoreValidationError, String(maxAgeSeconds));
+      }
+    });
+  });
+
+  it("erases the origin with the guest's details and keeps the channel, which the host list shows without the origin", async () => {
+    await withSchema(async (context) => {
+      const { pool, store, guests, addRule } = context;
+      await addRule("walk", rule("sample-walk-am"));
+      const embed = await guests.startGuestBooking(walkRequest({ guestEmail: "embed@example.com", salesChannel: "EMBED", embedOrigin: ORIGIN }));
+      await guests.attachCheckoutSession(embed.publicBookingId, "cs_test_embed_erase");
+      await payFor(store, embed, 3000, "embed-erase");
+      const site = await guests.startGuestBooking(walkRequest({ guestEmail: "site@example.com", occurrenceDate: day(3) }));
+      await payFor(store, site, 3000, "site-erase");
+
+      const listed = (await guests.listGuestBookingsForHost(ownerA)).bookings;
+      assert.deepEqual(
+        listed.map((booking) => [booking.publicBookingId, booking.salesChannel]),
+        [[embed.publicBookingId, "EMBED"], [site.publicBookingId, "SITE"]],
+      );
+      assert.equal((await guests.getGuestBookingForHost(ownerA, embed.publicBookingId)).salesChannel, "EMBED");
+      assert.ok(!JSON.stringify(listed).includes("host-site.example.test"));
+
+      await pool.query("ALTER TABLE bookings DISABLE TRIGGER bookings_protect_snapshots");
+      await pool.query(
+        "UPDATE bookings SET occurrence_snapshot = jsonb_set(occurrence_snapshot, '{endUtc}', to_jsonb('2020-01-01T01:30:00.000Z'::text)) WHERE public_booking_id=$1",
+        [embed.publicBookingId],
+      );
+      await pool.query("ALTER TABLE bookings ENABLE TRIGGER bookings_protect_snapshots");
+      assert.equal(await guests.eraseGuestData({ endedBefore: new Date().toISOString() }), 1);
+      const erased = await channelOf(pool, embed);
+      assert.deepEqual([erased.sales_channel, erased.embed_origin], ["EMBED", null]);
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_embed_erase"), null);
+      assert.equal((await guests.getGuestBookingForHost(ownerA, embed.publicBookingId)).salesChannel, "EMBED");
+      // An erased row cannot take an origin back.
+      await assert.rejects(() => pool.query(
+        "UPDATE booking_guests SET embed_origin=$1 WHERE pii_erased_at IS NOT NULL", [ORIGIN],
+      ), /booking_guests_embed_origin_check/);
     });
   });
 });
