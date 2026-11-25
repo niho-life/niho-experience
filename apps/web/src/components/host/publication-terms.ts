@@ -45,6 +45,17 @@ export function asPublicationPrice(value: string): number | null {
   return parsed !== null && (parsed === 0 || parsed >= 50) ? parsed : null;
 }
 
+/**
+ * 枠別料金: the server takes a price for every slot or for none. When the host priced only some slots, the ones left empty
+ * take the adult price as it stands at this save, which is what an empty slot means to the host.
+ */
+export function withBlankOfferPricesFilled(value: PublicationTermsForm, basePrice: string): PublicationTermsForm {
+  const entered = value.offerPrices.filter((price) => price.adultPriceYen !== "").length;
+  const base = asPublicationPrice(basePrice);
+  if (entered === 0 || entered === value.offerPrices.length || base === null) return value;
+  return { ...value, offerPrices: value.offerPrices.map((price) => (price.adultPriceYen === "" ? { ...price, adultPriceYen: String(base) } : price)) };
+}
+
 function refundBasisPoints(value: string): number | null {
   if (!/^(?:0|[1-9]\d{0,2})(?:\.\d{1,2})?$/.test(value)) return null;
   const [whole, fraction = ""] = value.split(".");

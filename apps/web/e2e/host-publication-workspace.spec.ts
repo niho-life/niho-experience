@@ -256,6 +256,26 @@ test("with nothing missing the main button opens the publish confirmation", asyn
   await expect(page.getByRole("dialog", { name: "この商品を公開しますか？" })).toBeVisible();
 });
 
+test("「同意して公開」 confirms manuscripts that were saved without a confirmation, with no edit needed", async ({ page }) => {
+  // Written in both languages under the old screen but never confirmed: nothing is unsaved, and the server holds MANUSCRIPT_REQUIRED.
+  const product = baseProduct({ publicationBlockers: ["MANUSCRIPT_REQUIRED"] });
+  await mountHost(page, product);
+  const drafts: Array<{ content: { translation?: Record<string, unknown> } }> = [];
+  await page.route(`${ORIGIN}/synthetic/products/synthetic-product`, async (route) => {
+    if (route.request().method() !== "PATCH") { await route.fallback(); return; }
+    const posted = route.request().postDataJSON() as { draft: { content: { translation?: Record<string, unknown> } } };
+    drafts.push(posted.draft);
+    await route.fulfill({ json: { product: { ...product, version: "2", publicationBlockers: [], draft: { ...product.draft, ...posted.draft } } } });
+  });
+  await page.getByRole("button", { name: "同意して公開", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "この商品を公開しますか？" })).toBeVisible();
+  expect(drafts).toHaveLength(1);
+  const translation = drafts[0]!.content.translation ?? {};
+  expect(typeof translation.sourceFingerprint).toBe("string");
+  expect(translation.confirmedSourceFingerprint).toBe(translation.sourceFingerprint);
+  expect(typeof translation.confirmedEnglishFingerprint).toBe("string");
+});
+
 test("the info tip opens a bubble and closes with Escape", async ({ page }) => {
   await mountHost(page, baseProduct());
   const tip = page.getByRole("button", { name: "写真の説明" });

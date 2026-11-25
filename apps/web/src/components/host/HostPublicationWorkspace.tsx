@@ -12,6 +12,7 @@ import {
   asPublicationPrice,
   publicationTermsForm,
   publicationTermsPayload,
+  withBlankOfferPricesFilled,
   type PublicationTermsForm,
 } from "./publication-terms";
 import { publicationBlockerDestination, publicationCanPublish, publicationNextAction } from "./publication-workflow";
@@ -660,17 +661,21 @@ export function HostPublicationWorkspace({
   }
 
   /** Saves what changed. Resolves with the saved product, or null when something could not be saved (the reason is in `error`). */
-  async function saveAll(event?: React.FormEvent): Promise<Product | null> {
+  async function saveAll(event?: React.FormEvent, options: { confirmManuscripts?: boolean } = {}): Promise<Product | null> {
     event?.preventDefault();
     if (!product || busy) return null;
     if (conflictProduct) { setError("別の更新と競合しています。入力を保持したまま、最新状態を確認してから保存してください。"); return null; }
     const amount = asPublicationPrice(unitAmount);
-    const saleTerms = publicationTermsPayload(terms, product.saleTerms);
-    if (draftDirty && amount === null) { setError("料金は無料なら0円、有料なら50円以上の整数で入力してください。"); return null; }
-    const faqProblem = draftDirty ? publicationContentFaqProblem(content) : null;
+    // 枠別料金を一部の枠だけ入れたときは、空欄の枠に大人1人の料金を入れて保存する（サーバーは全枠か無しかを求める）。
+    const termsToSave = adminDraft ? terms : withBlankOfferPricesFilled(terms, unitAmount);
+    const saleTerms = publicationTermsPayload(termsToSave, product.saleTerms);
+    // 「同意して公開」 can ask for the draft to be saved as it stands, so manuscripts saved before without a confirmation get one (保存＝確認).
+    const saveDraft = draftDirty || (options.confirmManuscripts === true && !adminDraft);
+    if (saveDraft && amount === null) { setError("料金は無料なら0円、有料なら50円以上の整数で入力してください。"); return null; }
+    const faqProblem = saveDraft ? publicationContentFaqProblem(content) : null;
     if (faqProblem) { setError(`${faqProblem}入力はこのブラウザーに保持しています。`); return null; }
-    if (!draftDirty && !mediaDirty && !termsDirty && !providerMediaDirty && !classificationDirty) return product;
-    if (termsDirty && !saleTerms && !draftDirty && !mediaDirty && !providerMediaDirty && !classificationDirty) {
+    if (!saveDraft && !mediaDirty && !termsDirty && !providerMediaDirty && !classificationDirty) return product;
+    if (termsDirty && !saleTerms && !saveDraft && !mediaDirty && !providerMediaDirty && !classificationDirty) {
       setError("料金・取消条件はまだ保存できません。人数と、確定した取消期限・返金割合を入力してください。入力はこのブラウザーに保持しています。");
       return null;
     }
@@ -701,7 +706,7 @@ export function HostPublicationWorkspace({
         setProduct(current); setMediaDraft(current.media);
       }
       let savedContent: Record<string, unknown> | null = null;
-      if (draftDirty) {
+      if (saveDraft) {
         // 保存＝確認: empty rows are dropped and, on a page in both languages, the English is confirmed against the Japanese just before saving.
         let draftContent = content;
         if (!adminDraft) {
@@ -1076,8 +1081,10 @@ export function HostPublicationWorkspace({
   async function requestPublish() {
     if (!product || busy || conflictProduct || product.status === "SUSPENDED") return;
     let current = product;
-    if (needsSave) {
-      const savedProduct = await saveAll();
+    // Manuscripts that were saved without a confirmation (the old 「英語を確認」) get it from this press: no edit is needed for it.
+    const confirmManuscripts = content.japaneseOnly !== true && (current.publicationBlockers ?? []).includes("MANUSCRIPT_REQUIRED");
+    if (needsSave || confirmManuscripts) {
+      const savedProduct = await saveAll(undefined, { confirmManuscripts });
       if (!savedProduct) return;
       current = savedProduct;
     }
@@ -1598,7 +1605,7 @@ export function HostPublicationWorkspace({
           <EditorUnitField label="対象の年齢" suffix="歳" value={terms.childMinAge} onChange={(next) => setTermsField("childMinAge", next)} to={{ label: "対象の年齢（上限）", value: terms.childMaxAge, onChange: (next) => setTermsField("childMaxAge", next) }} />
           <label className="mt-3.5 flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={terms.childAdultRequired} onChange={(event) => setTermsField("childAdultRequired", event.target.checked)} className="accent-moss" />大人の同伴を必須にする</label>
         </div> : null}
-        <EditorSwitch label="開催枠ごとに料金を変える" checked={perOffer} info="枠ごとに大人1人の料金を変えられます。空欄の枠は、上の大人1人の料金を使います。"
+        <EditorSwitch label="開催枠ごとに料金を変える" checked={perOffer} info="枠ごとに大人1人の料金を変えられます。空欄の枠には、保存するときに上の大人1人の料金が入ります。"
           onChange={(on) => { setPerOfferOpen(on); if (!on) setTerms((current) => ({ ...current, offerPrices: current.offerPrices.map((price) => ({ ...price, adultPriceYen: "" })) })); }} />
         {perOffer ? <div className="mt-2.5 border-l-2 border-line pl-4">
           {product.offers.length ? product.offers.map((offer) => {
