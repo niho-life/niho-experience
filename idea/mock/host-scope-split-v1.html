@@ -1,0 +1,318 @@
+<!doctype html>
+<!--
+  mock: NIHO Experience ホスト画面「提供者の設定」と「あなたのアカウント」を分ける案 v1（2026-11-25）。
+  論点: (1) 左下の個人メニューにある「設定」が提供者の設定を開く (2)「体験サイトを見る」が個人メニューに隠れている
+        (3) 設定トップに提供者の項目と個人の項目が混ざる (4) チームへの追加がメールアドレスの照合で、オーナーだけで終わらない。
+  案B: メニューと設定を「提供者」と「個人」に分ける（画面とURLだけ）。案C: オーナーが招待し、相手が NIHO アカウントで受け取る。
+  メニューは1列（オーナー指摘 2026-11-25）: 上の提供者チップが列全体の見出し。ホーム〜売上・メンバー・設定 ／ 記事 ／ 下端に体験サイトを見る・本人。途中に提供者名の小見出しを置かない。
+  参照: host-workspace-simple-v1.html（2026-11-08）、docs/host-team.md、docs/host-accounts.md、Issue #528。
+  作っていない: API・認証・保存・メール送信、設定の各詳細ページ、体験・カレンダー・予約・売上の中身。
+  人の名前・メール・招待・メンバーはすべて合成。サーバー通信・storage・実サービスへの遷移なし。
+  URLバーは提案中の画面パス。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>NIHO Experience — 提供者と個人を分ける案 v1</title>
+<style>
+:root{--canvas:#fff;--ink:#1c1c1a;--soft:#4b4b47;--muted:#6c6c67;--line:#e8e8e4;--line-strong:#d4d4cf;--sand:#f5f5f2;--leaf:#b2d67c;--leaf-pale:#eef5e3;--moss:#355e1f;--info:#1e4ea8;--info-pale:#eaf2ff;--warn:#7a4b00;--warn-pale:#fff3dc;--danger:#a8321e;--font:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;--display:Georgia,"Hiragino Mincho ProN",serif}
+*{box-sizing:border-box}
+body{margin:0;background:#eeeeea;font:14px/1.65 var(--font);color:var(--ink)}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:inherit;text-decoration:none}
+h1,h2,p{margin:0}
+.review{max-width:1180px;margin:auto;padding:16px 20px 10px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.review-title{font-size:13px;font-weight:700}
+.review-note{font-size:12px;color:var(--muted);margin-left:10px}
+.review-controls{display:flex;flex-wrap:wrap;gap:10px}
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:999px;background:#fff;padding:3px}
+.seg button{border:0;background:transparent;border-radius:999px;padding:5px 13px;font-size:12px;font-weight:700;color:var(--soft)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.device{max-width:1180px;margin:0 auto 28px;background:var(--canvas);border:1px solid var(--line-strong);border-radius:14px;overflow:hidden;position:relative}
+.device.phone{max-width:390px}
+.urlbar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--sand);font-size:12px;color:var(--muted)}
+.lights{display:inline-flex;gap:5px}.lights i{width:9px;height:9px;border-radius:50%;background:var(--line-strong)}
+.urltext strong{color:var(--ink)}
+.workspace{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:720px}
+.sidebar{border-right:1px solid var(--line);padding:18px 12px 14px;display:flex;flex-direction:column;position:relative}
+.brand{font-family:var(--display);font-size:19px;padding:4px 10px 14px;display:block}
+.providerbox{position:relative;margin-bottom:12px}
+.providerbtn{width:100%;display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;background:#fff;padding:8px 10px;text-align:left}
+.providerbtn:hover,.personbtn:hover{background:var(--sand)}
+.avatar{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:800;flex:none}
+.avatar.prov{background:var(--leaf-pale);color:var(--moss)}
+.avatar.me{background:var(--info-pale);color:var(--info)}
+.who{min-width:0;flex:1;line-height:1.3}
+.who b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who span{display:block;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.caret{width:16px;height:16px;color:var(--muted);flex:none}
+.grouplabel{font-size:12px;font-weight:700;color:var(--muted);padding:10px 10px 4px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a,.nav button{display:flex;align-items:center;gap:10px;height:40px;border-radius:10px;padding:0 10px;font-weight:700;color:var(--soft);border:0;background:transparent;width:100%;text-align:left}
+.nav a:hover,.nav button:hover{background:var(--sand);color:var(--ink)}
+.nav a[aria-current="page"]{background:var(--sand);color:var(--ink)}
+.nav svg,.menu svg,.btn svg,.back svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.nav .ext{margin-left:auto;width:14px;height:14px;color:var(--muted)}
+.divider{border-top:1px solid var(--line);margin:8px 0}
+.foot{margin-top:auto;padding-top:12px}
+.personbox{position:relative;border-top:1px solid var(--line);padding-top:10px;margin-top:8px}
+.personbtn{width:100%;display:flex;align-items:center;gap:10px;border:0;border-radius:12px;background:transparent;padding:8px 10px;text-align:left}
+.menu{position:absolute;z-index:20;left:0;right:0;background:#fff;border:1px solid var(--line);border-radius:14px;padding:6px;box-shadow:0 10px 30px rgb(28 28 26 / .1)}
+.menu.up{bottom:calc(100% + 6px)}
+.menu.down{top:calc(100% + 6px)}
+.menu .menuhead{padding:6px 10px 8px;font-size:12px;color:var(--muted)}
+.menu a,.menu button{display:flex;align-items:center;gap:10px;min-height:42px;width:100%;border:0;background:transparent;border-radius:10px;padding:4px 10px;font-weight:700;color:var(--soft);text-align:left}
+.menu a:hover,.menu button:hover{background:var(--sand);color:var(--ink)}
+.menu .check{margin-left:auto;width:16px;height:16px;color:var(--ink)}
+.maincol{min-width:0;display:flex;flex-direction:column;position:relative}
+.mobilehead{display:none;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);position:relative}
+.mobilehead .providerbtn{width:auto;max-width:240px;border-radius:999px;padding:5px 12px 5px 6px}
+.mobilehead .personbtn{width:auto;padding:4px}
+.mobilehead .menu{left:10px;right:10px}
+.page{padding:32px 36px 40px;flex:1;max-width:860px;width:100%}
+.pagehead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:18px}
+.pagehead h1{font-size:22px;font-weight:800;line-height:1.3}
+.subtitle{color:var(--muted);font-size:13px;margin-top:4px}
+.scope{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 11px;font-size:12px;font-weight:700;margin-bottom:8px}
+.scope.prov{background:var(--leaf-pale);color:var(--moss)}
+.scope.me{background:var(--info-pale);color:var(--info)}
+.surface{border:1px solid var(--line);border-radius:18px;overflow:hidden;margin-bottom:14px;background:#fff}
+.sectionhead{padding:14px 18px 6px;font-size:13px;font-weight:800;color:var(--soft)}
+.row{display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line);min-height:60px}
+.surface>.row:first-child{border-top:0}
+.row.link{width:100%;border-left:0;border-right:0;border-bottom:0;background:transparent;text-align:left}
+.row.link:hover{background:var(--sand)}
+.grow{flex:1;min-width:0}
+.rowtitle{font-weight:800}
+.detail{font-size:12.5px;color:var(--muted);line-height:1.5}
+.chev{width:16px;height:16px;color:var(--muted);flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.pill{display:inline-flex;align-items:center;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700;background:var(--sand);color:var(--soft);white-space:nowrap}
+.pill.live{background:var(--leaf-pale);color:var(--moss)}
+.pill.wait{background:var(--warn-pale);color:var(--warn)}
+.pill.me{background:var(--info-pale);color:var(--info)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--line-strong);background:#fff;border-radius:999px;padding:8px 16px;font-weight:800;font-size:13px;white-space:nowrap}
+.btn:hover{background:var(--sand)}
+.btn.primary{background:var(--leaf);border-color:var(--leaf)}
+.btn.primary:hover{background:#a3c86b}
+.btn.small{padding:5px 12px;font-size:12px}
+.btn.quiet{border-color:transparent;color:var(--soft)}
+.formbody{padding:6px 18px 18px;display:grid;gap:12px}
+.field{display:grid;gap:5px}
+.field span{font-weight:800;font-size:13px}
+.field input{border:1px solid var(--line-strong);border-radius:12px;padding:10px 12px;width:100%;background:#fff}
+.inline{display:flex;gap:8px;align-items:flex-end}
+.inline .field{flex:1}
+.help{font-size:12.5px;color:var(--muted)}
+.notice{border-radius:12px;padding:10px 12px;font-size:13px;background:var(--sand)}
+.notice.warn{background:var(--warn-pale);color:var(--warn)}
+.can{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0}
+.can>div{padding:12px 18px;border-top:1px solid var(--line)}
+.can>div+div{border-left:1px solid var(--line)}
+.can b{display:block;margin-bottom:2px}
+.back{display:inline-flex;align-items:center;gap:4px;color:var(--soft);font-weight:700;margin-bottom:10px}
+.tabbar{display:none;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);padding:6px 4px 12px;background:#fff}
+.tabbar a{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;font-weight:700;color:var(--muted);padding:5px 0}
+.tabbar a[aria-current="page"]{color:var(--ink)}
+.tabbar svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.device.phone .workspace{grid-template-columns:1fr;min-height:760px}
+.device.phone .sidebar{display:none}
+.device.phone .mobilehead{display:flex}
+.device.phone .tabbar{display:grid}
+.device.phone .page{padding:20px 16px 24px}
+.device.phone .pagehead{flex-direction:column}
+.device.phone .can{grid-template-columns:1fr}
+.device.phone .can>div+div{border-left:0}
+.device.phone .inline{flex-direction:column;align-items:stretch}
+dialog{border:0;border-radius:20px;padding:0;width:min(440px,calc(100vw - 32px));box-shadow:0 20px 60px rgb(28 28 26 / .25)}
+dialog::backdrop{background:rgb(28 28 26 / .35)}
+.dialogbody{padding:22px 22px 18px;display:grid;gap:14px}
+.dialogbody h2{font-size:18px;font-weight:800}
+.dialogactions{display:flex;justify-content:flex-end;gap:8px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:999px;padding:9px 18px;font-size:13px;font-weight:700;z-index:50}
+@media(max-width:760px){.workspace{grid-template-columns:1fr}.device:not(.phone) .sidebar{display:none}.device:not(.phone) .mobilehead{display:flex}.device:not(.phone) .tabbar{display:grid}.page{padding:20px 16px 24px}}
+</style>
+</head>
+<body>
+<header class="review">
+  <div><span class="review-title">提供者と個人を分ける案 v1</span><span class="review-note">合成データ・保存されません</span></div>
+  <div class="review-controls">
+    <div class="seg" aria-label="表示する端末"><button type="button" data-device="desktop" aria-pressed="true">PC</button><button type="button" data-device="phone" aria-pressed="false">スマホ</button></div>
+    <div class="seg" aria-label="メンバーの追加方法"><button type="button" data-flow="B" aria-pressed="true">案B 登録済みの人を追加</button><button type="button" data-flow="C" aria-pressed="false">案C 招待を送る</button></div>
+  </div>
+</header>
+<div class="device" id="device">
+  <div class="urlbar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="urltext">experience.niho.life<strong id="url-path">/host/home</strong></span></div>
+  <div class="workspace">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="maincol">
+      <div class="mobilehead" id="mobilehead"></div>
+      <main class="page" id="page"></main>
+      <nav class="tabbar" id="tabbar" aria-label="ホストのメニュー"></nav>
+    </div>
+  </div>
+</div>
+<dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+<script>
+const $=(s)=>document.querySelector(s);
+const esc=(s)=>String(s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const icons={
+  home:'<path d="m3 10 7-6 7 6v7H6v-7"/><path d="M9 17v-5h3v5"/>',
+  experiences:'<rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/>',
+  calendar:'<rect x="3" y="5" width="14" height="12" rx="2"/><path d="M6 3v4m8-4v4M3 9h14"/>',
+  bookings:'<path d="M4 6h12v3a1.5 1.5 0 0 0 0 3v3H4v-3a1.5 1.5 0 0 0 0-3Z"/>',
+  sales:'<path d="M4 16V9m4 7V5m4 11v-5m4 5V8"/>',
+  article:'<path d="M5 3h7l3 3v11H5Z"/><path d="M8 9h4m-4 3h4"/>',
+  members:'<circle cx="7.5" cy="7" r="2.5"/><path d="M3 16c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4"/><circle cx="14" cy="8" r="2"/><path d="M13.5 12c2 0 3.5 1.3 3.5 3.5"/>',
+  settings:'<circle cx="10" cy="10" r="2.5"/><path d="M10 3v2m0 10v2M3 10h2m10 0h2M5 5l1.5 1.5m7 7L15 15M5 15l1.5-1.5m7-7L15 5"/>',
+  external:'<path d="M8 5H5v10h10v-3"/><path d="M11 4h5v5m0-5-7 7"/>',
+  user:'<circle cx="10" cy="7" r="3"/><path d="M4 17c0-3 2.7-5 6-5s6 2 6 5"/>',
+  switch:'<path d="M4 7h11l-3-3M16 13H5l3 3"/>',
+  logout:'<path d="M8 4H4v12h4"/><path d="M12 7l3 3-3 3m3-3H8"/>',
+  check:'<path d="m4 10 4 4 8-8"/>',
+  down:'<path d="m5 8 5 5 5-5"/>',
+  right:'<path d="m8 5 5 5-5 5"/>',
+  back:'<path d="m12 5-5 5 5 5"/>',
+  plus:'<path d="M10 4v12M4 10h12"/>'
+};
+const icon=(n,cls='')=>`<svg viewBox="0 0 20 20" class="${cls}" aria-hidden="true">${icons[n]}</svg>`;
+const providers={
+  kamakura:{id:'kamakura',name:'NIHO kamakura',initial:'N',role:'OWNER'},
+  kobo:{id:'kobo',name:'サンプル工房',initial:'サ',role:'COHOST'}
+};
+const roleLabel={OWNER:'オーナー',COHOST:'共同ホスト'};
+const me={name:'ホストA',initial:'A',email:'host-a@example.com'};
+const state={page:'settings',device:'desktop',flow:'B',provider:'kamakura',menu:null,members:[],invites:[],candidate:null,lookup:'',notFound:false};
+const paths={home:'/host/home',experiences:'/host/experiences',calendar:'/host/calendar',bookings:'/host/bookings',sales:'/host/sales',articles:'/write',members:'/host/members',settings:'/host/settings',account:'/host/account'};
+const daily=[['home','ホーム'],['experiences','体験'],['calendar','カレンダー'],['bookings','予約'],['sales','売上']];
+const current=()=>providers[state.provider];
+const isOwner=()=>current().role==='OWNER';
+const dailyFor=()=>daily.filter(([p])=>isOwner()||p!=='sales');
+function go(label,p,extra=''){return `<a href="${paths[p]}" data-go="${p}" ${state.page===p?'aria-current="page"':''} ${extra}>${label}</a>`}
+function providerButton(){const c=current();return `<button type="button" class="providerbtn" data-menu="provider" aria-expanded="${state.menu==='provider'}"><span class="avatar prov">${esc(c.initial)}</span><span class="who"><b>${esc(c.name)}</b><span>あなたは${roleLabel[c.role]}</span></span>${icon('down','caret')}</button>`}
+function providerMenu(dir){
+  const rows=Object.values(providers).map((p)=>`<button type="button" data-provider="${p.id}"><span class="avatar prov">${esc(p.initial)}</span><span class="who"><b>${esc(p.name)}</b><span>${roleLabel[p.role]}</span></span>${p.id===state.provider?icon('check','check'):''}</button>`).join('');
+  return `<div class="menu ${dir}"><p class="menuhead">提供者を切り替える</p>${rows}</div>`;
+}
+const siteLink=()=>`<button type="button" data-action="public">${icon('external')}<span>体験サイトを見る</span></button>`;
+function providerLinks(){
+  return `${isOwner()?go(icon('members')+'<span>メンバー</span>','members'):''}${go(icon('settings')+'<span>設定</span>','settings')}`;
+}
+function personMenu(dir){
+  return `<div class="menu ${dir}"><p class="menuhead">${esc(me.name)}（あなた）</p>${go(icon('user')+'<span>アカウント設定</span>','account')}<button type="button" data-action="niho">${icon('external')}<span>NIHO アプリ</span></button><button type="button" data-action="logout">${icon('logout')}<span>ログアウト</span></button></div>`;
+}
+function shell(){
+  const nav=dailyFor().map(([p,t])=>go(icon(p)+`<span>${t}</span>`,p)).join('')+providerLinks();
+  $('#sidebar').innerHTML=`<a href="${paths.home}" data-go="home" class="brand">NIHO Experience</a>
+    <div class="providerbox">${providerButton()}${state.menu==='provider'&&state.device==='desktop'?providerMenu('down'):''}</div>
+    <nav class="nav" aria-label="ホストのメニュー">${nav}</nav>
+    ${isOwner()?`<div class="divider"></div><nav class="nav" aria-label="記事">${go(icon('article')+'<span>記事</span>','articles')}</nav>`:''}
+    <div class="foot"><nav class="nav" aria-label="体験サイト">${siteLink()}</nav>
+    <div class="personbox">${state.menu==='person'&&state.device==='desktop'?personMenu('up'):''}<button type="button" class="personbtn" data-menu="person" aria-expanded="${state.menu==='person'}"><span class="avatar me">${esc(me.initial)}</span><span class="who"><b>${esc(me.name)}</b><span>${esc(me.email)}</span></span>${icon('down','caret')}</button></div></div>`;
+  const narrow=state.device==='phone'||window.innerWidth<=760;
+  $('#mobilehead').innerHTML=`${providerButton()}<button type="button" class="personbtn" data-menu="person" aria-label="${esc(me.name)}のアカウント" aria-expanded="${state.menu==='person'}"><span class="avatar me">${esc(me.initial)}</span></button>
+    ${narrow&&state.menu==='provider'?`<div class="menu down"><p class="menuhead">${esc(current().name)}</p><nav class="nav">${providerLinks()}${siteLink()}</nav><div class="divider"></div>${providerMenuRows()}</div>`:''}
+    ${narrow&&state.menu==='person'?personMenu('down'):''}`;
+  $('#tabbar').style.gridTemplateColumns=`repeat(${dailyFor().length},1fr)`;
+  $('#tabbar').innerHTML=dailyFor().map(([p,t])=>go(icon(p)+`<span>${t}</span>`,p)).join('');
+  $('#url-path').textContent=paths[state.page]+(['members','settings'].includes(state.page)||daily.some(([p])=>p===state.page)?`?providerId=${state.provider}`:'');
+}
+function providerMenuRows(){
+  return `<p class="menuhead">提供者を切り替える</p>`+Object.values(providers).map((p)=>`<button type="button" data-provider="${p.id}"><span class="avatar prov">${esc(p.initial)}</span><span class="who"><b>${esc(p.name)}</b><span>${roleLabel[p.role]}</span></span>${p.id===state.provider?icon('check','check'):''}</button>`).join('');
+}
+const scopeProv=()=>`<span class="scope prov">提供者 · ${esc(current().name)}</span>`;
+const scopeMe=()=>`<span class="scope me">個人 · ${esc(me.name)}</span>`;
+function head(scope,title,subtitle='',action=''){return `<div class="pagehead"><div>${scope}<h1>${title}</h1>${subtitle?`<p class="subtitle">${subtitle}</p>`:''}</div>${action}</div>`}
+function section(title,body){return `<section class="surface">${title?`<h2 class="sectionhead">${title}</h2>`:''}${body}</section>`}
+function settingRow(label,desc){return `<button type="button" class="row link" data-action="detail"><span class="grow"><span class="rowtitle">${label}</span><br><span class="detail">${desc}</span></span>${icon('right','chev')}</button>`}
+function placeholder(title){
+  return head(scopeProv(),title)+section('',`<div class="row"><div class="grow"><div class="rowtitle">この画面は今のままです</div><div class="detail">このモックは、メニュー・メンバー・設定・アカウントの分け方だけを示します。</div></div></div>`);
+}
+function settings(){
+  if(!isOwner()){
+    return head(scopeProv(),`${esc(current().name)} の設定`,'この提供者に関わる設定です。あなた個人の設定は「アカウント設定」にあります。')
+      +section('運営',settingRow('カレンダー連携','Google の予定と空き状況'))
+      +`<p class="help">掲載・販売・メンバーの設定は、オーナーだけが変えられます。</p>`;
+  }
+  return head(scopeProv(),`${esc(current().name)} の設定`,'この提供者に関わる設定です。メンバー全員に影響します。')
+    +section('掲載',settingRow('提供者情報','掲載名・事業者の紹介')+settingRow('ホスト紹介','迎える人の紹介文'))
+    +section('販売',settingRow('販売者表示','旅行者に公開する販売者の情報')+settingRow('受取口座','売上を受け取る口座')+settingRow('NIHOサポート','サポートの利用条件・手数料'))
+    +section('運営',settingRow('カレンダー連携','Google の予定と空き状況')+settingRow('集合案内','予約後に伝える場所と当日の案内')+settingRow('通知の種類','この提供者で受け取る通知')+settingRow('記事連携','記事ライターとのつながり'))
+    +`<p class="help">メンバーの追加と解除は、メニューの「メンバー」にあります。あなた個人のログインや通知の宛先は「アカウント設定」にあります。</p>`;
+}
+function account(){
+  const belongs=Object.values(providers).map((p)=>`<div class="row"><span class="avatar prov">${esc(p.initial)}</span><div class="grow"><div class="rowtitle">${esc(p.name)}</div><div class="detail">${roleLabel[p.role]}</div></div>${p.id===state.provider?'<span class="pill live">表示中</span>':`<button type="button" class="btn small" data-provider="${p.id}" data-then="home">開く</button>`}</div>`).join('');
+  return head(scopeMe(),'あなたのアカウント','あなた個人の設定です。どの提供者を開いていても同じです。')
+    +section('ログイン',`<div class="row"><div class="grow"><div class="rowtitle">NIHO アカウント</div><div class="detail">結び付け済み · 最後のログイン 11月25日</div></div><span class="pill live">結び付け済み</span></div><div class="row"><div class="grow"><div class="rowtitle">登録のメール</div><div class="detail">${esc(me.email)}</div></div></div>`)
+    +section('通知',`<div class="row"><div class="grow"><div class="rowtitle">通知の宛先</div><div class="detail">${esc(me.email)}</div></div><button type="button" class="btn small" data-action="detail">変える</button></div><div class="row"><div class="grow"><div class="rowtitle">この端末</div><div class="detail">アプリの追加・この端末への通知</div></div><button type="button" class="btn small" data-action="detail">設定する</button></div>`)
+    +section('所属している提供者',belongs)
+    +`<button type="button" class="btn" data-action="logout">${icon('logout')}ログアウト</button>`;
+}
+function memberRows(){
+  const rows=[`<div class="row"><span class="avatar me">${esc(me.initial)}</span><div class="grow"><div class="rowtitle">${esc(me.name)}</div><div class="detail">${esc(me.email)}</div></div><span class="pill me">あなた</span><span class="pill">オーナー</span></div>`];
+  state.members.forEach((m,i)=>rows.push(`<div class="row"><span class="avatar prov">${esc(m.name.slice(-1))}</span><div class="grow"><div class="rowtitle">${esc(m.name)}</div><div class="detail">${esc(m.email)}</div></div><span class="pill">共同ホスト</span><button type="button" class="btn small quiet" data-remove="${i}">外す</button></div>`));
+  return rows.join('');
+}
+function addByLookup(){
+  let result='';
+  if(state.candidate){result=`<div class="row" style="border:1px solid var(--line);border-radius:14px"><span class="avatar prov">B</span><div class="grow"><div class="rowtitle">${esc(state.candidate.name)}</div><div class="detail">${esc(state.candidate.email)}</div></div><button type="button" class="btn primary small" data-action="add-candidate">共同ホストとして追加</button></div>`}
+  else if(state.notFound){result=`<p class="notice warn">この宛先の人は、まだ登録されていません。NIHO に登録を依頼してください。</p>`}
+  return section('メンバーを追加',`<div class="formbody"><div class="inline"><label class="field"><span>相手のメールアドレス</span><input type="email" id="lookup" placeholder="name@example.com" value="${esc(state.lookup)}"></label><button type="button" class="btn" data-action="lookup">確認</button></div>${result}<p class="help">追加できるのは、NIHO への登録が済んでいる人です。この画面からメールは送られません。</p></div>`);
+}
+function invitesSection(){
+  if(!state.invites.length)return '';
+  return section('招待中',state.invites.map((v,i)=>`<div class="row"><div class="grow"><div class="rowtitle">${esc(v.email)}</div><div class="detail">共同ホストとして招待 · あと7日</div></div><span class="pill wait">返事待ち</span><button type="button" class="btn small" data-accept="${i}">相手が受け取る（モック）</button><button type="button" class="btn small quiet" data-cancel="${i}">取り消す</button></div>`).join(''));
+}
+function members(){
+  const action=state.flow==='C'?`<button type="button" class="btn primary" data-action="invite">${icon('plus')}メンバーを招待</button>`:'';
+  return head(scopeProv(),'メンバー','この提供者を一緒に運営する人です。',action)
+    +section('運営する人',memberRows())
+    +(state.flow==='C'?invitesSection()+`<p class="help" style="margin-bottom:14px">相手は、招待メールのリンクから NIHO アカウントでログインすると参加できます。</p>`:addByLookup())
+    +section('できること',`<div class="can"><div><b>オーナー</b><span class="detail">本文・料金、公開と停止、販売者・受取口座、売上、取消と返金、メンバーの管理</span></div><div><b>共同ホスト</b><span class="detail">開催枠の編集、予約の確認、予約者への返信</span></div></div>`);
+}
+function render(){
+  shell();
+  const p=state.page;
+  const titles={home:'ホーム',experiences:'体験',calendar:'カレンダー',bookings:'予約',sales:'売上',articles:'記事'};
+  $('#page').innerHTML=p==='settings'?settings():p==='account'?account():p==='members'?members():placeholder(titles[p]);
+  document.querySelectorAll('[data-device]').forEach((b)=>b.setAttribute('aria-pressed',String(b.dataset.device===state.device)));
+  document.querySelectorAll('[data-flow]').forEach((b)=>b.setAttribute('aria-pressed',String(b.dataset.flow===state.flow)));
+  $('#device').classList.toggle('phone',state.device==='phone');
+}
+let toastTimer=0;
+function toast(text){const t=$('#toast');t.textContent=text;t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{t.hidden=true},2200)}
+function openInvite(){
+  const d=$('#dialog');
+  d.innerHTML=`<form method="dialog" class="dialogbody"><h2 id="dialog-title">メンバーを招待</h2><label class="field"><span>相手のメールアドレス</span><input type="email" id="invite-email" placeholder="name@example.com" required></label><div class="notice">役割：共同ホスト（開催枠の編集、予約の確認、予約者への返信）</div><p class="help">招待メールを送ります。相手が NIHO アカウントでログインすると、${esc(current().name)} に参加します。7日で期限が切れます。</p><div class="dialogactions"><button type="button" class="btn" data-action="close-dialog">やめる</button><button type="submit" class="btn primary" data-action="send-invite">招待を送る</button></div></form>`;
+  d.showModal();
+}
+document.addEventListener('click',(event)=>{
+  const el=event.target instanceof Element?event.target.closest('[data-go],[data-menu],[data-provider],[data-action],[data-device],[data-flow],[data-remove],[data-accept],[data-cancel]'):null;
+  if(!el){if(state.menu){state.menu=null;render()}return}
+  const d=el.dataset;
+  if(d.go){event.preventDefault();state.page=d.go;state.menu=null}
+  else if(d.menu){state.menu=state.menu===d.menu?null:d.menu}
+  else if(d.provider){state.provider=d.provider;state.menu=null;state.candidate=null;state.notFound=false;if(d.then)state.page=d.then;if(!isOwner()&&['members','sales','articles'].includes(state.page))state.page='home'}
+  else if(d.device){state.device=d.device;state.menu=null}
+  else if(d.flow){state.flow=d.flow;state.page='members';state.provider='kamakura';state.menu=null}
+  else if(d.remove!==undefined){const m=state.members.splice(Number(d.remove),1)[0];toast(`${m.name} を外しました`)}
+  else if(d.accept!==undefined){const v=state.invites.splice(Number(d.accept),1)[0];state.members.push({name:'ホストB',email:v.email});toast('ホストB が参加しました')}
+  else if(d.cancel!==undefined){state.invites.splice(Number(d.cancel),1);toast('招待を取り消しました')}
+  else if(d.action==='lookup'){const v=($('#lookup')?.value||'').trim();state.lookup=v;state.candidate=null;state.notFound=false;if(!v||!v.includes('@')){toast('メールアドレスを入れてください');}else if(v.startsWith('new')){state.notFound=true}else{state.candidate={name:'ホストB',email:v}}}
+  else if(d.action==='add-candidate'){state.members.push(state.candidate);state.candidate=null;state.lookup='';toast('共同ホストとして追加しました')}
+  else if(d.action==='invite'){openInvite();return}
+  else if(d.action==='close-dialog'){$('#dialog').close();return}
+  else if(d.action==='send-invite'){const v=($('#invite-email')?.value||'').trim();if(!v||!v.includes('@'))return;event.preventDefault();$('#dialog').close();state.invites.push({email:v});toast('招待を送りました')}
+  else if(d.action==='public'){state.menu=null;toast('体験サイトを新しいタブで開きます')}
+  else if(d.action==='niho'){state.menu=null;toast('NIHO アプリを新しいタブで開きます')}
+  else if(d.action==='logout'){state.menu=null;toast('ログアウトします（モック）')}
+  else if(d.action==='detail'){toast('この先の画面は今のままです')}
+  render();
+});
+document.addEventListener('keydown',(event)=>{if(event.key==='Escape'&&state.menu){state.menu=null;render()}});
+window.addEventListener('resize',()=>{if(state.menu){state.menu=null}render()});
+render();
+</script>
+</body>
+</html>

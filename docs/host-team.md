@@ -1,5 +1,7 @@
 # Experience native ホストチーム
 
+画面はメニューの「メンバー」（`/host/members`）。旧 `/host/settings?section=team` はここへ送られる。
+
 `EXPERIENCE_HOST_TEAM_ENABLED`（既定 `false`）は、Experience ホストアカウント用の独立した COHOST 管理を開く。`HOST_CONSOLE_ENABLED`、`EXPERIENCE_HOST_ACCOUNTS_ENABLED`、`EXPERIENCE_DATABASE_URL` が必須で、legacy provider-operations API の代替や互換層にはしない。DB は migration `0068_host_team.sql` を先に適用する。
 
 - OWNER だけが一覧、完全一致のアカウント確認、追加、解除を行う。候補は ops が事前登録した ACTIVE の `hst_` アカウントだけで、この追加では招待メールは送らない。NIHO アカウントでログインできるようにするのは、ops の招待リンク（`provision-host-account.mjs invite`、[host-accounts.md](host-accounts.md)「招待リンク」）で、追加の前でも後でもよい。確認は provider+OWNER ごとに1時間12回まで。入力メールは command receipt、監査、rate-limit 行へ保存しない。
