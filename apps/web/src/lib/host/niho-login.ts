@@ -222,9 +222,8 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
         catch { return { now, opened, writerFailure: "writer-unavailable" as const }; }
         if (!authority.writer) return { now, opened, writerFailure: "writer-revoked" as const };
         opened = await identities.startWriterSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) });
-        return { now, opened, writerOnly: true };
       }
-      return { now, opened, writerOnly: false };
+      return { now, opened };
     } catch (error) {
       console.error(`[host-auth] NIHO sign-in not opened: ${error instanceof Error ? error.name : "unknown error"}`);
       return null;
@@ -233,18 +232,17 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
   if (!verified.ok) return failed(verified.reason, login);
   if (verified.value === null) return failed("unavailable", login);
   if ("writerFailure" in verified.value && verified.value.writerFailure) return failed(verified.value.writerFailure, login);
-  const { now, opened, writerOnly } = verified.value;
+  const { now, opened } = verified.value;
   if (opened.kind === "not-linked") return failed("unregistered", login);
   if (opened.kind === "account-suspended") return failed("suspended", login);
-  // A writer without a host account (#481) is not sent to NIHO by the host console when the session runs out (#632).
-  return signedIn(request, login, accounts, opened, now, { returningHost: !writerOnly });
+  return signedIn(request, login, accounts, opened, now);
 }
 
 /**
  * The session is open: the one this browser held before ends (with its devices' push: another account on a shared device, or
  * the same host signing in again; best effort, the new session is open either way), and the host goes where the sign-in was for.
  */
-async function signedIn(request: NextRequest, login: HostLoginState, accounts: NonNullable<ReturnType<typeof hostAccounts>>, opened: Extract<NihoSessionResult, { kind: "ok" }>, now: number, options: { returningHost: boolean } = { returningHost: true }): Promise<NextResponse> {
+async function signedIn(request: NextRequest, login: HostLoginState, accounts: NonNullable<ReturnType<typeof hostAccounts>>, opened: Extract<NihoSessionResult, { kind: "ok" }>, now: number): Promise<NextResponse> {
   const previous = request.cookies.get(ACCOUNT_SESSION_COOKIE)?.value;
   if (isOpaqueSecret(previous) && previous !== opened.sessionToken) {
     try {
@@ -260,8 +258,9 @@ async function signedIn(request: NextRequest, login: HostLoginState, accounts: N
   const response = seeOther(login.invitationId ? hostInvitationPath(login.invitationId) : returnPath ?? withProvider(HOST_HOME_PATH, login.providerId));
   clearLoginCookie(response);
   setAccountSessionCookie(response, opened.sessionToken, opened.absoluteExpiresAtUtc, now);
-  // When this session runs out, the console signs the host in again by itself (#632).
-  if (options.returningHost) setReturningHostCookie(response);
+  // When this session runs out, the console signs the host in again by itself (#632). A writer (#481) gets the mark too: once
+  // bound, a writer's sign-in is a host account's like any other, and the console's pages are where a writer works as well.
+  setReturningHostCookie(response);
   return response;
 }
 

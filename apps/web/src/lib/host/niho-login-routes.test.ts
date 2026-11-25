@@ -412,8 +412,8 @@ describe("the callback", () => {
     expect(result.response.headers.get("location")).toBe("/write");
     expect(state.identities!.startWriterSessionForNihoIdentity).toHaveBeenCalledWith(expect.objectContaining({ nihoUserId: NIHO_USER }));
     expect(calls.some((call) => call.url.pathname === "/api/internal/editor-article-authority/check")).toBe(true);
-    // A writer without a host account is not sent to NIHO by the host console when the session runs out (#632).
-    expect(setCookies(result.response).has(RETURNING_HOST_COOKIE)).toBe(false);
+    // A writer's browser is marked like a host's (#632): once bound, its later sign-ins open like any host account's.
+    expect(setCookies(result.response).get(RETURNING_HOST_COOKIE)?.value).toBe("1");
 
     state.identities!.startWriterSessionForNihoIdentity.mockClear(); calls.length = 0;
     handler = niho({ authority: () => json(200, { version: 1, writer: false, links: [] }) });
