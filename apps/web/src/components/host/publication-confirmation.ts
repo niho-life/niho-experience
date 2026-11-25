@@ -41,9 +41,10 @@ export async function publicationManuscriptFingerprint(value: unknown): Promise<
 }
 
 /** The OWNER confirms the current copy, whether entered manually or produced by translation. */
-export async function confirmPublicationEnglish(readCurrent: () => Manuscripts) {
+export async function confirmPublicationEnglish(readCurrent: () => Manuscripts, options: { readonly allowEmptyJapanese?: boolean } = {}) {
   const manuscripts = readCurrent();
-  for (const manuscript of [manuscripts.japanese, manuscripts.english]) {
+  // An English-only page has an empty Japanese manuscript: only its shape has to be valid.
+  for (const manuscript of options.allowEmptyJapanese ? [manuscripts.english] : [manuscripts.japanese, manuscripts.english]) {
     if (["title", "lead", "description", "language"].some((key) => typeof manuscript[key] !== "string" || !manuscript[key].trim())) {
       throw new Error("日本語と英語の商品名・紹介文・説明・当日の言語を入力してから確認してください。");
     }

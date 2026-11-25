@@ -160,3 +160,23 @@ export function EditorUnitField({ label, small, info, prefix, suffix, value, onC
     </div>
   );
 }
+
+/** A group of checkboxes drawn as cards (掲載言語: at least one stays checked, which the caller enforces). `detail` is a faint line under a row. */
+export function EditorCheckList({ legend, info, options, onChange, disabled }: {
+  legend: string; info?: string; disabled?: boolean; onChange: (key: string, checked: boolean) => void;
+  options: readonly { key: string; label: string; checked: boolean; detail?: string }[];
+}) {
+  return (
+    <fieldset className="min-w-0">
+      <legend className="mb-1 flex items-center p-0 text-[0.8125rem] font-bold text-ink-soft">{legend}{info ? <HostInfoTip label={legend}>{info}</HostInfoTip> : null}</legend>
+      <div className="grid gap-2">
+        {options.map((option) => (
+          <label key={option.key} className={`flex cursor-pointer items-start gap-2.5 rounded-xl border px-3.5 py-2.5 ${option.checked ? "border-ink bg-sand" : "border-line-strong"}`}>
+            <input type="checkbox" checked={option.checked} disabled={disabled} onChange={(event) => onChange(option.key, event.target.checked)} className="mt-1 accent-moss" />
+            <span><b className="block text-[0.84375rem]">{option.label}</b>{option.detail ? <span className="block text-[0.78125rem] text-muted [overflow-wrap:anywhere]">{option.detail}</span> : null}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}

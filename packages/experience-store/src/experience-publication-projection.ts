@@ -1,6 +1,7 @@
 import {
   englishPublicationManuscriptOf,
   hasPublicationManuscriptKeys,
+  isEnglishOnlyContent,
   isJapaneseOnlyContent,
   projectPublicationFaq,
   publicationContentFingerprint,
@@ -225,6 +226,8 @@ function projectJapaneseManuscript(
   englishTitle: string,
   galleryPositionBySourcePosition: ReadonlyMap<number, number>,
 ): PublicExperiencePublication["japanese"] {
+  // 英語のみの商品は日本語を公開しない（content.ja に文が残っていても）。
+  if (isEnglishOnlyContent(content)) return null;
   const japanese = record(content.ja);
   const translation = record(content.translation);
   const japaneseOnly = isJapaneseOnlyContent(content);
