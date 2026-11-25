@@ -49,10 +49,13 @@ export default async function HostLoginErrorPage({ searchParams }: { searchParam
   const preparationCaseId = preparationCaseIdOrNull(rawPreparationCaseId);
   const invitationId = invitationIdOrNull(rawInvitationId);
   const loginHref = invitationId ? hostInvitationLoginPath(invitationId) : preparationCaseId ? hostPreparationLoginPath(preparationCaseId) : HOST_LOGIN_PATH;
+  // 「別の方法でやり直す」 asks NIHO for its account choice (#632), which it would skip for a host it knows.
+  const switchAccount = config.nihoLoginPromptEnabled ? "1" : null;
   // An emailed link that did not open (the migration fallback) is asked for again on the email form, not at NIHO.
   const retryHref = known === "link" && config.hostNihoLoginEnabled ? withQuery(HOST_EMAIL_SIGN_IN_PATH, { method: "email" }) : loginHref;
   if (known.startsWith("invite-")) {
-    const retry = INVITE_RETRY[known];
+    const listed = INVITE_RETRY[known];
+    const retry = listed && known === "invite-in-use" ? { ...listed, href: withQuery(listed.href, { switch: switchAccount }) } : listed;
     return (
       <main id="main" className="mx-auto w-full max-w-xl px-4 py-16">
         <h1 className={`${HOST_HEADING} text-2xl`}>招待を使えませんでした</h1>
@@ -77,7 +80,7 @@ export default async function HostLoginErrorPage({ searchParams }: { searchParam
         </div>
         {/* Plain links: login is a route handler, and /host belongs to the traveler site's root. */}
         <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
-          <HostLoginLink href={loginHref} className={hostButtonClass("primary")}>別の方法でやり直す</HostLoginLink>
+          <HostLoginLink href={withQuery(loginHref, { switch: switchAccount })} className={hostButtonClass("primary")}>別の方法でやり直す</HostLoginLink>
           <a href={SUPPORT_HREF} className="text-[0.875rem] font-bold text-ink-soft underline underline-offset-4 hover:text-ink">運営に問い合わせる</a>
         </div>
       </main>

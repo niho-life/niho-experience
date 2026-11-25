@@ -5,6 +5,7 @@ import { clearAccountSessionCookie, clearLinkBindingCookie, isOpaqueSecret, nowU
 import { deleteConnection } from "@/lib/host/niho-auth";
 import { forgetHostPushConnection } from "@/lib/host/push/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
+import { clearReturningHostCookie } from "@/lib/host/returning-host";
 import { HOST_INTRO_PATH, HOST_LAUNCH_PATH } from "@/lib/host/routes";
 import { clearLoginCookie, clearSessionCookie, hostNotFound, isHostMock, nihoAuthDeps, noStoreJson, renewSession, seeOther, sessionSealer, siteOrigin } from "@/lib/host/server";
 import { accessTokenUsable, ACCOUNT_SESSION_COOKIE, decodeSession, SESSION_COOKIE } from "@/lib/host/session";
@@ -29,6 +30,8 @@ async function logoutExperienceSession(request: NextRequest) {
   }
   const response = seeOther(config.hostPwaEnabled ? HOST_LAUNCH_PATH : HOST_INTRO_PATH);
   clearAccountSessionCookie(response);
+  // After a logout the entrance waits for the button: the console does not sign the host in again by itself (#632).
+  clearReturningHostCookie(response);
   clearLinkBindingCookie(response);
   clearLoginCookie(response);
   // A NIHO login's cookies from before the switch go too.

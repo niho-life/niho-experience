@@ -14,6 +14,7 @@ import { HOST_HOME_PATH, HOST_INTRO_PATH, HOST_LAUNCH_PATH, HOST_LOGIN_PATH, HOS
 import { hostLoginLabel, isHostMock, loadHostProviders, readHostSession, requireHostConsole, type ProvidersLoad } from "@/lib/host/server";
 import { sessionKeeperExpiresAt, sessionUsableInApp } from "@/lib/host/session";
 import { productOperatorRepository } from "@/lib/experience/store-server";
+import { returningHostLoginPath } from "@/lib/host/returning-host";
 
 function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"], "ok" | "refresh" | "signed-out"> }) {
   if (status === "rejected") {
@@ -48,8 +49,9 @@ function ProvidersProblem({ status }: { status: Exclude<ProvidersLoad["status"],
 export default async function HostConsoleLayout({ children }: { children: React.ReactNode }) {
   requireHostConsole();
   const session = await readHostSession();
-  // With the app on, a host without a session signs in on the app's start page, inside its window (#177).
-  if (!session) redirect(config.hostPwaEnabled ? HOST_LAUNCH_PATH : HOST_INTRO_PATH);
+  // A returning host whose session ran out goes to NIHO by itself (#632); after a logout, or anyone else, the usual page:
+  // with the app on, a host without a session signs in on the app's start page, inside its window (#177).
+  if (!session) redirect((await returningHostLoginPath()) ?? (config.hostPwaEnabled ? HOST_LAUNCH_PATH : HOST_INTRO_PATH));
   const load = await loadHostProviders();
   // Inside the installed app, only a session signed in there is used (#177).
   const appGuard = <HostAppSurfaceGuard enabled={config.hostPwaEnabled} appSurface={sessionUsableInApp(session)} />;

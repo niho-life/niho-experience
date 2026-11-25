@@ -325,6 +325,14 @@ export const FLAGS = Object.freeze([
     variable: "HOST_NIHO_LOGIN_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
   },
+  // ホストのアカウントの選び直し (#632): 「ホストに登録されていません」と招待の「別の NIHO アカウントでやり直す」で、NIHO に
+  // `prompt=select_account` を付けて接続の確認（アカウントの切替）を必ず出させる。NIHO が連携済みのホストの確認を省く（niho-coliving/niho-app#21302）と、
+  // 別の方法の NIHO アカウントで入ったホストが切り替えられなくなるため。NIHO 側の本番配備の前に ON にしない（URL ごと無効になる）。
+  {
+    env: "EXPERIENCE_NIHO_LOGIN_PROMPT_ENABLED",
+    variable: "NIHO_LOGIN_PROMPT_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED"],
+  },
   // 旅行者のアカウント (Epic #591, #597, ADR 0004 §8): Google / Apple / LINE のボタンから、NIHO の名前を出さずにアカウントを作る。
   // アカウントとセッション（migration 0085）は Experience の DB で、ホストアカウントとは別の表と cookie。NIHO の戻りは同じ callback なので
   // ホストのアカウント（HOST_ACCOUNTS_ENABLED。旧 NIHO トークン方式の callback に旅行者を入れないため）が前提。

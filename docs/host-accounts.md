@@ -58,7 +58,7 @@ preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock
 4. `GET /host/auth/open`：インラインの小さな script が fragment からトークンを読み、すぐに `history.replaceState` で消し、同じパスへ POST する（`referrerPolicy: same-origin`。ページ自体は `Referrer-Policy: no-referrer`・no-store・noindex）。
 5. `POST /host/auth/open`：link cookie の SHA-256 で `consumeLogin`。成功ならセッション cookie を置き、link cookie を消し、このブラウザの前のセッションを失効させて 204 を返し、ページが `/host/home` へ移る（読めないリダイレクトに cookie を載せず、ふつうの応答で置くため）。使えないリンク（期限切れ・使用済み・別のブラウザ）は 400 で、ページが `/host/auth/error?reason=link`（理由と「新しいリンクを送る」）へ移る。
 
-ログアウトは store のセッションを失効させ、その端末の push を止め、cookie を消す。`/host/auth/refresh` は何も回さず成功を返す（セッションを読み直し、アイドルの期限を `HostSessionKeeper` に返す）。
+ログアウトは store のセッションを失効させ、その端末の push を止め、cookie を消す。NIHO アカウントでのログインでは、戻ってくるホストの印（`__Host-niho_host_returning`）も消す。印があるブラウザは、セッションが切れた後にホストの画面を開くと、自動で NIHO のログインを始める（#632、ADR 0004 §4）。`/host/auth/refresh` は何も回さず成功を返す（セッションを読み直し、アイドルの期限を `HostSessionKeeper` に返す）。
 
 ## cookie
 

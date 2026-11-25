@@ -3,6 +3,7 @@ import { config } from "@/lib/config";
 import { nihoConnectUrl } from "@/lib/host/niho-auth";
 import { startNihoInvite, startNihoLogin } from "@/lib/host/niho-login";
 import { createLoginState, createPkceVerifier, pkceChallenge } from "@/lib/host/pkce";
+import { autoLoginAllowed, markAutoLoginStarted } from "@/lib/host/returning-host";
 import { nihoIdOrNull } from "@/lib/host/providers";
 import { HOST_EMAIL_SIGN_IN_PATH, HOST_HOME_PATH, HOST_MOCK_LOGIN_PATH, hostInvitationPath, hostReturnPathOrNull, invitationIdOrNull, preparationCaseIdOrNull, withQuery } from "@/lib/host/routes";
 import { hostNotFound, isHostMock, noStoreJson, readHostSession, seeOther, setLoginCookie, siteOrigin } from "@/lib/host/server";
@@ -24,6 +25,14 @@ export async function GET(request: NextRequest) {
     // Already signed in (an old link, a second tab): straight on to where the sign-in was for, with no trip to NIHO.
     // A re-login (`reauth=1`, a sensitive change asked for a recent sign-in) always goes to NIHO.
     if (request.nextUrl.searchParams.get("reauth") !== "1" && await readHostSession()) return seeOther(invitationId ? hostInvitationPath(invitationId) : returnPath ?? HOST_HOME_PATH);
+    // The console sent a returning host's browser here by itself (#632, returning-host.ts). Once in a short while: a second
+    // time goes to the entrance and its button, so a session that does not open after NIHO's return cannot loop.
+    if (request.nextUrl.searchParams.get("auto") === "1") {
+      if (!autoLoginAllowed(request)) return seeOther(HOST_EMAIL_SIGN_IN_PATH);
+      const response = startNihoLogin(request);
+      markAutoLoginStarted(response);
+      return response;
+    }
     return startNihoLogin(request);
   }
   // The email form keeps an invitation as the page the opened link returns to (hostReturnPathOrNull).
