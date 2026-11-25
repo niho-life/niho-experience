@@ -111,6 +111,31 @@ describe("site publication booking seller terms", () => {
     expect(html).not.toContain('aria-current="step"');
   });
 
+  // 開催枠ごとに offer が分かれる (#638): the offers are the same experience at other times, never a plan to choose first.
+  it.each(["page", "embed"] as const)("asks for a date, not for an offer, when the %s form sells several offers", (layout) => {
+    const render = (offers: readonly unknown[]) => renderToStaticMarkup(createElement(SitePublicationBooking, {
+      item: { publication: { slug: "paid-one", publicTitle: "Paid one", sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers }, sellerDisclosure: null } as never,
+      siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true, layout,
+    }));
+    const evening = { ...offer, id: "synthetic-offer-2", startTime: "18:00", weekdays: [4] };
+    const samePrice = render([offer, evening]);
+    expect(samePrice).not.toContain("<select");
+    expect(samePrice).not.toMatch(/>(Option|プラン)</);
+    expect(samePrice).toContain("¥5,000 per adult");
+    expect(samePrice).not.toContain("From ¥");
+    // Start times differ by offer: the calendar says them for the chosen date, the heading says only what is shared.
+    expect(samePrice).toContain("Duration: 1 hr 30 min");
+    expect(samePrice).not.toContain("10:00 AM JST");
+    expect(samePrice).toContain("50% refund when cancelled at least 24 hours before the start");
+    expect(samePrice).toContain("<b>¥5,000</b>");
+
+    const otherPrice = render([offer, { ...evening, durationMinutes: 120, pricing: { ...offer.pricing, adultPriceYen: 4000 } }]);
+    expect(otherPrice).toContain("From ¥4,000 per adult");
+    expect(otherPrice).not.toContain("Duration:");
+    expect(otherPrice).toContain("<b>Choose a date</b>");
+    expect(otherPrice).not.toContain("<b>¥5,000</b>");
+  });
+
   it("starts the embedded widget at the date step, without the contact fields", () => {
     const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
       item: { publication: { slug: "paid-one", publicTitle: "Paid one", sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers: [offer] }, sellerDisclosure: null } as never,

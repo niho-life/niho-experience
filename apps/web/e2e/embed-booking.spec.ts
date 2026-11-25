@@ -32,9 +32,13 @@ const occurrence = (date: string, bookable: boolean, seatsLeft: number) => ({
   offerId: "synthetic-offer", date, bookable, seatsLeft, reason: bookable ? null : "FULL",
   startAt: `${date}T09:00:00Z`, endAt: `${date}T11:00:00Z`, bookingClosesAt: null,
 });
+/** The second offer's occurrence: noon in Tokyo, the same experience at another time. */
+const noonOccurrence = (date: string, bookable: boolean, seatsLeft: number) => ({
+  ...occurrence(date, bookable, seatsLeft), offerId: "synthetic-offer-noon", startAt: `${date}T03:00:00Z`, endAt: `${date}T05:00:00Z`,
+});
 
 /** The host's page frames the widget and keeps every message it gets from it. */
-type WidgetOptions = { layout?: "page" | "embed"; preview?: boolean; refuseWith?: "FULL" };
+type WidgetOptions = { layout?: "page" | "embed"; preview?: boolean; refuseWith?: "FULL"; secondOffer?: boolean };
 
 async function openWidget(page: Page, acceptanceMode: "INSTANT" | "APPROVAL", checkoutUrl: string, options: WidgetOptions = {}) {
   const checkouts: unknown[] = [];
@@ -43,7 +47,9 @@ async function openWidget(page: Page, acceptanceMode: "INSTANT" | "APPROVAL", ch
     <script>window.received=[];window.addEventListener("message",function(e){if(e.origin==="${EXPERIENCE}")window.received.push(e.data);});</script>` }));
   await page.route(`${EXPERIENCE}/frame`, (route) => route.fulfill({ contentType: "text/html", body: '<!doctype html><meta charset="utf-8"><div id="root"></div>' }));
   await page.route(`${EXPERIENCE}/api/public/experiences/synthetic-dinner/availability**`, (route) => route.fulfill({ json: {
-    occurrences: [occurrence("2026-12-05", true, 6), occurrence("2026-12-12", false, 0), occurrence("2027-01-09", true, 2)],
+    occurrences: [occurrence("2026-12-05", true, 6), occurrence("2026-12-12", false, 0), occurrence("2027-01-09", true, 2),
+      // With a second offer: a day of its own, a second start on a day the first offer has, and one that is full.
+      ...(options.secondOffer ? [noonOccurrence("2026-12-06", true, 3), noonOccurrence("2026-12-05", true, 4), noonOccurrence("2027-01-09", false, 0)] : [])],
   } }));
   await page.route(`${EXPERIENCE}/api/public/experiences/synthetic-dinner/checkout`, async (route) => {
     checkouts.push(route.request().postDataJSON());
@@ -58,7 +64,7 @@ async function openWidget(page: Page, acceptanceMode: "INSTANT" | "APPROVAL", ch
   if (!frame) throw new Error("The widget's frame did not load");
   await frame.evaluate(() => Object.defineProperty(globalThis, "process", { value: { env: { NODE_ENV: "development" } } }));
   await frame.addScriptTag({ content: bundle });
-  await frame.evaluate(([mode, mount]) => window.mountEmbedBooking(mode, mount), [acceptanceMode, { layout: options.layout, preview: options.preview }] as const);
+  await frame.evaluate(([mode, mount]) => window.mountEmbedBooking(mode, mount), [acceptanceMode, { layout: options.layout, preview: options.preview, secondOffer: options.secondOffer }] as const);
   return { widget: page.frameLocator("#widget"), checkouts };
 }
 
@@ -140,6 +146,55 @@ test("a date that filled up brings the traveler back to the calendar, with the r
   expect(alertBox!.y).toBeLessThan(calendarBox!.y);
   expect(checkouts).toHaveLength(1);
   expect(page.url()).toBe(`${HOST_SITE}/`);
+});
+
+// The host added 開催枠 one at a time: each is its own offer, and all of them are days of the one calendar.
+test("every offer's dates are in the one calendar, and the date chooses the offer", async ({ page }) => {
+  const { widget, checkouts } = await openWidget(page, "INSTANT", STRIPE, { secondOffer: true });
+  await expect(widget.getByRole("combobox")).toHaveCount(0);
+  await expect(widget.getByText("From ¥4,000 per adult")).toBeVisible();
+  await expect(widget.getByText("Choose a date", { exact: true })).toBeVisible();
+
+  // A day only the second offer has.
+  await widget.getByRole("button", { name: "Sun 6 Dec, 3 places left" }).click();
+  await expect(widget.getByText("12:00 PM JST · 3 places left")).toBeVisible();
+  await expect(widget.getByText("¥4,000 per adult", { exact: true })).toBeVisible();
+  await expect(widget.getByRole("radio")).toHaveCount(0);
+
+  // A day both offers have: the earliest start is chosen, and the other can be.
+  await widget.getByRole("button", { name: "Sat 5 Dec, 4 places left" }).click();
+  const starts = widget.getByRole("radiogroup", { name: "Start time on Sat 5 Dec" });
+  await expect(starts.getByRole("radio")).toHaveCount(2);
+  await expect(starts.getByRole("radio", { name: "12:00 PM JST · 4 places left · ¥4,000 per adult" })).toBeChecked();
+  await starts.getByRole("radio", { name: "6:00 PM JST · 6 places left · ¥5,000 per adult" }).check();
+  await expect(widget.getByText("¥5,000 per adult", { exact: true })).toBeVisible();
+  await widget.getByLabel("Adults").fill("2");
+
+  await widget.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(widget.getByText("Sat 5 Dec · 6:00 PM JST")).toBeVisible();
+  await widget.getByLabel("Full name").fill(NAME);
+  await widget.getByLabel("Email").fill(EMAIL);
+  await widget.getByRole("checkbox").check();
+  await widget.getByRole("button", { name: "Continue to secure checkout" }).click();
+  await expect(widget.getByRole("link", { name: "Pay securely on Stripe" })).toBeVisible();
+  expect(checkouts).toHaveLength(1);
+  expect(checkouts[0]).toMatchObject({ offerId: "synthetic-offer", occurrenceDate: "2026-12-05", adultCount: 2, expectedTotalYen: 10000 });
+});
+
+test("a start that is full stays in the list of its day and cannot be chosen", async ({ page }) => {
+  const { widget, checkouts } = await openWidget(page, "INSTANT", STRIPE, { secondOffer: true, layout: "page" });
+  await page.route("https://checkout.stripe.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Synthetic Stripe</title>" }));
+  await widget.getByRole("button", { name: "Next month" }).click();
+  await widget.getByRole("button", { name: "Sat 9 Jan, 2 places left" }).click();
+  const starts = widget.getByRole("radiogroup", { name: "Start time on Sat 9 Jan" });
+  await expect(starts.getByRole("radio", { name: "12:00 PM JST · Full" })).toBeDisabled();
+  await expect(starts.getByRole("radio", { name: "6:00 PM JST · 2 places left · ¥5,000 per adult" })).toBeChecked();
+  await widget.getByLabel("Full name").fill(NAME);
+  await widget.getByLabel("Email").fill(EMAIL);
+  await widget.getByRole("checkbox").check();
+  await widget.getByRole("button", { name: "Continue to secure checkout" }).click();
+  await expect.poll(() => checkouts.length).toBe(1);
+  expect(checkouts[0]).toMatchObject({ offerId: "synthetic-offer", occurrenceDate: "2027-01-09", expectedTotalYen: 5000 });
 });
 
 test("the preview shows the calendar and takes no booking", async ({ page }) => {

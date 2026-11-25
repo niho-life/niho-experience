@@ -21,7 +21,8 @@ window.mountEmbedBooking = (acceptanceMode, options = {}) => createRoot(document
     preview={options.preview ?? false}
     item={{
       publication: { slug: "synthetic-dinner", publicTitle: "Synthetic dinner", sellerDisplayName: "Synthetic seller" },
-      saleTerms: { sellerDisplayName: "Synthetic seller", offers: [{ ...offer, acceptanceMode }] },
+      // 開催枠ごとに offer が分かれる: a second offer is the same experience at another time and price.
+      saleTerms: { sellerDisplayName: "Synthetic seller", offers: [{ ...offer, acceptanceMode }, ...(options.secondOffer ? [{ ...offer, acceptanceMode, id: "synthetic-offer-noon", startTime: "12:00", weekdays: [0, 6], pricing: { ...offer.pricing, adultPriceYen: 4000 } }] : [])] },
       sellerDisclosure: null,
     } as never}
     siteOrigin={window.location.origin}

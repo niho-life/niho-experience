@@ -1,8 +1,9 @@
 import type { Occurrence } from "@niho-experience/api-client";
 
 /*
- * The booking form's month calendar (#638, docs/embed.md「旅行者の流れ」). Pure: the occurrences of the chosen offer in, the
- * months, their week rows and each day's state out. A date is the Tokyo calendar day the availability read gives
+ * The booking form's month calendar (#638, docs/embed.md「旅行者の流れ」). Pure: the occurrences of every offer in, the
+ * months, their week rows and each day's state out. An offer is one 開催枠 of the experience (a schedule rule with its own
+ * start time), so a day can hold more than one occurrence. A date is the Tokyo calendar day the availability read gives
  * (`YYYY-MM-DD`); every calculation is on that string and on UTC dates at noon, so the browser's time zone never moves a day.
  */
 
@@ -49,9 +50,14 @@ export function calendarMonths(occurrences: readonly CalendarOccurrence[]): stri
   return months;
 }
 
-/** The occurrence of a date: a bookable one if any, else the first. */
+/** The occurrences of a date, earliest start first: one for each offer held that day. */
+export function occurrencesOn<T extends CalendarOccurrence>(occurrences: readonly T[], date: string): T[] {
+  return occurrences.filter((occurrence) => occurrence.date === date).sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt));
+}
+
+/** The occurrence a date stands for: its earliest bookable one, else its earliest. */
 export function occurrenceOn<T extends CalendarOccurrence>(occurrences: readonly T[], date: string): T | null {
-  const same = occurrences.filter((occurrence) => occurrence.date === date);
+  const same = occurrencesOn(occurrences, date);
   return same.find((occurrence) => occurrence.bookable) ?? same[0] ?? null;
 }
 
