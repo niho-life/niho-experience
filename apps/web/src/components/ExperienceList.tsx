@@ -7,7 +7,7 @@ import { readBookingAvailability } from "@/lib/browser-availability";
 import { bookingSourceFor, type BookingSources } from "@/lib/booking-source";
 import type { BrowseContext } from "@/lib/browse-context";
 import type { CardModel } from "@/lib/card-model";
-import { dayOption, fitsPartySize, matchingOccurrence, MAX_GUESTS, type DayOption } from "@/lib/date-filter";
+import { dayOption, fitsPartySize, matchingOccurrence, MAX_GUESTS, visibleDayChips, type DayOption } from "@/lib/date-filter";
 import { formatTime, pluralize } from "@/lib/format";
 import { ExperienceCard } from "./ExperienceCard";
 import { HandIcon } from "./HandIcon";
@@ -35,6 +35,7 @@ export function ExperienceList({
   search,
   inlineSearch,
   columns = "three",
+  dayChips = "all",
 }: {
   cards: CardModel[];
   days: DayOption[];
@@ -46,6 +47,8 @@ export function ExperienceList({
   /** Where each card's availability is read: NIHO's API, or this site's for an experience sold here (#285). */
   bookingSources: BookingSources;
   columns?: "two" | "three";
+  /** "available" lists only days with something on (plus the selected day); "all" lists every day, empty ones disabled. */
+  dayChips?: "all" | "available";
   /** Shown instead of the list when the server returned no experiences (search or empty catalog). */
   empty: ReactNode;
   /** The round search button at the end of the date chips (ExperienceFiltersForm, placement "bar"). */
@@ -115,6 +118,7 @@ export function ExperienceList({
       </div>
     );
 
+  const shownDays = visibleDayChips({ mode: dayChips, days, counts, selected: date, failed, catalogDateFiltered });
   const visible = cards.filter((card) => fitsPartySize(card.offers, guests) && (failed || !matches || matches.has(card.slug)));
   const chosenDay = date ? (days.find((day) => day.key === date) ?? dayOption(date, locale)) : null;
 
@@ -169,7 +173,7 @@ export function ExperienceList({
                 onChange={(event) => chooseGuests(event.target.value ? Number(event.target.value) : null)}
                 className="cursor-pointer appearance-none bg-transparent px-1"
               >
-                <option value="">{copy.text("catalogue.anyGroup")}</option>
+                <option value="">{locale === "en" ? "Any group size" : copy.text("catalogue.anyGroup")}</option>
                 {Array.from({ length: MAX_GUESTS }, (_, i) => i + 1).map((n) => (
                   <option key={n} value={n}>
                     {locale === "ja" ? `${n}名` : pluralize(n, "guest")}
@@ -187,10 +191,10 @@ export function ExperienceList({
                 >
                   {copy.text("home.anyDay")}
                 </button>
-                {days.map((day) => {
+                {shownDays.map((day) => {
                   const selected = date === day.key;
                   const count = catalogDateFiltered && !selected ? undefined : counts?.get(day.key);
-                  const disabled = !catalogDateFiltered && count === 0 && !selected;
+                  const disabled = dayChips === "all" && !catalogDateFiltered && count === 0 && !selected;
                   return (
                     <button
                       key={day.key}

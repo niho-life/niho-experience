@@ -137,11 +137,12 @@
 ### 一覧（`/experiences`）
 
 - 手書き "small groups · local hosts"、h1 "Experiences in Kamakura"、円・税込・JST の補足。
-- ヘッダーの下に固定する絞り込み：上の行に人数のピル（Any group／1〜8）、下の行に Any day と今日から7日の日付チップ（曜日＋日、JST。トップから8日目以降の日付が来たらそのチップを足す）。チップの行の右端に小さな丸い検索ボタン（虫眼鏡）。PC は人数のピルと日付チップを1行に並べ、間を細い線で区切る。
+- ヘッダーの下に固定する絞り込み：上の行に人数のピル（Any group size／1〜8）、下の行に Any day と、今日から14日のうち開催のある日だけの日付チップ（曜日＋日、JST。人数を変えると出る日も変わる。読み込み中は Any day だけ（選択中の日があればそれも）。選択中の日は件数0でも残し、サーバーが日付で絞った場合は Any day と選択中の日だけ。無効のチップは作らない。15日目以降の日付が来たらそのチップを足す）。チップの行の右端に小さな丸い検索ボタン（虫眼鏡）。PC は人数のピルと日付チップを1行に並べ、間を細い線で区切る。
 - 検索（`q`。API 1.2 ではテーマも）は `<details>/<summary>` の中の GET フォームで、押すと入力欄がチップの下に開く。JS なしでも開閉・送信できる。`q`（やテーマ）が URL にあるときは開いた状態で語を表示する。0件や日程を読めないときは同じ検索を独立した行に出す。
-- 日付・人数の絞り込みはブラウザから各体験の availability を1回ずつ読み、その日に予約可能で残席 ≥ 人数、かつ商品の1組の上限 ≥ 人数の開催回がある体験だけを出す（`lib/date-filter.ts`）。残席数そのものは表示しない。読込後はチップの下に件数、0件の日は無効。読込中は控えめな文言、失敗したら絞り込みを出さず全件と短い案内。
-- URL の `date`・`guests` を読み、変更は `history.replaceState` で同期する。`date` 付きの URL は noindex（canonical は `/experiences`）。
+- 日付・人数の絞り込みはブラウザから各体験の availability を1回ずつ読み、その日に予約可能で残席 ≥ 人数、かつ商品の1組の上限 ≥ 人数の開催回がある体験だけを出す（`lib/date-filter.ts`）。残席数そのものは表示しない。読込後はチップの下に件数（英語版の日付チップは開催のある日だけ。日本語版は従来どおり全日を出し、0件の日は無効）。読込中は控えめな文言、失敗したら絞り込みを出さず全件と短い案内。
+- URL の `date`・`guests` を読み、変更は `router.push`（スクロールなし）で同期する。`date` 付きの URL は noindex（canonical は `/experiences`）。
 - 0件と通信失敗はそれぞれ行動できる表示にする（検索を消す、Any day に戻す、人数を減らす、再試行）。
+- リード文は "Hosted by people who live here, one hour from Tokyo."。カードの下に1行の安心表示（`BookingAssurance.tsx`。"Book as a guest"・"Pay by card in yen"・"Confirmation by email" をアイコン付きで、右端（md から）に "Questions before you book" → `/help`）。その下のガイド枠は手書き "plan your day"、h2 "From the Journal"、リンク "See all"（`/guides`）。
 
 ### 詳細（`/experiences/[slug]`）
 
