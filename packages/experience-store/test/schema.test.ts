@@ -589,4 +589,16 @@ describe("database invariants", () => {
     const code = sql.replace(/--.*$/gm, "");
     assert.doesNotMatch(code, /UPDATE bookings|UPDATE booking_guests|INSERT INTO bookings|DELETE FROM bookings/i);
   });
+
+  it("records a booking's sales channel and only the framing site's origin, erasable with the guest (#638)", async () => {
+    const sql = await readFile(new URL("../migrations/0089_booking_sales_channel.sql", import.meta.url), "utf8");
+    assert.match(sql, /^BEGIN;/);
+    assert.match(sql, /COMMIT;\s*$/);
+    assert.match(sql, /sales_channel text NOT NULL DEFAULT 'SITE' CHECK \(sales_channel IN \('SITE','EMBED'\)\)/);
+    assert.match(sql, /sales_channel = 'EMBED' AND pii_erased_at IS NULL/);
+    assert.match(sql, /embed_origin ~ '\^https:\/\/\[a-z0-9\]/);
+    assert.match(sql, /ON booking_guests \(checkout_session_ref\) WHERE checkout_session_ref IS NOT NULL/);
+    const code = sql.replace(/--.*$/gm, "");
+    assert.doesNotMatch(code, /UPDATE |DELETE |INSERT |GRANT |protect_booking_guests/i);
+  });
 });

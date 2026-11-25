@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { BookingReturn } from "@/components/BookingReturn";
-import { bookingReturnCopy, readReturnType } from "./booking-return-copy";
+import { bookingReturnBackLabel, bookingReturnCopy, readReturnType } from "./booking-return-copy";
 
 describe("booking return copy (#638)", () => {
   it.each([
@@ -41,5 +41,28 @@ describe("booking return copy (#638)", () => {
     expect(readReturnType("managed-request")).toBe("managed-request");
     expect(readReturnType("anything")).toBeNull();
     expect(readReturnType(null)).toBeNull();
+  });
+});
+
+describe("the return page's link back to the host's site (#638)", () => {
+  const backTo = { href: "https://host-site.example.test", host: "host-site.example.test" };
+
+  it("adds one link to the host's origin beside the other actions, in English and Japanese", () => {
+    expect(bookingReturnBackLabel("host-site.example.test", "en")).toBe("Back to host-site.example.test");
+    expect(bookingReturnBackLabel("host-site.example.test", "ja")).toBe("host-site.example.test に戻る");
+    const en = renderToStaticMarkup(createElement(BookingReturn, { type: "instant", showReview: false, backTo }));
+    expect(en).toMatch(/Browse experiences<\/a><a href="https:\/\/host-site\.example\.test" rel="noopener noreferrer" class="[^"]+">Back to host-site\.example\.test<\/a><\/div><\/div>$/);
+    const ja = renderToStaticMarkup(createElement(BookingReturn, { type: "instant", showReview: false, locale: "ja", backTo }));
+    expect(ja).toMatch(/体験を探す<\/a><a href="https:\/\/host-site\.example\.test" rel="noopener noreferrer" class="[^"]+">host-site\.example\.test に戻る<\/a><\/div><\/div>$/);
+  });
+
+  it("renders the page exactly as before without one", () => {
+    for (const locale of ["en", "ja"] as const) {
+      const without = renderToStaticMarkup(createElement(BookingReturn, { type: "instant", showReview: false, locale }));
+      expect(without).toBe(renderToStaticMarkup(createElement(BookingReturn, { type: "instant", showReview: false, locale, backTo: undefined })));
+      expect(without).not.toContain("host-site");
+      expect(without).not.toContain("noopener");
+      expect(without).toMatch(locale === "en" ? /Browse experiences<\/a><\/div><\/div>$/ : /体験を探す<\/a><\/div><\/div>$/);
+    }
   });
 });

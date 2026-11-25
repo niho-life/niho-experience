@@ -9,7 +9,7 @@ import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-
 import { attributionWithDefault, readBookingAttribution, type BookingAttribution } from "@/lib/booking-attribution";
 import { bookingReturnCopy, readReturnType, type BookingReturnType } from "@/lib/booking-return-copy";
 import { calendarDayLabel, occurrenceStartTime } from "@/lib/experience/booking-calendar";
-import { leaveFrameTo, postEmbedTop, useEmbedFrame } from "@/lib/experience/embed-frame";
+import { embedParentOrigin, leaveFrameTo, postEmbedTop, useEmbedFrame } from "@/lib/experience/embed-frame";
 import { BookingCalendar } from "@/components/BookingCalendar";
 import { expectedSiteBookingTotalYen } from "@/lib/experience/site-booking-rules";
 import { answersForCheckout } from "@/lib/experience/site-booking-answers";
@@ -24,6 +24,9 @@ const FIELD_TEXTAREA = "min-h-24 w-full min-w-0 rounded-xl border border-line-st
 const FORM_FRAME = "rounded-[var(--radius-card)] border border-line bg-white p-5 sm:p-7";
 const PRIMARY_BUTTON = "min-h-12 rounded-full bg-ink px-6 font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-45";
 const UNAVAILABLE = "rounded-2xl bg-sand p-5 text-ink-soft";
+
+/** What the checkout route reads beside NIHO's request: the sales plan revision, and the widget's sales channel (#638). */
+type EmbedChannelFields = { salesPlanRevision?: number; salesChannel?: "embed"; embedOrigin?: string };
 
 /** The embedded widget's steps (#638, docs/embed.md「旅行者の流れ」): 1 date and guests, 2 details, 3 pay (or done). */
 type EmbedStep = 1 | 2 | 3;
@@ -119,7 +122,9 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
     if (embed && (step !== 2 || preview)) return;
     setProblem("");
     const answersBody = answersForCheckout(offer.bookingQuestions, answers);
-    const bodyWithoutKey: Omit<ExperienceCheckoutRequest, "clientRequestKey"> & { salesPlanRevision?: number } = {
+    // 販売経路 (#638): the widget says it is embedded, with the framing page's origin when the browser tells it (never a path).
+    const parentOrigin = embed ? embedParentOrigin() : null;
+    const bodyWithoutKey: Omit<ExperienceCheckoutRequest, "clientRequestKey"> & EmbedChannelFields = {
       offerId: offer.id,
       occurrenceDate: date,
       adultCount: adults,
@@ -135,10 +140,11 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       // 流入の印（utm_*）：最初の流入だけをメモリに持ち、Do Not Track なら送らない（lib/booking-attribution.ts）。
       // The widget's default mark (utm_source=provider, utm_medium=embed) goes under what was captured, and never with Do Not Track.
       ...(attributionEnabled ? attributionForCheckout(defaultAttribution) : {}),
+      ...(embed ? { salesChannel: "embed" as const, ...(parentOrigin === null ? {} : { embedOrigin: parentOrigin }) } : {}),
     };
     const signature = JSON.stringify(bodyWithoutKey);
     if (attempt.current?.signature !== signature) attempt.current = { signature, key: createClientRequestKey() };
-    const body: ExperienceCheckoutRequest & { salesPlanRevision?: number } = { ...bodyWithoutKey, clientRequestKey: attempt.current.key };
+    const body: ExperienceCheckoutRequest & EmbedChannelFields = { ...bodyWithoutKey, clientRequestKey: attempt.current.key };
     setSubmitting(true);
     try {
       const result = await api.startCheckout(publication.slug, body);

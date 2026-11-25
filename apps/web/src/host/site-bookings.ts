@@ -71,8 +71,10 @@ export function siteCancellationLines(booking: Pick<HostBooking, "amountYen" | "
 /** A payment under review (確認待ち): it arrived after the hold was released. */
 export const SITE_BOOKING_PAYMENT_REVIEW_TEXT = "仮押さえの期限のあとに支払いが届きました。席は確保されていません";
 export const SITE_BOOKING_LOAD_FAILED_TEXT = "予約を読み込めませんでした。時間をおいて、もう一度お試しください。";
-/** 申込経路 of every booking made here. */
+/** 申込経路 of a booking made on this site's own pages. */
 export const SITE_BOOKING_CHANNEL = "体験サイト";
+/** 申込経路 of a booking made from the widget on the host's own site (#638). The site's address is not shown. */
+export const SITE_BOOKING_EMBED_CHANNEL = "自分のサイト（埋め込み）";
 /** An answer whose question, or choice, the sale terms no longer have: the booking keeps only the answer. */
 const DROPPED_QUESTION = "（削除された質問）";
 const DROPPED_OPTION = "（削除された選択肢）";
@@ -126,7 +128,7 @@ export function siteBooking(stored: HostGuestBooking, ownerFinancial = true): Ho
     childPriceYen: stored.childUnitAmount,
     amountYen: stored.totalAmount,
     status,
-    channel: SITE_BOOKING_CHANNEL,
+    channel: stored.salesChannel === "EMBED" ? SITE_BOOKING_EMBED_CHANNEL : SITE_BOOKING_CHANNEL,
     note: stored.guest?.note ?? "",
     answers: stored.guest?.answers.map(answerOf) ?? [],
     meetingGuide: null,

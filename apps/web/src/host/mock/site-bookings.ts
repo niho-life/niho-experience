@@ -4,7 +4,8 @@ import type { HostGuestBooking } from "@niho-experience/experience-store";
  * 予約 as the experience DB gives the bookings made on this site (#285 slice 8), invented for the preview's
  * `?mock=site-bookings` sign-in: the sample kitchen's Community Dinner and tea time around the preview's day
  * (MOCK_TODAY, 10/21), with NIHO's fee fixed at booking (10 % with support off, 15 % with it on). One is a payment
- * under review, three are cancelled (refunded in full, in part, and still on its way) and one has passed. Nothing
+ * under review, three are cancelled (refunded in full, in part, and still on its way), one has passed and one came from
+ * the booking widget on the host's own site (#638). Nothing
  * here is a real booking, payment or guest; the store's integration tests check the real reads.
  */
 
@@ -30,6 +31,7 @@ function booking({ name, support = false, ...fields }: Fields): HostGuestBooking
     endUtc,
     childCount,
     language: "EN",
+    salesChannel: "SITE",
     guest: { name, phone: null, note: null, answers: [] },
     currency: "JPY",
     totalAmount,
@@ -63,8 +65,8 @@ export const MOCK_SITE_BOOKINGS: readonly HostGuestBooking[] = [
     ...TEA, publicBookingId: "00000000-0000-4000-8000-00000000b102", name: "Kenji Sato", language: "JA", localDate: "2026-10-25", localStartTime: "13:00", adultCount: 2, bookedAtUtc: "2026-10-09T10:00:00.000Z",
     status: "CANCELLED", cancelledAtUtc: "2026-10-20T23:10:00.000Z", cancelledBy: "HOST", cancellationReason: "WEATHER", refundedAmount: 30000,
   }),
-  // NIHO support on (15 %), with a child.
-  booking({ ...DINNER, publicBookingId: "00000000-0000-4000-8000-00000000b103", name: "Noah Park", support: true, localDate: "2026-10-27", localStartTime: "18:00", adultCount: 1, childCount: 1, cancellationPolicy: "FREE_UNTIL_24H", bookedAtUtc: "2026-10-15T08:30:00.000Z" }),
+  // NIHO support on (15 %), with a child, booked from the widget on the host's own site (#638).
+  booking({ ...DINNER, publicBookingId: "00000000-0000-4000-8000-00000000b103", name: "Noah Park", support: true, salesChannel: "EMBED", localDate: "2026-10-27", localStartTime: "18:00", adultCount: 1, childCount: 1, cancellationPolicy: "FREE_UNTIL_24H", bookedAtUtc: "2026-10-15T08:30:00.000Z" }),
   // Support gave back half: Stripe gives back half of NIHO's fee too.
   booking({
     ...DINNER, publicBookingId: "00000000-0000-4000-8000-00000000b104", name: "Maya Cohen", localDate: "2026-10-27", localStartTime: "18:00", adultCount: 1, bookedAtUtc: "2026-10-05T04:00:00.000Z",
