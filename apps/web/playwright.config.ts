@@ -13,7 +13,7 @@ const NIHO_LOGIN_PORT = Number(process.env.E2E_NIHO_LOGIN_PORT ?? 3105);
 // A server with travelers' accounts on (Epic #591, #597): the English log in page and the account page of the preview.
 const TRAVELER_PORT = Number(process.env.E2E_TRAVELER_PORT ?? 3106);
 // The host console and its preview tests run against the second server.
-const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|ota-bookings|sales|messages|session|reviews|settings(?:-navigation)?|support|standalone-translate|pwa)|admin-support)\.spec\.ts/;
+const HOST_CONSOLE_SPEC = /(host-(console|screens|editor|editor-english|bookings|ota-bookings|sales|messages|session|reviews|settings(?:-navigation)?|support|standalone-translate|pwa|embed)|admin-support)\.spec\.ts/;
 const SEPARATE_PREVIEW_SPEC = /(assisted-launch|provider-operations|host-bookings-unified|host-calendar|host-airbnb-google-setup|admin-channel-workspace|write-ui)\.spec\.ts/;
 const ADMIN_READ_SPEC = /admin-http-read\.spec\.ts/;
 const ADMIN_CASE_SPEC = /admin-(support-case|operations|site-bookings|operators|providers)\.spec\.ts/;
@@ -88,7 +88,7 @@ export default defineConfig({
       // SITE_URL is this server's origin: the console's same-origin check compares against it.
       // MOCK_CATALOG=pilot, as in the mock preview deployment: the console's experiences are the
       // pilot listings, so their public experience pages open here too.
-      env: { ...serverEnv, PORT: String(HOST_PORT), HOST_CONSOLE_ENABLED: "true", HOST_PWA_ENABLED: "true", HOST_PUSH_ENABLED: "true", HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED: "true", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", SITE_URL: hostBaseURL, MOCK_CATALOG: "pilot" },
+      env: { ...serverEnv, PORT: String(HOST_PORT), HOST_CONSOLE_ENABLED: "true", HOST_PWA_ENABLED: "true", HOST_PUSH_ENABLED: "true", HOST_SUPPORT_SETTINGS_PREVIEW_ENABLED: "true", ADMIN_SUPPORT_CONSOLE_ENABLED: "true", EXPERIENCE_EMBED_ENABLED: "true", SITE_URL: hostBaseURL, MOCK_CATALOG: "pilot" },
     },
     {
       command: "sh scripts/start-standalone.sh",

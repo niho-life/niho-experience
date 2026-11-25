@@ -10,6 +10,7 @@ import { HostSubHeader } from "@/components/host/HostSubHeader";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody } from "@/components/host/ui";
 import { hostPageContext, loadHostExperienceEditor } from "@/host/data";
+import { experiencePath } from "@/host/home";
 import { config } from "@/lib/config";
 import { HOST_EXPERIENCES_PATH, HOST_SETTINGS_PATH, hostPayoutSettingsPath, withProvider } from "@/lib/host/routes";
 import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
@@ -45,8 +46,8 @@ export default async function HostExperiencePage({ params, searchParams }: { par
   if (config.experienceHostPublicationApiEnabled) {
     // With Experience host accounts the OWNER consents in 設定 › 受取口座 (ADR 0003 slice 3), not on NIHO.
     return config.hostAccountsEnabled
-      ? <HostPublicationWorkspace productId={id} paymentConsentHref={hostPayoutSettingsPath(null)} paymentConsentLabel="受取口座の同意へ" />
-      : <HostPublicationWorkspace productId={id} paymentConsentHref={new URL("/connect/experience-payments", config.nihoWebOrigin).href} />;
+      ? <HostPublicationWorkspace productId={id} paymentConsentHref={hostPayoutSettingsPath(null)} paymentConsentLabel="受取口座の同意へ" embedEnabled={config.embedEnabled} />
+      : <HostPublicationWorkspace productId={id} paymentConsentHref={new URL("/connect/experience-payments", config.nihoWebOrigin).href} embedEnabled={config.embedEnabled} />;
   }
   const context = await hostPageContext(query);
   if (!context) return null;
@@ -73,6 +74,7 @@ export default async function HostExperiencePage({ params, searchParams }: { par
       siteUrl={config.siteUrl}
       backHref={backHref}
       settingsHref={settingsHref}
+      embedHref={config.embedEnabled ? withProvider(`${experiencePath(editor.experience.id)}/embed`, linkProviderId) : null}
     />
   );
 }
