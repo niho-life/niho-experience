@@ -85,9 +85,10 @@ niho-app の公開埋め込み（`specs/initiatives/public-embeds.md`）と同�
 **コード**（iframe と、高さを合わせる短い script）：
 
 ```html
-<iframe id="niho-exp-book" src="https://experience.niho.life/embed/experiences/{slug}/book"
+<iframe src="https://experience.niho.life/embed/experiences/{slug}/book"
   title="Book {title}" loading="lazy" style="width:100%;max-width:520px;height:760px;border:0"></iframe>
-<script>(function(){var f=document.getElementById("niho-exp-book");
+<script>(function(){var f=document.currentScript.previousElementSibling;
+if(!f||f.tagName!=="IFRAME")return;
 window.addEventListener("message",function(e){
   if(e.origin!=="https://experience.niho.life"||e.source!==f.contentWindow)return;
   var d=e.data||{};
@@ -95,6 +96,8 @@ window.addEventListener("message",function(e){
   if(d.type==="niho-experience-embed-top")f.scrollIntoView({block:"start"});
 });})();</script>
 ```
+
+同じページに複数の体験を貼る場合も、それぞれの script は直前の iframe だけに紐付きます。
 
 **URL だけ**：`https://experience.niho.life/embed/experiences/{slug}/book`。URL しか受け付けない埋め込み枠に使う。高さは枠の設定で決まり、ウィジェットは 3 段なのでそのまま使える。
 

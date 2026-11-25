@@ -21,9 +21,10 @@ describe("embed snippet (#638)", () => {
 
   it("writes the code of docs/embed.md, checking messages against this site's origin", () => {
     expect(embedBookSnippet({ siteOrigin: ORIGIN, slug: "kamakura-dinner", title: "Kamakura Dinner" })).toBe([
-      `<iframe id="niho-exp-book" src="${ORIGIN}/embed/experiences/kamakura-dinner/book"`,
+      `<iframe src="${ORIGIN}/embed/experiences/kamakura-dinner/book"`,
       `  title="Book Kamakura Dinner" loading="lazy" style="width:100%;max-width:520px;height:760px;border:0"></iframe>`,
-      `<script>(function(){var f=document.getElementById("niho-exp-book");`,
+      `<script>(function(){var f=document.currentScript.previousElementSibling;`,
+      `if(!f||f.tagName!=="IFRAME")return;`,
       `window.addEventListener("message",function(e){`,
       `  if(e.origin!=="${ORIGIN}"||e.source!==f.contentWindow)return;`,
       `  var d=e.data||{};`,
@@ -31,6 +32,14 @@ describe("embed snippet (#638)", () => {
       `  if(d.type==="niho-experience-embed-top")f.scrollIntoView({block:"start"});`,
       `});})();</script>`,
     ].join("\n"));
+  });
+
+  it("binds each copied script to its own iframe", () => {
+    const snippet = embedBookSnippet({ siteOrigin: ORIGIN, slug: "dinner", title: "Dinner" })!;
+    const copies = `${snippet}\n${snippet}`;
+    expect(copies.match(/<iframe src=/g)).toHaveLength(2);
+    expect(copies.match(/document\.currentScript\.previousElementSibling/g)).toHaveLength(2);
+    expect(copies).not.toContain("niho-exp-book");
   });
 
   it("keeps the title attribute whole whatever the title holds", () => {

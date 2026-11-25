@@ -33,8 +33,9 @@ test("the editor's ページ opens 自分のサイトに貼る, with the widget'
   const code = panel(page, "コード");
   const snippet = code.locator("pre");
   await expect(page.getByRole("button", { name: /予約ウィジェット/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(snippet).toContainText(`<iframe id="niho-exp-book" src="`);
+  await expect(snippet).toContainText(`<iframe src="`);
   await expect(snippet).toContainText(`/embed/experiences/${SLUG}/book"`);
+  await expect(snippet).toContainText("document.currentScript.previousElementSibling");
   await expect(snippet).toContainText(`niho-experience-embed-resize`);
   await expect(code).toContainText("高さは中身に合わせて自動で変わります。");
 
@@ -59,7 +60,7 @@ test("自分のサイトに貼る does not scroll sideways at 360px", async ({ p
   await page.setViewportSize({ width: 360, height: 800 });
   await signIn(page);
   await page.goto(`${DINNER}/embed`);
-  await expect(panel(page, "コード").locator("pre")).toContainText("niho-exp-book");
+  await expect(panel(page, "コード").locator("pre")).toContainText("document.currentScript.previousElementSibling");
   expect(await overflowX(page)).toBeLessThanOrEqual(0);
   await page.getByRole("button", { name: /予約ボタン/ }).click();
   expect(await overflowX(page)).toBeLessThanOrEqual(0);

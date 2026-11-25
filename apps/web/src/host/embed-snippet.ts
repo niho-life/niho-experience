@@ -5,8 +5,6 @@ import { providerBookingLink } from "@/lib/provider-booking-link";
  * published slug only; nothing is issued or stored, and none of it is secret (it is the public page's address).
  */
 
-export const EMBED_FRAME_ID = "niho-exp-book";
-
 /** Escapes a value for an HTML attribute in double quotes (and for text). */
 function attribute(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -33,9 +31,10 @@ export function embedBookSnippet(input: { readonly siteOrigin: string; readonly 
   const origin = siteOriginOf(input.siteOrigin);
   if (!url || !origin) return null;
   return [
-    `<iframe id="${EMBED_FRAME_ID}" src="${attribute(url)}"`,
+    `<iframe src="${attribute(url)}"`,
     `  title="${attribute(`Book ${input.title}`)}" loading="lazy" style="width:100%;max-width:520px;height:760px;border:0"></iframe>`,
-    `<script>(function(){var f=document.getElementById("${EMBED_FRAME_ID}");`,
+    `<script>(function(){var f=document.currentScript.previousElementSibling;`,
+    `if(!f||f.tagName!=="IFRAME")return;`,
     `window.addEventListener("message",function(e){`,
     `  if(e.origin!==${JSON.stringify(origin)}||e.source!==f.contentWindow)return;`,
     `  var d=e.data||{};`,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarMonths, dayState, initialCalendarMonth, monthOf, monthWeeks, type CalendarOccurrence } from "./booking-calendar";
+import { calendarDayLabel, calendarMonths, dayState, initialCalendarMonth, monthOf, monthWeeks, type CalendarOccurrence } from "./booking-calendar";
 
 const at = (date: string, bookable = true, seatsLeft = 4): CalendarOccurrence => ({ date, bookable, seatsLeft, startAt: `${date}T09:00:00Z` });
 
@@ -49,6 +49,11 @@ describe("booking calendar", () => {
     expect(common.at(-1)?.date).toBe("2027-02-28");
     expect(monthOf("2027-02-29")).toBeNull();
     expect(monthOf("2028-02-29")).toBe("2028-02");
+  });
+
+  it("labels English dates without locale-inserted punctuation", () => {
+    expect(calendarDayLabel("2026-12-12")).toBe("Sat 12 Dec");
+    expect(calendarDayLabel("2026-12-12", "ja")).toBe("12月12日(土)");
   });
 
   it("ignores dates that are not calendar days", () => {

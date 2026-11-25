@@ -91,7 +91,10 @@ export function calendarDayDate(date: string): Date {
 
 /** "Sat 5 Dec" / "12月5日(土)": a calendar day, whatever the browser's time zone. */
 export function calendarDayLabel(date: string, locale: "en" | "ja" = "en"): string {
-  return new Intl.DateTimeFormat(locale === "ja" ? "ja-JP" : "en-GB", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" }).format(calendarDayDate(date));
+  const day = calendarDayDate(date);
+  const formatter = new Intl.DateTimeFormat(locale === "ja" ? "ja-JP" : "en-GB", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
+  if (locale === "ja") return formatter.format(day);
+  return formatter.formatToParts(day).filter((part) => part.type === "weekday" || part.type === "day" || part.type === "month").map((part) => part.value).join(" ");
 }
 
 /** "6:00 PM" / "18:00": the start time in Tokyo, as the date options always showed it. */
