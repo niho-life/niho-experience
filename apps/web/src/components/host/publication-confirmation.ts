@@ -35,7 +35,7 @@ export function fingerprintablePublicationManuscript(value: unknown): unknown {
   return Object.fromEntries(Object.entries(record).filter(([key]) => key !== "faq"));
 }
 
-async function fingerprint(value: unknown): Promise<string> {
+export async function publicationManuscriptFingerprint(value: unknown): Promise<string> {
   const bytes = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalPublicationJson(fingerprintablePublicationManuscript(value))));
   return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -53,7 +53,7 @@ export async function confirmPublicationEnglish(readCurrent: () => Manuscripts) 
   if (faqProblem) throw new Error(faqProblem);
   const snapshot = canonicalPublicationJson(manuscripts);
   const [sourceFingerprint, confirmedEnglishFingerprint] = await Promise.all([
-    fingerprint(manuscripts.japanese), fingerprint(manuscripts.english),
+    publicationManuscriptFingerprint(manuscripts.japanese), publicationManuscriptFingerprint(manuscripts.english),
   ]);
   if (canonicalPublicationJson(readCurrent()) !== snapshot) {
     throw new Error("確認中に原稿が変更されました。日英の内容を照合し、もう一度確認してください。");
