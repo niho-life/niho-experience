@@ -267,6 +267,16 @@ describe("v1 portable presentation", () => {
     expect(html).toContain('Spend a few hours with a <span class="squig">neighbor</span>');
   });
 
+  it("lets a consumer replace the hero heading and its class, and widen the body to a node", () => {
+    const journal = { ...home, layout: "journal" as const };
+    const base = renderToStaticMarkup(<HomeViewV1 model={journal} />);
+    expect(renderToStaticMarkup(<HomeViewV1 model={{ ...journal, heroHeading: undefined, heroHeadingClassName: undefined }} />)).toBe(base);
+    const html = renderToStaticMarkup(<HomeViewV1 model={{ ...journal, finder: null, themes: [], heroHeading: <>Synthetic heading<br />second<span className="hand">line</span></>, heroHeadingClassName: "synthetic-h1", heroBody: <span className="synthetic-body">Synthetic body node</span> }} />);
+    expect(html).toContain('<h1 class="synthetic-h1">Synthetic heading<br/>second<span class="hand">line</span></h1>');
+    expect(html).toContain('<span class="synthetic-body">Synthetic body node</span>');
+    expect(html).not.toContain("max-w-[12ch]");
+  });
+
   it("adds a review line to a card only when the consumer supplies one", () => {
     const model = { ...card, href: card.href };
     expect(renderToStaticMarkup(<ExperienceCardV1 card={model} />)).not.toContain("★");
@@ -312,7 +322,8 @@ describe("v1 portable presentation", () => {
 
   it("keeps every English code-owned route on v1", async () => {
     const consumers = {
-      "apps/web/src/app/(site)/page.tsx": ["HomeViewV1"],
+      "apps/web/src/app/(site)/page.tsx": ["HomePageView"],
+      "apps/web/src/components/pages/HomePageView.tsx": ["HomeViewV1"],
       "apps/web/src/app/(site)/experiences/(list)/page.tsx": ["CatalogueViewV1"],
       "apps/web/src/app/(site)/experiences/[slug]/page.tsx": ['ExperiencePageContent({ ...props, locale: "en" })'],
       "apps/web/src/components/pages/ExperiencePageContent.tsx": ["DetailViewV1"],

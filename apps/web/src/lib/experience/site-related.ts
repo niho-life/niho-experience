@@ -27,7 +27,7 @@ export async function relatedSiteExperienceCards(currentSlug: string, limit = 3)
     if (!picked.length) return [];
 
     const legacyCards = await cardsFor(legacy.filter((summary) => picked.some((item) => item.source === "legacy" && item.slug === summary.slug)));
-    const nativeCards = native.filter(({ publication }) => picked.some((item) => item.source === "native" && item.slug === publication.slug)).map(sitePublicationCard);
+    const nativeCards = native.filter(({ publication }) => picked.some((item) => item.source === "native" && item.slug === publication.slug)).map((entry) => sitePublicationCard(entry));
     const nativeWithReviews = nativeCards.length ? withReviewLines(nativeCards, await getReviewSummaries(nativeCards.map((card) => card.slug))) : [];
     const bySlug = new Map([...legacyCards, ...nativeWithReviews].map((card) => [card.slug, card] as const));
     return picked.flatMap((item) => bySlug.get(item.slug) ?? []);

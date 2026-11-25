@@ -44,7 +44,7 @@ export const JA_STATIC_COPY_V1: StaticCopyValuesV1 = {
   "common.imageComingSoon": "画像は準備中です",
   "common.unavailableJa": "このページは現在、日本語でご利用いただけません。英語のページをご利用ください。",
 
-  "home.welcome": "ようこそ",
+  "home.welcome": "鎌倉の人に、会いにいく",
   "home.heroTitle": "鎌倉をつくる人たちと出会う",
   "home.heroBody": "ここに暮らす人たちと、料理をしたり、座ったり、直したり、書いたり。少人数で、数分で予約できて、アカウントも不要です。",
   "home.themes": "テーマ",
@@ -66,7 +66,7 @@ export const JA_STATIC_COPY_V1: StaticCopyValuesV1 = {
   "home.aroundPlaces": "鎌倉周辺の見どころ",
   "home.localEyebrow": "地元の方へ",
   "home.localTitle": "鎌倉の好きなところを、分かち合いませんか",
-  "home.localBody": "NIHOは、地元のホストが体験を準備し、予約を受け付けるお手伝いをします。まずは小さく、ひとつの食卓、ひとつの午後、数人のゲストから。",
+  "home.localBody": "教えていること、案内していることを、体験として載せられます。予約の受付と支払いはこのサイトが引き受けます。",
   "home.learnHosting": "ホストになるには",
   "home.find": "体験を探す",
   "home.when": "いつ",
@@ -126,8 +126,8 @@ export const JA_STATIC_COPY_V1: StaticCopyValuesV1 = {
   "card.privateGuests": "貸切 · {min}〜{max}名",
   "card.upToGuests": "最大{count}名",
   "card.hostTitle": "あなたの体験も、ここに？",
-  "card.hostBody": "鎌倉の好きなところを分かち合いませんか。NIHOは、地元のホストが体験を準備し、予約を受け付けるお手伝いをします。",
-  "card.hostCta": "NIHOでホストになる",
+  "card.hostBody": "鎌倉の好きなところを分かち合いませんか。教えていること、案内していることを、体験として載せられます。",
+  "card.hostCta": "ホストになる",
   "card.priceRich": "{em}{price}{/em} / 大人1名",
   "card.fromPriceRich": "{em}{price}{/em}〜 / 大人1名",
 

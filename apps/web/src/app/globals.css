@@ -107,6 +107,14 @@
     letter-spacing: 0;
     line-height: 1.35;
   }
+  /*
+   * 日本語の見出しと手書き風の行は、文節の切れ目で折り返す（「グ／ループ」のように語の途中で折れない、#658）。
+   * 対応していないブラウザ（Safari）では今までどおりの折り返し。長すぎる文節は break-word で折る。
+   */
+  html[lang="ja"] :is(h1, h2, h3, .hand):not(:lang(en)) {
+    word-break: auto-phrase;
+    overflow-wrap: break-word;
+  }
 
   html {
     -webkit-text-size-adjust: 100%;

@@ -1,12 +1,59 @@
 import { providerNameFor } from "./provider-name";
 import type { SitePublicExperience, SitePublicOffer } from "./site-publications";
 import type { CardModel } from "@/lib/card-model";
+import type { StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
 import { formatDuration, formatYen } from "@/lib/format";
 import { formatClock, scheduleSummary } from "@/lib/schedule";
 import { groupSizeLabel, initialOf, shortLanguageNote } from "@/lib/card-model";
+import { jaGuideLine, jaYen } from "@/lib/ja-catalog";
 
-/** A card made only from Experience's public manuscript and sale projection. */
-export function sitePublicationCard(item: SitePublicExperience): CardModel {
+/** The Japanese card's extras: the people on 街の人 this experience is met through (#585), and the Japanese interface copy. */
+export type SiteCardOptions = {
+  readonly people?: readonly { readonly name: string; readonly photo?: { readonly src: string } }[];
+  readonly copy?: StaticCopyAccessorV1;
+};
+
+function japaneseSiteCard(item: SitePublicExperience, { people = [], copy }: SiteCardOptions): CardModel | null {
+  const { publication, saleTerms } = item;
+  const japanese = publication.japanese;
+  const offers = saleTerms?.offers ?? [];
+  if (!japanese || offers.length === 0) return null;
+  // The same decisions as the Japanese list's card (`jaCardOf`): the people it is met through, else the provider's public name.
+  const providerName = publication.providerPublicName?.trim() || null;
+  const person = publication.providerKind === "PERSON";
+  const withLabel = jaGuideLine(people.map((entry) => entry.name)) ?? (providerName ? (person ? `${providerName}さんと` : `${providerName}が案内`) : publication.sellerDisplayName);
+  const faceName = people[0]?.name.trim() || providerName || publication.sellerDisplayName;
+  const faceUrl = people[0]?.photo?.src ?? publication.providerPhoto?.src ?? null;
+  const durations = offers.map((offer) => offer.durationMinutes).sort((a, b) => a - b);
+  const prices = offers.map((offer) => offer.pricing.adultPriceYen);
+  const photo = publication.photos[0];
+  const language = japanese.language.trim();
+  return {
+    slug: publication.slug,
+    title: japanese.title,
+    lead: japanese.lead,
+    cover: photo ? { url: photo.src, alt: photo.altJa || `${japanese.title}の写真` } : null,
+    withLabel,
+    face: { name: faceName, initial: initialOf(faceName), image: faceUrl ? { url: faceUrl, alt: "" } : null },
+    groupLabel: groupSizeLabel(offers.map((offer) => ({ capacity: offer.capacity, maxPartySize: offer.maxPartySize, minimumParticipants: offer.minimumParticipants })), "ja", copy),
+    durationLabel: durations[0] === durations.at(-1) ? formatDuration(durations[0]!, "ja") : `${formatDuration(durations[0]!, "ja")}–${formatDuration(durations.at(-1)!, "ja")}`,
+    language: language ? { short: language, full: language } : null,
+    scheduleLabel: scheduleSummary(offers.map((offer) => ({ weekdays: [...offer.weekdays], startTime: offer.startTime })), "ja"),
+    // 日本語サイトの料金は半角の ¥（一覧・詳細と同じ `jaYen`）。Intl の ja-JP は全角の ￥ を返す。
+    priceLabel: Math.min(...prices) === 0 ? "無料" : jaYen(Math.min(...prices)),
+    priceIsFrom: new Set(prices).size > 1,
+    offers: offers.map((offer) => ({ id: offer.id, minimumParticipants: offer.minimumParticipants, maxPartySize: offer.maxPartySize })),
+  };
+}
+
+/**
+ * A card made only from Experience's public manuscript and sale projection. `"ja"` builds the Japanese card from the Japanese
+ * manuscript (null when the product has no Japanese text or no sale); the English card is unchanged.
+ */
+export function sitePublicationCard(item: SitePublicExperience, locale?: "en"): CardModel;
+export function sitePublicationCard(item: SitePublicExperience, locale: "ja", options?: SiteCardOptions): CardModel | null;
+export function sitePublicationCard(item: SitePublicExperience, locale: "en" | "ja" = "en", options: SiteCardOptions = {}): CardModel | null {
+  if (locale === "ja") return japaneseSiteCard(item, options);
   const { publication, saleTerms, sellerDisclosure } = item;
   const offers = saleTerms?.offers ?? [];
   const durations = offers.map((offer) => offer.durationMinutes).sort((a, b) => a - b);

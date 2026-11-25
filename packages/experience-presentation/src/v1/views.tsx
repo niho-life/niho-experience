@@ -10,8 +10,12 @@ export type HomeViewModelV1 = Readonly<{
   hero: DisplayImageV1;
   /** Optional extra layers inside the hero box, right after the hero image and under the gradient. */
   heroMedia?: ReactNode;
+  /** Optional replacement for the hero heading's children (`home.heroHeadingRich`). */
+  heroHeading?: ReactNode;
+  /** Optional replacement for the hero heading's class. */
+  heroHeadingClassName?: string;
   /** Optional replacement for the hero body text (`home.heroBody`). */
-  heroBody?: string;
+  heroBody?: ReactNode;
   /** Optional action rendered right below the hero body text. */
   heroAction?: ReactNode;
   finder: ReactNode;
@@ -58,7 +62,7 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
       <div aria-hidden className="absolute inset-0 bg-[linear-gradient(180deg,rgb(0_0_0/0)_32%,rgb(0_0_0/0.64)_100%)] lg:bg-[linear-gradient(90deg,rgb(0_0_0/0.42),rgb(0_0_0/0)_62%),linear-gradient(180deg,rgb(0_0_0/0)_40%,rgb(0_0_0/0.5)_100%)]" />
       <div className={openHero ? "absolute inset-x-0 bottom-10 z-[2] text-white lg:bottom-14" : "absolute inset-x-0 bottom-16 z-[2] text-white lg:bottom-[116px]"}>
 <div className="container-page">
-<h1 className={openHero ? "max-w-[12ch] text-[2.625rem] leading-[1.02] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:max-w-[20ch] lg:text-[4.875rem]" : "max-w-[12ch] text-[2.625rem] leading-[1.02] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:max-w-[13ch] lg:text-[4.875rem]"}><RichMessageV1 segments={copy.rich("home.heroHeadingRich")} emphasisClassName="hand inline-block -rotate-3 text-[1.22em] text-leaf" />
+<h1 className={model.heroHeadingClassName ?? (openHero ? "max-w-[12ch] text-[2.625rem] leading-[1.02] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:max-w-[20ch] lg:text-[4.875rem]" : "max-w-[12ch] text-[2.625rem] leading-[1.02] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:max-w-[13ch] lg:text-[4.875rem]")}>{model.heroHeading ?? <RichMessageV1 segments={copy.rich("home.heroHeadingRich")} emphasisClassName="hand inline-block -rotate-3 text-[1.22em] text-leaf" />}
 </h1>
 <p className="mt-3.5 max-w-[30rem] text-[1.0625rem] text-white/90 lg:text-[1.1875rem]">{model.heroBody ?? copy.text("home.heroBody")}</p>{model.heroAction ? <div className="mt-5">{model.heroAction}</div> : null}
 </div>
