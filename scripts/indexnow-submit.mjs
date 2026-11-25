@@ -3,7 +3,7 @@
 //
 //   node scripts/indexnow-submit.mjs --dry-run                  # sitemap の全 URL。送らずに中身だけ表示
 //   node scripts/indexnow-submit.mjs --since 2026-11-01         # sitemap の lastmod がこの日以降の URL だけ
-//   node scripts/indexnow-submit.mjs https://experience.niho.life/experiences/some-slug
+//   node scripts/indexnow-submit.mjs https://travel.niho.life/experiences/some-slug
 //
 // 鍵はサイトの /indexnow-key.txt から読む（公開値。検索公開が止まっている間は 404 なので、送信もしない）。
 
@@ -12,7 +12,7 @@ const KEY_PATH = "/indexnow-key.txt";
 const MAX_URLS = 10_000;
 
 function parseArgs(argv) {
-  const options = { site: "https://experience.niho.life", since: null, dryRun: false, urls: [] };
+  const options = { site: "https://travel.niho.life", since: null, dryRun: false, urls: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--dry-run") options.dryRun = true;

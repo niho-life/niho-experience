@@ -19,7 +19,7 @@ describe("the app's manifest (#177)", () => {
     const manifest = hostWebManifest();
     expect(manifest).toMatchObject({
       id: "/host/",
-      name: "NIHO 体験ホスト",
+      name: "NIHO Travel ホスト",
       short_name: "体験ホスト",
       lang: "ja",
       dir: "ltr",

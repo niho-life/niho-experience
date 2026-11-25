@@ -287,7 +287,7 @@ export function bookingLinkEmail(email: BookingLinkEmail, options: { readonly si
   const experience = oneLine(email.experienceTitle);
   return mail(`Your booking link: ${experience}, ${calendarDate(email.localDate, DATE_SHORT)} ${email.localStartTime}`, [
     { kind: "p", text: `Hi ${oneLine(email.guestName)},` },
-    { kind: "p", text: "Here is the link to your booking that was asked for on NIHO Experience." },
+    { kind: "p", text: "Here is the link to your booking that was asked for on NIHO Travel." },
     {
       kind: "facts",
       rows: [

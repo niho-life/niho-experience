@@ -1,6 +1,6 @@
 # 検索公開の方針（画面側）
 
-[#12](https://github.com/niho-life/niho-experience/issues/12) のうち、サイト基盤担当が実装した部分と、商品・集客担当（担当3）と決める部分をまとめる。公開ドメインは未定のため、URLは `SITE_URL` からの相対で考える。
+[#12](https://github.com/niho-life/niho-experience/issues/12) のうち、サイト基盤担当が実装した部分と、商品・集客担当（担当3）と決める部分をまとめる。公開ドメインは `https://travel.niho.life`。以下のURLは `SITE_URL` からの相対で示す。旧ホストの301と検索登録は [ホスト名切替手順](travel-domain-cutover.md) に従う。
 
 ## URL
 
@@ -58,7 +58,7 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 
 - `SITE_INDEXING=allow` **かつ** `EXPERIENCE_API_MODE=http` の時だけindexを許可する。それ以外（プレビュー・合成データ）は全ページ `noindex, nofollow`、robots.txtは全体を拒否、sitemapは空。
 - 値はリクエスト時に読むので、同じイメージのまま環境変数だけで切り替えられる。
-- 本番はオーナー決定（2026-11-07）で、販売開始（#15）より先に有効にした。`deploy-production.yml` が `SITE_INDEXING=allow` と `BOOKINGS_ENABLED=false` を設定し、候補と昇格の前に robots.txt（全体拒否が無い・sitemapの告知・非公開パスの除外）、sitemap、トップに `noindex` が無いことを確かめる。止める時は `block` に戻すPRを配備するか、直前の revision へ traffic を戻す。2026-11-07 の公開は、#410 の切替前の版のまま環境変数だけを変えた例外の revision で行った（[production-deploy.md](production-deploy.md#個別ゲートと切戻し)）。
+- 本番はオーナー決定（2026-11-07）で、販売開始（#15）より先に有効にした。`deploy-production.yml` は `SITE_INDEXING=allow` と承認済みの `BOOKINGS_ENABLED` を設定する。候補は robots.txt の全面拒否、`X-Robots-Tag: noindex`、sitemap 内の本番URLを確かめる。昇格後の本番URLでは robots.txt の sitemap 告知と非公開パス除外、トップの canonical と検索公開を確認する。止める時は `block` に戻すPRを配備するか、直前の revision へ traffic を戻す。2026-11-07 の公開は、#410 の切替前の版のまま環境変数だけを変えた例外の revision で行った（[production-deploy.md](production-deploy.md#個別ゲートと切戻し)）。
 - 検索公開はサイト全体のスイッチで、掲載中の体験はすべて索引の対象になる。NIHO 側の掲載同意（`EXPERIENCE_SITE_LISTING_CONSENT_VERSION`）は掲載だけが対象で、検索登録は別に同意を得る決まり（NIHO の体験サイト連携 runbook §3）。2026-11-07 時点の掲載は NIHO kamakura 拠点の体験だけで、検索登録はコンテンツの所有者であるオーナーの決定で同意済みとする。外部提供者の掲載を承認する時は、承認の前に検索登録の同意を得る。
 - 体験詳細の canonical は API（今は NIHO の公開API）が返す正規URLに従う。NIHO 側の `EXPERIENCE_SITE_PUBLIC_ORIGIN` が未設定の間は NIHO の企画ページ（`noindex`）を指すため、体験詳細はこのサイトの URL では索引に載らない想定。載せるには NIHO 側の切替が要る（[production-deploy.md](production-deploy.md#niho-の実apiとの整合)）。
 
@@ -89,7 +89,7 @@ index しない（`noindex, follow`）。ページの中身は、NIHOのヘル�
 
 ## 登録先（Search Console・Bing Webmaster Tools）
 
-- Search Console：ドメインプロパティ `experience.niho.life` を 2026-10-26 に追加した。親の `niho.life` のドメインプロパティを DNS で確認済みのため、所有権は自動で確認された。担当者を足す時は最小権限（閲覧だけなら「制限付き」）。
+- Search Console には 2026-10-26 に旧ホスト `experience.niho.life` のドメインプロパティを追加した。#653 では新ホスト `travel.niho.life` の所有権を確認し、新 sitemap を送信する。親の `niho.life` のドメインプロパティを DNS で確認済みのため、所有権は自動で確認された。担当者を足す時は最小権限（閲覧だけなら「制限付き」）。
 - Bing Webmaster Tools：オーナーのアカウントで登録済み（2026-10-26）。
 - 検索公開の配備の後に行うこと：両方で sitemap（`/sitemap.xml`）を送信、トップ・一覧・体験詳細 1 件の URL 検査、`node scripts/indexnow-submit.mjs` の実行。予約・`/host/*`・`/admin` が索引に無いことを確認する。
 - 月次で見るもの：Search Console の「生成 AI 機能」レポートと、Bing の AI Performance レポート（計測の Issue で扱う）。数値は公開 Issue に貼らない。
@@ -104,7 +104,7 @@ Server Componentで描画し、JavaScriptなしで次が読める（E2Eの `seo.
 
 ## 構造化データ
 
-- トップ：`Organization`（名称・掲載名の `alternateName`「NIHO Experience, Kamakura」・URLだけ。ロゴは承認済み素材が出てから。各媒体のプロフィールの URL は表記とアカウントが決まってから `sameAs` に足す。[#152](https://github.com/niho-life/niho-experience/issues/152)、[launch-kit.md](growth/launch-kit.md) の「名前の表記」）と `WebSite`。
+- トップ：`Organization`（名称・掲載名の `alternateName`「NIHO Travel, Kamakura」・URLだけ。ロゴは承認済み素材が出てから。各媒体のプロフィールの URL は表記とアカウントが決まってから `sameAs` に足す。[#152](https://github.com/niho-life/niho-experience/issues/152)、[launch-kit.md](growth/launch-kit.md) の「名前の表記」）と `WebSite`。
 - 体験詳細（英語・日本語とも同じ条件）：`BreadcrumbList`、HTTP APIの実データの時だけ `TouristTrip` と `Product`。どちらも題名・要約・URL・公開写真を持ち、`TouristTrip` は言語・提供者、`Product` は提供者を `brand` に持つ。`TouristTrip` はGoogleのリッチリザルトの対象外なので、星や料金の表示を狙うのは `Product`。予約受付中なら画面に表示する最安の大人料金と販売者を `Offer` に含める。日本語版は自分のURL（`/ja/experiences/{slug}`）と `inLanguage: ja` で出し、レビューは日本語版に表示していないので出さない。
 - SSR詳細応答に残席がないため、構造化データに `availability` を入れない。残席はブラウザから取得し、予約時に再確認する。サイト全体の予約停止中も `Offer` を出さない。
 - トップ・一覧・提供者案内・詳細のcanonicalとOG URLを揃え、queryを引き継がない。詳細の正規URLはAPIが正本。未承認のOG画像は出さず、Twitterカードは画像不要の `summary` とする。

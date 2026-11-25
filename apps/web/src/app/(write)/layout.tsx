@@ -5,7 +5,7 @@ import type { Metadata, Viewport } from "next";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
-  title: { default: "記事を書く | NIHO Experience", template: "%s | NIHO Experience" },
+  title: { default: "記事を書く | NIHO Travel", template: "%s | NIHO Travel" },
   referrer: "no-referrer",
   robots: { index: false, follow: false, noarchive: true, nocache: true },
 };

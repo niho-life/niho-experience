@@ -13,8 +13,8 @@ set -euo pipefail
   exit 1
 }
 SERVICE_URL="${STG_HOST_SERVICE_URL:-}"
-[[ "$SERVICE_URL" == https://experience-stg.niho.life ]] || {
-  echo 'Set STG_HOST_SERVICE_URL to https://experience-stg.niho.life (the trusted edge origin).' >&2
+[[ "$SERVICE_URL" == https://travel-stg.niho.life ]] || {
+  echo 'Set STG_HOST_SERVICE_URL to https://travel-stg.niho.life (the trusted edge origin).' >&2
   exit 1
 }
 PROJECT=niho-app-stg
@@ -51,7 +51,7 @@ retry_binding() {
 state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
 jq -e --arg url "$SERVICE_URL" --arg runtime "$RUNTIME" '
   . as $service
-  | ($url == "https://experience-stg.niho.life")
+  | ($url == "https://travel-stg.niho.life")
     and $service.metadata.name == "niho-experience-host-stg"
     and $service.metadata.annotations["run.googleapis.com/ingress"] == "internal-and-cloud-load-balancing"
     and $service.spec.template.spec.serviceAccountName == $runtime

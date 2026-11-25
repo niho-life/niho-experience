@@ -19,7 +19,7 @@ import {
 } from "@/lib/ga4-consent";
 import { createGtagQueue, type GtagCommand } from "@/lib/ga4-queue";
 
-const EXPERIENCE_ORIGIN = "https://experience.niho.life";
+const EXPERIENCE_ORIGIN = "https://travel.niho.life";
 const GA4_SCRIPT_ID = "niho-experience-ga4-tracker";
 const GA4_CONSENT_CHANGE_EVENT = "niho:ga4-consent-change";
 const MEASUREMENT_ID = /^G-[A-Za-z0-9]{4,24}$/;
@@ -77,7 +77,7 @@ function ga4DisabledFlag(measurementId: string): string {
 function clearGa4Cookies(): void {
   for (const name of ga4CookieNames(document.cookie)) {
     document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax; Secure`;
-    document.cookie = `${name}=; Max-Age=0; Path=/; Domain=experience.niho.life; SameSite=Lax; Secure`;
+    document.cookie = `${name}=; Max-Age=0; Path=/; Domain=${GA4_COOKIE_SETTINGS.cookie_domain}; SameSite=Lax; Secure`;
   }
 }
 

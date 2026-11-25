@@ -156,7 +156,7 @@ test("the public booking page keeps one screen: a date from the calendar, then c
   await page.route("https://checkout.stripe.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Synthetic Stripe</title>" }));
   const submit = widget.getByRole("button", { name: "Continue to secure checkout" });
   await expect(submit).toBeDisabled();
-  await expect(widget.getByText("Powered by NIHO Experience")).toHaveCount(0);
+  await expect(widget.getByText("Powered by NIHO Travel")).toHaveCount(0);
   await widget.getByRole("button", { name: "Sat 5 Dec, 6 places left" }).click();
   await widget.getByLabel("Full name").fill(NAME);
   await widget.getByLabel("Email").fill(EMAIL);

@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   config: {
     apiMode: "http" as "http" | "mock",
-    siteUrl: "https://experience.niho.life",
+    siteUrl: "https://travel.niho.life",
     indexingAllowed: true,
     nihoWebOrigin: "https://niho.life",
   },
-  headers: { host: "experience.niho.life", "x-forwarded-proto": "https", dnt: "" },
+  headers: { host: "travel.niho.life", "x-forwarded-proto": "https", dnt: "" },
 }));
 
 vi.mock("server-only", () => ({}));
@@ -18,11 +18,11 @@ import { getPublicSiteAnalyticsSettings } from "./public-site-analytics";
 
 const acceptedSettings = {
   siteId: "experience",
-  siteOrigin: "https://experience.niho.life",
+  siteOrigin: "https://travel.niho.life",
   analytics: {
     runtimeGate: {
       mode: "production-origin-only",
-      approvedOrigin: "https://experience.niho.life",
+      approvedOrigin: "https://travel.niho.life",
       previewCollection: false,
     },
     ga4: { measurementId: "G-ABCD1234" },
@@ -42,12 +42,12 @@ describe("public site analytics settings", () => {
   beforeEach(() => {
     Object.assign(state.config, {
       apiMode: "http",
-      siteUrl: "https://experience.niho.life",
+      siteUrl: "https://travel.niho.life",
       indexingAllowed: true,
       nihoWebOrigin: "https://niho.life",
     });
     Object.assign(state.headers, {
-      host: "experience.niho.life",
+      host: "travel.niho.life",
       "x-forwarded-proto": "https",
       dnt: "",
     });
@@ -71,7 +71,7 @@ describe("public site analytics settings", () => {
     await expect(getPublicSiteAnalyticsSettings()).resolves.toBeNull();
     expect(fetch).not.toHaveBeenCalled();
 
-    state.headers.host = "experience.niho.life";
+    state.headers.host = "travel.niho.life";
     state.config.apiMode = "mock";
     await expect(getPublicSiteAnalyticsSettings()).resolves.toBeNull();
     expect(fetch).not.toHaveBeenCalled();

@@ -962,7 +962,7 @@ describe("sign-in links of Experience host accounts (ADR 0003)", () => {
     expect(logins.listPendingLoginRequests.mock.invocationCallOrder[0]).toBeLessThan(s.questions.claimReplyDeliveries.mock.invocationCallOrder[0]!);
     expect(s.sent.map((mail) => mail.to)).toEqual(["host1@example.test", "host3@example.test"]);
     const [mail] = s.sent;
-    expect(mail!.subject).toBe("NIHO 体験ホストへのログイン");
+    expect(mail!.subject).toBe("NIHO Travel ホストへのログイン");
     expect(mail!.text).toContain(`${SITE}/host/auth/open#t=${send(1).token}`);
     expect(mail!.html).toContain(`${SITE}/host/auth/open#t=${send(1).token}`);
     expect(mail!.text).toContain("11/1 09:15 まで（15 分間）、1 回だけ使えます。");
@@ -1020,7 +1020,7 @@ describe("invitation links of host accounts (Epic #591, #596)", () => {
     expect(invitations.issueInvitationLink.mock.calls.map(([input]) => input)).toEqual(ids.map((invitationId) => ({ invitationId, nowUtc: NOW.toISOString() })));
     expect(s.sent.map((mail) => mail.to)).toEqual(["invited1@example.test", "invited3@example.test"]);
     const [mail] = s.sent;
-    expect(mail!.subject).toBe("NIHO 体験ホストへのご招待");
+    expect(mail!.subject).toBe("NIHO Travel ホストへのご招待");
     expect(mail!.text).toContain(`${SITE}/host/auth/invite#t=${send(1).token}`);
     expect(mail!.html).toContain(`${SITE}/host/auth/invite#t=${send(1).token}`);
     expect(mail!.text).toContain("1 回だけ使えます");

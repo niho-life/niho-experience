@@ -15,11 +15,11 @@ export const LOCAL_JAPANESE_RELEASE_ID = "experience-local-ja-v1";
 
 export const JA_STATIC_COPY_V1: StaticCopyValuesV1 = {
   "meta.siteTitle": JA_HOME_SEO_TITLE,
-  "meta.titleTemplate": "{title} | NIHO Experience",
+  "meta.titleTemplate": "{title} | NIHO Travel",
   "meta.description": JA_HOME_SEO_DESCRIPTION,
 
   "chrome.skipToContent": "本文へ移動",
-  "chrome.brand": "NIHO Experience",
+  "chrome.brand": "NIHO Travel",
   "chrome.main": "メイン",
   "chrome.allExperiences": "すべての体験",
   "chrome.host": "NIHOでホストになる",
@@ -30,7 +30,7 @@ export const JA_STATIC_COPY_V1: StaticCopyValuesV1 = {
   "chrome.footerExperiences": "すべての体験",
   "chrome.footerHost": "体験を提供する",
   "chrome.footerBookingHelp": "予約のヘルプ",
-  "chrome.brandRich": "NIHO {em}Experience{/em}",
+  "chrome.brandRich": "NIHO {em}Travel{/em}",
   "chrome.experiences": "体験",
   "chrome.footerNavigation": "フッター",
 

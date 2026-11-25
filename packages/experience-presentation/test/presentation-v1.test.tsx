@@ -307,7 +307,7 @@ describe("v1 portable presentation", () => {
     const detail = <DetailViewV1 model={detailModel} />;
     const booking = <BookingPageViewV1 backHref={card.href} backLabel={card.title} panel={<BookingPreviewV1 model={bookingPreview} />} />;
     const routes = renderToStaticMarkup(<PresentationRootV1><SiteHeaderV1 /><HomeViewV1 model={home} /><CatalogueViewV1 content={<div>Catalogue controller</div>} />{detail}{booking}<HelpViewV1 model={{ primaryHref: "mailto:test@example.invalid", primaryLabelKey: "help.email", emailHref: "mailto:test@example.invalid", emailLabel: "test@example.invalid" }} /><HostViewV1 model={{ video, steps: [{ title: "Plan", body: "Synthetic step" }], you: ["Host"], niho: ["Help"], signup: <div>Signup controller</div>, signupOpen: false }} /><SiteFooterV1 /></PresentationRootV1>);
-    for (const marker of ["Meet the people who make Kamakura", "Experiences hosted by", "Slow down", "Small on purpose", "Simple, in yen", "Kamakura is small", "Experiences in Kamakura", "What you&#x27;ll do", "Show all 2 photos", "data-booking-screen=\"selection\"", "data-booking-screen=\"checkout\"", "What name should the host use?", "Select accessibility preferences", "Booking terms:", "Synthetic dates controller", "Booking help", "Share what you love with travelers", "NIHO Experience"]) expect(routes).toContain(marker);
+    for (const marker of ["Meet the people who make Kamakura", "Experiences hosted by", "Slow down", "Small on purpose", "Simple, in yen", "Kamakura is small", "Experiences in Kamakura", "What you&#x27;ll do", "Show all 2 photos", "data-booking-screen=\"selection\"", "data-booking-screen=\"checkout\"", "What name should the host use?", "Select accessibility preferences", "Booking terms:", "Synthetic dates controller", "Booking help", "Share what you love with travelers", "NIHO Travel"]) expect(routes).toContain(marker);
   });
 
   it("keeps every English code-owned route on v1", async () => {
@@ -377,7 +377,7 @@ describe("v1 portable presentation", () => {
     expect(() => createStaticCopyV1({ ...defaultStaticCopyValuesV1(), "home.heroHeadingRich": "{em}家{/em}{em}home{/em}" })).toThrow(/tokens/);
     expect(() => createStaticCopyV1({ ...defaultStaticCopyValuesV1(), "home.heroHeadingRich": "鎌倉を{em}家" })).toThrow(/tokens|order/);
     expect(() => createStaticCopyV1({ ...defaultStaticCopyValuesV1(), "home.heroHeadingRich": "{strong}家{/strong}" })).toThrow(/marker|tokens/);
-    expect(() => createStaticCopyV1({ ...defaultStaticCopyValuesV1(), "meta.titleTemplate": "NIHO Experience" })).toThrow(/tokens/);
+    expect(() => createStaticCopyV1({ ...defaultStaticCopyValuesV1(), "meta.titleTemplate": "NIHO Travel" })).toThrow(/tokens/);
     expect(() => createStaticCopyV1({ ...defaultStaticCopyValuesV1(), "meta.titleTemplate": "{title} · {title}" })).toThrow(/tokens/);
     const incomplete = { ...defaultStaticCopyValuesV1() } as Record<string, string>;
     delete incomplete["booking.fullName"];

@@ -26,7 +26,7 @@ import type {
 
 export const MOCK_LISTING_CONSENT: ExperienceProviderPageListingConsent = {
   version: "sample-listing-consent-1",
-  text: "（サンプル）この体験ページを NIHO Experience に掲載することに同意します。この文言は合成データです。",
+  text: "（サンプル）この体験ページを NIHO Travel に掲載することに同意します。この文言は合成データです。",
 };
 
 /** mock の写真の URL の host（実在しない）。画面はこれを検出して手元の仮素材に置き換える。 */

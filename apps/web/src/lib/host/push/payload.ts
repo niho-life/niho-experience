@@ -228,7 +228,7 @@ function pushMessage(input: { title: string; body: string; url: string; tag: str
   };
 }
 
-/** `origin` is this site's (https://experience.niho.life): with it a declarative message names absolute addresses. */
+/** `origin` is this site's (https://travel.niho.life): with it a declarative message names absolute addresses. */
 export function hostPushPayload(event: HostPushEvent, origin?: string): string {
   const tag = event.tag.trim();
   if (!tag || tag.length > TAG_MAX) throw new Error("A host push tag must be 1-64 characters");
@@ -248,7 +248,7 @@ export function hostPushPayload(event: HostPushEvent, origin?: string): string {
 
 /** 設定 › この端末's テスト通知: the same shape, nothing about a booking. */
 export function hostPushTestPayload(origin?: string): string {
-  return JSON.stringify(pushMessage({ title: "テスト通知", body: "この端末に NIHO 体験ホストの通知が届きます。", url: "/host/settings#settings-device", tag: "host-push-test" }, origin));
+  return JSON.stringify(pushMessage({ title: "テスト通知", body: "この端末に NIHO Travel ホストの通知が届きます。", url: "/host/settings#settings-device", tag: "host-push-test" }, origin));
 }
 
 /** Time-critical kinds go out at once; a summary is useless once it has passed. */

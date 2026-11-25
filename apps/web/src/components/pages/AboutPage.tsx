@@ -6,11 +6,11 @@ import { ABOUT_EXTERIOR, ABOUT_HERO, ABOUT_PILLARS } from "@/lib/site-media";
 const copy = EN_STATIC_COPY_V1;
 const STEPS = [["cal", "home.pickDateTitle", "home.pickDateBody"], ["card", "home.payTitle", "home.payBody"], ["mail", "home.meetTitle", "home.meetBody"]] as const;
 
-/** `/about` (#645): who NIHO Experience is made by. English only. NIHO's own photos, no animation. */
+/** `/about` (#645): who NIHO Travel is made by. English only. NIHO's own photos, no animation. */
 export function AboutPage() {
   const { Image, Link } = PRESENTATION_PRIMITIVES_V1;
   return <>
-    <section className="relative" aria-label="About NIHO Experience">
+    <section className="relative" aria-label="About NIHO Travel">
       <div className="relative h-[380px] overflow-hidden bg-[#222] lg:h-[520px]">
         <Image src={ABOUT_HERO.src} alt={ABOUT_HERO.alt} priority sizes="100vw" className="absolute inset-0 h-full w-full object-cover" style={{ objectPosition: ABOUT_HERO.position }} />
         <div aria-hidden className="absolute inset-0 bg-[linear-gradient(180deg,rgb(0_0_0/0)_30%,rgb(0_0_0/0.62)_100%)]" />
@@ -24,7 +24,7 @@ export function AboutPage() {
     </section>
 
     <section className="container-page pt-12 lg:pt-20">
-      <p className="max-w-[46rem] font-display text-[1.5rem] leading-snug lg:text-[2.125rem]">NIHO is a living room for Kamakura, two minutes from the station, where people of the town gather. NIHO Experience opens that room to travelers, with small experiences hosted by people who live here.</p>
+      <p className="max-w-[46rem] font-display text-[1.5rem] leading-snug lg:text-[2.125rem]">NIHO is a living room for Kamakura, two minutes from the station, where people of the town gather. NIHO Travel opens that room to travelers, with small experiences hosted by people who live here.</p>
     </section>
 
     <section className="container-page pt-12 lg:pt-20" aria-label="What we care about">
@@ -61,7 +61,7 @@ export function AboutPage() {
         <div>
           <p className="eyebrow">who runs it</p>
           <h2 id="about-who" className="mt-2 text-[1.875rem] lg:text-[2.625rem]">NIHO, the town&rsquo;s living room</h2>
-          <p className="mt-3 text-ink-soft">NIHO Experience is made by NIHO, the town&rsquo;s living room, two minutes from Kamakura Station.</p>
+          <p className="mt-3 text-ink-soft">NIHO Travel is made by NIHO, the town&rsquo;s living room, two minutes from Kamakura Station.</p>
           <p className="mt-4"><Link href="/help" className="link-leaf font-bold">Help and contact</Link></p>
         </div>
       </div>

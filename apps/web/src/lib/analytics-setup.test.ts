@@ -14,7 +14,7 @@ let dnt = "0";
 beforeEach(() => {
   dnt = "0";
   vi.stubGlobal("navigator", { get doNotTrack() { return dnt; } });
-  vi.stubGlobal("window", { location: { origin: "https://experience.niho.life", href: "https://experience.niho.life/experiences?utm_source=niho&q=private" } });
+  vi.stubGlobal("window", { location: { origin: "https://travel.niho.life", href: "https://travel.niho.life/experiences?utm_source=niho&q=private" } });
   vi.stubGlobal("document", {
     getElementById: () => null,
     createElement: () => ({ dataset: {}, addEventListener: (_event: string, callback: () => void) => { load = callback; } }),
@@ -26,7 +26,7 @@ afterEach(() => { effects.cleanups.splice(0).forEach((cleanup) => cleanup()); se
 it("queued events keep their original sanitized route when the script loads on another page", () => {
   AnalyticsSetup({ mode: "umami", websiteId });
   track("list_view", { theme: "all" });
-  window.location.href = "https://experience.niho.life/experiences/dinner/book?token=private";
+  window.location.href = "https://travel.niho.life/experiences/dinner/book?token=private";
   const sent: unknown[] = [];
   window.umami = { track: vi.fn((build?: unknown) => {
     expect(typeof build).toBe("function");
@@ -35,7 +35,7 @@ it("queued events keep their original sanitized route when the script loads on a
     return Promise.resolve();
   }) };
   load();
-  expect(sent).toEqual([{ url: "/experiences?utm_source=niho", hostname: "experience.niho.life", title: "Experiences", website: websiteId, name: "list_view", data: { theme: "all" } }]);
+  expect(sent).toEqual([{ url: "/experiences?utm_source=niho", hostname: "travel.niho.life", title: "Experiences", website: websiteId, name: "list_view", data: { theme: "all" } }]);
 });
 
 it("rechecks DNT at send time and discards queued events when DNT changes", () => {

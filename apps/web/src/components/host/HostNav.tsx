@@ -252,7 +252,7 @@ export function HostSidebar({ account, providers, nihoAppUrl, writePath, writerN
     <header onClickCapture={captureNavigation} className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-line bg-canvas px-3 pt-[18px] pb-3.5 md:flex">
       <p className="px-2.5 pt-1 pb-4">
         <Link href={writerNavigation && providers.length === 0 ? writePath! : withProvider(current?.kind === "OPERATOR" ? "/host/calendar" : HOST_HOME_PATH, providerId)} className="font-display text-[1.1875rem] leading-[1.1] font-medium tracking-[-0.01em] whitespace-nowrap">
-          NIHO Experience
+          NIHO Travel
         </Link>
       </p>
       {providers.length > 0 ? (
@@ -397,7 +397,7 @@ export function HostMobileHeader(props: HostChromeProps) {
         ) : (
           <p className="min-w-0 flex-1 truncate">
             <Link href={withProvider(HOST_HOME_PATH, providerId)} className="font-display text-[1.0625rem] leading-none font-medium tracking-[-0.01em]">
-              NIHO Experience
+              NIHO Travel
             </Link>
           </p>
         )}

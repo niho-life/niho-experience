@@ -225,7 +225,7 @@ describe("guide selection", () => {
 
 describe("Article structured data", () => {
   it("says only what the page shows, with the site's publisher and no unlicensed image", () => {
-    const data = guideArticleJsonLd(sample, SITE, "NIHO Experience");
+    const data = guideArticleJsonLd(sample, SITE, "NIHO Travel");
     const url = `${SITE}/guides/${sample.slug}`;
     expect(data).toEqual({
       "@context": "https://schema.org",
@@ -239,18 +239,18 @@ describe("Article structured data", () => {
       author: { "@type": "Person", name: sample.author.name, jobTitle: sample.author.role, description: sample.author.bio },
       datePublished: sample.publishedAt,
       dateModified: sample.updatedAt,
-      publisher: { "@type": "Organization", "@id": `${SITE}/#organization`, name: "NIHO Experience", url: `${SITE}/` },
+      publisher: { "@type": "Organization", "@id": `${SITE}/#organization`, name: "NIHO Travel", url: `${SITE}/` },
     });
     expect(shareableGuideImage(sample, SITE)).toBeNull();
   });
 
   it("adds the hero only when it is licensed for sharing", () => {
     const licensed = { ...sample, hero: { ...sample.hero!, licensed: true } };
-    expect(guideArticleJsonLd(licensed, SITE, "NIHO Experience").image).toEqual([`${SITE}/placeholders/dinner.svg`]);
+    expect(guideArticleJsonLd(licensed, SITE, "NIHO Travel").image).toEqual([`${SITE}/placeholders/dinner.svg`]);
     const external = { ...sample, hero: { ...sample.hero!, src: "https://images.example.com/a.jpg", licensed: true } };
-    expect(guideArticleJsonLd(external, SITE, "NIHO Experience").image).toEqual(["https://images.example.com/a.jpg"]);
+    expect(guideArticleJsonLd(external, SITE, "NIHO Travel").image).toEqual(["https://images.example.com/a.jpg"]);
     const none = { ...sample, hero: undefined };
-    expect(guideArticleJsonLd(none, SITE, "NIHO Experience")).not.toHaveProperty("image");
+    expect(guideArticleJsonLd(none, SITE, "NIHO Travel")).not.toHaveProperty("image");
   });
 });
 
@@ -333,22 +333,22 @@ describe("related guides by CMS category", () => {
 describe("Article structured data for what the page shows", () => {
   it("uses the category as the section before the pillar, and leaves it out with neither", () => {
     const categorized = { ...sample, category: { slug: "walks", label: "Coastal walks", displayOrder: 1 } };
-    expect(guideArticleJsonLd(categorized, SITE, "NIHO Experience").articleSection).toBe("Coastal walks");
-    expect(guideArticleJsonLd({ ...sample, pillar: undefined }, SITE, "NIHO Experience")).not.toHaveProperty("articleSection");
+    expect(guideArticleJsonLd(categorized, SITE, "NIHO Travel").articleSection).toBe("Coastal walks");
+    expect(guideArticleJsonLd({ ...sample, pillar: undefined }, SITE, "NIHO Travel")).not.toHaveProperty("articleSection");
   });
 
   it("describes a lead-less guide by its summary, and the author by the role and introduction the page shows", () => {
     const leadless = { ...sample, description: "", body: "## A\n\nThe opening paragraph.", author: { name: "Sample Writer", bio: "Writes about the sea." } };
-    const data = guideArticleJsonLd(leadless, SITE, "NIHO Experience");
+    const data = guideArticleJsonLd(leadless, SITE, "NIHO Travel");
     expect(data.description).toBe("The opening paragraph.");
     expect(data.author).toEqual({ "@type": "Person", name: "Sample Writer", description: "Writes about the sea." });
-    expect(guideArticleJsonLd({ ...leadless, body: "## Only a heading" }, SITE, "NIHO Experience")).not.toHaveProperty("description");
+    expect(guideArticleJsonLd({ ...leadless, body: "## Only a heading" }, SITE, "NIHO Travel")).not.toHaveProperty("description");
   });
 
   it("mentions the experiences shown as booking cards, and none when none are shown", () => {
-    const data = guideArticleJsonLd(sample, SITE, "NIHO Experience", [{ slug: "evening-pottery-session", name: "Evening pottery session" }]);
+    const data = guideArticleJsonLd(sample, SITE, "NIHO Travel", [{ slug: "evening-pottery-session", name: "Evening pottery session" }]);
     expect(data.mentions).toEqual([{ "@type": "TouristTrip", name: "Evening pottery session", url: `${SITE}/experiences/evening-pottery-session` }]);
-    expect(guideArticleJsonLd(sample, SITE, "NIHO Experience", [])).not.toHaveProperty("mentions");
+    expect(guideArticleJsonLd(sample, SITE, "NIHO Travel", [])).not.toHaveProperty("mentions");
   });
 });
 

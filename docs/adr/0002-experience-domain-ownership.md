@@ -6,7 +6,7 @@
 
 ## 決定
 
-体験コンテンツ、開催枠、予約、体験取引の状態・返金記録、体験提供者の権限は niho-experience が所有する。OWNER本人が `experience.niho.life/host` で商品を作り、公開・編集・停止・再開する。Google Calendar は予定の表示と新規受付停止の入力であり、体験枠の正本ではない。確定予約は、提供者が選んだ専用 Google Calendar に書き込める。旧 `niho.life/experiences/provider` は利用者がいないためデータ移行せず、Experienceの商品販売・予約経路から撤去する。
+体験コンテンツ、開催枠、予約、体験取引の状態・返金記録、体験提供者の権限は niho-experience が所有する。OWNER本人が `travel.niho.life/host` で商品を作り、公開・編集・停止・再開する。Google Calendar は予定の表示と新規受付停止の入力であり、体験枠の正本ではない。確定予約は、提供者が選んだ専用 Google Calendar に書き込める。旧 `niho.life/experiences/provider` は利用者がいないためデータ移行せず、Experienceの商品販売・予約経路から撤去する。
 
 2026-11-04 追記（#330 / #369）: 提供者と体験の事前承認は廃止し、必要条件を満たした OWNER が同意して自分で公開・停止・再開する。通常の保存で掲載停止・再審査へ戻さない。公開版、公開条件の検証、運営停止はExperienceが所有する。NIHOは共通アカウントの本人と、その本人が使うConnect口座の状態だけを提供する。旧体験販売の利用者はいないため、商品移行・予約移行・二重販売切替を実装しない。公開版が無い商品は販売できず、Checkoutは有効なExperience公開版だけを使う。販売者と受取先は同一で、コミュニティディナーはいずれもPanasonic。「NIHOkamakura」はConnect口座の表示名である。詳細は [本人による商品作成と公開](../host-publication.md)。
 

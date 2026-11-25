@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
     guestMailEnabled: true,
     guestMailSmtpHost: "smtp.example.com",
     guestMailSmtpPort: 587,
-    guestMailFrom: { name: "NIHO Experiences", address: "experiences@example.com" } as { name: string; address: string } | null,
+    guestMailFrom: { name: "NIHO Travel", address: "experiences@example.com" } as { name: string; address: string } | null,
     guestMailReplyTo: { name: "NIHO support", address: "support@example.com" } as { name: string; address: string } | null,
   },
   createTransport: vi.fn(),
@@ -18,7 +18,7 @@ vi.mock("nodemailer", () => ({ createTransport: mocks.createTransport }));
 
 import { classifyMailFailure, createMailer, smtpMailer, smtpTransportOptions, type MailTransport } from "./transport";
 
-const mailboxes = { from: { name: "NIHO Experiences", address: "experiences@example.com" }, replyTo: { name: "", address: "support@example.com" } };
+const mailboxes = { from: { name: "NIHO Travel", address: "experiences@example.com" }, replyTo: { name: "", address: "support@example.com" } };
 const message = { to: "guest@example.com", subject: "Sample subject", text: "Sample text\n", html: "<p>Sample</p>" };
 const smtpError = (fields: Record<string, unknown>) => Object.assign(new Error("Recipient address rejected: guest@example.com"), fields);
 

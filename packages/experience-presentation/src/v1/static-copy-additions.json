@@ -67,7 +67,7 @@
     "booking.previewUnexpected": { "default": "The preview checkout returned an unexpected address.", "placeholders": [] },
     "booking.checkoutUnexpected": { "default": "Checkout could not be started. Please try again.", "placeholders": [] },
     "booking.rateLimitedCount": { "default": "Too many attempts. Try again in {seconds} {noun}.", "placeholders": ["seconds", "noun"] },
-    "chrome.brandRich": { "default": "NIHO {em}Experience{/em}", "placeholders": [], "markers": ["em"] },
+    "chrome.brandRich": { "default": "NIHO {em}Travel{/em}", "placeholders": [], "markers": ["em"] },
     "chrome.experiences": { "default": "Experiences", "placeholders": [] },
     "chrome.footerNavigation": { "default": "Footer", "placeholders": [] },
     "detail.breadcrumbNavigation": { "default": "Breadcrumb", "placeholders": [] },

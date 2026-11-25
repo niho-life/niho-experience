@@ -9,7 +9,7 @@ export const sampleFirstEvening: Guide = {
   title: "A first evening in Kamakura with local hosts (sample guide)",
   description: "A sample guide for previews: how an evening with local hosts works, what to bring and how to plan the trip back. Everything in it is invented.",
   pillar: "evenings",
-  author: { name: "Mika Sato (sample)", role: "Sample editor, NIHO Experience (invented for previews)", bio: "Mika is an invented editor used only to demonstrate the guide layout in mock previews." },
+  author: { name: "Mika Sato (sample)", role: "Sample editor, NIHO Travel (invented for previews)", bio: "Mika is an invented editor used only to demonstrate the guide layout in mock previews." },
   publishedAt: "2026-10-20",
   updatedAt: "2026-10-24",
   checkedAt: "2026-10-24",

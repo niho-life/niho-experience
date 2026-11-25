@@ -180,7 +180,7 @@ export async function refreshConnection(deps: NihoAuthDeps, refreshToken: string
   return { ok: true, value: { accessToken: body.accessToken, accessTokenExpiresAt, refreshToken: body.refreshToken, connectionExpiresAt } };
 }
 
-/** Admin-only legacy exchange; the NIHO Experience host uses the scoped Web access token above. */
+/** Admin-only legacy exchange; the NIHO Travel host uses the scoped Web access token above. */
 export async function signInWithCustomToken(deps: NihoAuthDeps, customToken: string, now: number): Promise<NihoAuthResult<IdTokenResult>> {
   if (!deps.firebaseWebApiKey) return { ok: false, reason: "unavailable" };
   const url = `${FIREBASE_SIGN_IN_URL}?key=${encodeURIComponent(deps.firebaseWebApiKey)}`;

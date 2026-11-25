@@ -67,7 +67,7 @@ export function bookingLinkEmailJa(email: BookingLinkEmail, options: { readonly 
   const experience = oneLine(email.experienceTitle);
   return japanMail(`ご予約の確認リンク：${experience}（${when(email.localDate, email.localStartTime)}）`, [
     greeting(email.guestName),
-    { kind: "p", text: "NIHO Experience でご依頼いただいた、ご予約の確認リンクをお送りします。" },
+    { kind: "p", text: "NIHO Travel でご依頼いただいた、ご予約の確認リンクをお送りします。" },
     {
       kind: "facts",
       rows: [

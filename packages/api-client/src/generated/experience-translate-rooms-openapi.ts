@@ -234,7 +234,7 @@ export type paths = {
         put?: never;
         /**
          * 体験の予約から通訳ルームを作り、host / guestの招待codeとURLを返す
-         * @description 体験サイトのホスト画面（experience.niho.life/host）から、確定済みの予約に対して1部屋を作る。名義は体験の提供者。
+         * @description 体験サイトのホスト画面（`/host`）から、確定済みの予約に対して1部屋を作る。名義は体験の提供者。
          *     言語は予約の`languageSnapshot`（EN → guest en / host ja、JA → guest ja / host en）。招待codeはこの応答にだけ平文で載り、
          *     DBにはhashだけ残る。同じ予約に有効な部屋があるときは409（`TRANSLATE_ROOM_EXISTS`・detailsに`roomId`）で、終了してから作り直す。
          *     通訳が未設定の環境では503。

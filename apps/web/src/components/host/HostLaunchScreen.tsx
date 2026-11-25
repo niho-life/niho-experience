@@ -32,7 +32,7 @@ export function HostLaunchScreen({ hasSession, emailLogin = false, nihoLogin = f
     <main id="main" className="mx-auto w-full max-w-xl px-4 py-16">
       {/* eslint-disable-next-line @next/next/no-img-element -- a fixed 192px icon from public/ */}
       <img src="/host-app/icon-192.png" alt="" width={64} height={64} className="size-16 rounded-2xl" />
-      <h1 className={`${HOST_HEADING} mt-6 text-2xl`}>NIHO 体験ホスト</h1>
+      <h1 className={`${HOST_HEADING} mt-6 text-2xl`}>NIHO Travel ホスト</h1>
       <p className="mt-3 text-ink-soft">{emailLogin || nihoLogin ? "この端末でログインすると" : "この端末で NIHO にログインすると"}、体験の予約やメッセージをここで確かめられます。</p>
       {/* Plain links: login is a route handler, and /host belongs to the traveler site's root. */}
       <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">

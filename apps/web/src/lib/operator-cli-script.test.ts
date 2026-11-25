@@ -19,8 +19,8 @@ describe("parseArgs", () => {
 
 describe("environment, AI kind and token", () => {
   it("defaults to stg, names prd only on request, and sends the token nowhere but the two sites (or this machine)", () => {
-    expect(resolveEnv({}, {})).toEqual({ name: "stg", origin: "https://experience-stg.niho.life" });
-    expect(resolveEnv({ env: "prd" }, {})).toEqual({ name: "prd", origin: "https://experience.niho.life" });
+    expect(resolveEnv({}, {})).toEqual({ name: "stg", origin: "https://travel-stg.niho.life" });
+    expect(resolveEnv({ env: "prd" }, {})).toEqual({ name: "prd", origin: "https://travel.niho.life" });
     expect(() => resolveEnv({ env: "production" }, {})).toThrow(/stg or prd/);
     expect(resolveEnv({}, { NIHO_OPS_BASE_URL: "http://127.0.0.1:3000" }).origin).toBe("http://127.0.0.1:3000");
     for (const bad of ["https://evil.example", "http://localhost.evil.example", "http://127.0.0.1.evil.example", "https://127.0.0.1"]) expect(() => resolveEnv({}, { NIHO_OPS_BASE_URL: bad }), bad).toThrow(/NIHO_OPS_BASE_URL/);
@@ -41,13 +41,13 @@ describe("environment, AI kind and token", () => {
 });
 
 describe("api", () => {
-  const make = (fetchImpl: typeof fetch, token = GOOD) => createApi({ env: { name: "stg", origin: "https://experience-stg.niho.life" }, aiKind: "claude-code", environment: {}, tokenSource: () => token, fetch: fetchImpl, now: () => NOW });
+  const make = (fetchImpl: typeof fetch, token = GOOD) => createApi({ env: { name: "stg", origin: "https://travel-stg.niho.life" }, aiKind: "claude-code", environment: {}, tokenSource: () => token, fetch: fetchImpl, now: () => NOW });
   it("sends the Bearer token, the AI kind and, for a change, the operation ID, and parses JSON", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ saved: 1 }), { status: 200 }));
     const api = make(fetchImpl as never);
     expect(await api.send("PUT", "/admin/api/product-classifications", { items: [] }, "op-20261114-abcdef")).toEqual({ status: 200, body: { saved: 1 } });
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://experience-stg.niho.life/admin/api/product-classifications");
+    expect(url).toBe("https://travel-stg.niho.life/admin/api/product-classifications");
     expect(init.headers).toMatchObject({ authorization: `Bearer ${GOOD}`, "x-niho-operator-ai": "claude-code", "x-niho-operation-id": "op-20261114-abcdef", "content-type": "application/json" });
     await api.get("/admin/api/people");
     expect((fetchImpl.mock.calls[1] as unknown as [string, RequestInit])[1].headers).not.toHaveProperty("x-niho-operation-id");

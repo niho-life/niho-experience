@@ -4,10 +4,10 @@
   "sourceRepository": "niho-app",
   "sourceIssue": "niho-coliving/niho-app#19672",
   "sourceCommit": "94badd30579a38320d914124814147cee2813b16",
-  "sha256": "db5323e556752445ec5702ebecd16cda96883052fd881ca92c14f2e47aff0fe5",
+  "sha256": "12c2dbf4c1583197c9986258c19281e840d467b9ee3e203744bae7b3eeb3fccf",
   "status": "agreed-not-deployed",
   "deploymentStatus": "not-deployed",
-  "deploymentNote": "Experience Host Accountの予約付き通訳をサービス認証で接続する。固定SHAでNIHOを先行配備し、stgでOWNER・予約所属・有効招待・失効を受け入れる。",
+  "deploymentNote": "Experience Host Accountの予約付き通訳をサービス認証で接続する。固定SHAでNIHOを先行配備し、stgでOWNER・予約所属・有効招待・失効を受け入れる。#653 では公開ホストの説明を相対パスにした。sourceCommit は元のexport、sha256 はこのリポジトリのファイルを指す。",
   "openapiFile": "experience-translate-rooms-api.openapi.json",
   "sha256File": "experience-translate-rooms-api.openapi.json.sha256",
   "scope": [

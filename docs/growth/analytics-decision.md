@@ -77,9 +77,9 @@ v1の規模（少数の体験、30日の検証）では、無料枠と6か月の
 
 ## サイト登録と実装
 
-- Umami Cloudのサイト名は `NIHO Experience`、登録ドメインは `experience.niho.life`。
+- Umami Cloud のサイト名と登録ドメインは、#653 の切替で `NIHO Travel`、`travel.niho.life` に更新する。Website ID を引き継ぐ。
 - Website IDは `f7a8b3ed-ef71-4a35-969e-955b88f01902`。公開IDのためコードへ直書きせず、`UMAMI_WEBSITE_ID` の実行時環境変数で渡す。
-- `UMAMI_WEBSITE_ID` が設定され、APIモードが `http` で、`SITE_URL` が `https://experience.niho.life` と完全一致する場合だけトラッカーを読み込む。preview（mock）と他ホストでは送信しない。
+- `UMAMI_WEBSITE_ID` が設定され、APIモードが `http` で、`SITE_URL` が `https://travel.niho.life` と完全一致する場合だけトラッカーを読み込む。preview（mock）と他ホストでは送信しない。
 - 現時点で本番サービス・本番配備workflowは未作成。将来、本番サービスを作る際にこのIDを本番サービスだけへ設定し、プライバシーポリシーへ計測内容を追記してから送信を有効にする。previewには設定しない。
 - ブラウザの `Do Not Track` を尊重し、URLは許可したUTMだけ残す。予約入力URL・予約結果URLのqueryや予約結果識別子、URL hash、リファラーのpath/queryは送らない。
 - オーナー決定（2026-10-20）：checkoutでは `utm_source` / `utm_medium` / `utm_campaign` / `utm_content` だけを予約行へ任意送信できる。Do Not Track が有効なら送らない。サイト内の移動中はメモリだけで値を保持し、cookie・session/local storage・独自訪問者IDを使わない。NIHO側は予約データの既存保持期間と閲覧権限を継承し、確定予約のUTM別集約にだけ使う。Umami visitorとは結合しない。

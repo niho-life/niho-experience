@@ -99,7 +99,7 @@ describe("日本語サイトのヘッダーとフッター（#562、#612）", ()
   it("フッターは運営の一文と、2列のリンク（企業・学校の方へ・ホストになる・ホストログイン・English・プライバシー）", () => {
     const html = render({});
     expect(JAPANESE_SITE_DESCRIPTION).toBe("運営：NIHO kamakura（鎌倉駅西口から歩いて2分）");
-    expect(html).toContain("NIHO Experience 鎌倉");
+    expect(html).toContain("NIHO Travel 鎌倉");
     expect(html).toContain(JAPANESE_SITE_DESCRIPTION);
     // 以前の説明文は残さない
     expect(html).not.toContain("会いにいくための予約窓口です");

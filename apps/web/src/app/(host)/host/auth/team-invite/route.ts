@@ -56,7 +56,7 @@ function invitePage(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<title>メンバーへの招待 | NIHO Experience ホスト</title>
+<title>メンバーへの招待 | NIHO Travel ホスト</title>
 <style>
 ${NIHO_SANS_FONT_FACES}
 body{margin:0;font-family:${NIHO_SANS_FAMILY};background:#ffffff;color:#1c1c1a;line-height:1.6}

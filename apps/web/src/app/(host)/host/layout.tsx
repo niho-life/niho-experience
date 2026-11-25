@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
  */
 export async function generateMetadata(): Promise<Metadata> {
   const base: Metadata = {
-    title: { default: "ホスト | NIHO Experience", template: "%s | NIHO Experience ホスト" },
+    title: { default: "ホスト | NIHO Travel", template: "%s | NIHO Travel ホスト" },
     robots: { index: false, follow: false },
   };
   if (!config.hostPwaEnabled) return base;

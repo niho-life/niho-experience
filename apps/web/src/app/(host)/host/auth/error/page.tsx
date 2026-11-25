@@ -50,7 +50,7 @@ const TEAM_INVITE_RETRY: Partial<Record<LoginErrorReason, { href: string; label:
 };
 
 /** NIHO's public support address (the help page uses it too). No account or NIHO user ID is put in the link. */
-const SUPPORT_HREF = "mailto:info@niho.life?subject=NIHO%20Experience%20%E3%83%9B%E3%82%B9%E3%83%88";
+const SUPPORT_HREF = "mailto:info@niho.life?subject=NIHO%20Travel%20%E3%83%9B%E3%82%B9%E3%83%88";
 
 export default async function HostLoginErrorPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   requireHostConsole();

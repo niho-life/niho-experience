@@ -149,7 +149,7 @@ export function AnalyticsSetup({ mode, websiteId }: { mode: "debug" | "off" | "u
       script.crossOrigin = "anonymous";
       script.dataset.websiteId = websiteId;
       script.dataset.hostUrl = "https://gateway.umami.is";
-      script.dataset.domains = "experience.niho.life";
+      script.dataset.domains = "travel.niho.life";
       // Disable automatic click collection; this app sends pageviews and
       // explicitly allowlisted funnel events only.
       script.dataset.autoTrack = "false";

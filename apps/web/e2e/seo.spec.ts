@@ -54,7 +54,7 @@ for (const [crawler, userAgent] of Object.entries(CRAWLERS)) {
 test("the home page names the organization and the website for crawlers", async ({ request }) => {
   const html = await (await request.get("/")).text();
   expect(html).toContain('"@type":"Organization"');
-  expect(html).toContain('"alternateName":"NIHO Experience, Kamakura"');
+  expect(html).toContain('"alternateName":"NIHO Travel, Kamakura"');
   expect(html).toContain('"@type":"WebSite"');
   expect(html).not.toContain('"logo"');
 });
@@ -100,7 +100,7 @@ test("list links reach every experience without JavaScript", async ({ request })
     expect(html).toContain(`href="/experiences/${slug}"`);
   }
   expect(html).toContain('<link rel="canonical" href="http://localhost:3000/experiences"');
-  expect(html).toContain("<title>Kamakura Experiences with Local Hosts | NIHO Experience</title>");
+  expect(html).toContain("<title>Kamakura Experiences with Local Hosts | NIHO Travel</title>");
   expect(html).toContain("Small-group experiences in Kamakura hosted by people who live here.");
 });
 

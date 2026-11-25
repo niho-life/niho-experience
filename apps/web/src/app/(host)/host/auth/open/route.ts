@@ -54,7 +54,7 @@ function linkPage(destination: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<title>ログイン | NIHO Experience ホスト</title>
+<title>ログイン | NIHO Travel ホスト</title>
 <style>
 ${NIHO_SANS_FONT_FACES}
 body{margin:0;font-family:${NIHO_SANS_FAMILY};background:#ffffff;color:#1c1c1a;line-height:1.6}
@@ -66,7 +66,7 @@ button{min-height:3rem;padding:0 1.5rem;border:0;border-radius:999px;background:
 </head>
 <body>
 <main id="main">
-<h1>NIHO 体験ホストにログイン</h1>
+<h1>NIHO Travel ホストにログイン</h1>
 <p id="status" role="status">ログインしています…</p>
 <button id="retry" type="button" hidden>もう一度試す</button>
 <noscript><p>このページは JavaScript でログインします。ブラウザの設定で JavaScript を有効にして、もう一度リンクを開いてください。</p></noscript>

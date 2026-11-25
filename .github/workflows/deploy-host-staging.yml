@@ -133,7 +133,7 @@ jobs:
           test "$CORE_READY" = true
           test "$DEPLOYER" = experience-host-stg-deployer@niho-app-stg.iam.gserviceaccount.com
           [[ "$WIF" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/experience-host-staging/providers/github$ ]]
-          test "$SITE_URL" = https://experience-stg.niho.life
+          test "$SITE_URL" = https://travel-stg.niho.life
           [[ "$SESSION_REF" =~ ^experience-stg-host-session:[1-9][0-9]*$ ]]
           [[ "$FIREBASE_REF" =~ ^experience-stg-niho-firebase-web-api-key:[1-9][0-9]*$ ]]
           [[ "$GOOGLE_ID_REF" =~ ^experience-stg-google-client-id:[1-9][0-9]*$ ]]
@@ -346,7 +346,7 @@ jobs:
             echo "url=$url"
           } >> "$GITHUB_OUTPUT"
           sales="sales disabled"
-          if [ "$GUEST_BOOKING" = true ]; then sales="Stripe test bookings open"; fi
+            if [ "$GUEST_BOOKING" = true ]; then sales="Stripe test bookings enabled for the stable origin after promotion"; fi
           {
             echo "Reviewed SHA: $SHA"
             echo "Revision: $REVISION"
@@ -365,6 +365,12 @@ jobs:
           done
           robots="$(curl -fsS --max-time 30 "${URL}/robots.txt")"
           grep -qF 'Disallow: /' <<< "$robots"
+          headers="$(curl -fsSI --max-time 30 "${URL}/" | tr -d '\r')"
+          grep -qiE '^X-Robots-Tag:.*noindex' <<< "$headers"
+          case "$(curl -sS --max-time 30 -o /dev/null -w '%{http_code}' -X POST "${URL}/.well-known/niho-candidate-write-probe")" in
+            403|405) ;;
+            *) exit 1 ;;
+          esac
           host_page="$(curl -fsS --max-time 30 "${URL}/host")"
           grep -qF 'href="/host/auth/login"' <<< "$host_page"
           # Authentication/Google acceptance uses the stable origin only, after promotion.

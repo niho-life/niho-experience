@@ -2,7 +2,7 @@
 
 ## 方針の変更（2026-11-07、#476）
 
-オーナー判断で、記事は experience.niho.life の `/write` で書き、正本は Experience DB に戻す。editor.niho.life から Experience への公開は止める。体験の OWNER は NIHO のライター権限なしで書ける。OWNER 以外のライターは NIHO のライター権限と記事連携を使う。決定の全体は [ADR 0002 ガイド記事](adr/0002-guide-content.md)の「2026-11-07」を正とする。
+オーナー判断で、記事は travel.niho.life の `/write` で書き、正本は Experience DB に戻す。editor.niho.life から Experience への公開は止める。体験の OWNER は NIHO のライター権限なしで書ける。OWNER 以外のライターは NIHO のライター権限と記事連携を使う。決定の全体は [ADR 0002 ガイド記事](adr/0002-guide-content.md)の「2026-11-07」を正とする。
 
 Store の書込みは #477、`/write` の画面と入口は #478 で追加済み。#479 で公開元をExperience DBへ切り替える配備境界と旧静的記事の移行手順を確定した。#480 では旧Editor公開API・プレビュー・関連設定を撤去し、保存済みDBデータは保持する。#481 でNIHOの現在writer権限と記事連携をS2Sで接続し、非OWNER writerも本人作成の記事だけを扱える。
 

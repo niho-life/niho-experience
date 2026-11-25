@@ -66,7 +66,7 @@ export function ga4ConsentDefaults(): Ga4ConsentDefault {
 
 /** The GA4 cookie is site scoped and expires after 60 days without sliding renewal. */
 export const GA4_COOKIE_SETTINGS = {
-  cookie_domain: "experience.niho.life",
+  cookie_domain: "travel.niho.life",
   cookie_expires: GA4_COOKIE_EXPIRES_SECONDS,
   cookie_path: "/",
   cookie_prefix: GA4_COOKIE_PREFIX,

@@ -128,7 +128,7 @@ export function AdminSidebar({ sections, actorName, accountKind, unreadCount }: 
     <header className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-line bg-canvas px-3 pt-[18px] pb-3.5 md:flex">
       <p className="-mr-2 flex items-center gap-1.5 pt-1 pr-0 pb-4 pl-2.5">
         <Link href={homeOf(sections)} className="font-display text-[1.1875rem] leading-[1.1] font-medium tracking-[-0.01em] whitespace-nowrap">
-          NIHO Experience
+          NIHO Travel
         </Link>
         <span className={SCOPE_PILL}>管理</span>
       </p>
@@ -170,7 +170,7 @@ export function AdminMobileHeader({ sections, actorName, accountKind }: Omit<Adm
       <div className="flex h-[52px] items-center gap-2.5 pr-2 pl-4">
         <p className="flex min-w-0 flex-1 items-center gap-1.5">
           <Link href={homeOf(sections)} className="truncate font-display text-[1.0625rem] leading-none font-medium tracking-[-0.01em]">
-            NIHO Experience
+            NIHO Travel
           </Link>
           <span className={SCOPE_PILL}>管理</span>
         </p>

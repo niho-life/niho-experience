@@ -7,7 +7,7 @@ import { getJapaneseCopy } from "@/lib/localized-content";
 import { japaneseStaticMetadata } from "@/lib/locale-metadata";
 
 const supportEmail = "info@niho.life";
-const emailHref = `mailto:${supportEmail}?subject=NIHO%20Experience`;
+const emailHref = `mailto:${supportEmail}?subject=NIHO%20Travel`;
 
 export async function generateMetadata(): Promise<Metadata> {
   try { return await japaneseStaticMetadata("help"); }

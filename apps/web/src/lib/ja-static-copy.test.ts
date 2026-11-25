@@ -28,7 +28,7 @@ describe("the site's own Japanese interface copy (#59)", () => {
       expect(value, key).toBe(value.trim());
       expect(value.length, key).toBeLessThanOrEqual(2000);
     }
-    expect(localJapaneseCopy().values["meta.titleTemplate"]).toBe("{title} | NIHO Experience");
+    expect(localJapaneseCopy().values["meta.titleTemplate"]).toBe("{title} | NIHO Travel");
   });
 
   it("fills placeholders and {em} markers like the English copy does", () => {

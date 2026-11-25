@@ -57,7 +57,7 @@ export function HostNotificationEmailConfirm() {
   return (
     <main id="main" className="mx-auto grid min-h-dvh w-full max-w-xl place-items-center px-4 py-10">
       <section className={`${HOST_SURFACE} w-full p-5 sm:p-7`} aria-labelledby="notification-email-title" aria-busy={view.kind === "reading" || view.kind === "confirming"}>
-        <p className="text-xs font-extrabold tracking-[0.08em] text-muted">NIHO EXPERIENCE</p>
+        <p className="text-xs font-extrabold tracking-[0.08em] text-muted">NIHO TRAVEL</p>
         <h1 id="notification-email-title" className="mt-2 font-display text-2xl font-medium">通知の宛先の確認</h1>
         {view.kind === "reading" ? <p role="status" className="mt-4 text-ink-soft">確認しています…</p> : null}
         {view.kind === "ready" || view.kind === "confirming" ? (

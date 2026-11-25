@@ -21,7 +21,7 @@ for (const [crawler, userAgent] of Object.entries(CRAWLERS)) {
     const headEnd = html.indexOf("</head>");
     expect(headEnd).toBeGreaterThan(-1);
     const head = html.slice(0, headEnd);
-    expect(head).toContain(`<title>${title} | NIHO Experience</title>`);
+    expect(head).toContain(`<title>${title} | NIHO Travel</title>`);
     expect(head).toContain('<meta name="description" content="A sample guide for previews: how an evening with local hosts works');
     expect(head).toContain(`<link rel="canonical" href="http://localhost:3000${article}"`);
     expect(head).toMatch(/<meta name="robots" content="noindex, nofollow"/);
@@ -31,7 +31,7 @@ for (const [crawler, userAgent] of Object.entries(CRAWLERS)) {
     const body = html.slice(headEnd).replaceAll("<!-- -->", "");
     expect(body).toMatch(new RegExp(`<h1[^>]*>${title.replace(/[()]/g, "\\$&")}</h1>`));
     expect(body).toContain("Mika Sato (sample)");
-    expect(body).toContain("Sample editor, NIHO Experience (invented for previews)");
+    expect(body).toContain("Sample editor, NIHO Travel (invented for previews)");
     // React may separate adjacent text with an empty comment; crawlers read it as one line of text.
     expect(body).toMatch(/Updated <time dateTime="2026-10-24">24 Oct 2026<\/time>/i);
     expect(body).toContain("5 min read");
@@ -83,7 +83,7 @@ test("the experience page links back to the guides about it", async ({ request }
 
 test("the guides list has its own title, description and canonical, and links every guide", async ({ request }) => {
   const html = await (await request.get("/guides?utm_source=sample")).text();
-  expect(html).toContain("<title>Kamakura, from people who live here | NIHO Experience</title>");
+  expect(html).toContain("<title>Kamakura, from people who live here | NIHO Travel</title>");
   expect(html).toContain('<meta name="description" content="Short, first-hand guides by our hosts.');
   expect(html).toContain('<link rel="canonical" href="http://localhost:3000/guides"');
   expect(html).toMatch(/<h1[^>]*>Kamakura, from people who live here<\/h1>/);

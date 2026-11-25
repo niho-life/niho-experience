@@ -4,7 +4,7 @@ import Script from "next/script";
 import type { Metadata, Viewport } from "next";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: { default: "管理 | NIHO Experience", template: "%s | NIHO Experience 管理" }, robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: { default: "管理 | NIHO Travel", template: "%s | NIHO Travel 管理" }, robots: { index: false, follow: false } };
 export const viewport: Viewport = { themeColor: "#ffffff", width: "device-width", initialScale: 1 };
 
 export default function AdminRootLayout({ children }: { children: React.ReactNode }) {

@@ -1,11 +1,11 @@
 export declare const STATIC_COPY_SCHEMA_VERSION_V1: 2;
 export declare const STATIC_COPY_REGISTRY_V1: {
     readonly "meta.siteTitle": {
-        readonly default: "Meet the people of Kamakura | NIHO Experience";
+        readonly default: "Meet the people of Kamakura | NIHO Travel";
         readonly placeholders: readonly [];
     };
     readonly "meta.titleTemplate": {
-        readonly default: "{title} | NIHO Experience";
+        readonly default: "{title} | NIHO Travel";
         readonly placeholders: readonly ["title"];
     };
     readonly "meta.description": {
@@ -17,7 +17,7 @@ export declare const STATIC_COPY_REGISTRY_V1: {
         readonly placeholders: readonly [];
     };
     readonly "chrome.brand": {
-        readonly default: "NIHO Experience";
+        readonly default: "NIHO Travel";
         readonly placeholders: readonly [];
     };
     readonly "chrome.main": {
@@ -1219,7 +1219,7 @@ export declare const STATIC_COPY_REGISTRY_V1: {
         readonly placeholders: readonly ["seconds", "noun"];
     };
     readonly "chrome.brandRich": {
-        readonly default: "NIHO {em}Experience{/em}";
+        readonly default: "NIHO {em}Travel{/em}";
         readonly placeholders: readonly [];
         readonly markers: readonly ["em"];
     };

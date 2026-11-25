@@ -4,12 +4,12 @@ export declare const PRESENTATION_MANIFEST_V1: Readonly<{
     readonly renderer: "niho-experience-presentation/v1";
     readonly copy: {
         readonly schemaVersion: 1;
-        readonly sha256: "1d73b4c80ae1025321532ff3be81430a5e43abfa6ca72d6aef8f57dc2da2a307";
+        readonly sha256: "d7360b29fc9b486d203a81d322f338fcc9cf8b5bc0d2c1126fd2fad184d70da7";
     };
     readonly staticCopy: {
         readonly schemaVersion: 2;
         readonly keyCount: number;
-        readonly sha256: "242e2111e705a14755d10f13d8d16820792ea1aeac3f337b9b01babbfdb106a9";
+        readonly sha256: "5a969928642f9236583cd66dbe54801d9d5b18e299fb7a377648ffa923a6e98a";
     };
     readonly assets: {
         readonly schemaVersion: 1;

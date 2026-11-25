@@ -7,7 +7,7 @@ import { HOST_APP_SCOPE, HOST_BOOKINGS_PATH, HOST_CALENDAR_PATH, HOST_LAUNCH_PAT
  * The console as an installable app (#177, docs/host-pwa.md). Named apart from NIHO's own
  * "NIHO host" app on niho.life; its icon is the site's mark on leaf green (public/host-app/*.svg).
  */
-export const HOST_APP_NAME = "NIHO 体験ホスト";
+export const HOST_APP_NAME = "NIHO Travel ホスト";
 export const HOST_APP_SHORT_NAME = "体験ホスト";
 /** The host root layout's themeColor. */
 export const HOST_APP_THEME_COLOR = "#ffffff";
@@ -39,7 +39,7 @@ export function hostWebManifest(): HostWebManifest {
     id: HOST_APP_SCOPE,
     name: HOST_APP_NAME,
     short_name: HOST_APP_SHORT_NAME,
-    description: "体験の予約・メッセージ・カレンダーを確かめる、NIHO Experience のホストの画面です。",
+    description: "体験の予約・メッセージ・カレンダーを確かめる、NIHO Travel のホストの画面です。",
     lang: "ja",
     dir: "ltr",
     start_url: `${HOST_LAUNCH_PATH}?source=pwa`,

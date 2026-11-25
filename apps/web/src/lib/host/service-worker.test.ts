@@ -159,7 +159,7 @@ describe("host service worker: push (#177 P2)", () => {
     const shown = worker.self.registration.showNotification.mock.calls as unknown as [string, unknown][];
     expect(shown).toHaveLength(8);
     for (const [title, options] of shown) {
-      expect(title).toBe("NIHO 体験ホストにお知らせがあります");
+      expect(title).toBe("NIHO Travel ホストにお知らせがあります");
       expect(options).toEqual({ data: { url: `${ORIGIN}/host/home` }, icon: "/host-app/icon-192.png" });
     }
   });
