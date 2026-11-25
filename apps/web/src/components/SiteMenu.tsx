@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LocalizedLink } from "./LocalizedLink";
 import { localeHref, useSiteLocale } from "./SiteLocale";
 
@@ -20,6 +20,7 @@ function MenuLink({ href, className, children }: { href: string; className: stri
 export function SiteMenu({ journalHref, hostLabel = "For hosts", language }: { journalHref?: string | null; hostLabel?: string; language?: ReactNode }) {
   const pathname = usePathname();
   const ref = useRef<HTMLDetailsElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => { if (ref.current) ref.current.open = false; }, [pathname]);
   useEffect(() => {
@@ -36,11 +37,11 @@ export function SiteMenu({ journalHref, hostLabel = "For hosts", language }: { j
     return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("pointerdown", onPointer); };
   }, []);
 
-  return <details ref={ref} className="md:hidden">
-    <summary aria-label="Menu" className="grid size-10 cursor-pointer list-none place-items-center rounded-full border border-line-strong hover:bg-sand [&::-webkit-details-marker]:hidden">
+  return <details ref={ref} className="md:hidden" onToggle={(event) => setMenuOpen(event.currentTarget.open)}>
+    <summary role="button" aria-label="Menu" aria-expanded={menuOpen} aria-controls="site-menu-panel" className="grid size-10 cursor-pointer list-none place-items-center rounded-full border border-line-strong hover:bg-sand [&::-webkit-details-marker]:hidden">
       <svg className="ico size-5" viewBox="0 0 24 24" aria-hidden><path d="M4.5 8h15M4.5 12.5h15M4.5 17h15" /></svg>
     </summary>
-    <div className="absolute inset-x-0 top-16 border-b border-line bg-white shadow-[0_18px_30px_rgb(0_0_0/0.08)]">
+    <div id="site-menu-panel" className="absolute inset-x-0 top-16 border-b border-line bg-white shadow-[0_18px_30px_rgb(0_0_0/0.08)]">
       <div className="container-page pb-4 pt-1">
         <nav aria-label="Menu">
           {/* A link to the page already open changes no pathname, so close on the click itself too. */}
