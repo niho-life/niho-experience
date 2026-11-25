@@ -19,7 +19,7 @@ export const INQUIRY_KIND_HINT: Record<GroupInquiryKind, InquiryCopy> = {
   PERSONAL: t("友人・家族・サークルなど、少人数のグループ", "Friends, family or a small club"),
   CORPORATE: t("研修・チームビルディング・取引先のおもてなしなど", "Training, team building or hosting guests"),
   SCHOOL: t("修学旅行・校外学習・探究学習など", "School trips and learning programs"),
-  LISTING: t("NIHO Experience に体験を載せたい方", "For people who want to offer an experience"),
+  LISTING: t("NIHO Travel に体験を載せたい方", "For people who want to offer an experience"),
 };
 
 /** The form's question for each optional answer, by its key (GROUP_INQUIRY_FIELDS). */

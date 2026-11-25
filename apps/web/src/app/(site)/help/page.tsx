@@ -11,7 +11,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 /** NIHO's existing public support address. No booking or customer data is put in the email link. */
 const supportEmail = "info@niho.life";
-const emailHref = `mailto:${supportEmail}?subject=NIHO%20Experience`;
+const emailHref = `mailto:${supportEmail}?subject=NIHO%20Travel`;
 
 export default async function HelpPage() {
   const helpUrl = safeNihoHelpUrl(config.nihoBookingHelpUrl, config.nihoWebOrigin);

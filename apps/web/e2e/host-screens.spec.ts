@@ -118,7 +118,7 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
     // A 232px column the height of the window: the provider and its sections, then the traveler site and the account at its foot.
     expect(bannerBox).toEqual({ x: 0, y: 0, width: 232, height: viewport.height });
     expect(navBox.x + navBox.width).toBeLessThanOrEqual(232);
-    await expect(banner.getByRole("link", { name: "NIHO Experience" })).toHaveAttribute("href", "/host/home");
+    await expect(banner.getByRole("link", { name: "NIHO Travel" })).toHaveAttribute("href", "/host/home");
     await expect(banner).toContainText("あなたはオーナー");
     await expect(nav.getByRole("link", { name: "メンバー" })).toHaveAttribute("href", "/host/members");
     await expect(nav.getByRole("link", { name: "設定", exact: true })).toHaveAttribute("href", "/host/settings");

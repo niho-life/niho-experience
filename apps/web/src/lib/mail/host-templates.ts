@@ -99,8 +99,8 @@ const JST = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "n
  */
 export function hostLoginLinkEmail(input: { readonly siteUrl: string; readonly token: string; readonly expiresAt: string; readonly minutes: number }): RenderedMail {
   const until = JST.format(new Date(input.expiresAt));
-  return mail("NIHO 体験ホストへのログイン", [
-    { kind: "p", text: "NIHO 体験ホストにログインするためのリンクです。" },
+  return mail("NIHO Travel ホストへのログイン", [
+    { kind: "p", text: "NIHO Travel ホストにログインするためのリンクです。" },
     {
       kind: "link",
       lead: `リンクは ${until} まで（${input.minutes} 分間）、1 回だけ使えます。リンクは、リクエストしたブラウザで開いてください。`,
@@ -114,14 +114,14 @@ export function hostLoginLinkEmail(input: { readonly siteUrl: string; readonly t
 }
 
 /**
- * 「NIHO 体験ホストへのご招待」 (Epic #591, #596): the link that binds the host's NIHO account to the host account ops
+ * 「NIHO Travel ホストへのご招待」 (Epic #591, #596): the link that binds the host's NIHO account to the host account ops
  * registered (`/host/auth/invite#t=<token>`; the token in the fragment only). It works until `expiresAt`, once, in the
  * browser that opens it first. The email says which NIHO account to sign in with and what to do when a mail app opens the link.
  */
 export function hostInvitationEmail(input: { readonly siteUrl: string; readonly token: string; readonly expiresAt: string }): RenderedMail {
   const until = JST.format(new Date(input.expiresAt));
-  return mail("NIHO 体験ホストへのご招待", [
-    { kind: "p", text: "NIHO 体験ホストを、NIHO アカウントでご利用いただけるようにするための招待です。" },
+  return mail("NIHO Travel ホストへのご招待", [
+    { kind: "p", text: "NIHO Travel ホストを、NIHO アカウントでご利用いただけるようにするための招待です。" },
     {
       kind: "link",
       lead: `下のリンクを開いて、NIHO にログインしてください。ご登録の NIHO アカウント（いつも使っているログインの方法）でお願いします。リンクは ${until} まで、1 回だけ使えます。最初にリンクを開いたブラウザで続けてください。`,
@@ -143,8 +143,8 @@ export function hostInvitationEmail(input: { readonly siteUrl: string; readonly 
 export function hostTeamInvitationEmail(input: { readonly siteUrl: string; readonly token: string; readonly expiresAt: string; readonly providerDisplayName: string | null }): RenderedMail {
   const until = JST.format(new Date(input.expiresAt));
   const name = input.providerDisplayName && input.providerDisplayName.trim() !== "" ? input.providerDisplayName.trim() : null;
-  return mail(name ? `「${name}」のメンバーへのご招待` : "NIHO 体験ホストのメンバーへのご招待", [
-    { kind: "p", text: `NIHO 体験ホストで、${name ?? "体験の提供者"} を一緒に運営するメンバー（共同ホスト）に招待されました。` },
+  return mail(name ? `「${name}」のメンバーへのご招待` : "NIHO Travel ホストのメンバーへのご招待", [
+    { kind: "p", text: `NIHO Travel ホストで、${name ?? "体験の提供者"} を一緒に運営するメンバー（共同ホスト）に招待されました。` },
     { kind: "p", text: "共同ホストは、開催枠の編集、予約の確認、予約者への返信ができます。" },
     {
       kind: "link",
@@ -166,7 +166,7 @@ export function hostTeamInvitationEmail(input: { readonly siteUrl: string; reado
 export function hostAddressConfirmationEmail(input: { readonly siteUrl: string; readonly token: string; readonly expiresAt: string }): RenderedMail {
   const until = JST.format(new Date(input.expiresAt));
   return mail("通知の宛先の確認", [
-    { kind: "p", text: "NIHO 体験ホストの通知を、このアドレスで受け取るための確認です。" },
+    { kind: "p", text: "NIHO Travel ホストの通知を、このアドレスで受け取るための確認です。" },
     {
       kind: "link",
       lead: `下のリンクを開いて「このアドレスに切り替える」を押すと、予約などの通知がこのアドレスに届くようになります。リンクは ${until} まで、1 回だけ使えます。`,

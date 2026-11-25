@@ -119,7 +119,7 @@ stg（`niho-app-stg`）と本番（`niho-app-prd`）に同じ名前で用意し�
 | 資源 | 内容 |
 | --- | --- |
 | サービスアカウント `experience-ota-watchdog@<project>.iam.gserviceaccount.com` | Scheduler の OIDC ID token 専用。ロールは持たない。stg の非公開 Cloud Run にだけ `roles/run.invoker` を付けた |
-| Cloud Scheduler `experience-ota-watchdog`（asia-northeast1） | 毎分 `POST /internal/ota/v1/watchdog`、body `{}`、再試行なし。audience はサービスのベース URL（stg は固定 run.app URL、本番は `https://experience.niho.life`）。flag と DB が揃うまで **一時停止** |
+| Cloud Scheduler `experience-ota-watchdog`（asia-northeast1） | 毎分 `POST /internal/ota/v1/watchdog`、body `{}`、再試行なし。audience はサービスのベース URL（stg は固定 run.app URL、本番は `https://travel.niho.life`）。flag と DB が揃うまで **一時停止** |
 | alert policy `experience-ota-runtime-incident` | `jsonPayload.event="ota_runtime_incident"` のログごとに通知（5分の rate limit）。件名に kind と transition |
 | alert policy `experience-ota-watchdog-scheduler-failed` | watchdog job の実行失敗（1時間の rate limit） |
 

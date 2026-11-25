@@ -6,6 +6,8 @@
 
 2026-11-03 のオーナー決定で、提供者の登録審査・体験ごとの掲載承認・通常保存時の再審査は廃止する。必要条件を満たした OWNER が同意して公開・停止・再開し、運営による規約違反等の停止は独立して残す。2026-11-05 の例外では、事務局が準備した未公開商品だけを、販売者確認と同じ公開条件・immutable監査の後に代理公開できる。目標仕様と現行 HTTP 版の移行境界は [ホスト自身による体験の公開](host-publication.md)（#369）と [事務局の代理登録](assisted-launch.md) を正とする。以下の NIHO の「掲載審査」は切替前の現状を説明する。
 
+公開名は NIHO Travel、正規URLは `https://travel.niho.life`（2026-11-25、#653）。配備順序と旧URLの301は [ホスト名切替手順](travel-domain-cutover.md) を参照。
+
 ## 責務
 
 | 担当 | 持つもの |
@@ -60,7 +62,7 @@ NIHO名義の一商品だけを担当する講師は、NIHO provider memberへ�
 - 流れ：英語圏のゲストの確定予約（EN、または未記録）で、当日以降に「通訳を始める」を出す。Experience DB予約は、BFFが現在のExperience OWNERと予約所属を毎回照合する。create時だけ確定・未取消・当日以降を確認する。Host Accountからはサービス認証で、Experience提供者IDと予約の公開UUIDをNIHOの予約通訳APIに渡す。status/endは取消・日付変更後も所属を再確認して自分のroomを終了できる。NIHO側の固定export contractに旧予約pathが残っていても、Experienceは呼び出さない。
 - 境界：Host AccountではGoogleのサービスIDトークンを使い、NIHOユーザーのトークンやHost Account IDは転送しない。ブラウザは `/host/api/translate/*` だけを呼ぶ。旅行者の氏名・メール・状態・言語・role・budgetはNIHOへ送らない。BFF は `participantId`・`inviteCode` を落とし、招待 URL・状態・参加状況だけを `private, no-store` / `noindex` / `no-referrer` で返す。HTTP失敗をmockへ差し替えない。
 - Host Accountで通訳するときは、別の端末で予約画面を開いておく。画面が見えている間は3秒ごとに現在のOWNERを再確認し、NIHOの15秒の操作資格を更新する。更新が止まると、新規参加や音声の継続ができなくなる。
-- 契約：`packages/api-client/contract/experience-translate-rooms-api.openapi.json` はNIHOの選別契約と固定SHA・ハッシュを同期する。版とsource commitは同ディレクトリのmanifestで管理する。公開状態は`waiting | active | paused | ended`、endは`{roomId,state}`。受入までは`EXPERIENCE_TRANSLATE_API_ENABLED`をOFFに保つ。httpの通訳flagはホスト画面とDBを前提にguest sales flagから独立する。guest salesがOFFの場合もOWNERの予約一覧/詳細と通訳だけをread-onlyで開き、guest checkout・予約更新・取消/返金・メールを開かない。mockはExperience予約とstandalone pathだけを合成する。
+- 契約：`packages/api-client/contract/experience-translate-rooms-api.openapi.json` はNIHOの選別契約から取り込む。固定のsource commitとこのリポジトリでのハッシュは同ディレクトリのmanifestで管理する。#653 ではホスト画面の説明を相対パスにし、wire schema と版を維持した。公開状態は`waiting | active | paused | ended`、endは`{roomId,state}`。受入までは`EXPERIENCE_TRANSLATE_API_ENABLED`をOFFに保つ。httpの通訳flagはホスト画面とDBを前提にguest sales flagから独立する。guest salesがOFFの場合もOWNERの予約一覧/詳細と通訳だけをread-onlyで開き、guest checkout・予約更新・取消/返金・メールを開かない。mockはExperience予約とstandalone pathだけを合成する。
 - 保存しないもの：音声・字幕・ゲストの個人情報。体験サイトは部屋や使用量の記録も持たず、必要なら NIHO から読む。
 
 ## API契約
@@ -123,7 +125,6 @@ Connect Directの口座設定・責任分担を今回変更しない。サイト
 
 ## 決める時期が後になる事項
 
-- 公開ドメイン・表示名：本番公開前。既存NIHOの商品ページと正規URLを統一する。
 - 販売条件・キャンセル基準・サポート分担：商品を有料で公開する前。
 - 提供者本人が行う編集とNIHOによる代理編集の範囲：連携B・Cの仕様確定時。
 - 再利用ライセンス：別途オーナー判断。リポのpublic設定と一般的なOSS許諾を同一視しない。

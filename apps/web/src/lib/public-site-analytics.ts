@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { config } from "@/lib/config";
 import { doNotTrackEnabled } from "@/lib/analytics";
 
-const EXPERIENCE_ORIGIN = "https://experience.niho.life";
+const EXPERIENCE_ORIGIN = "https://travel.niho.life";
 const SETTINGS_PATH = "/api/public/experiences/site-settings";
 const MEASUREMENT_ID = /^G-[A-Za-z0-9]{4,24}$/;
 const VERIFICATION_CONTENT = /^[A-Za-z0-9_=-]{1,512}$/;
@@ -59,7 +59,7 @@ function parsePublicSettings(value: unknown): PublicSiteAnalyticsSettings | null
 }
 
 function requestHasApprovedOrigin(requestHeaders: Pick<Headers, "get">): boolean {
-  return requestHeaders.get("host")?.trim().toLowerCase() === "experience.niho.life" &&
+  return requestHeaders.get("host")?.trim().toLowerCase() === "travel.niho.life" &&
     requestHeaders.get("x-forwarded-proto")?.trim().toLowerCase() === "https";
 }
 

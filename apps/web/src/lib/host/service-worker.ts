@@ -21,7 +21,7 @@ const OFFLINE_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>接続できません | NIHO 体験ホスト</title>
+<title>接続できません | NIHO Travel ホスト</title>
 <style>
 ${NIHO_SANS_FONT_FACES}
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fff;color:#1c1c1a;font-family:${NIHO_SANS_FAMILY};line-height:1.6}
@@ -50,14 +50,14 @@ const OFFLINE_HEADERS = {
 };
 
 const ENABLED = `"use strict";
-// NIHO 体験ホスト (#177). No Cache Storage: nothing the host sees is kept on the device.
+// NIHO Travel ホスト (#177). No Cache Storage: nothing the host sees is kept on the device.
 const SCOPE = ${JSON.stringify(HOST_APP_SCOPE)};
 const PASSTHROUGH = ${JSON.stringify(HOST_SW_PASSTHROUGH)};
 const OFFLINE_HTML = ${JSON.stringify(OFFLINE_HTML)};
 const OFFLINE_HEADERS = ${JSON.stringify(OFFLINE_HEADERS)};
 const HOME = ${JSON.stringify(HOST_HOME_PATH)};
 const ICON = ${JSON.stringify(HOST_APP_ICONS.icon192)};
-const FALLBACK_TITLE = "NIHO 体験ホストにお知らせがあります";
+const FALLBACK_TITLE = "NIHO Travel ホストにお知らせがあります";
 const SUBSCRIPTIONS = ${JSON.stringify(`${HOST_API_PREFIX}push-subscriptions`)};
 const PUSH_MESSAGE = ${JSON.stringify(HOST_PUSH_MESSAGE)};
 const SHARE_PATH = ${JSON.stringify(HOST_SHARE_TARGET_PATH)};

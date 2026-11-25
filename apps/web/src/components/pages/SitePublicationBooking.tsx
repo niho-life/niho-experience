@@ -379,7 +379,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
 function EmbedRoot({ rootRef, siteOrigin, children }: { rootRef: React.RefObject<HTMLDivElement | null>; siteOrigin: string; children: React.ReactNode }) {
   return <div data-embed-root ref={rootRef}>
     {children}
-    <p className="mt-2 text-center text-xs text-muted"><a href={siteOrigin} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline">Powered by NIHO Experience</a></p>
+    <p className="mt-2 text-center text-xs text-muted"><a href={siteOrigin} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline">Powered by NIHO Travel</a></p>
   </div>;
 }
 

@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { EN_STATIC_COPY_V1 } from "@niho/experience-presentation/v1";
 
-export const SITE_NAME = "NIHO Experience";
+export const SITE_NAME = "NIHO Travel";
 /** The name on listings (Google Business Profile, Tripadvisor, OTAs, YouTube): docs/growth/launch-kit.md, #152. */
-export const LISTING_NAME = "NIHO Experience, Kamakura";
+export const LISTING_NAME = "NIHO Travel, Kamakura";
 export const SITE_DESCRIPTION = "Discover small experiences in Kamakura, offered by independent hosts and local businesses. Book as a guest, no account needed.";
 /** The English footer line: the site description plus who is behind it (#645). `SITE_DESCRIPTION` itself stays the metadata text. */
 export const SITE_FOOTER_DESCRIPTION = `${SITE_DESCRIPTION} Made by NIHO, the town's living room, two minutes from Kamakura Station.`;

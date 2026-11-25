@@ -3,11 +3,11 @@
   "legacySchemaVersion": 1,
   "definitions": {
     "meta.siteTitle": {
-      "default": "Meet the people of Kamakura | NIHO Experience",
+      "default": "Meet the people of Kamakura | NIHO Travel",
       "placeholders": []
     },
     "meta.titleTemplate": {
-      "default": "{title} | NIHO Experience",
+      "default": "{title} | NIHO Travel",
       "placeholders": [
         "title"
       ]
@@ -21,7 +21,7 @@
       "placeholders": []
     },
     "chrome.brand": {
-      "default": "NIHO Experience",
+      "default": "NIHO Travel",
       "placeholders": []
     },
     "chrome.main": {
@@ -1291,7 +1291,7 @@
       ]
     },
     "chrome.brandRich": {
-      "default": "NIHO {em}Experience{/em}",
+      "default": "NIHO {em}Travel{/em}",
       "placeholders": [],
       "markers": [
         "em"

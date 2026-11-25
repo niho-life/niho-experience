@@ -88,7 +88,7 @@ describe("GA4 basic consent", () => {
   it("uses an Experience-only cookie prefix and fixed 60-day expiry", () => {
     expect(GA4_COOKIE_EXPIRES_SECONDS).toBe(60 * 24 * 60 * 60);
     expect(GA4_COOKIE_SETTINGS).toEqual({
-      cookie_domain: "experience.niho.life",
+      cookie_domain: "travel.niho.life",
       cookie_expires: GA4_COOKIE_EXPIRES_SECONDS,
       cookie_path: "/",
       cookie_prefix: GA4_COOKIE_PREFIX,

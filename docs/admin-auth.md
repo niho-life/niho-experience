@@ -65,7 +65,7 @@ Google から受け取ったもの（トークン・code）は、ログインが
 ## 運用の手順
 
 1. migration `0066` を適用する（runtime に `admin_sessions` の SELECT・INSERT・UPDATE・DELETE）。
-2. **Google Cloud コンソール**（操作者が行う。コードからは変えない）：Experience の OAuth クライアント（`EXPERIENCE_GOOGLE_CLIENT_ID` のもの）の「承認済みのリダイレクト URI」に `<SITE_URL>/admin/auth/google/callback` を追加する。stg は `STG_HOST_SERVICE_URL`、本番は `https://experience.niho.life/admin/auth/google/callback`。同意画面のスコープは `openid`・`email` だけでよい。
+2. **Google Cloud コンソール**（操作者が行う。コードからは変えない）：Experience の OAuth クライアント（`EXPERIENCE_GOOGLE_CLIENT_ID` のもの）の「承認済みのリダイレクト URI」に `<SITE_URL>/admin/auth/google/callback` を追加する。stg は `STG_HOST_SERVICE_URL`、本番は `https://travel.niho.life/admin/auth/google/callback`。同意画面のスコープは `openid`・`email` だけでよい。
 3. Google Workspace の管理コンソールで、管理者のアカウントに 2 段階認証が必須になっていることを確かめる（ADR 0003 の前提。コードでは確かめられない）。
 4. GitHub の variable：`STG_ADMIN_ALLOWED_EMAILS`（例 `name@niho.life;other@niho.life`）と `STG_ADMIN_GOOGLE_LOGIN_ENABLED=true`。`STG_ADMIN_SUPPORT_CONSOLE_ENABLED=true` も要る。本番は `PROD_` で同じ。
 5. 受入：許可されたアカウントでログインできる／リストに無い `niho.life` のアカウント・個人の Gmail は `/admin/auth/error`／サイト予約・掲載先・運営停止が `adm_` の ID で記録される／ログアウトで戻れなくなる／リストから外して配備し直すと次の要求で弾かれる。

@@ -51,7 +51,7 @@ const { FLAGS, CAPABILITIES, resolveDeployFlags, outputsOf, tableNames } = await
   tableNames: () => string[];
 };
 
-const SITE: Record<Target, string> = { stg: "https://niho-experience-host-stg-sample-an.a.run.app", prod: "https://experience.niho.life" };
+const SITE: Record<Target, string> = { stg: "https://travel-stg.niho.life", prod: "https://travel.niho.life" };
 const PREFIX: Record<Target, string> = { stg: "STG", prod: "PROD" };
 const NIHO_API_AUDIENCE: Record<Target, string> = { stg: "https://api-stg.niho.life", prod: "https://api.niho.life" };
 const SETTING: Record<string, string> = {
@@ -264,7 +264,7 @@ describe("the deploy workflows' feature flags", () => {
     const invalid = resolve("prod", { ...vars, PROD_GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL: "person@example.com" });
     expect(invalid.problems.join(" ")).toContain("PROD_GUIDE_ADMIN_SERVICE_ACCOUNT_EMAIL");
     expect(invalid.problems.join(" ")).not.toContain("person@example.com");
-    expect(resolve("prod", { ...vars, PROD_GUIDE_ADMIN_AUDIENCE: "https://experience.niho.life" }).problems.join(" ")).toContain("PROD_GUIDE_ADMIN_AUDIENCE");
+    expect(resolve("prod", { ...vars, PROD_GUIDE_ADMIN_AUDIENCE: "https://travel.niho.life" }).problems.join(" ")).toContain("PROD_GUIDE_ADMIN_AUDIENCE");
     expect(resolve("prod", { PROD_GUIDE_ADMIN_API_ENABLED: "true" }).problems.join(" ")).toContain("PROD_GUIDE_ADMIN_AUDIENCE");
   });
 
@@ -323,7 +323,7 @@ describe("the deploy workflows' feature flags", () => {
     expect(missing.problems.join(" ")).toContain(variable);
     expect(missing.on).toEqual(["HOST_PWA_ENABLED"]);
     expect(missing.env).toEqual({ HOST_PWA_ENABLED: "true" });
-    const malformed = resolveDeployFlags({ ...input, vars: { [variable]: "https://experience.niho.life/path?secret" } });
+    const malformed = resolveDeployFlags({ ...input, vars: { [variable]: "https://travel.niho.life/path?secret" } });
     expect(malformed.problems.join(" ")).toContain(variable);
     expect(malformed.problems.join(" ")).not.toContain("?secret");
     const valid = resolve("stg", {});
@@ -331,7 +331,7 @@ describe("the deploy workflows' feature flags", () => {
     expect(valid.env).toEqual({ NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: NIHO_API_AUDIENCE.stg, HOST_PWA_ENABLED: "true" });
   });
   it("puts the OTA watchdog on a revision exactly as the workflows wired it by hand before the table (#194)", () => {
-    // Staging: audience SITE_URL; production: https://experience.niho.life. Each project's experience-ota-watchdog caller.
+    // Staging: audience SITE_URL; production: https://travel.niho.life. Each project's experience-ota-watchdog caller.
     const project: Record<Target, string> = { stg: "niho-app-stg", prod: "niho-app-prd" };
     for (const target of ["stg", "prod"] as const) {
       const resolved = resolve(target, { [`${PREFIX[target]}_CHANNEL_WATCHDOG_ENABLED`]: "true" });
@@ -688,7 +688,7 @@ describe("the deploy workflows", () => {
 
   }
 
-  it("deploy-production.yml opens search indexing and preserves the accepted booking switch in every job (owner 2026-11-07, #141)", () => {
+  it("deploy-production.yml keeps stable search and booking flags while blocking candidate traffic (#653)", () => {
     const text = workflow("deploy-production.yml");
     expect(text).toContain("SITE_INDEXING=allow,BOOKINGS_ENABLED=${BOOKINGS}");
     expect(text).not.toMatch(/SITE_INDEXING=block/);
@@ -696,8 +696,12 @@ describe("the deploy workflows", () => {
       const body = job(text, name);
       expect(body, name).toContain(`select(.name == "SITE_INDEXING") | .value' <<< "$revision_json")" = allow`);
       expect(body, name).toContain(`select(.name == "BOOKINGS_ENABLED") | .value' <<< "$revision_json")" = "$BOOKINGS"`);
-      expect(body, name).toContain("if grep -qxF 'Disallow: /' <<< \"$robots\"; then exit 1; fi");
-      expect(body, name).toContain("grep -qxF 'Sitemap: https://experience.niho.life/sitemap.xml' <<< \"$robots\"");
+      expect(body, name).toContain("grep -qxF 'Disallow: /' <<< \"$robots\"");
+      expect(body, name).toContain("grep -qiE '^X-Robots-Tag:.*noindex'");
+      expect(body, name).toContain("grep -qF '<loc>https://travel.niho.life/'");
     }
+    const stable = job(text, "promote").split("      - name: Promote the reviewed existing revision")[1];
+    expect(stable).toContain("if grep -qxF 'Disallow: /' <<< \"$robots\"; then exit 1; fi");
+    expect(stable).toContain('grep -qxF "Sitemap: ${url}/sitemap.xml" <<< "$robots"');
   });
 });

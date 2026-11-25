@@ -16,7 +16,7 @@ STUDIO・WordPress・Wix などで自分のサイトを持つホストが、コ�
 | 貼れるサイト | 制限しない（`https:` のサイト） |
 | NIHO の手数料 | 体験サイトと同じ率 |
 | 言語 | 英語だけ |
-| 表記 | 「Powered by NIHO Experience」を出す。販売者・取消条件・プライバシーポリシーの表示は予約ページと同じ |
+| 表記 | 「Powered by NIHO Travel」を出す。販売者・取消条件・プライバシーポリシーの表示は予約ページと同じ |
 | 見た目の調整 | 入れない |
 
 niho-app の公開埋め込み（`specs/initiatives/public-embeds.md`）と同じ形にした。違いは 2 つ。
@@ -100,12 +100,12 @@ niho-app の公開埋め込み（`specs/initiatives/public-embeds.md`）と同�
 **コード**（iframe と、高さを合わせる短い script）：
 
 ```html
-<iframe src="https://experience.niho.life/embed/experiences/{slug}/book"
+<iframe src="https://travel.niho.life/embed/experiences/{slug}/book"
   title="Book {title}" loading="lazy" style="width:100%;max-width:520px;height:760px;border:0"></iframe>
 <script>(function(){var f=document.currentScript.previousElementSibling;
 if(!f||f.tagName!=="IFRAME")return;
 window.addEventListener("message",function(e){
-  if(e.origin!=="https://experience.niho.life"||e.source!==f.contentWindow)return;
+  if(e.origin!=="https://travel.niho.life"||e.source!==f.contentWindow)return;
   var d=e.data||{};
   if(d.type==="niho-experience-embed-resize")f.style.height=Math.max(240,Math.ceil(d.height))+"px";
   if(d.type==="niho-experience-embed-top")f.scrollIntoView({block:"start"});
@@ -114,7 +114,7 @@ window.addEventListener("message",function(e){
 
 同じページに複数の体験を貼る場合も、それぞれの script は直前の iframe だけに紐付きます。
 
-**URL だけ**：`https://experience.niho.life/embed/experiences/{slug}/book`。URL しか受け付けない埋め込み枠に使う。高さは枠の設定で決まり、ウィジェットは 3 段なのでそのまま使える。
+**URL だけ**：`https://travel.niho.life/embed/experiences/{slug}/book`。URL しか受け付けない埋め込み枠に使う。高さは枠の設定で決まり、ウィジェットは 3 段なのでそのまま使える。
 
 **予約ボタン**：既存の予約リンク（`/experiences/{slug}?utm_source=provider&utm_medium=referral`）を指す `<a>`（新しいタブ）。iframe もコードも貼れない場所で使う。
 

@@ -136,10 +136,10 @@ describe("Product structured data", () => {
 
 describe("site structured data", () => {
   it("names the organization, with its listing name, and the website without a logo", () => {
-    const data = siteJsonLd(SITE, "NIHO Experience", "NIHO Experience, Kamakura");
+    const data = siteJsonLd(SITE, "NIHO Travel", "NIHO Travel, Kamakura");
     expect(data["@graph"]).toEqual([
-      { "@type": "Organization", "@id": `${SITE}/#organization`, name: "NIHO Experience", alternateName: "NIHO Experience, Kamakura", url: `${SITE}/` },
-      { "@type": "WebSite", "@id": `${SITE}/#website`, name: "NIHO Experience", url: `${SITE}/`, inLanguage: "en", publisher: { "@id": `${SITE}/#organization` } },
+      { "@type": "Organization", "@id": `${SITE}/#organization`, name: "NIHO Travel", alternateName: "NIHO Travel, Kamakura", url: `${SITE}/` },
+      { "@type": "WebSite", "@id": `${SITE}/#website`, name: "NIHO Travel", url: `${SITE}/`, inLanguage: "en", publisher: { "@id": `${SITE}/#organization` } },
     ]);
     expect(JSON.stringify(data)).not.toMatch(/logo/i);
   });

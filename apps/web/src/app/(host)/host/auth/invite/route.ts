@@ -56,7 +56,7 @@ function invitePage(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<title>招待 | NIHO Experience ホスト</title>
+<title>招待 | NIHO Travel ホスト</title>
 <style>
 ${NIHO_SANS_FONT_FACES}
 body{margin:0;font-family:${NIHO_SANS_FAMILY};background:#ffffff;color:#1c1c1a;line-height:1.6}
@@ -68,7 +68,7 @@ button{min-height:3rem;padding:0 1.5rem;border:0;border-radius:999px;background:
 </head>
 <body>
 <main id="main">
-<h1>NIHO 体験ホストへの招待</h1>
+<h1>NIHO Travel ホストへの招待</h1>
 <p id="status" role="status">招待を確かめています…</p>
 <button id="retry" type="button" hidden>もう一度試す</button>
 <noscript><p>このページは JavaScript で進みます。ブラウザの設定で JavaScript を有効にして、もう一度リンクを開いてください。</p></noscript>

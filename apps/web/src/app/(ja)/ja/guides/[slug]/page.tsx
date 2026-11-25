@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     description: guide.description,
     alternates: { canonical },
     authors: [{ name: guide.author.name }],
-    openGraph: { title: guide.title, description: guide.description, url: canonical, siteName: "NIHO Experience", locale: "ja_JP", type: "article", publishedTime: guide.publishedAt, modifiedTime: guide.updatedAt },
+    openGraph: { title: guide.title, description: guide.description, url: canonical, siteName: "NIHO Travel", locale: "ja_JP", type: "article", publishedTime: guide.publishedAt, modifiedTime: guide.updatedAt },
     ...(guide.unlisted ? { robots: { index: false, follow: false } } : {}),
   };
 }

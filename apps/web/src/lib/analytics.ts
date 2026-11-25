@@ -36,7 +36,7 @@ export function doNotTrackEnabled(value: string | null | undefined): boolean {
 
 export function analyticsModeForRuntime(apiMode: "http" | "mock", siteUrl: string, websiteId: string): "debug" | "off" | "umami" {
   if (apiMode === "mock") return "debug";
-  return siteUrl === "https://experience.niho.life" && UMAMI_WEBSITE_ID.test(websiteId) ? "umami" : "off";
+  return siteUrl === "https://travel.niho.life" && UMAMI_WEBSITE_ID.test(websiteId) ? "umami" : "off";
 }
 
 /**
@@ -67,7 +67,7 @@ export function sanitizeUmamiPayload(
     if (typeof rawUrl !== "string") return false;
 
     const url = new URL(rawUrl, currentOrigin);
-    if (currentOrigin !== "https://experience.niho.life" || url.origin !== currentOrigin || url.username || url.password) return false;
+    if (currentOrigin !== "https://travel.niho.life" || url.origin !== currentOrigin || url.username || url.password) return false;
 
     const isBookingResult = url.pathname === "/booking" || url.pathname.startsWith("/booking/");
     const detail = /^\/experiences\/([^/]+)(\/book)?$/.exec(url.pathname);
@@ -80,7 +80,7 @@ export function sanitizeUmamiPayload(
       url.pathname = `/experiences/${/^[a-z0-9_-]{3,64}$/i.test(slug) ? slug : "_experience"}${detail[2] ?? ""}`;
     }
     const isBookingForm = Boolean(detail?.[2]);
-    const pageTitles: Record<string, string> = { "/": "NIHO Experience", "/experiences": "Experiences", "/host": "Host an experience", "/help": "Booking help", "/about": "About NIHO Experience" };
+    const pageTitles: Record<string, string> = { "/": "NIHO Travel", "/experiences": "Experiences", "/host": "Host an experience", "/help": "Booking help", "/about": "About NIHO Travel" };
     if (!isBookingResult && !detail && !Object.hasOwn(pageTitles, url.pathname)) return false;
     url.hash = "";
 

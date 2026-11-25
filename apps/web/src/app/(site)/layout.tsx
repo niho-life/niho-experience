@@ -24,10 +24,10 @@ export const dynamic = "force-dynamic";
 export function generateMetadata(): Metadata {
   return {
     metadataBase: new URL(config.siteUrl),
-    title: { default: "Meet the people of Kamakura | NIHO Experience", template: "%s | NIHO Experience" },
+    title: { default: "Meet the people of Kamakura | NIHO Travel", template: "%s | NIHO Travel" },
     description: SITE_DESCRIPTION,
     robots: config.indexingAllowed ? undefined : { index: false, follow: false },
-    openGraph: { siteName: "NIHO Experience", type: "website", locale: "en_US" },
+    openGraph: { siteName: "NIHO Travel", type: "website", locale: "en_US" },
     twitter: { card: "summary" },
   };
 }

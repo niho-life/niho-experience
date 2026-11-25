@@ -120,16 +120,16 @@ PC/スマホで日時・人数・入力・Checkout・失敗からの復帰・計
 
 ## 本番について
 
-本番の固定SHA配備、GCP projectとCloud Runの権限境界、`experience.niho.life` の入口・DNS/TLS/cache、NIHO側のCORS/canonical、販売・検索・外部提供者の個別ゲートは [production-deploy.md](production-deploy.md) を正とする。
+本番の固定SHA配備、GCP projectとCloud Runの権限境界、`travel.niho.life` の入口・DNS/TLS/cache、NIHO側のCORS/canonical、販売・検索・外部提供者の個別ゲートは [production-deploy.md](production-deploy.md) を正とする。
 
 ## Cloudflareについて
 
 **プレビューにはCloudflareは不要。** Cloud RunのURLで見られる。
 
-本番（独自ドメイン）ではCloudflareを入口に置く。ホスト名は `experience.niho.life` と決まった。
+本番（独自ドメイン）ではCloudflareを入口に置く。ホスト名は `travel.niho.life` と決まった。
 
 入口はNIHOが既に使う global external Application Load Balancer と Cloudflare proxy を再利用する。Cloud Runの直接domain mappingはGoogleがproductionに推奨していない。Cloudflareでcacheするのは初期は `/_next/static/*` だけとし、予約入力・決済後ページはbypassを確認する。
 
 本番候補のworkflowと準備スクリプトは用意済み。既存請求とALBを確認してからExperience専用サービスを作り、受入中は最小インスタンス0・予約停止・検索除外で運用する。販売開始時の最小インスタンス1への変更も受入記録に含める。
 
-Umami CloudのWebsite IDは `f7a8b3ed-ef71-4a35-969e-955b88f01902`（ドメイン `experience.niho.life`）。プライバシーポリシーへの計測内容の追記後に、実行時環境変数 `UMAMI_WEBSITE_ID` として本番サービスだけへ設定する。previewには設定しない。サイトID自体は公開情報で、GitHub Secretではなくランタイム設定として扱う。
+Umami CloudのWebsite IDは `f7a8b3ed-ef71-4a35-969e-955b88f01902`（ドメイン `travel.niho.life`）。プライバシーポリシーへの計測内容の追記後に、実行時環境変数 `UMAMI_WEBSITE_ID` として本番サービスだけへ設定する。previewには設定しない。サイトID自体は公開情報で、GitHub Secretではなくランタイム設定として扱う。

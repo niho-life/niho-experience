@@ -9,7 +9,7 @@ import type { Metadata, Viewport } from "next";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Book | NIHO Experience",
+  title: "Book | NIHO Travel",
   robots: { index: false, follow: false },
 };
 

@@ -61,7 +61,7 @@ export async function GuideArticle({ guide, variant, query }: { guide: Guide; va
             </div>
           ) : null}
           <nav aria-label="Breadcrumb" className="text-sm text-muted">
-            <Link href={guide.unlisted ? "/" : "/guides"} className="font-extrabold text-ink hover:underline">{guide.unlisted ? "NIHO Experience" : "Guides"}</Link>
+            <Link href={guide.unlisted ? "/" : "/guides"} className="font-extrabold text-ink hover:underline">{guide.unlisted ? "NIHO Travel" : "Guides"}</Link>
             <span aria-hidden> / </span>
             <span aria-current="page">{sectionLabel}</span>
           </nav>

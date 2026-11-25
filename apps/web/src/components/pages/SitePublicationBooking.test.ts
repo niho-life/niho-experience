@@ -107,7 +107,7 @@ describe("site publication booking seller terms", () => {
     expect(html).toMatch(/<div role="group" aria-labelledby="([^"]+)"[^>]*><p id="\1">Date<\/p>/);
     expect(html).toContain("Loading dates…");
     expect(html).not.toContain("data-embed-root");
-    expect(html).not.toContain("Powered by NIHO Experience");
+    expect(html).not.toContain("Powered by NIHO Travel");
     expect(html).not.toContain('aria-current="step"');
   });
 
@@ -169,7 +169,7 @@ describe("site publication booking seller terms", () => {
     expect(html).not.toContain('type="email"');
     expect(html).not.toContain('type="submit"');
     expect(html).toContain('href="https://experience.example.test" target="_blank" rel="noopener noreferrer"');
-    expect(html).toContain("Powered by NIHO Experience");
+    expect(html).toContain("Powered by NIHO Travel");
     expect(html).not.toContain("Preview. Booking is turned off here.");
   });
 

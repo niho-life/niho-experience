@@ -9,7 +9,7 @@ export const JA_HOME_HAND = "meet the town";
 export const JA_HOME_LEAD = "書家と筆をとる。寺で坐る。地元の台所で一緒につくって食べる。鎌倉の街の人と、その人の時間を予約できます。";
 
 /** 検索結果に出る題と説明（日本語のトップ）。 */
-export const JA_HOME_SEO_TITLE = `${JA_HOME_TITLE} | NIHO Experience`;
+export const JA_HOME_SEO_TITLE = `${JA_HOME_TITLE} | NIHO Travel`;
 export const JA_HOME_SEO_DESCRIPTION = JA_HOME_LEAD;
 
 export type HeroPhoto = Readonly<{ src: string; position: string }>;

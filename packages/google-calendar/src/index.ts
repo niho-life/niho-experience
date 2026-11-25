@@ -161,7 +161,7 @@ export async function stopGoogleWatchChannel(config: GoogleConfig, accessToken: 
 
 /** App-created calendar avoids write access to the host's personal events. */
 export async function createBookingCalendar(config: GoogleConfig, accessToken: string): Promise<string> {
-  const result = await apiJson(config, accessToken, "/calendars", { method: "POST", body: JSON.stringify({ summary: "NIHO Experience 予約", timeZone: "Asia/Tokyo" }) });
+  const result = await apiJson(config, accessToken, "/calendars", { method: "POST", body: JSON.stringify({ summary: "NIHO Travel 予約", timeZone: "Asia/Tokyo" }) });
   if (!nonEmpty(result.id)) throw new GoogleCalendarError("INVALID_RESPONSE");
   return result.id;
 }

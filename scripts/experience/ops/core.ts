@@ -15,8 +15,8 @@ export const AI_KINDS: readonly AiKind[] = ["claude-code", "codex", "other", "hu
 export type EnvName = "stg" | "prd";
 
 export const ENV_ORIGINS: Readonly<Record<EnvName, string>> = Object.freeze({
-  stg: "https://experience-stg.niho.life",
-  prd: "https://experience.niho.life",
+  stg: "https://travel-stg.niho.life",
+  prd: "https://travel.niho.life",
 });
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
 

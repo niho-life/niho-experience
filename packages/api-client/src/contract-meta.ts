@@ -112,7 +112,7 @@ export const EXPERIENCE_TRANSLATE_ROOMS_API_CONTRACT = {
   version: "1.3.0",
   sourceIssue: "niho-coliving/niho-app#19672",
   sourceCommit: "94badd30579a38320d914124814147cee2813b16",
-  sha256: "db5323e556752445ec5702ebecd16cda96883052fd881ca92c14f2e47aff0fe5",
+  sha256: "12c2dbf4c1583197c9986258c19281e840d467b9ee3e203744bae7b3eeb3fccf",
   status: "agreed-not-deployed",
   deploymentStatus: "not-deployed",
 } as const;

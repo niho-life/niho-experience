@@ -6,7 +6,7 @@ test("the footer leads to English booking help without asking for a guest accoun
   await expect(page.getByRole("heading", { name: "Booking help", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Find your booking" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Changes and cancellations" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Email NIHO", exact: true })).toHaveAttribute("href", "mailto:info@niho.life?subject=NIHO%20Experience");
+  await expect(page.getByRole("link", { name: "Email NIHO", exact: true })).toHaveAttribute("href", "mailto:info@niho.life?subject=NIHO%20Travel");
   await expect(page.getByRole("textbox")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

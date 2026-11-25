@@ -76,7 +76,7 @@ export function JapaneseSiteFooter({ counterparts, inquiryOpen, guidesOpen = fal
   return <footer className="mt-24 border-t border-line bg-white">
     <div className="container-page grid gap-7 pt-11 pb-14 sm:grid-cols-[1.2fr_2fr_auto] sm:items-start">
       <div className="max-w-md">
-        <p className="font-display text-xl font-semibold text-muted">NIHO Experience 鎌倉</p>
+        <p className="font-display text-xl font-semibold text-muted">NIHO Travel 鎌倉</p>
         <p className="mt-2 text-sm text-muted">{JAPANESE_SITE_DESCRIPTION}</p>
       </div>
       <nav aria-label="フッター" className="grid grid-cols-2 gap-x-6 gap-y-2 sm:gap-x-10">

@@ -76,7 +76,7 @@ fi
 state="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format=json)"
 jq -e --arg runtime "$RUNTIME" '.spec.template.spec.serviceAccountName == $runtime and .metadata.labels.app == "niho-experience" and .metadata.labels.env == "host-staging"' <<< "$state" >/dev/null
 # DNS, mTLS ALB and serverless NEG are provisioned by the owner before the first deploy (#471).
-STG_HOST_SERVICE_URL=https://experience-stg.niho.life
+STG_HOST_SERVICE_URL=https://travel-stg.niho.life
 for role in roles/run.admin roles/run.invoker; do
   retry_binding gcloud run services add-iam-policy-binding "$SERVICE" --project "$PROJECT" --region "$REGION" \
     --member "serviceAccount:$DEPLOYER" --role "$role" --condition=None --quiet

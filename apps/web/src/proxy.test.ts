@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
@@ -51,7 +52,7 @@ import { PUT, GET } from "@/app/(admin)/admin/api/product-classifications/route"
 import { adminMutationAllowed } from "@/lib/admin/server";
 import { OPERATOR_ASSERTION_HEADER, OPERATOR_BODY_LIMIT, OPERATOR_PHOTO_BODY_LIMIT, operatorApiAllowed, operatorBodyLimit, operatorIdentity } from "@/lib/admin/operator-cli";
 import { adminActorIdForGoogleSubject } from "@niho-experience/experience-store";
-import { proxy } from "./proxy";
+import { config as proxyConfig, proxy } from "./proxy";
 
 const TOKEN = `${"a".repeat(20)}.${"b".repeat(20)}.${"c".repeat(20)}`;
 const goodPayload = () => ({ iss: "https://accounts.google.com", aud: AUDIENCE, sub: SUBJECT, email: "Admin.Sample@niho.life", email_verified: true, hd: "niho.life", exp: Math.floor(Date.now() / 1000) + 3600 });
@@ -84,6 +85,44 @@ beforeEach(() => {
   state.verifyError = null;
   state.requests.record.mockResolvedValue({ status: "recorded", requestRef: "r" });
   state.incoming = new Headers();
+});
+
+describe("deployment candidate hosts", () => {
+  const host = "travel-candidate.niho.life";
+  const request = (path: string, method = "GET", hostname = host) =>
+    new NextRequest(`https://${hostname}${path}`, { method, headers: { host: hostname } });
+
+  it("selects candidate traffic and leaves the stable public routes alone", () => {
+    for (const hostname of [host, "experience-stg-candidate.niho.life", "experience-candidate.niho.life"]) {
+      for (const url of ["/", "/robots.txt", "/api/public/checkout"]) {
+        expect(unstable_doesMiddlewareMatch({ config: proxyConfig, url, headers: { host: hostname } })).toBe(true);
+      }
+    }
+    for (const hostname of ["travel.niho.life", "travel-stg.niho.life", "travel-candidate.niho.life.example.com"]) {
+      expect(unstable_doesMiddlewareMatch({ config: proxyConfig, url: "/", headers: { host: hostname } })).toBe(false);
+    }
+  });
+
+  it("serves readbacks without inviting crawlers or caching candidate responses", async () => {
+    const top = await proxy(request("/"));
+    expect(top.status).toBe(200);
+    expect(top.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    expect(top.headers.get("cache-control")).toBe("private, no-store");
+    const robots = await proxy(request("/robots.txt"));
+    expect(await robots.text()).toBe("User-agent: *\nDisallow: /\n");
+    expect(await (await proxy(request("/robots.txt", "HEAD"))).text()).toBe("");
+    expect((await proxy(request("/indexnow-key.txt"))).status).toBe(404);
+  });
+
+  it("blocks the English, Japanese and embedded booking forms and any mutation", async () => {
+    for (const prefix of ["", "/ja", "/embed"]) {
+      expect((await proxy(request(`${prefix}/experiences/dinner/book`))).status).toBe(404);
+    }
+    const result = await proxy(request("/api/public/checkout", "POST"));
+    expect(result.status).toBe(405);
+    expect(result.headers.get("allow")).toBe("GET, HEAD");
+    expect(state.requests.record).not.toHaveBeenCalled();
+  });
 });
 
 describe("operatorIdentity", () => {

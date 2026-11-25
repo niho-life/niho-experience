@@ -91,7 +91,7 @@ describe("team invitation email (#636)", () => {
   it("carries the token in the URL fragment only, with the provider's name when it has one", () => {
     const named = hostTeamInvitationEmail({ ...base, providerDisplayName: "合成ファーム" });
     expect(named.subject).toBe("「合成ファーム」のメンバーへのご招待");
-    expect(named.text).toContain("NIHO 体験ホストで、合成ファーム を一緒に運営するメンバー（共同ホスト）に招待されました。");
+    expect(named.text).toContain("NIHO Travel ホストで、合成ファーム を一緒に運営するメンバー（共同ホスト）に招待されました。");
     expect(named.text).toContain("共同ホストは、開催枠の編集、予約の確認、予約者への返信ができます。");
     expect(named.text).toContain(`https://experience.example.test/host/auth/team-invite#t=${TOKEN}`);
     expect(named.html).toContain(`https://experience.example.test/host/auth/team-invite#t=${TOKEN}`);
@@ -107,8 +107,8 @@ describe("team invitation email (#636)", () => {
   it("says a generic provider when the office has no name on record", () => {
     for (const providerDisplayName of [null, "  "]) {
       const anonymous = hostTeamInvitationEmail({ ...base, providerDisplayName });
-      expect(anonymous.subject).toBe("NIHO 体験ホストのメンバーへのご招待");
-      expect(anonymous.text).toContain("NIHO 体験ホストで、体験の提供者 を一緒に運営するメンバー（共同ホスト）に招待されました。");
+      expect(anonymous.subject).toBe("NIHO Travel ホストのメンバーへのご招待");
+      expect(anonymous.text).toContain("NIHO Travel ホストで、体験の提供者 を一緒に運営するメンバー（共同ホスト）に招待されました。");
     }
   });
 });

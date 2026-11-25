@@ -20,7 +20,7 @@ export type GuideAuthor = Readonly<{
   /** The writer's real name as shown on the page. */
   name: string;
   /**
-   * Their role, e.g. "Editor, NIHO Experience" or "Host of the community dinner". Required for static and database
+   * Their role, e.g. "Editor, NIHO Travel" or "Host of the community dinner". Required for static and database
    * publications; older mock preview drafts may omit it.
    */
   role?: string;

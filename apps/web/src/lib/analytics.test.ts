@@ -39,10 +39,10 @@ describe("Umami privacy filter", () => {
   const websiteId = "123e4567-e89b-12d3-a456-426614174000";
 
   it("enables Umami only for the production API host with a configured website ID", () => {
-    expect(analyticsModeForRuntime("mock", "https://experience.niho.life", websiteId)).toBe("debug");
-    expect(analyticsModeForRuntime("http", "https://experience.niho.life", websiteId)).toBe("umami");
+    expect(analyticsModeForRuntime("mock", "https://travel.niho.life", websiteId)).toBe("debug");
+    expect(analyticsModeForRuntime("http", "https://travel.niho.life", websiteId)).toBe("umami");
     expect(analyticsModeForRuntime("http", "https://preview.example", websiteId)).toBe("off");
-    expect(analyticsModeForRuntime("http", "https://experience.niho.life", "")).toBe("off");
+    expect(analyticsModeForRuntime("http", "https://travel.niho.life", "")).toBe("off");
   });
 
   it("recognizes a browser's Do Not Track signal", () => {
@@ -59,32 +59,32 @@ describe("Umami privacy filter", () => {
   });
 
   it("removes booking queries and opaque result paths", () => {
-    const origin = "https://experience.niho.life";
+    const origin = "https://travel.niho.life";
     expect(sanitizeUmamiPayload("pageview", { url: "/experiences/dinner/book?token=secret&guest=Jane" }, origin)).toMatchObject({ url: "/experiences/dinner/book" });
     expect(sanitizeUmamiPayload("pageview", { url: "/booking/opaque-token?guest=Jane" }, origin)).toMatchObject({ url: "/booking" });
   });
 
   it("keeps page views of the About page (#645)", () => {
-    expect(sanitizeUmamiPayload("pageview", { url: "/about" }, "https://experience.niho.life")).toMatchObject({ url: "/about", title: "About NIHO Experience" });
+    expect(sanitizeUmamiPayload("pageview", { url: "/about" }, "https://travel.niho.life")).toMatchObject({ url: "/about", title: "About NIHO Travel" });
   });
 
   it("never reports the guest's reply page, whose link carries a one-time token (#105)", () => {
-    expect(sanitizeUmamiPayload("pageview", { url: "/questions/reply#t=sample-token" }, "https://experience.niho.life")).toBe(false);
-    expect(sanitizeUmamiPayload("pageview", { url: "/questions/reply" }, "https://experience.niho.life")).toBe(false);
+    expect(sanitizeUmamiPayload("pageview", { url: "/questions/reply#t=sample-token" }, "https://travel.niho.life")).toBe(false);
+    expect(sanitizeUmamiPayload("pageview", { url: "/questions/reply" }, "https://travel.niho.life")).toBe(false);
   });
 
   it("keeps only identifier-like UTM values and reduces referrers to their origin", () => {
-    const sanitized = sanitizeUmamiPayload("pageview", { url: "/experiences?utm_source=niho&utm_campaign=guest%40example.com&token=secret", referrer: "https://partner.example/path?token=private" }, "https://experience.niho.life");
+    const sanitized = sanitizeUmamiPayload("pageview", { url: "/experiences?utm_source=niho&utm_campaign=guest%40example.com&token=secret", referrer: "https://partner.example/path?token=private" }, "https://travel.niho.life");
     expect(sanitized).toMatchObject({ url: "/experiences?utm_source=niho", referrer: "https://partner.example" });
   });
 
   it("removes free-text listing searches from analytics page URLs", () => {
-    const result = sanitizeUmamiPayload("pageview", { url: "https://experience.niho.life/experiences?q=guest%40example.com" }, "https://experience.niho.life");
+    const result = sanitizeUmamiPayload("pageview", { url: "https://travel.niho.life/experiences?q=guest%40example.com" }, "https://travel.niho.life");
     expect(result).toMatchObject({ url: "/experiences" });
   });
 
   it("rechecks event data at the final send boundary", () => {
-    const origin = "https://experience.niho.life";
+    const origin = "https://travel.niho.life";
     const pageview = sanitizeUmamiPayload("event", { url: "/experiences?token=private", data: { guestName: "Jane" } }, origin);
     expect(pageview).toMatchObject({ url: "/experiences" });
     expect(pageview).not.toHaveProperty("data");
@@ -101,16 +101,16 @@ describe("Umami privacy filter", () => {
       hostname: "guest@example.com", title: "Booking for Sample Guest", id: "private-id", tag: "private-tag", email: "guest@example.com",
       screen: "1280x900", language: "en-US", referrer: "file:///private/path",
       data: { experience: "dinner", guests: 2, total_jpy: 12000, note: "private" },
-    }, "https://experience.niho.life");
-    expect(result).toEqual({ url: "/experiences/dinner/book", name: "checkout_start", website: websiteId, hostname: "experience.niho.life", title: "Booking", screen: "1280x900", language: "en-US", referrer: "", data: { experience: "dinner", guests: 2, total_jpy: 12000 } });
+    }, "https://travel.niho.life");
+    expect(result).toEqual({ url: "/experiences/dinner/book", name: "checkout_start", website: websiteId, hostname: "travel.niho.life", title: "Booking", screen: "1280x900", language: "en-US", referrer: "", data: { experience: "dinner", guests: 2, total_jpy: 12000 } });
   });
 
-  it.each(["/missing/private-token", "/preview/checkout", "/experiences/dinner%2Fbook/private", "https://experience.niho.life:444/experiences", "https://user@experience.niho.life/experiences"])("rejects an unapproved path or origin: %s", (url) => {
-    expect(sanitizeUmamiPayload("event", { url }, "https://experience.niho.life")).toBe(false);
+  it.each(["/missing/private-token", "/preview/checkout", "/experiences/dinner%2Fbook/private", "https://travel.niho.life:444/experiences", "https://user@travel.niho.life/experiences"])("rejects an unapproved path or origin: %s", (url) => {
+    expect(sanitizeUmamiPayload("event", { url }, "https://travel.niho.life")).toBe(false);
   });
 
   it("keeps contract-valid mixed-case slugs and counts unusual slugs without exporting their text", () => {
-    const origin = "https://experience.niho.life";
+    const origin = "https://travel.niho.life";
     expect(sanitizeUmamiPayload("event", { url: "/experiences/Tea_1/book", name: "checkout_start", data: { experience: "Tea_1" } }, origin)).toMatchObject({ url: "/experiences/Tea_1/book", name: "checkout_start", data: { experience: "Tea_1" } });
     expect(sanitizeUmamiPayload("event", { url: "/experiences/guest%40example.com", name: "experience_view", data: { experience: "guest@example.com" } }, origin)).toMatchObject({ url: "/experiences/_experience", name: "experience_view", data: {} });
     expect(sanitizeUmamiPayload("event", { url: "/experiences/%E9%8E%8C%E5%80%89%E8%8C%B6/book" }, origin)).toMatchObject({ url: "/experiences/_experience/book" });
@@ -118,6 +118,6 @@ describe("Umami privacy filter", () => {
   });
 
   it("does not use an alternate current origin", () => {
-    expect(sanitizeUmamiPayload("event", { url: "https://experience.niho.life/" }, "https://preview.example")).toBe(false);
+    expect(sanitizeUmamiPayload("event", { url: "https://travel.niho.life/" }, "https://preview.example")).toBe(false);
   });
 });

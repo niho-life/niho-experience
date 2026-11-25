@@ -7,7 +7,7 @@ import { returningHostLoginPath } from "@/lib/host/returning-host";
 import { readHostSession, requireHostConsole } from "@/lib/host/server";
 import { sessionUsableInApp } from "@/lib/host/session";
 
-export const metadata: Metadata = { title: { absolute: "NIHO 体験ホスト" } };
+export const metadata: Metadata = { title: { absolute: "NIHO Travel ホスト" } };
 
 /**
  * The installed app's start page (#177; the manifest's start_url). Outside the console frame,

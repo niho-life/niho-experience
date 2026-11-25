@@ -21,8 +21,8 @@ import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 export const TARGETS = Object.freeze({
-  stg: { prefix: "STG", project: "niho-app-stg" },
-  prod: { prefix: "PROD", project: "niho-app-prd" },
+  stg: { prefix: "STG", project: "niho-app-stg", siteUrl: "https://travel-stg.niho.life" },
+  prod: { prefix: "PROD", project: "niho-app-prd", siteUrl: "https://travel.niho.life" },
 });
 
 /** What a flag may need besides other flags: the host console, and the experience DB (both workflows wire them together). */
@@ -444,7 +444,6 @@ export const FLAGS = Object.freeze([
 ]);
 
 const PROD_SECRET_REF = /^[A-Za-z0-9_-]+:[1-9][0-9]*$/;
-const SITE_URL = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+$/;
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Every Cloud Run name the table can set: what the revision must carry exactly as expected, and nothing else of. */
@@ -466,7 +465,7 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
   const settings = TARGETS[target];
   if (!settings) return { problems: [`unknown target ${String(target)}`], on: [], env: {}, secrets: {}, names: tableNames() };
   const problems = [];
-  if (!SITE_URL.test(url ?? "")) problems.push("the site URL must be an https origin");
+  if (url !== settings.siteUrl) problems.push(`--site-url must match the canonical origin for ${target}: ${settings.siteUrl}`);
   const name = (variable) => `${settings.prefix}_${variable}`;
   const value = (variable) => {
     const raw = vars?.[name(variable)];

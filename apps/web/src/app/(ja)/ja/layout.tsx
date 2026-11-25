@@ -20,9 +20,9 @@ export async function generateMetadata(): Promise<Metadata> {
   try { await getPreparedJapaneseStaticRelease(); released = true; } catch { /* fail closed */ }
   return {
     metadataBase: new URL(config.siteUrl),
-    title: { default: "NIHO Experience", template: "%s | NIHO Experience" },
+    title: { default: "NIHO Travel", template: "%s | NIHO Travel" },
     robots: released && config.indexingAllowed ? undefined : { index: false, follow: false },
-    openGraph: { siteName: "NIHO Experience", type: "website", locale: "ja_JP" },
+    openGraph: { siteName: "NIHO Travel", type: "website", locale: "ja_JP" },
     twitter: { card: "summary" },
   };
 }

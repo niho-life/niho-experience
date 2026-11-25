@@ -157,11 +157,11 @@ jobs:
           if [[ -n "$FEEDBACK_AUDIENCE" || -n "$FEEDBACK_SERVICE_ACCOUNT_EMAIL" ]]; then
             test -n "$FEEDBACK_AUDIENCE"
             test -n "$FEEDBACK_SERVICE_ACCOUNT_EMAIL"
-            test "$FEEDBACK_AUDIENCE" = "https://experience.niho.life"
+            test "$FEEDBACK_AUDIENCE" = "https://travel.niho.life"
             test "$FEEDBACK_SERVICE_ACCOUNT_EMAIL" = "nihoapp-runner@niho-app-prd.iam.gserviceaccount.com"
             test "$(jq -r '.PROD_GUEST_MAIL_ENABLED // "false"' <<< "$DEPLOY_VARS")" = true
           fi
-          node scripts/deploy/runtime-flags.mjs --target prod --host-console "$HOST_CALENDAR_ENABLED" --site-url https://experience.niho.life
+          node scripts/deploy/runtime-flags.mjs --target prod --host-console "$HOST_CALENDAR_ENABLED" --site-url https://travel.niho.life
       # No checkout or repository scripts run after OIDC credentials are issued.
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -204,7 +204,7 @@ jobs:
           image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/web@${{ steps.pushed_image.outputs.digest }}"
           tag="candidate-${CANDIDATE_SHA}"
           tag="${tag:0:22}"
-          env_vars="EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life,SITE_URL=https://experience.niho.life,SITE_INDEXING=allow,BOOKINGS_ENABLED=${BOOKINGS},HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider"
+          env_vars="EXPERIENCE_API_MODE=http,EXPERIENCE_PUBLIC_API_VERSION=1.0,NEXT_PUBLIC_NIHO_WEB_ORIGIN=https://niho.life,SITE_URL=https://travel.niho.life,SITE_INDEXING=allow,BOOKINGS_ENABLED=${BOOKINGS},HOST_SIGNUP_MODE=pilot,NIHO_HOST_START_URL=https://niho.life/experiences/provider"
           if [[ -n "$FEEDBACK_AUDIENCE" ]]; then
             env_vars+=",EXPERIENCE_MAIL_FEEDBACK_AUDIENCE=${FEEDBACK_AUDIENCE},EXPERIENCE_MAIL_FEEDBACK_SERVICE_ACCOUNT_EMAIL=${FEEDBACK_SERVICE_ACCOUNT_EMAIL}"
           fi
@@ -253,7 +253,7 @@ jobs:
               length == 1 and .[0].revisionName == $revision)
           ' <<< "$state" >/dev/null
           # EDGE_CANDIDATE_READBACK_END
-          url=https://experience-candidate.niho.life
+          url=https://travel-candidate.niho.life
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           {
@@ -298,7 +298,7 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_INDEXING") | .value' <<< "$revision_json")" = allow
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_SIGNUP_MODE") | .value' <<< "$revision_json")" = pilot
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NIHO_HOST_START_URL") | .value' <<< "$revision_json")" = https://niho.life/experiences/provider
-          test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_URL") | .value' <<< "$revision_json")" = https://experience.niho.life
+          test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_URL") | .value' <<< "$revision_json")" = https://travel.niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NEXT_PUBLIC_NIHO_WEB_ORIGIN") | .value' <<< "$revision_json")" = https://niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_CONSOLE_ENABLED") | .value' <<< "$revision_json")" = "$HOST_CALENDAR_ENABLED"
           test "$(jq -r '[.spec.containers[0].env[]? | select(.name == "EXPERIENCE_MAIL_FEEDBACK_AUDIENCE") | .value][0] // ""' <<< "$revision_json")" = "$FEEDBACK_AUDIENCE"
@@ -334,19 +334,19 @@ jobs:
           page="$(curl -fsS "${URL}/experiences")"
           if grep -qF 'Preview with sample data' <<< "$page"; then exit 1; fi
           if grep -qF 'Details to be confirmed' <<< "$page"; then exit 1; fi
-          # Search indexing is open (owner 2026-11-07): no site-wide block, the sitemap is announced and lists the top page,
-          # the private paths stay excluded, and the top page carries no noindex.
+          # Candidate traffic is noindex and read-only, even with the stable revision's flags.
           robots="$(curl -fsS "${URL}/robots.txt")"
-          if grep -qxF 'Disallow: /' <<< "$robots"; then exit 1; fi
-          grep -qxF 'Sitemap: https://experience.niho.life/sitemap.xml' <<< "$robots"
-          for private_path in '/experiences/*/book' '/booking/' '/host/' '/admin'; do
-            grep -qxF "Disallow: ${private_path}" <<< "$robots"
-          done
-          # Read whole bodies first: an early grep -q exit must not turn a curl SIGPIPE into a pass or a failure.
+          grep -qxF 'Disallow: /' <<< "$robots"
+          headers="$(curl -fsSI "${URL}/" | tr -d '\r')"
+          grep -qiE '^X-Robots-Tag:.*noindex' <<< "$headers"
+          # No application route can handle this probe.
+          case "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${URL}/.well-known/niho-candidate-write-probe")" in
+            403|405) ;;
+            *) exit 1 ;;
+          esac
           sitemap="$(curl -fsS "${URL}/sitemap.xml")"
-          grep -qF '<loc>https://experience.niho.life' <<< "$sitemap"
-          top_page="$(curl -fsS "${URL}/")"
-          if grep -qE '<meta name="robots" content="[^"]*noindex' <<< "$top_page"; then exit 1; fi
+          grep -qF '<loc>https://travel.niho.life/' <<< "$sitemap"
+          if grep -qF 'travel-candidate.niho.life' <<< "$sitemap"; then exit 1; fi
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/states")" = 404
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/checkout")" = 404
           {
@@ -419,11 +419,11 @@ jobs:
           if [[ -n "$FEEDBACK_AUDIENCE" || -n "$FEEDBACK_SERVICE_ACCOUNT_EMAIL" ]]; then
             test -n "$FEEDBACK_AUDIENCE"
             test -n "$FEEDBACK_SERVICE_ACCOUNT_EMAIL"
-            test "$FEEDBACK_AUDIENCE" = "https://experience.niho.life"
+            test "$FEEDBACK_AUDIENCE" = "https://travel.niho.life"
             test "$FEEDBACK_SERVICE_ACCOUNT_EMAIL" = "nihoapp-runner@niho-app-prd.iam.gserviceaccount.com"
             test "$(jq -r '.PROD_GUEST_MAIL_ENABLED // "false"' <<< "$DEPLOY_VARS")" = true
           fi
-          node scripts/deploy/runtime-flags.mjs --target prod --host-console "$HOST_CALENDAR_ENABLED" --site-url https://experience.niho.life
+          node scripts/deploy/runtime-flags.mjs --target prod --host-console "$HOST_CALENDAR_ENABLED" --site-url https://travel.niho.life
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.PROD_GCP_WIF_PROVIDER }}
@@ -446,7 +446,7 @@ jobs:
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_INDEXING") | .value' <<< "$revision_json")" = allow
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOST_SIGNUP_MODE") | .value' <<< "$revision_json")" = pilot
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NIHO_HOST_START_URL") | .value' <<< "$revision_json")" = https://niho.life/experiences/provider
-          test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_URL") | .value' <<< "$revision_json")" = https://experience.niho.life
+          test "$(jq -r '.spec.containers[0].env[] | select(.name == "SITE_URL") | .value' <<< "$revision_json")" = https://travel.niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "NEXT_PUBLIC_NIHO_WEB_ORIGIN") | .value' <<< "$revision_json")" = https://niho.life
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_API_MODE") | .value' <<< "$revision_json")" = http
           test "$(jq -r '.spec.containers[0].env[] | select(.name == "EXPERIENCE_PUBLIC_API_VERSION") | .value' <<< "$revision_json")" = 1.0
@@ -487,7 +487,7 @@ jobs:
               length == 1 and .[0].revisionName == $revision)
           ' <<< "$state" >/dev/null
           # EDGE_CANDIDATE_READBACK_END
-          url=https://experience-candidate.niho.life
+          url=https://travel-candidate.niho.life
           echo "url=$url" >> "$GITHUB_OUTPUT"
           {
             echo "Verified existing revision: ${CANDIDATE_REVISION}"
@@ -515,19 +515,19 @@ jobs:
           page="$(curl -fsS "${URL}/experiences")"
           if grep -qF 'Preview with sample data' <<< "$page"; then exit 1; fi
           if grep -qF 'Details to be confirmed' <<< "$page"; then exit 1; fi
-          # Search indexing is open (owner 2026-11-07): no site-wide block, the sitemap is announced and lists the top page,
-          # the private paths stay excluded, and the top page carries no noindex.
+          # Candidate traffic is noindex and read-only, even with the stable revision's flags.
           robots="$(curl -fsS "${URL}/robots.txt")"
-          if grep -qxF 'Disallow: /' <<< "$robots"; then exit 1; fi
-          grep -qxF 'Sitemap: https://experience.niho.life/sitemap.xml' <<< "$robots"
-          for private_path in '/experiences/*/book' '/booking/' '/host/' '/admin'; do
-            grep -qxF "Disallow: ${private_path}" <<< "$robots"
-          done
-          # Read whole bodies first: an early grep -q exit must not turn a curl SIGPIPE into a pass or a failure.
+          grep -qxF 'Disallow: /' <<< "$robots"
+          headers="$(curl -fsSI "${URL}/" | tr -d '\r')"
+          grep -qiE '^X-Robots-Tag:.*noindex' <<< "$headers"
+          # No application route can handle this probe.
+          case "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "${URL}/.well-known/niho-candidate-write-probe")" in
+            403|405) ;;
+            *) exit 1 ;;
+          esac
           sitemap="$(curl -fsS "${URL}/sitemap.xml")"
-          grep -qF '<loc>https://experience.niho.life' <<< "$sitemap"
-          top_page="$(curl -fsS "${URL}/")"
-          if grep -qE '<meta name="robots" content="[^"]*noindex' <<< "$top_page"; then exit 1; fi
+          grep -qF '<loc>https://travel.niho.life/' <<< "$sitemap"
+          if grep -qF 'travel-candidate.niho.life' <<< "$sitemap"; then exit 1; fi
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/states")" = 404
           test "$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/preview/checkout")" = 404
       - name: Promote the reviewed existing revision
@@ -536,4 +536,17 @@ jobs:
             --to-revisions "${CANDIDATE_REVISION}=100" --quiet
           state="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format=json)"
           jq -e --arg revision "$CANDIDATE_REVISION" '[.status.traffic[] | select(.revisionName == $revision and .percent == 100)] | length == 1' <<< "$state" >/dev/null
+          # Verify the exact stable origin after it serves the candidate revision.
+          url=https://travel.niho.life
+          robots="$(curl -fsS --retry 5 --retry-all-errors "${url}/robots.txt")"
+          if grep -qxF 'Disallow: /' <<< "$robots"; then exit 1; fi
+          grep -qxF "Sitemap: ${url}/sitemap.xml" <<< "$robots"
+          for private_path in '/experiences/*/book' '/booking/' '/host/' '/admin'; do
+            grep -qxF "Disallow: ${private_path}" <<< "$robots"
+          done
+          top_page="$(curl -fsS -A Googlebot "${url}/")"
+          if ! grep -qF "<link rel=\"canonical\" href=\"${url}\"" <<< "$top_page"; then
+            grep -qF "<link rel=\"canonical\" href=\"${url}/\"" <<< "$top_page"
+          fi
+          if grep -qE '<meta name="robots" content="[^"]*noindex' <<< "$top_page"; then exit 1; fi
           echo "Serving reviewed revision: ${CANDIDATE_REVISION} (100%)" >> "$GITHUB_STEP_SUMMARY"

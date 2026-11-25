@@ -45,7 +45,7 @@ export function ProductOperatorInvitation({ invitationId, prepared, loginHref, d
 
   return <main id="main" className="mx-auto grid min-h-dvh w-full max-w-xl place-items-center px-4 py-10">
     <section className={`${HOST_SURFACE} w-full p-5 sm:p-7`}>
-      <p className="text-xs font-extrabold tracking-[0.08em] text-muted">NIHO EXPERIENCE</p>
+      <p className="text-xs font-extrabold tracking-[0.08em] text-muted">NIHO TRAVEL</p>
       <h1 className="mt-2 font-display text-2xl font-medium">体験への招待</h1>
       {status === "preparing" ? <p role="status" className="mt-4 text-ink-soft">招待を確認しています…</p> : null}
       {status === "invalid" ? <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-warn">この招待リンクは無効か、期限が切れています。管理者へ新しいリンクを依頼してください。</p> : null}

@@ -60,7 +60,7 @@ export const PAYOUT_ACCOUNT_TEXT = {
  */
 export function payoutAccountConsentText(input: { readonly providerName: string; readonly accountLast4: string }): string {
   const name = input.providerName.trim() || "この提供者";
-  return `${name}が NIHO Experience で販売する体験の売上は、Stripe の口座（末尾 ${input.accountLast4}）で受け取ります。`
+  return `${name}が NIHO Travel で販売する体験の売上は、Stripe の口座（末尾 ${input.accountLast4}）で受け取ります。`
     + "売上からは、販売条件に示す Stripe の決済手数料と NIHO の手数料が差し引かれます。"
     + "この同意を取り消すと、公開中の体験は止まり、新しい公開と販売はできなくなります。";
 }

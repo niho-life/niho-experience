@@ -18,7 +18,7 @@
 | 項目 | 値 |
 | --- | --- |
 | `id` / `scope` | `/host/` |
-| `name` / `short_name` | NIHO 体験ホスト / 体験ホスト（niho.life の「NIHO host」と区別する） |
+| `name` / `short_name` | NIHO Travel ホスト / 体験ホスト（niho.life の「NIHO host」と区別する） |
 | `start_url` | `/host/launch?source=pwa` |
 | `display` / `lang` | `standalone` / `ja` |
 | 色 | `background_color`・`theme_color` とも `#ffffff`（layout の themeColor と同じ） |

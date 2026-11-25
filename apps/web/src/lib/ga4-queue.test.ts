@@ -5,7 +5,7 @@ describe("GA4 dataLayer queue", () => {
   it("pushes the gtag call's arguments object", () => {
     const dataLayer: unknown[] = [];
     const gtag = createGtagQueue(dataLayer);
-    const command = ["event", "page_view", { page_location: "https://experience.niho.life/" }];
+    const command = ["event", "page_view", { page_location: "https://travel.niho.life/" }];
 
     gtag(...command);
 

@@ -9,7 +9,7 @@ export const sampleRainyDay: Guide = {
   title: "Indoor crafts for a rainy day in Kamakura (sample guide)",
   description: "A sample guide for previews: indoor craft experiences for a wet day, and what to ask your host before you go. Everything in it is invented.",
   pillar: "hands-on",
-  author: { name: "Ken Ito (sample)", role: "Sample writer, NIHO Experience (invented for previews)", bio: "Ken is an invented writer used only for the synthetic guide preview." },
+  author: { name: "Ken Ito (sample)", role: "Sample writer, NIHO Travel (invented for previews)", bio: "Ken is an invented writer used only for the synthetic guide preview." },
   publishedAt: "2026-10-18",
   updatedAt: "2026-10-18",
   readMinutes: 4,

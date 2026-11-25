@@ -47,7 +47,7 @@ test("the manifest opens the console's start page and stays inside /host/", asyn
   expect(response.headers()["content-type"]).toContain("application/manifest+json");
   expect(response.headers()["cache-control"]).toContain("no-store");
   const manifest = await response.json();
-  expect(manifest).toMatchObject({ id: "/host/", name: "NIHO 体験ホスト", short_name: "体験ホスト", lang: "ja", start_url: "/host/launch?source=pwa", scope: "/host/", display: "standalone" });
+  expect(manifest).toMatchObject({ id: "/host/", name: "NIHO Travel ホスト", short_name: "体験ホスト", lang: "ja", start_url: "/host/launch?source=pwa", scope: "/host/", display: "standalone" });
   expect(manifest.shortcuts.map((shortcut: { name: string }) => shortcut.name)).toEqual(["承認待ち", "今日の回", "メッセージ", "カレンダー"]);
   for (const icon of manifest.icons as { src: string }[]) expect((await request.get(icon.src)).headers()["content-type"]).toBe("image/png");
 
@@ -122,7 +122,7 @@ test("a share that is not a usable image is said to have failed, and can be clos
 
 test("in a browser, /host/launch signs in as usual and forwards a signed-in host to ホーム", async ({ page }) => {
   await page.goto("/host/launch");
-  await expect(page.getByRole("heading", { level: 1, name: "NIHO 体験ホスト" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "NIHO Travel ホスト" })).toBeVisible();
   await expect(loginLink(page)).toHaveAttribute("href", "/host/auth/login");
   await loginLink(page).click();
   await page.waitForURL(/\/host\/home$/);

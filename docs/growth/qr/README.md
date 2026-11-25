@@ -1,6 +1,6 @@
 # QR試作データ
 
-2026-10-20作成。`qrencode` のPNG出力（1モジュール12px、誤り訂正M、余白4モジュール）。リンク先の `experience.niho.life` は作成時点でDNS未開通。**印刷・掲示・配布しない。** 本番URL、campaign名、販売可能な商品を確認した後に再生成し、iPhoneとAndroidで読み取り、UmamiでUTMを確認する。
+2026-10-20作成。`qrencode` のPNG出力（1モジュール12px、誤り訂正M、余白4モジュール）。リンク先の `experience.niho.life` は作成時点でDNS未開通。**印刷・掲示・配布しない。** 以下は試作PNGに実際に埋め込まれた旧URL。新しい印刷物に使うQRは [公開URL](../launch-kit.md#リンクとutm) の `travel.niho.life`、campaign名、販売可能な商品を確認した後に再生成し、iPhoneとAndroidで読み取り、UmamiでUTMを確認する。
 
 | 画像 | リンク先 |
 | --- | --- |

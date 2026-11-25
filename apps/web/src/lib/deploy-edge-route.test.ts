@@ -10,7 +10,7 @@ for (const [file, service, environment] of [['deploy-host-staging.yml', 'niho-ex
     expect(blocks.length).toBe(file.includes('production') ? 2 : 1);
     expect(source).toContain('--ingress internal-and-cloud-load-balancing');
     expect(source).toContain('--update-tags "candidate=$');
-    expect(source).toContain(`url=https://experience-${file.includes('production') ? '' : 'stg-'}candidate.niho.life`);
+    expect(source).toContain(`url=https://${file.includes('production') ? 'travel-candidate.niho.life' : 'experience-stg-candidate.niho.life'}`);
     expect(source).not.toContain('node scripts/deploy/edge-route.mjs');
   });
   for (const [i, block] of blocks.entries()) {
