@@ -9,6 +9,7 @@ import { cancellationSummary, scheduleDescription } from "@/lib/experience/site-
 import { attributionWithDefault, readBookingAttribution, type BookingAttribution } from "@/lib/booking-attribution";
 import { bookingReturnCopy, readReturnType, type BookingReturnType } from "@/lib/booking-return-copy";
 import { calendarDayLabel, occurrenceStartTime } from "@/lib/experience/booking-calendar";
+import { doNotTrackEnabled } from "@/lib/analytics";
 import { embedParentOrigin, leaveFrameTo, postEmbedTop, useEmbedFrame } from "@/lib/experience/embed-frame";
 import { BookingCalendar } from "@/components/BookingCalendar";
 import { expectedSiteBookingTotalYen } from "@/lib/experience/site-booking-rules";
@@ -123,7 +124,8 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
     setProblem("");
     const answersBody = answersForCheckout(offer.bookingQuestions, answers);
     // 販売経路 (#638): the widget says it is embedded, with the framing page's origin when the browser tells it (never a path).
-    const parentOrigin = embed ? embedParentOrigin() : null;
+    // Under Do Not Track the origin is not sent, as the utm_* marks; the channel still is.
+    const parentOrigin = embed && !doNotTrackEnabled(navigator.doNotTrack) ? embedParentOrigin() : null;
     const bodyWithoutKey: Omit<ExperienceCheckoutRequest, "clientRequestKey"> & EmbedChannelFields = {
       offerId: offer.id,
       occurrenceDate: date,

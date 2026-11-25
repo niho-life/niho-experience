@@ -2138,6 +2138,47 @@ describe("PostgreSQL guest bookings made from the widget on the host's site (#63
     });
   });
 
+  it("returns the origin only right after the request, for a paid booking or an active hold", async () => {
+    await withSchema(async ({ pool, store, guests, addRule }) => {
+      await addRule("walk", rule("sample-walk-am"));
+      const embedded = async (email: string, date: number, session: string) => {
+        const start = await guests.startGuestBooking(walkRequest({ guestEmail: email, occurrenceDate: day(date), salesChannel: "EMBED", embedOrigin: ORIGIN }));
+        await guests.attachCheckoutSession(start.publicBookingId, session);
+        return start;
+      };
+      const held = await embedded("held@example.com", 2, "cs_test_held");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_held"), ORIGIN);
+
+      const paid = await embedded("paid@example.com", 3, "cs_test_paid");
+      await payFor(store, paid, 3000, "embed-paid");
+      assert.equal(await statusOf(pool, paid), "CONFIRMED");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_paid"), ORIGIN);
+
+      const lapsed = await embedded("lapsed@example.com", 4, "cs_test_lapsed");
+      await lapse(pool, [lapsed]);
+      assert.equal(await statusOf(pool, lapsed), "HOLD");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_lapsed"), null);
+
+      const expired = await embedded("expired@example.com", 5, "cs_test_expired");
+      await endSession(guests, expired, "cs_test_expired", "embed-expired");
+      assert.equal(await statusOf(pool, expired), "EXPIRED");
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_expired"), null);
+
+      const cancelled = await embedded("cancelled@example.com", 6, "cs_test_cancelled");
+      await payFor(store, cancelled, 3000, "embed-cancelled");
+      await pool.query("UPDATE bookings SET status='CANCELLED', confirmed_at=NULL, cancelled_at=clock_timestamp() WHERE public_booking_id=$1", [cancelled.publicBookingId]);
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_cancelled"), null);
+
+      // An old request has no link, even while it is paid.
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_paid", { maxAgeSeconds: 1 }), null);
+      assert.equal(await guests.findEmbedReturnOrigin("cs_test_paid"), ORIGIN);
+      for (const maxAgeSeconds of [0, -1, 1.5, Number.NaN]) {
+        await assert.rejects(() => guests.findEmbedReturnOrigin("cs_test_paid", { maxAgeSeconds }), StoreValidationError, String(maxAgeSeconds));
+      }
+    });
+  });
+
   it("erases the origin with the guest's details and keeps the channel, which the host list shows without the origin", async () => {
     await withSchema(async (context) => {
       const { pool, store, guests, addRule } = context;

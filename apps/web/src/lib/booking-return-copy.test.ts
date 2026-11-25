@@ -56,13 +56,16 @@ describe("the return page's link back to the host's site (#638)", () => {
     expect(ja).toMatch(/体験を探す<\/a><a href="https:\/\/host-site\.example\.test" rel="noopener noreferrer" class="[^"]+">host-site\.example\.test に戻る<\/a><\/div><\/div>$/);
   });
 
-  it("renders the page exactly as before without one", () => {
+  it("renders the page exactly as before without one: the same markup less the one link", () => {
     for (const locale of ["en", "ja"] as const) {
-      const without = renderToStaticMarkup(createElement(BookingReturn, { type: "instant", showReview: false, locale }));
-      expect(without).toBe(renderToStaticMarkup(createElement(BookingReturn, { type: "instant", showReview: false, locale, backTo: undefined })));
-      expect(without).not.toContain("host-site");
-      expect(without).not.toContain("noopener");
-      expect(without).toMatch(locale === "en" ? /Browse experiences<\/a><\/div><\/div>$/ : /体験を探す<\/a><\/div><\/div>$/);
+      for (const [type, freeBooking] of [["instant", false], ["instant", true], ["managed-request", false], [null, false]] as const) {
+        const without = renderToStaticMarkup(createElement(BookingReturn, { type, freeBooking, showReview: false, locale }));
+        const withLink = renderToStaticMarkup(createElement(BookingReturn, { type, freeBooking, showReview: false, locale, backTo }));
+        const links = withLink.match(/<a href="https:\/\/host-site\.example\.test" rel="noopener noreferrer"[^>]*>[^<]*<\/a>/g) ?? [];
+        expect(links).toHaveLength(1);
+        expect(withLink.replace(links[0]!, "")).toBe(without);
+        expect(without).not.toContain("host-site");
+      }
     }
   });
 });

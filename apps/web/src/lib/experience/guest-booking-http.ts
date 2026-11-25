@@ -178,7 +178,8 @@ export async function readGuestCheckout(request: Request, options: ReadGuestChec
     if (value.salesChannel !== undefined && value.salesChannel !== "embed") return invalid("salesChannel");
     if (value.embedOrigin !== undefined) {
       if (typeof value.embedOrigin !== "string" || value.salesChannel !== "embed") return invalid("embedOrigin");
-      embedOrigin = embedOriginOf(value.embedOrigin);
+      // Do Not Track: the channel is kept, the framing site's origin is not (as the UTM fields below).
+      embedOrigin = request.headers.get("dnt") === "1" ? null : embedOriginOf(value.embedOrigin);
     }
     if (value.salesChannel === "embed") salesChannel = "EMBED";
   }

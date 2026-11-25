@@ -344,7 +344,10 @@ export interface GuestBookingStart {
   readonly guestEmail: string | null;
   /** The Checkout Session already attached to this booking (a repeated request), or null. */
   readonly checkoutSessionRef: string | null;
-  /** The framing site's origin kept with an EMBED booking; null for SITE, an unknown origin or erased data. */
+  /**
+   * The framing site's origin of this request: what a new EMBED booking stores, and for a repeated request the same value
+   * (the request's own, which the matching fingerprint shows is the one stored). null for SITE or an unknown origin.
+   */
   readonly embedOrigin: string | null;
   /** For experience-payments' createDirectCheckout. */
   readonly booking: BookingRecord;
@@ -2179,14 +2182,25 @@ export class GuestBookingRepository {
 
   /**
    * The payment return page's "Back to {host}" link: the origin kept with the EMBED booking whose Checkout
-   * Session this is, or null (a SITE booking, an unknown Session, no origin kept, erased data). Read only;
-   * anything that is not a Checkout Session ID is null without touching the database.
+   * Session this is, only right after the request (`maxAgeSeconds`, two hours by default) and only while the
+   * booking is paid, under payment review or still an active hold. Otherwise null (a SITE booking, an unknown
+   * Session, no origin kept, erased data, an expired or cancelled booking, an old request), so a Session ID
+   * alone cannot keep a link on the return page. Read only; anything that is not a Checkout Session ID is null
+   * without touching the database.
    */
-  async findEmbedReturnOrigin(checkoutSessionRef: string): Promise<string | null> {
+  async findEmbedReturnOrigin(checkoutSessionRef: string, options: { readonly maxAgeSeconds?: number } = {}): Promise<string | null> {
+    const maxAgeSeconds = options.maxAgeSeconds ?? 7_200;
+    if (!Number.isSafeInteger(maxAgeSeconds) || maxAgeSeconds < 1) throw new StoreValidationError("maxAgeSeconds must be a positive integer.");
     if (typeof checkoutSessionRef !== "string" || !CHECKOUT_SESSION_ID.test(checkoutSessionRef)) return null;
     const result = await this.#pool.query<DbRow>(
-      "SELECT embed_origin FROM booking_guests WHERE checkout_session_ref = $1 AND sales_channel = 'EMBED' AND embed_origin IS NOT NULL LIMIT 1",
-      [checkoutSessionRef],
+      `SELECT g.embed_origin
+         FROM booking_guests g
+         JOIN bookings b ON b.provider_id = g.provider_id AND b.id = g.booking_id
+        WHERE g.checkout_session_ref = $1 AND g.sales_channel = 'EMBED' AND g.embed_origin IS NOT NULL
+          AND g.created_at > clock_timestamp() - make_interval(secs => $2)
+          AND (b.status IN ('CONFIRMED','PAYMENT_REVIEW') OR (b.status = 'HOLD' AND b.hold_expires_at > clock_timestamp()))
+        LIMIT 1`,
+      [checkoutSessionRef, maxAgeSeconds],
     );
     const origin = result.rows[0]?.embed_origin;
     return typeof origin === "string" ? origin : null;

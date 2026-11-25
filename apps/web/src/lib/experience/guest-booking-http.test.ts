@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { embedOriginOf, stripeReturnPath } from "./guest-booking-http";
+import { embedOriginOf, readGuestCheckout, stripeReturnPath } from "./guest-booking-http";
 
 /** 販売経路 (#638): what the checkout keeps of the framing page's address, and where Stripe sends the guest back. */
 describe("embedOriginOf", () => {
@@ -27,5 +27,28 @@ describe("stripeReturnPath", () => {
     expect(stripeReturnPath("/booking/return?type=instant", "https://host-site.example.test")).toBe("/booking/return?type=instant&cs={CHECKOUT_SESSION_ID}");
     expect(stripeReturnPath("/ja/booking/return?type=instant", "https://host-site.example.test")).toBe("/ja/booking/return?type=instant&cs={CHECKOUT_SESSION_ID}");
     expect(stripeReturnPath("/booking/return?type=instant", null)).toBe("/booking/return?type=instant");
+  });
+});
+
+describe("readGuestCheckout under Do Not Track", () => {
+  const BODY = {
+    offerId: "sample-am", occurrenceDate: "2026-11-02", adultCount: 1, childCount: 0, expectedTotalYen: 4000,
+    guestName: "Sample Guest", guestEmail: "guest@example.com", bookingQuestionsFingerprint: "a".repeat(64),
+    consent: { agreedVersion: "sample-terms-2026-10" }, clientRequestKey: "00000000-0000-4000-8000-000000000638",
+    utmSource: "provider", utmMedium: "embed", salesChannel: "embed", embedOrigin: "https://host-site.example.test/tours?x=1",
+  };
+  const post = (headers: Record<string, string> = {}) => new Request("https://experience.example/api/public/experiences/sample-tea/checkout", {
+    method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(BODY),
+  });
+
+  it("keeps the channel and drops the framing site's origin, as the UTM fields", async () => {
+    const tracked = await readGuestCheckout(post(), { embedEnabled: true });
+    expect(tracked.ok && tracked.fields).toMatchObject({ salesChannel: "EMBED", embedOrigin: "https://host-site.example.test", utm: { utmSource: "provider", utmMedium: "embed" } });
+    const dnt = await readGuestCheckout(post({ dnt: "1" }), { embedEnabled: true });
+    expect(dnt.ok).toBe(true);
+    if (!dnt.ok) return;
+    expect(dnt.fields.salesChannel).toBe("EMBED");
+    expect(dnt.fields.embedOrigin).toBeNull();
+    expect(dnt.fields.utm).toBeUndefined();
   });
 });
