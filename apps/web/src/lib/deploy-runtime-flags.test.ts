@@ -98,6 +98,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_GROUP_INQUIRY_ENABLED: "groupInquiryEnabled",
   EXPERIENCE_TRANSLATION_ENABLED: "translationEnabled",
   EXPERIENCE_GUEST_REVIEWS_ENABLED: "guestReviewsEnabled",
+  EXPERIENCE_EMBED_ENABLED: "embedEnabled",
   EXPERIENCE_HOST_ATTENDANCE_ENABLED: "hostAttendanceEnabled",
   HOST_SALES_LEDGER_ENABLED: "hostSalesLedgerEnabled",
   HOST_SALES_PAYOUTS_ENABLED: "hostSalesPayoutsEnabled",

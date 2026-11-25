@@ -392,6 +392,15 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUEST_REVIEWS_ENABLED: "true" }).guestReviewsEnabled).toBe(true);
   });
 
+  it("opens the embed only with its own flag, in mock and http mode alike (#638)", () => {
+    expect(resolveConfig({}).embedEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_EMBED_ENABLED: "1" }).embedEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_EMBED_ENABLED: "1" }).embedEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_EMBED_ENABLED: "true" }).embedEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "mock", EXPERIENCE_EMBED_ENABLED: "true" }).embedEnabled).toBe(true);
+    expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_EMBED_ENABLED: "true" }).embedEnabled).toBe(true);
+  });
+
   it("opens Experience guest questions for the OWNER when the host console is available (#106)", () => {
     // No host console: nobody would see the question.
     expect(resolveConfig({ EXPERIENCE_API_MODE: "http", EXPERIENCE_GUEST_QUESTIONS_ENABLED: "true" }).guestQuestionsEnabled).toBe(false);

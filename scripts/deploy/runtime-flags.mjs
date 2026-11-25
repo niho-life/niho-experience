@@ -257,6 +257,10 @@ export const FLAGS = Object.freeze([
     secrets: [{ env: "EXPERIENCE_ANTHROPIC_API_KEY", variable: "ANTHROPIC_API_KEY_REF", stg: "NIHO_TRANSLATE_ANTHROPIC_API_KEY" }],
   },
   { env: "EXPERIENCE_GUEST_REVIEWS_ENABLED", variable: "GUEST_REVIEWS_ENABLED", needs: ["DATABASE"] },
+  // ホストのサイトへの埋め込み (#638, docs/embed.md): /embed/* and the host's 自分のサイトに貼る. resolve-config needs nothing else,
+  // but the widget sells published experiences and the code is handed out in the host console, so like every flag it rides on
+  // the host console's revision. Booking inside the frame follows the booking flags.
+  { env: "EXPERIENCE_EMBED_ENABLED", variable: "EMBED_ENABLED", needs: ["HOST_CONSOLE"] },
   { env: "EXPERIENCE_HOST_ATTENDANCE_ENABLED", variable: "HOST_ATTENDANCE_ENABLED", needs: ["EXPERIENCE_GUEST_BOOKING_ENABLED"] },
   { env: "HOST_SALES_LEDGER_ENABLED", variable: "HOST_SALES_LEDGER_ENABLED", needs: ["HOST_CONSOLE", "DATABASE"] },
   {

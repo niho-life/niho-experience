@@ -885,6 +885,9 @@ export function resolveConfig(env: Env) {
   // writes use this flag; invitations also require guest booking, attendance and mail to be enabled. The mock keeps
   // its own synthetic reviews; http opens per environment after migrations 0027 and 0033 are accepted.
   const guestReviewsEnabled = apiMode === "http" && env.EXPERIENCE_GUEST_REVIEWS_ENABLED === "true";
+  // ホストのサイトへの埋め込み (#638, docs/embed.md): /embed/* and the host's 自分のサイトに貼る. Off by default; the same in
+  // mock and http mode (the mock host console shows the code with synthetic data). Booking itself still follows the booking flags.
+  const embedEnabled = env.EXPERIENCE_EMBED_ENABLED === "true";
   // 旅行者の予約 (#285) on this site instead of NIHO: availability and checkout from the experience DB. The mock keeps
   // NIHO's contract served by the api-client mock; http opens per environment after migrations 0023/0024 are accepted,
   // and only with the host console that shows the OWNER these bookings.
@@ -1071,6 +1074,7 @@ export function resolveConfig(env: Env) {
     groupInquiryEnabled,
     groupInquiryPreviewEnabled,
     guestReviewsEnabled,
+    embedEnabled,
     guestBookingEnabled: guestBooking.enabled,
     managedSalesEnabled: apiMode === "http" && env.EXPERIENCE_MANAGED_SALES_ENABLED === "true",
     managedSalesWebhooksEnabled: apiMode === "http" && env.EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED === "true",

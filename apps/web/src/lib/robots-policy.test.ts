@@ -4,7 +4,7 @@ import { PRIVATE_PATHS, SEARCH_CRAWLERS, TRAINING_CRAWLERS, robotsFor } from "./
 
 const SITE = "https://experience.example.com";
 const PUBLIC = ["/", "/experiences", "/experiences/home-cooked-dinner-with-locals", "/host", "/ja", "/ja/experiences/home-cooked-dinner-with-locals"];
-const PRIVATE = ["/experiences/home-cooked-dinner-with-locals/book", "/booking/return", "/ja/experiences/home-cooked-dinner-with-locals/book", "/ja/booking/return", "/preview/detail", "/host/home", "/host/api/session", "/admin", "/admin/bookings"];
+const PRIVATE = ["/experiences/home-cooked-dinner-with-locals/book", "/booking/return", "/ja/experiences/home-cooked-dinner-with-locals/book", "/ja/booking/return", "/preview/detail", "/embed/experiences/home-cooked-dinner-with-locals/book", "/host/home", "/host/api/session", "/admin", "/admin/bookings"];
 
 type Group = Exclude<MetadataRoute.Robots["rules"], unknown[]>;
 const list = (value: string | string[] | undefined) => (value === undefined ? [] : Array.isArray(value) ? value : [value]);
