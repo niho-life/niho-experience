@@ -204,30 +204,31 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 {publication.meetingPoint.exteriorPhotoIndex !== null && photos[publication.meetingPoint.exteriorPhotoIndex] ? <Photo image={photos[publication.meetingPoint.exteriorPhotoIndex]!} alt={photos[publication.meetingPoint.exteriorPhotoIndex]!.alt || `${publication.meetingPoint.name} exterior`} aspect="" rounded="rounded-xl" className="mt-4 h-52 w-64" sizes="256px" /> : null}
               </div> : publication.meetingPointDisclosure === "AFTER_BOOKING" ? <p className="mt-4 text-ink-soft">The meeting point is shared after your booking is confirmed.</p> : null}
             </section> : null}
-            {/* 街の人のデータは日本語だけにある（#564）ので、紐づく人がいるときの「会いにいく人／案内する人」は日本語だけの差。 */}
-            {people.length ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
-              <h2 id="host-heading" className="text-2xl">{people.length === 1 ? "会いにいく人" : "案内する人"}</h2>
-              <ul className="mt-5 grid gap-6">
-                {people.map((entry) => (
-                  <li key={entry.slug} className="flex items-start gap-4">
-                    {peopleLinks
-                      ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} aria-label={`${entry.name}さんのページ`} className="shrink-0"><Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20" sizes="80px" /></Link>
-                      : <Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" />}
-                    <div className="min-w-0">
-                      <p className="font-extrabold">{entry.name}<span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{entry.roleJa}・{entry.areaJa}</span></p>
-                      {entry.quoteJa ? <p className="mt-1.5 text-[1.0625rem] leading-snug">「{entry.quoteJa}」</p> : null}
-                      {entry.introJa ? <p className="mt-2 line-clamp-3 whitespace-pre-line break-words text-ink-soft">{entry.introJa}</p> : null}
-                      {peopleLinks ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} className="mt-2 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{entry.name}さんのページ</Link> : null}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section> : providerName || hostBioText ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
+            {/* 提供者の紹介は日英で共通。日本語だけの街の人情報は、その中に追加表示する。 */}
+            {providerName || hostBioText || people.length ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 id="host-heading" className="text-2xl">{ja ? "ホストについて" : "About your host"}</h2>
               <div className="mt-4 flex items-start gap-4">
                 {providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt={providerIdentityPhoto.alt} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" /> : null}
                 <div><p className="font-extrabold">{providerName ?? publication.sellerDisplayName}</p>{hostBioText ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{hostBioText}</p> : null}</div>
               </div>
+              {people.length ? <div className="mt-7 border-t border-line pt-5">
+                <h3 className="text-lg font-extrabold">{people.length === 1 ? "会いにいく人" : "案内する人"}</h3>
+                <ul className="mt-4 grid gap-6">
+                  {people.map((entry) => (
+                    <li key={entry.slug} className="flex items-start gap-4">
+                      {peopleLinks
+                        ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} aria-label={`${entry.name}さんのページ`} className="shrink-0"><Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20" sizes="80px" /></Link>
+                        : <Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" />}
+                      <div className="min-w-0">
+                        <p className="font-extrabold">{entry.name}<span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{entry.roleJa}・{entry.areaJa}</span></p>
+                        {entry.quoteJa ? <p className="mt-1.5 text-[1.0625rem] leading-snug">「{entry.quoteJa}」</p> : null}
+                        {entry.introJa ? <p className="mt-2 line-clamp-3 whitespace-pre-line break-words text-ink-soft">{entry.introJa}</p> : null}
+                        {peopleLinks ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} className="mt-2 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{entry.name}さんのページ</Link> : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div> : null}
               {config.groupInquiryEnabled && providerName && !ja ? <a href={inquiryHref(locale, { from: "PROVIDER", hostName: providerName })} className={buttonClass("secondary", "mt-5 w-full sm:w-auto")}>{ja ? `${providerName}さんに相談する` : `Ask ${providerName} about a group visit`}</a> : null}
             </section> : null}
             {config.groupInquiryEnabled ? <section id="inquiry" aria-labelledby="inquiry-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">

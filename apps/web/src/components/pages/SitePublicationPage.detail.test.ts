@@ -155,14 +155,17 @@ describe("the detail page in Japanese: the differences that stay", () => {
     expect(publicMeeting).not.toContain("Gate");
   });
 
-  it("shows the people it is met through in place of the host section, linked only while the people pages are on", async () => {
+  it("keeps the provider section and nests Japanese people details beneath it", async () => {
     state.people = [person(), person({ slug: "other", name: "別の人", experienceSlugs: ["elsewhere"] })];
     const one = await render("ja");
+    expect(one).toContain("ホストについて");
+    expect(one).toContain("Sample Host");
     expect(one).toContain("会いにいく人");
     expect(one).toContain('href="/ja/people/suga"');
     expect(one).toContain("空手指導者・鎌倉");
     expect(one).not.toContain("別の人");
-    expect(one).not.toContain("ホストについて");
+    expect(one.indexOf("Sample Host")).toBeLessThan(one.indexOf("会いにいく人"));
+    expect(one.match(/id="host"/g)).toHaveLength(1);
     expect(one).not.toContain("Sample Hostさんに相談する");
     state.people = [person(), person({ slug: "takuya", name: "高浜 拓也" })];
     expect(await render("ja")).toContain("案内する人");
