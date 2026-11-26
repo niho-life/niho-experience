@@ -76,6 +76,51 @@ describe("Experience actual settlement evidence", () => {
     assert.equal(evidence.processingFeeCurrency, "JPY");
   });
 
+  it("reads legacy Standard direct-charge fees and refunds when Stripe omits controller and Charge fee references", async () => {
+    const stripe = settlementStripe({
+      accounts: { retrieve: async () => ({ id: ACCOUNT, type: "standard" }) },
+      paymentIntents: { retrieve: async () => ({ id: PI, metadata: { booking_id: BOOKING_ID }, latest_charge: {
+        id: "ch_SampleCharge0001", payment_intent: PI, amount: 30_000, currency: "jpy", application_fee: null,
+        balance_transaction: { id: "txn_SampleBalance0001", fee: 4_188, currency: "jpy", fee_details: [
+          { amount: 3_000, currency: "jpy", type: "application_fee" },
+          { amount: 108, currency: "jpy", type: "tax" },
+          { amount: 1_080, currency: "jpy", type: "stripe_fee" },
+        ] },
+      } }) },
+      applicationFees: {
+        retrieve: async () => { throw new Error("unexpected fee lookup"); },
+        list: async (params: Record<string, unknown>) => {
+          assert.deepEqual(params, { charge: "ch_SampleCharge0001", limit: 2 });
+          return { data: [{ id: "fee_SampleApplication1", amount: 3_000, amount_refunded: 3_000, charge: "ch_SampleCharge0001" }], has_more: false };
+        },
+      },
+      refunds: { list: async (params: Record<string, unknown>) => {
+        assert.equal(params.payment_intent, PI);
+        return { data: [{ id: "re_SampleRefund0001", amount: 30_000, currency: "jpy", status: "succeeded" }], has_more: false };
+      } },
+    });
+    const evidence = await readBookingSettlement({
+      publicBookingId: BOOKING_ID, connectedAccountId: ACCOUNT, paymentIntentId: PI,
+      expectedGrossAmount: 30_000, expectedCurrency: "JPY", stripe,
+    });
+    assert.equal(evidence.feePayer, "ACCOUNT");
+    assert.equal(evidence.processingFeeAmount, 1_188);
+    assert.equal(evidence.applicationFeeAmount, 3_000);
+    assert.equal(evidence.applicationFeeRefunded, 3_000);
+    assert.equal(evidence.successfulRefundAmount, 30_000);
+    assert.equal(evidence.issueCode, null);
+  });
+
+  it("keeps an absent fee payer unknown for a non-Standard account", async () => {
+    const stripe = settlementStripe({ accounts: { retrieve: async () => ({ id: ACCOUNT, type: "express" }) } });
+    const evidence = await readBookingSettlement({
+      publicBookingId: BOOKING_ID, connectedAccountId: ACCOUNT, paymentIntentId: PI,
+      expectedGrossAmount: 10_000, expectedCurrency: "JPY", stripe,
+    });
+    assert.equal(evidence.feePayer, null);
+    assert.equal(evidence.issueCode, "fee_payer_unknown");
+  });
+
   it("separates Application Fee from the actual fee details and leaves unknown fee types for review", async () => {
     const stripe = settlementStripe({ paymentIntents: { retrieve: async () => ({ id: PI, metadata: { booking_id: BOOKING_ID }, latest_charge: {
       id: "ch_SampleCharge0001", payment_intent: PI, amount: 10_000, currency: "jpy",

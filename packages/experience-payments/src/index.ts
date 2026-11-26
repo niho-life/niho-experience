@@ -685,6 +685,10 @@ function feePayerFromAccount(account: Stripe.Account): StripeSettlementEvidence[
   const payer = account.controller?.fees?.payer;
   if (payer === "account" || payer === "application_custom" || payer === "application_express") return "ACCOUNT";
   if (payer === "application") return "APPLICATION";
+  // Stripe's Accounts v1 Standard accounts use account-level fee collection for direct charges. Some older
+  // Standard accounts omit controller.fees.payer from the response, so use the documented account type only
+  // when the payer field itself is absent; preserve unknown explicit values for review.
+  if (payer == null && account.type === "standard") return "ACCOUNT";
   return null;
 }
 
@@ -747,6 +751,21 @@ export async function readBookingSettlement(input: ReadBookingSettlementInput): 
     appFee = typeof charge.application_fee === "string"
       ? await stripe.applicationFees.retrieve(charge.application_fee)
       : charge.application_fee;
+  } else {
+    // Direct-charge Application Fees belong to the platform account, and some connected-account Charge reads omit
+    // the application_fee reference. Resolve by the verified Charge ID on the platform key instead of treating it
+    // as missing or guessing the fee/refund amount.
+    const listed = await stripe.applicationFees.list({ charge: chargeRef, limit: 2 });
+    if (listed.has_more || listed.data.length > 1) {
+      issueCodes.push("application_fee_reference_ambiguous");
+    } else if (listed.data.length === 1) {
+      const candidate = listed.data[0]!;
+      if (candidate.charge && stripeReference(candidate.charge, "ch_", "application_fee.charge") === chargeRef) {
+        appFee = candidate;
+      } else {
+        issueCodes.push("application_fee_charge_mismatch");
+      }
+    }
   }
   const applicationFeeRef = appFee ? stripeReference(appFee.id, "fee_", "application_fee.id") : null;
   const applicationFeeAmount = appFee ? positiveOrZero(appFee.amount, "application_fee.amount") : null;
