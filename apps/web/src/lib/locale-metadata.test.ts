@@ -34,7 +34,7 @@ vi.mock("./localized-content", () => ({
 }));
 vi.mock("./experience/store-server", () => ({ experiencePublicationRepository: () => ({ getPublicBySlug: async () => japanese.publication }) }));
 
-import { experienceAlternates, japaneseExperienceAlternates } from "./locale-metadata";
+import { experienceAlternates, japaneseExperienceAlternates, japanesePublicPageMetadata } from "./locale-metadata";
 
 const SITE = "https://experience.example.com";
 const EN = `${SITE}/experiences`;
@@ -132,5 +132,20 @@ describe("Japanese experience hreflang", () => {
     });
     japanese.publication = null;
     await expect(japaneseExperienceAlternates("synthetic-dinner", `${SITE}/ja/experiences/synthetic-dinner`)).resolves.toEqual({ canonical: `${SITE}/ja/experiences/synthetic-dinner` });
+  });
+});
+
+describe("independently authored Japanese public page metadata", () => {
+  it.each([
+    { path: "/ja/usage", title: "ご利用の案内", description: "参加と利用の案内" },
+    { path: "/ja/business", title: "法人・団体の方へ", description: "法人向けの案内" },
+    { path: "/ja/schools", title: "学校の方へ", description: "学校向けの案内" },
+  ])("adds self-canonical and Japanese share metadata for $path", async ({ path, title, description }) => {
+    const canonical = `${SITE}${path}`;
+    const metadata = await japanesePublicPageMetadata(path, title, description);
+
+    expect(metadata.alternates).toEqual({ canonical });
+    expect(metadata.openGraph).toEqual({ title, description, url: canonical, siteName: "NIHO Travel", type: "website", locale: "ja_JP", images: [] });
+    expect(metadata.twitter).toEqual({ card: "summary", title, description, images: [] });
   });
 });

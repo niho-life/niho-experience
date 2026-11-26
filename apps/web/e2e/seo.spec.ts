@@ -23,6 +23,23 @@ test("public pages share their canonical URL without carrying queries or unappro
   }
 });
 
+test("independently authored Japanese pages have self-canonical Open Graph URLs without hreflang", async ({ request }) => {
+  for (const path of ["/ja/usage", "/ja/business", "/ja/schools"]) {
+    const response = await request.get(path);
+    expect(response.status(), path).toBe(200);
+    const html = await response.text();
+    const head = html.slice(0, html.indexOf("</head>"));
+    const canonical = `http://localhost:3000${path}`;
+
+    expect(head, `${path}: canonical`).toContain(`<link rel="canonical" href="${canonical}"`);
+    expect(head, `${path}: Open Graph URL`).toContain(`<meta property="og:url" content="${canonical}"`);
+    expect(head, `${path}: site name`).toContain('<meta property="og:site_name" content="NIHO Travel"');
+    expect(head, `${path}: no English pair`).not.toContain('hrefLang="en"');
+    expect(head, `${path}: no Japanese pair`).not.toContain('hrefLang="ja"');
+    expect(head, `${path}: no default pair`).not.toContain('hrefLang="x-default"');
+  }
+});
+
 // Googlebot and the AI crawlers read <head> from the first HTML and never run JavaScript (#139).
 const CRAWLERS = {
   Googlebot: "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html) Chrome/126.0.0.0 Safari/537.36",

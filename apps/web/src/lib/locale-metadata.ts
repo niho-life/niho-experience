@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import type { PageId } from "./page-document-contract";
 import { listExperiencesForSite } from "./api";
 import { config } from "./config";
+import { SITE_NAME } from "./public-metadata";
 import { getJapaneseCatalog, getJapaneseDetail, getPreparedJapaneseStaticRelease } from "./localized-content";
 import { isIndexableJapanesePage, mapJapaneseExperiences, pairLanguages, siteOwnedPair, staticPair } from "./localized-mapping";
 import { experiencePublicationRepository } from "./experience/store-server";
@@ -85,6 +86,18 @@ export async function japaneseSiteOwnedAlternates(japanesePath: string): Promise
   try { await getPreparedJapaneseStaticRelease(); }
   catch { return { canonical }; }
   return { canonical, languages: pairLanguages(`${config.siteUrl}${pair.englishPath}`, canonical) };
+}
+
+/** SEO metadata for independently authored Japanese public pages. These routes are indexable but have no English pair. */
+export async function japanesePublicPageMetadata(japanesePath: string, title: string, description: string): Promise<Metadata> {
+  const canonical = `${config.siteUrl}${japanesePath}`;
+  return {
+    title,
+    description,
+    alternates: await japaneseSiteOwnedAlternates(japanesePath),
+    openGraph: { title, description, url: canonical, siteName: SITE_NAME, type: "website", locale: "ja_JP", images: [] },
+    twitter: { card: "summary", title, description, images: [] },
+  };
 }
 
 export async function japaneseStaticMetadata(pageId: Extract<PageId, "home" | "experiences" | "host" | "help">, filtered = false): Promise<Metadata> {
