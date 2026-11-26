@@ -8,14 +8,14 @@ import { languageButtonTarget } from "@/lib/locale-links";
  * 言語を切り替えるボタン（#562）。日本語のページでは「EN」、英語のページでは「日本語」。同じページの相手の言語へ移り、
  * 相手が無いページではその言語のトップへ移る。日本語だけの体験のページでは出さない。ヘッダーには `pill`、フッターには `text`。
  */
-export function LanguageButton({ counterparts, variant = "pill" }: { counterparts: Readonly<Record<string, string>>; variant?: "pill" | "text" }) {
+export function LanguageButton({ counterparts, variant = "pill" }: { counterparts: Readonly<Record<string, string>>; variant?: "pill" | "text" | "choices" }) {
   const pathname = usePathname();
   const search = useSearchParams().toString();
   const target = languageButtonTarget(pathname, search, counterparts);
   if (!target) return null;
   const toEnglish = pathname === "/ja" || pathname.startsWith("/ja/");
   const label = toEnglish ? (variant === "pill" ? "EN" : "English") : "日本語";
-  return <Link
+  const link = <Link
     href={target}
     hrefLang={toEnglish ? "en" : "ja"}
     lang={toEnglish ? "en" : "ja"}
@@ -24,4 +24,9 @@ export function LanguageButton({ counterparts, variant = "pill" }: { counterpart
       ? "inline-flex min-h-9 shrink-0 items-center rounded-full border border-line-strong px-2.5 py-1 text-[0.8125rem] font-extrabold whitespace-nowrap hover:bg-sand"
       : "hover:underline"}
   >{label}</Link>;
+  if (variant !== "choices") return link;
+  const current = toEnglish ? <span lang="ja" aria-current="true">日本語</span> : <span lang="en" aria-current="true">English</span>;
+  return <span className="inline-flex items-center gap-2">
+    {toEnglish ? current : link}<span aria-hidden>/</span>{toEnglish ? link : current}
+  </span>;
 }

@@ -9,7 +9,7 @@ const allowed = new Map<string, { symbols: readonly string[]; reason: string }>(
     symbols: ["JaListConsult", "JaListEmpty"], reason: "the consultation entry and its empty state are intentional Japanese-only list content",
   }],
   ["ja/page.tsx|@/components/ja-home/JapaneseHomeSections", {
-    symbols: ["ConsultBand", "PeopleBand"], reason: "the consultation and local people bands are intentional Japanese-only home sections",
+    symbols: ["PeopleBand"], reason: "the local people band is an intentional Japanese-only home section",
   }],
 ]);
 

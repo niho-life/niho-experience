@@ -6,7 +6,7 @@ import { config } from "@/lib/config";
 import { safeHttpsUrl, safeNihoProviderUrl } from "@/lib/safe-url";
 import { publicMetadata } from "@/lib/public-metadata";
 import { nihoIdOrNull } from "@/lib/host/providers";
-import { HOST_LOGIN_PATH, hostLandingPath } from "@/lib/host/routes";
+import { HOST_EMAIL_SIGN_IN_PATH, HOST_LOGIN_PATH, hostLandingPath } from "@/lib/host/routes";
 import { isHostMock, readHostSession } from "@/lib/host/server";
 import type { SiteLocale } from "@/lib/localized-content";
 import { englishAlternates, japaneseStaticMetadata } from "@/lib/locale-metadata";
@@ -40,7 +40,7 @@ export async function hostConsoleEntry(query: SearchParams): Promise<{ loginHref
   const params = new URLSearchParams();
   if (providerId) params.set("providerId", providerId);
   if (isHostMock() && query.mock === "empty") params.set("mock", "empty");
-  return { loginHref: params.size ? `${HOST_LOGIN_PATH}?${params}` : HOST_LOGIN_PATH };
+  return { loginHref: params.size ? `${HOST_LOGIN_PATH}?${params}` : config.hostNihoLoginEnabled ? HOST_EMAIL_SIGN_IN_PATH : HOST_LOGIN_PATH };
 }
 
 function HostPlans({ plans, copy }: { plans: readonly HostPlanCopy[]; copy: HostPageContentCopy }) {
@@ -95,32 +95,26 @@ export async function HostPageContent({ searchParams, locale }: { searchParams: 
   const startUrl = config.hostSignupMode === "open" ? managementUrl : null;
   const contactUrl = safeHttpsUrl(config.hostPilotContactUrl);
   const talkHref = locale === "ja" && groupInquiryOpen() ? inquiryHref("ja", { type: "LISTING", from: "LISTING" }) : contactUrl;
-  const loginLabel = copy.loginLabel;
-  const loginBody = locale === "ja"
-    ? config.hostAccountsEnabled
-      ? "登録済みの方はメールアドレスでログインして、体験、予約、売上を確認できます。"
-      : config.hostSignupMode === "open"
-        ? "NIHOアカウントでログインして、ホスト登録、体験の編集、予約・売上の確認ができます。"
-        : "NIHOでホストをしている方は、ログインして体験、予約、売上を確認できます。"
-    : config.hostAccountsEnabled
-      ? "Already hosting? Sign in with your registered email address to see your experiences, bookings and sales."
-      : config.hostSignupMode === "open"
-        ? "Sign in with your NIHO account to register as a host, edit your experiences and see bookings and sales. Stripe may request identity checks."
-        : "Already hosting with NIHO? Sign in to edit your experiences and see bookings and sales.";
+  const loginHref = consoleEntry?.loginHref ?? managementUrl;
+  const loginTitle = locale === "ja" ? "登録済みのホストの方" : "Already registered as a host?";
+  const loginBody = locale === "ja" ? "ログインして体験、予約、売上を確認できます。" : "Sign in to see your experiences, bookings and sales.";
+  const loginLabel = consoleEntry ? copy.loginLabel : locale === "ja" ? "NIHOで体験を管理" : "Manage your experiences on NIHO";
   return <>
     {locale === "en" ? <TrackView event="host_view" props={{ signup_mode: config.hostSignupMode === "open" ? "open" : "pilot" }} /> : null}
     <div className="mx-auto w-full max-w-[64rem] px-4 pb-16">
-      <header className="py-10 sm:py-14">
-        <p className="hand text-[1.25rem] text-moss">{copy.eyebrow}</p>
-        <h1 className="mt-1 max-w-[24ch] text-[2rem] leading-tight sm:text-[2.75rem]">{copy.title}</h1>
-        <p className="mt-4 max-w-[40rem] text-[1.0625rem] text-ink-soft">{copy.lead}</p>
-        <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
-          {startUrl ? <TrackedLink href={startUrl} event="host_start" props={{ signup_mode: "open" }} className={buttonClass("primary", "max-sm:w-full")}>{locale === "ja" ? "NIHOアカウントで始める" : "Start with your NIHO account"}</TrackedLink>
-            : talkHref ? <TrackedLink href={talkHref} event="host_start" props={{ signup_mode: locale === "ja" ? "ja" : "pilot" }} className={buttonClass("primary", "max-sm:w-full")}>{copy.talk}</TrackedLink> : null}
-          {consoleEntry ? <a href={consoleEntry.loginHref} lang={locale} className="font-extrabold underline underline-offset-4">{loginLabel}</a> : null}
+      <header className={`grid items-center gap-6 py-10 sm:py-14 ${loginHref ? "md:grid-cols-[minmax(0,1fr)_minmax(15rem,19rem)] md:gap-10" : ""}`}>
+        <div>
+          <p className="hand text-[1.25rem] text-moss">{copy.eyebrow}</p>
+          <h1 className="mt-1 max-w-[24ch] text-[2rem] leading-tight sm:text-[2.75rem]">{copy.title}</h1>
+          <p className="mt-4 max-w-[40rem] text-[1.0625rem] text-ink-soft">{copy.lead}</p>
+          {startUrl ? <TrackedLink href={startUrl} event="host_start" props={{ signup_mode: "open" }} className={buttonClass("primary", "mt-6 max-sm:w-full")}>{locale === "ja" ? "NIHOアカウントで始める" : "Start with your NIHO account"}</TrackedLink>
+            : talkHref ? <TrackedLink href={talkHref} event="host_start" props={{ signup_mode: locale === "ja" ? "ja" : "pilot" }} className={buttonClass("primary", "mt-6 max-sm:w-full")}>{copy.talk}</TrackedLink> : null}
         </div>
-        {consoleEntry ? <p className="mt-3 max-w-[40rem] text-sm text-muted">{loginBody}</p> : null}
-        {!startUrl && managementUrl ? <p className="mt-4"><a href={managementUrl} className="link-leaf">{locale === "ja" ? "NIHOで体験を管理" : "Manage your experiences on NIHO"}</a></p> : null}
+        {loginHref ? <section aria-labelledby="registered-host-title" className="rounded-[18px] border border-line bg-sand p-5">
+          <h2 id="registered-host-title" className="font-sans text-lg font-bold">{loginTitle}</h2>
+          <p className="mt-2 text-sm text-ink-soft">{loginBody}</p>
+          <a href={loginHref} className={buttonClass("secondary", "mt-4 w-full text-sm")}>{loginLabel}</a>
+        </section> : null}
       </header>
 
       <p className="mb-10 rounded-[16px] bg-leaf-pale px-5 py-4"><b className="block">{copy.note.title}</b><span className="text-ink-soft">{copy.note.body}</span></p>

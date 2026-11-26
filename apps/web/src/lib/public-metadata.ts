@@ -5,8 +5,6 @@ export const SITE_NAME = "NIHO Travel";
 /** The name on listings (Google Business Profile, Tripadvisor, OTAs, YouTube): docs/growth/launch-kit.md, #152. */
 export const LISTING_NAME = "NIHO Travel, Kamakura";
 export const SITE_DESCRIPTION = "Discover small experiences in Kamakura, offered by independent hosts and local businesses. Book as a guest, no account needed.";
-/** The English footer line: the site description plus who is behind it (#645). `SITE_DESCRIPTION` itself stays the metadata text. */
-export const SITE_FOOTER_DESCRIPTION = `${SITE_DESCRIPTION} Made by NIHO, the town's living room, two minutes from Kamakura Station.`;
 // Decided in docs/growth/seo-content-policy.md and kept in the shared copy registry.
 export const EXPERIENCE_LIST_TITLE = EN_STATIC_COPY_V1.text("catalogue.metaTitle");
 export const EXPERIENCE_LIST_DESCRIPTION = EN_STATIC_COPY_V1.text("catalogue.metaDescription");

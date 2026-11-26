@@ -11,12 +11,14 @@ async function noHorizontalScroll(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 }
 
-test("the entrance is a heading and one button, with no email link and no explanation", async ({ page }) => {
+test("the entrance links to NIHO login, onboarding, and booking help", async ({ page }) => {
   await page.goto("/host/auth/sign-in");
   await expect(page.getByRole("heading", { level: 1, name: "ホストのログイン" })).toBeVisible();
   const main = page.getByRole("main");
-  await expect(main.getByRole("link")).toHaveCount(1);
+  await expect(main.getByRole("link")).toHaveCount(3);
   await expect(main.getByRole("link", { name: "NIHO アカウントでログイン" })).toHaveAttribute("href", "/host/auth/login");
+  await expect(main.getByRole("link", { name: "ホストになるには" })).toHaveAttribute("href", "/ja/host");
+  await expect(main.getByRole("link", { name: "ご予約の確認はログイン不要です" })).toHaveAttribute("href", "/ja/help#find-booking");
   await expect(main.getByRole("button")).toHaveCount(0);
   await expect(page.getByRole("textbox")).toHaveCount(0);
   const text = await main.innerText();

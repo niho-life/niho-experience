@@ -333,7 +333,7 @@ describe("v1 portable presentation", () => {
       "apps/web/src/app/(site)/help/page.tsx": ["HelpViewV1"],
       "apps/web/src/app/(site)/host/page.tsx": ['HostPageContent({ ...props, locale: "en" })'],
       "apps/web/src/components/pages/HostPageContent.tsx": ["HostPlans", "HostStepsAndQuestions"],
-      "apps/web/src/components/SiteChrome.tsx": ["PresentationRootV1", "SiteHeaderV1", "SiteFooterV1"],
+      "apps/web/src/components/SiteChrome.tsx": ["PresentationRootV1", "export function SiteHeader(", "export function SiteFooter("],
       "apps/web/src/components/BookingParts.tsx": ["BookingSummaryV1", "BookingStepHeadingV1", "BookingBarV1"],
       "apps/web/src/components/SlotPicker.tsx": ["BookingSelectionViewV1", "BookingSelectionViewModelV1"],
       "apps/web/src/components/BookingForm.tsx": ["BookingCheckoutViewV1", "BookingCheckoutViewModelV1"],

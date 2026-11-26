@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
-import { ConsultBand, PeopleBand } from "@/components/ja-home/JapaneseHomeSections";
+import { PeopleBand } from "@/components/ja-home/JapaneseHomeSections";
 import { HomeJournal } from "@/components/HomeJournal";
 import { buttonClass } from "@/components/ui";
 import { HomePageView, type HomeRest } from "@/components/pages/HomePageView";
@@ -9,6 +9,7 @@ import type { CardModel } from "@/lib/card-model";
 import { sitePublicationCard } from "@/lib/experience/site-card-model";
 import { listSitePublicExperiences } from "@/lib/experience/site-publications";
 import { guestBookingSources } from "@/lib/guest-booking-source";
+import { loadSiteCategories } from "@/lib/site-categories";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
 import { JA_HOME_FACES_LIMIT, pickFeaturedPerson } from "@/lib/ja-home";
 import { loadJapaneseGuides } from "@/lib/ja-guides";
@@ -54,7 +55,7 @@ export default async function JapaneseHome() {
       return card ? [card] : [];
     });
   } catch { return <JapaneseUnavailable />; }
-  const [peopleOnPages, allGuides] = await Promise.all([loadPeoplePages(), loadJapaneseGuides()]);
+  const [peopleOnPages, allGuides, categories] = await Promise.all([loadPeoplePages(), loadJapaneseGuides(), loadSiteCategories("ja")]);
   cards = withReviewLines(cards, await getReviewSummaries(cards.map((card) => card.slug)), "ja");
   const cardDates: CardDatesSource = { kind: "read", preview: false, sources: await guestBookingSources(cards.map((card) => card.slug)) };
   const featured = pickFeaturedPerson(peopleOnPages);
@@ -63,7 +64,7 @@ export default async function JapaneseHome() {
   return <HomePageView
     locale="ja" copy={copy} cards={cards} cardDates={cardDates} rest={REST}
     people={featured ? <PeopleBand featured={featured} people={peopleOnPages} facesLimit={JA_HOME_FACES_LIMIT} /> : undefined}
-    consult={groupInquiryOpen() ? <ConsultBand /> : undefined}
+    categories={categories} inquiry={groupInquiryOpen()}
     journal={journalNode}
   />;
 }

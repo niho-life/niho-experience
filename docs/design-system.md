@@ -19,7 +19,7 @@
 ## 1. 表現の考え方
 
 - 主役は写真と人。地は白、区切りは淡いグレーの面（sand）と細い線。色は少なく、写真の色を邪魔しない。
-- 英語のサイトの見出しはやわらかいセリフ体（Fraunces、weight 400 中心）、本文・操作は NIHOapp と同じ Nunito。**日本語の画面（`<html lang="ja">`：`/ja`・`/host`・`/write`・`/admin`）は、本文も見出しも NIHO アプリと同じ「NIHO Sans」にする**（#615。§2.2）。手書きの Caveat は短いアクセントだけに使う。
+- 英語のサイトの見出しはやわらかいセリフ体（Fraunces、weight 400 中心）、本文・操作は NIHOapp と同じ Nunito。**日本語の画面（`<html lang="ja">`：`/ja`・`/host`・`/write`・`/admin`）は、本文も見出しもヒラギノ角ゴ＋Nunito の「NIHO Sans」にする**（2026-11-26 オーナー決定、#670。§2.2）。手書きの Caveat は短いアクセントだけに使う。
 - NIHO のブランド緑（leaf）は主ボタンの地と下線に、深い苔色（moss）はリンク・focus・手書きの文字に使う。全面を塗らない。
 - 手描きのアイコン（`#sketch` フィルタで線を少し揺らす）、丸スタンプ（`#rubber` フィルタでかすれ）、切手の縁、アーチ形の切り抜きは装飾。意味は必ず隣の文字が持つ（`aria-hidden`）。
 - Slowhop から採り入れたのは「大きな写真・余白・人の紹介・整理されたカード」という考え方だけ。写真、ロゴ、文章、配色、ページ構成は流用していない。
@@ -53,18 +53,19 @@
 
 手書きは短いアクセントだけ。本文・操作・価格・法的な文言には使わない。旧来の柿色の eyebrow（大文字の小見出し）は手書きの一言に置き換えた。
 
-**日本語の画面の書体（NIHO Sans、#615）**。`<html lang="ja">` の画面（`/ja`・`/host`・`/write`・`/admin`）は、NIHO アプリ（niho-app `docs/design/font-style-guide.md` §3.1）と同じ組み方にする。実装は `apps/web/src/app/globals.css` の `@font-face "NIHO Sans"` と `html[lang="ja"]` のトークン、照合は `apps/web/src/lib/niho-sans.test.ts` と e2e（`host-screens`・`write-ui`・`english-type`）。
+**日本語の画面の書体（NIHO Sans、#670）**。2026-11-26 のオーナー決定で、#615 の NIHO アプリに合わせた構成から、体験サイトの日本語をヒラギノ角ゴに統一した。英数字は Nunito を使う。実装は `apps/web/src/app/globals.css` の `@font-face "NIHO Sans"` と `html[lang="ja"]` のトークン、照合は `apps/web/src/lib/niho-sans.test.ts` と e2e（`host-screens`・`write-ui`・`english-type`）。
 
 | 役割 | 書体と太さ | Apple 端末での字 |
 | --- | --- | --- |
-| 本文・大見出し（h1・h2 は 400。強調の h1 は 500） | Nunito（英字）＋ NIHO Sans。`--font-sans` と `--font-display` は同じ | ヒラギノ丸ゴ ProN W4 |
-| 小見出し（h3・カードの体験名・FAQ の問い）・ラベル（600–700） | 同上の `font-bold` | ヒラギノ角ゴシック W6 |
+| 本文（100–400） | Nunito（英字）＋ NIHO Sans。日本語の `--font-sans` と `--font-display` は同じ | ヒラギノ角ゴシック W3 |
+| 中太（500） | 同上の `font-medium` | ヒラギノ角ゴシック W5 |
+| 見出し（h1〜h3）・太字（600–700） | 同上の `font-semibold`・`font-bold` | ヒラギノ角ゴシック W6 |
 | ボタン・強いラベル（800） | 同上の `font-extrabold` | ヒラギノ角ゴシック W7 |
 | 900 | 同上の `font-black` | ヒラギノ角ゴシック W8 |
-| 手書きの中の日本語 | `--font-hand` の Caveat のあと `NIHO Hand JA`（丸ゴ W4 を Caveat の大きさに縮める、`size-adjust`） | ヒラギノ丸ゴ ProN W4 |
+| 手書きの中の日本語 | `--font-hand` の Caveat のあと `NIHO Hand JA`（角ゴ W3 を Caveat の大きさに縮める、`size-adjust`） | ヒラギノ角ゴシック W3 |
 
-- 見出しの格は、書体ではなく太さと大きさで分ける。日本語の部品では見出しに `font-sans` を直書きしない（トークンが同じなので不要）。日本語の見出しの字間は 0、行間は 1.35（画面ごとの `leading-*` は勝つ）。
-- 日本語の Web フォントは配信しない（#612 の Zen Maru Gothic は外した）。端末の書体を `local()` で名前で指すだけ。Windows / Android は 游ゴシック・メイリオ・Noto に落ち、丸ゴにはならない（NIHO アプリと同じ）。
+- 見出しの格は大きさで示す。日本語の見出しの字間は 0、行間は 1.35（画面ごとの `leading-*` は勝つ）。
+- 日本語は端末の書体を `local()` で指す。日本語の Web フォント（#612 の Zen Maru Gothic など）は配信しない。Windows / Android は游ゴシック・メイリオ・Noto に落ちる。合成太字は使わない。
 - 手書きは英字の一言に使う。行程の時刻のように読み違えると困る情報は、日本語の画面では手書きにせず `font-bold` の moss にする。
 - 日本語の画面の中で英語のサイトの見た目を見せる所（ホストの体験のプレビュー、英語の記事を書く欄の題と本文）は `lang="en"` を付け、英語の書体（@theme の値）に戻す。
 - 例外はヘッダーの丸スタンプ「鎌倉」（判子の飾り、SVG のヒラギノ明朝）だけ。
@@ -112,10 +113,10 @@
 
 英語（`/…`）と日本語（`/ja/…`）は同じレイアウトにする（オーナー決定 2026-11-25）。1ページは1つの部品で、言語で変えるのは文言と、意図した差だけ。
 
-- ヘッダー：`SiteHeader` 1つ。タブは `apps/web/src/lib/site-nav.ts` が言語ごとに返す。英語は Experiences · Journal · About · Help、日本語は 体験をさがす · 読みもの · NIHOについて · 企業・学校 · ヘルプ。「企業・学校」とメニューの「ご相談」は日本語だけ（英語に相手のページが無い）。md 未満は1つ目だけを行に残し、ほかはメニュー（`SiteMenu`）。日本語の1つ目は lg 未満で「さがす」。
-- フッター：`SiteFooter` が両言語で `SiteFooterV1` を使う。説明・カテゴリー・案内の3列を同じ配置にし、カテゴリーとリンクだけ locale に合わせる。プレビューの注記も両方に表示する。
+- ヘッダー：`SiteHeader` 1つ。タブとメニューは `apps/web/src/lib/site-nav.ts` が言語ごとに返す。英語は Experiences · Journal · About · Help、日本語は 体験をさがす · 読みもの · はじめての方へ · 企業・学校 · ヘルプ。ログアウト中は言語切替の左に For hosts／ホストの方を置き、ログイン中はホスト画面を出す。md 未満のメニューは見出しつきで「体験をさがす」「ご利用ガイド」「団体・ご相談（日本語のみ）」「ホストの方」「言語」に分け、掲載中のカテゴリとすべての体験を置く。
+- フッター：`SiteFooter` はブランド説明と、Explore／Plan your visit／For hosts（日本語で相談受付中は4つ目の団体・ご相談）に分ける。掲載のあるカテゴリだけ表示し、見出しを太字、リンクを通常の太さにする。最下段に著作権・プライバシー・言語切替、プレビュー注記はその下に表示する。
 - 共通のページ部品：`HomePageView`（トップ）、`ExperiencesPageView`（一覧）、`SitePublicationPage`（詳細と予約要約）、`GuidesListPage`（読みもの一覧）、`GuideArticle`（記事）、`HomeJournal`（トップの記事）、`HostPageContent`（ホスト募集）。文言は各 `lib/*-text` に置き、route はデータと locale を渡す。
-- 日本語だけの差：トップのご相談と街の人の帯、一覧の相談案内と相談用の空状態、企業・学校・ご相談・ご利用の案内。記事には日本語の体験 CTA と相談帯を出し、FAQ・関連記事・目次・著者欄は共通部品で表示する。英語だけの差は For writers と Privacy。
+- 日本語だけの差：トップの団体・相談カード、一覧の相談案内と相談用の空状態、企業・学校・ご相談・ご利用の案内。`/ja/about` はナビを「はじめての方へ」とし、h1 で予約サイトの役割を説明する。記事には日本語の体験 CTA と相談帯を出し、FAQ・関連記事・目次・著者欄は共通部品で表示する。英語だけの差は For writers。
 - `apps/web/src/lib/japanese-route-components.test.ts` が日本語専用部品の route import を検査する。例外は相談・街の人・日本語一覧の相談内容に限り、ページの構造を別実装へ戻さない。
 - 和文は欧文より大きく見えるので、見出しの大きさと行間だけ日本語用の値を持つ（About の `titleClassName` など）。
 
@@ -123,13 +124,13 @@
 
 2026-10-29 にオーナー承認のモック A（<https://niho-experience-top-mock.pages.dev/a-journal-grid.html>）の構成に変えた（オーナー判断「体験が最優先。体験を先に出して、その下に記事も。記事は今後たくさん増えるので、サムネイル画像とセットで一覧できるように」）。presentation の `HomeViewModelV1.layout: "journal"` で組む。
 
-上から：ヘッダー → ヒーロー（検索とテーマの行は置かない。検索が下端に重ならないので、高さは 560px / PC 680px、文字は下寄せ、PC の見出しは2行、#646）→ カード → 予約の流れ（カードの直下）→ リビングの帯（#646）→ 記事（Kamakura Journal）→ ホスト募集の帯 → フッター（プレビューだけ最下部に1行の表記）。
+上から：ヘッダー → ヒーロー（検索とテーマの行は置かない。検索が下端に重ならないので、高さは 560px / PC 680px、文字は下寄せ、PC の見出しは2行、#646）→ 掲載中カテゴリのチップと「すべての体験」→ 体験カード（ホスト募集カードは混ぜない）→ 予約の流れ（カードの直下）→ 街のリビング（相談受付中の日本語トップは団体・相談カードと横並び）→ 街の人 → 記事（Kamakura Journal）→ ホスト募集の帯と登録済みホストのログイン → フッター。
 
 特集・動画の帯・ホスト紹介・数字・絵はがきは `HomeViewV1` の classic 構成向けに残る。公開中の英語・日本語トップはどちらも `HomePageView` から `layout: "journal"` を渡す。
 
 | 節 | 内容 |
 | --- | --- |
-| ヘッダー | 白。ロゴ。md（48rem）以上は Experiences · Journal（記事のページがあるときだけ）· About · Help の行（現在のページは淡い面と `aria-current="page"`）と、右端の言語ボタン（日本語のサイトが無い配備だけ "EN · ¥" の表示）。md 未満は行に Experiences だけ、言語ボタン（360px 未満は隠す）、丸いメニューボタン（`SiteMenu.tsx`。`<details>` なので JS なしで開閉し、JS があればページ移動・Escape・外側クリックで閉じる）。メニューは全幅のパネルで Experiences / Journal / About / Help / 言語 / 控えめな最後の項目 "For hosts"（`/host`）。ヘッダーの行に提供者向けのリンクは置かない（#645） |
+| ヘッダー | 白。ロゴ。md（48rem）以上は Experiences · Journal（記事のページがあるときだけ）· About · Help と For hosts の行（現在のページは淡い面と `aria-current="page"`）、右端に言語ボタン。ログイン中は For hosts が Host dashboard になる。md 未満は行に Experiences だけ、言語ボタン、丸いメニューボタン（`SiteMenu.tsx`。`<details>` なので JS なしで開閉し、JS があればページ移動・Escape・外側クリックで閉じる）。メニューは全幅のパネルで、見出しつきの4〜5グループに分ける |
 | ヒーロー（#646） | 写真が主役。NIHO 自前の写真3枚（`lib/site-media.ts` の `HERO_PHOTO` ＝リビングの交流が下地・priority、`HOME_HERO_SLIDES` ＝一緒に料理する様子とテーブル。後の2枚は lazy・装飾）が21秒周期で重なりを入れ替える（`HomeHeroSlides.tsx`、`globals.css` の `hero-fade-2/3`）。**動きは不透明度のクロスフェードだけ**（拡大・移動は使わない。コマ単位のがたつきが見えるため）。`prefers-reduced-motion: reduce` では動かず下地の1枚だけ。見出し・リード・ボタンは `HOME_TEXT` の locale 別文言。日本語も同じ `HomeViewV1` と写真の切替を使い、`/ja/experiences` へ進む。検索（日付・人数）とテーマの行は両方に置かない（presentation は `finder: null`・`themes: []`、`heroMedia` / `heroBody` / `heroAction` で差し込む）。 |
 | テーマ（classic 構成のみ） | 英語トップ（journal）には出さない。classic 構成では掲載中の体験から作る（空のテーマを作らない）。slug を明示した編集用の表でアイコンと短いラベルを決める（`lib/themes.ts`：Cook & eat / Roast coffee / Sit zazen / Mend a bowl / Write kanji）。題名からは推測しない（#36）。各テーマはその体験の詳細へ |
 | カード | 手書き "after the Great Buddha"、h2 "Spend a few hours with a *neighbor*"（neighbor に波線。`cardsTitle`。classic 構成は従来の "N to choose from" / "Experiences hosted by neighbors"）、See all。スマホは横スクロールの snap、PC は3列。最後に "Your experience here?"（`/host` へ） |
@@ -137,12 +138,12 @@
 | 動画の帯 | "Slow down, you're among neighbors" と手書きの副題。下に縦長の動画カード（掲載中のテーマだけ）。ラベルは手書きの動詞＋編集用の短い名前（"Cook / Community dinner"。表に無ければ題名の短縮）。書道は書道の動画で上書き。ホストの実名は書かない |
 | ホスト紹介 | sand の面。書道の slug が掲載中ならモックどおり（`FEATURED_HOST`）：データの hosts[0] の名前を手書き、役割 "Calligrapher, MC and event producer"、本文、切手の縁の中に書道の動画＋丸スタンプ、"See Shiryu's workshop"。掲載されていなければ個人の提供者（`provider.kind = INDIVIDUAL`）の体験の表紙・`provider.tagline`・リード。下にホストの顔（写真、無ければ頭文字。名前のあるホストを先に、ホストのいない体験は編集用の顔）を各体験へのリンクで並べ、紹介中の人を緑の縁で強調 |
 | 数字 | "Small on purpose"：駅からの分数（"From Kamakura Station West Exit to the living room door."）、最大定員（計算）、体験数（計算。掲載中の全体験にテーマがあれば "Food, coffee, Zen, mending and calligraphy." のように並べる）、言語数（"English and Japanese, often both at the same table."）。Fraunces 300 の数字＋手書きの単位 |
-| リビングの帯（#646） | カードと予約の流れの下、記事の上。全幅の1枚写真（長いテーブル、`min-h` 460px / PC 600px、動かさない）に左からの暗いグラデーション。手書き "it starts here"（leaf）、h2 "NIHO, the town’s living room"、本文、主ボタン "About NIHO Experience"（`/about`）。`components/HomeLivingRoom.tsx`（`afterCards` の先頭） |
+| リビング・相談のカード | カードと予約の流れの下。日本語トップは手書き "it starts here" の「街のリビング、NIHO」カードと、相談受付中だけ出る団体・相談カードを並べる。英語トップは既存のリビング紹介を続ける。`components/HomeLivingRoom.tsx`、`HomePageView.tsx` |
 | 記事 | 手書き "then, wander the town"、英語の h2 "Kamakura Journal"／日本語の h2 "鎌倉の読みもの"、説明・カテゴリー・操作は locale の文言。両方とも `/guides` または `/ja/guides` があれば一覧へ進む。1本目を大きく、右に次の3本（PC。スマホは縦に並ぶ行）、その下に3列のサムネイル（タブレット2列、スマホは左に正方形のサムネイルの行）。最大10本、複数カテゴリーがあれば絞り込みチップを出す。カードは題名、説明、読了分数、確認・更新日。英日とも `components/HomeJournal.tsx`・`lib/home-journal.ts`。 |
 | 予約の流れ | Pick a date（"See the next dates on every card. Times are Japan time."）/ Pay securely（"Checkout by Stripe in Japanese yen, tax included."）/ Meet your hosts（"The meeting point and your booking arrive by email."）、手書き "no account needed — book as a guest" |
 | 絵はがき | "Kamakura is small. Walk it."。切手の縁で少し傾け、手書きの地名。リンクなし |
-| ホスト募集 | 英語・日本語で `HostPageContent` を共有。日本語の3プランと確認済みの手数料率を土台に、手順・FAQ・相談・ログインを同じ配置で表示する。文言だけ `host-text` の英語コピーへ切り替える。 |
-| フッター | 白、丸スタンプ、説明・8カテゴリー・案内の3列を日英で同じ配置にする。英語は固定リンクに About、Kamakura Journal（記事があるときだけ）、For writers、Privacy。日本語は NIHOについて、読みもの（記事があるときだけ）、ご相談・企業学校（相談の flag が開いているとき）、ホストログイン、言語、プライバシー。プレビュー注記は最下部に日英の文で表示。 |
+| ホスト募集 | 英語・日本語で `HostPageContent` を共有。ヒーローでは初回相談の CTA の隣に登録済みホストのログインカードを置き、スマホではその下に並べる。トップの募集帯にもホストログインを添える。 |
+| フッター | ブランド説明・運営・丸スタンプの隣に、掲載中カテゴリを含む3グループ（日本語で相談受付中は4グループ）を表示。英語は Explore／Plan your visit／For hosts、日本語は 体験をさがす／ご利用ガイド／団体・ご相談／ホストの方。最下段に著作権・プライバシー・言語切替を置く。 |
 | About（`/about`、英語のみ。#645） | 全幅の写真のヒーロー（NIHO 自前の写真・動かさない）と h1 "It starts in the town’s living room" → 導入の1段落（明朝の大きな文字）→ 写真3枚と手書きのひとこと（local / deep / small）→ 予約の流れ（トップと同じ3ステップ）と "See the experiences" → 運営の紹介（アーチ形の外観写真・"Help and contact"）→ 地元の人向けの淡い緑の帯（`/host`）。体験の写真は使わない |
 | Help の "Common questions"（`/help`。#645） | 既存の Help の下に、同じ幅で手書きのひとこと "good to know" と `<details>` の質問5つ（アカウント・支払い・言語・集合場所・東京からの距離）。矢印は開くと180°回る。JS なしでもキーボードでも開閉できる |
 
@@ -200,7 +201,7 @@
 
 - 旅行者向けとは別の root layout。日本語（`lang="ja"`）、`noindex`、`private, no-store`、計測なし。旅行者の画面との間は全体を読み込み直す。
 - トークン（`globals.css` の色・角丸・影・書体）は同じものを使う。旅行者向けの英語の部品（`@niho/experience-presentation`）は、体験の編集の「プレビュー」（体験詳細の見た目を見せる 1 か所）だけが使い、ほかのホストの画面の部品は `src/components/host/` に置く。見た目の正は niho-app のモック v2（`idea/mock/experience-provider-workspace-v2.html`）。地は白（canvas）で、ホストの画面だけの色を足さない。
-- 枠（`HostShell`）：PC（`md` 以上）は 232px の左サイドバー（ブランド・提供者の切替と役割・ホーム／体験／カレンダー／予約／売上／メンバー／設定。メンバーはオーナーだけ、予約・売上・メンバーは役割で外れる）。下端に「体験サイトを見る」と本人のアカウントメニュー（「あなたのアカウント」）を置く。スマホは日々の5項目を下端タブ（アイコン＋12px のラベル）にし、「カレンダー」と省略せず表示する。スマホのヘッダーは左が提供者チップ（メンバー・設定・体験サイトを見る・提供者の切替）、右が本人のアカウントメニューで、同時には開かない。本人のメニューは「アカウント設定」（`/host/account`）、「記事を書く」「NIHO アプリ」、ログアウトだけを持つ。販売者表示・ホスト紹介・提供者のNIHOサポートは設定一覧へ集約し、提供者0件の通常Spot向けNIHOサポート入口だけはアカウントメニューと登録案内に残す。提供者切替と `?providerId=` の引継ぎ、0件・role・商品運営者の境界は変えない。選択中は sand の面と ink の文字で、緑は使わない。下位画面（体験の編集など）は「‹ 体験」の戻るヘッダーにして下端タブを出さない。本文は最大幅 1040px、ページ題（h1）は日本語の画面の大見出し（NIHO Sans の 400〜500、§2.2。以前は Fraunces から明朝に落ちていた）、面の小見出しは sans の太字。
+- 枠（`HostShell`）：PC（`md` 以上）は 232px の左サイドバー（ブランド・提供者の切替と役割・ホーム／体験／カレンダー／予約／売上／メンバー／設定。メンバーはオーナーだけ、予約・売上・メンバーは役割で外れる）。下端に「体験サイトを見る」と本人のアカウントメニュー（「あなたのアカウント」）を置く。スマホは日々の5項目を下端タブ（アイコン＋12px のラベル）にし、「カレンダー」と省略せず表示する。スマホのヘッダーは左が提供者チップ（メンバー・設定・体験サイトを見る・提供者の切替）、右が本人のアカウントメニューで、同時には開かない。本人のメニューは「アカウント設定」（`/host/account`）、「記事を書く」「NIHO アプリ」、ログアウトだけを持つ。販売者表示・ホスト紹介・提供者のNIHOサポートは設定一覧へ集約し、提供者0件の通常Spot向けNIHOサポート入口だけはアカウントメニューと登録案内に残す。提供者切替と `?providerId=` の引継ぎ、0件・role・商品運営者の境界は変えない。選択中は sand の面と ink の文字で、緑は使わない。下位画面（体験の編集など）は「‹ 体験」の戻るヘッダーにして下端タブを出さない。本文は最大幅 1040px、ページ題（h1）は日本語の画面の大見出し（NIHO Sans の 600〜700、§2.2。以前は Fraunces から明朝に落ちていた）、面の小見出しは sans の太字。
 - 提供者は `?providerId=` で選び、提供者別画面のリンクがそれを引き継ぐ。提供者が 1 件なら切替は表示だけ。0 件のアカウントは五つの提供者メニューを出さず、提供者別画面では登録へ案内する。ただし通常SpotにProvider登録を要求しないため、NIHOサポートへの入口と携帯アカウントメニューは残す。
 - 面：1 セクション 1 面（角丸 16px・line の罫線・影なし）。行リストは罫線で区切り、行の中にカードを重ねない。ボタンは 38px（行の中は 30px、フォームの主操作は 48px）。主操作は画面に 1 つ。
 - 状態はピル（文字つき・左に 6px の丸）。掲載中／確定／準備済み／審査済み＝leaf-pale 地に moss、審査待ち／承認待ち／未接続＝warn-pale 地に warn、下書き／未申請＝sand 地に ink-soft、停止中／取消済み＝danger-pale 地に danger。色だけで伝えない。権限が無い操作は出さず、NIHO が 403 を返したら理由を言葉で出す。

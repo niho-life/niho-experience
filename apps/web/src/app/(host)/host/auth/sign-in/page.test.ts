@@ -27,11 +27,13 @@ beforeEach(() => {
 });
 
 describe("sign-in page", () => {
-  it("is a heading and one button to NIHO, with the page it was for", async () => {
+  it("keeps the return destination and gives hosts and travelers their public links", async () => {
     const html = await render({ next: "/write/new" });
     expect(html).toContain("ホストのログイン");
     expect(html).toContain("NIHO アカウントでログイン");
     expect(html).toContain('href="/host/auth/login?returnTo=%2Fwrite%2Fnew"');
+    expect(html).toContain('href="/ja/host"');
+    expect(html).toContain('href="/ja/help#find-booking"');
     for (const absent of ["メール", "<form", "<input", "体験の提供について"]) expect(html, absent).not.toContain(absent);
   });
 

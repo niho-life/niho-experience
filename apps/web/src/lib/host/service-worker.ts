@@ -24,7 +24,7 @@ const OFFLINE_HTML = `<!doctype html>
 <title>接続できません | NIHO Travel ホスト</title>
 <style>
 ${NIHO_SANS_FONT_FACES}
-body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fff;color:#1c1c1a;font-family:${NIHO_SANS_FAMILY};line-height:1.6}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fff;color:#1c1c1a;font-family:${NIHO_SANS_FAMILY};font-synthesis-weight:none;line-height:1.6}
 main{width:100%;max-width:36rem;padding:4rem 1rem;box-sizing:border-box}
 h1{margin:0;font-size:1.5rem;line-height:1.3}
 p{margin:.75rem 0 2rem;color:#4b4b47}

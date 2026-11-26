@@ -19,12 +19,16 @@ export type HomeViewModelV1 = Readonly<{
   /** Optional action rendered right below the hero body text. */
   heroAction?: ReactNode;
   finder: ReactNode;
+  /** Entries attached by the consumer immediately below the hero. */
+  afterHero?: ReactNode;
   themes: readonly { key: string; href: string; icon: HandIconName; label: string }[];
   cardsEyebrow?: string;
   /** Optional replacement for the cards section title (`home.hostedHeadingRich`). */
   cardsTitle?: ReactNode;
   cards: readonly { model: ExperienceCardModelV1; dates?: ReactNode }[];
   empty?: ReactNode;
+  hideHostInvite?: boolean;
+  hostBandExtraAction?: ReactNode;
   /** Consumer-owned editorial entry placed directly after the experience-card section. */
   afterCards?: ReactNode;
   feature?: { schedule?: string; heading: string; body: string; cta: string; href: string; photos: readonly DisplayImageV1[] };
@@ -68,16 +72,16 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
 </div>
 </div>
       <RubberStamp className="absolute top-[18px] right-4 z-[2] size-24 -rotate-12 text-white opacity-90 lg:top-11 lg:right-14 lg:size-[134px]" />
-    </div>{model.finder}</section>
+    </div>{model.finder}</section>{model.afterHero ?? null}
     {model.themes.length ? <nav aria-label={copy.text("home.themes")} className="scrollbar-none flex gap-0.5 overflow-x-auto px-3 pt-9 lg:justify-center lg:gap-7 lg:pt-[88px]">{model.themes.map((theme) => <Link key={theme.key} href={theme.href} className="flex w-[92px] shrink-0 flex-col items-center gap-2 rounded-[18px] px-1 py-2.5 text-center text-sm leading-tight font-bold text-ink-soft hover:bg-sand">
 <HandIcon name={theme.icon} className="size-[46px] text-ink" />{theme.label}</Link>)}</nav> : null}
     <section className="container-page pt-14 lg:pt-[88px]" aria-labelledby="home-cards-v1">
 <SectionHeadingV1 id="home-cards-v1" eyebrow={model.cardsEyebrow} title={model.cardsTitle ?? <RichMessageV1 segments={copy.rich("home.hostedHeadingRich")} emphasisClassName="squig" />} action={model.cards.length ? <Link href="/experiences" className="link-leaf">{copy.text("home.seeAll")}</Link> : null} />
       {model.cards.length ? <ul className="scrollbar-none -mx-5 grid snap-x snap-mandatory auto-cols-[80%] grid-flow-col gap-[18px] overflow-x-auto px-5 pt-1 pb-7 sm:-mx-6 sm:auto-cols-[44%] sm:px-6 lg:mx-0 lg:grid-flow-row lg:grid-cols-3 lg:gap-x-7 lg:gap-y-[52px] lg:overflow-visible lg:p-0">{model.cards.map((card, index) => <li key={card.model.slug} className="snap-center">
 <ExperienceCardV1 card={card.model} dates={card.dates} priority={index === 0} primitives={primitives} copy={copy} />
-</li>)}<li className="snap-center">
+</li>)}{model.hideHostInvite ? null : <li className="snap-center">
 <InviteCardV1 primitives={primitives} copy={copy} />
-</li>
+</li>}
 </ul> : model.empty ?? null}
       {journal && model.cards.length ? <div className="mt-2 lg:mt-12">{stepList(copy.text("home.bookingTitle"))}</div> : null}
     </section>{model.afterCards ?? null}
@@ -144,7 +148,9 @@ export function HomeViewV1({ model, primitives, copy = EN_STATIC_COPY_V1 }: { mo
 <p className="eyebrow">{copy.text("home.localEyebrow")}</p>
 <h2 id="host-band-heading-v1" className="mt-2 text-[1.875rem] lg:text-[2.625rem]">{copy.text("home.localTitle")}</h2>
 <p className="mt-3 text-ink-soft">{copy.text("home.localBody")}</p>
-<ButtonLinkV1 href="/host" variant="secondary" className="mt-[22px]" primitives={primitives}>{copy.text("home.learnHosting")}</ButtonLinkV1>
+{model.hostBandExtraAction ? <div className="mt-[22px] flex flex-wrap items-center gap-x-5 gap-y-3">
+<ButtonLinkV1 href="/host" variant="secondary" primitives={primitives}>{copy.text("home.learnHosting")}</ButtonLinkV1>{model.hostBandExtraAction}
+</div> : <ButtonLinkV1 href="/host" variant="secondary" className="mt-[22px]" primitives={primitives}>{copy.text("home.learnHosting")}</ButtonLinkV1>}
 </div>
 <div className="arch relative aspect-[3/4] w-[min(100%,260px)] justify-self-center bg-line">
 <DecorativeVideoV1 video={model.hostBand} primitives={primitives} />
@@ -251,13 +257,15 @@ export function CatalogueViewV1({ heading, intro, content, copy = EN_STATIC_COPY
 </header>{content}</div>;
 }
 
+export const BOOKING_LOOKUP_SECTION_ID = "find-booking";
+
 export type HelpViewModelV1 = Readonly<{ primaryHref: string; primaryLabelKey: "help.niho" | "help.email"; emailHref: string; emailLabel: string }>;
 export function HelpViewV1({ model, copy = EN_STATIC_COPY_V1 }: { model: HelpViewModelV1; copy?: StaticCopyAccessorV1 }) {
   const sections = [["help.beforeTitle", "help.beforeBody"], ["help.findTitle", "help.findBody"], ["help.changeTitle", "help.changeBody"]] as const;
   return <div className="container-page max-w-2xl py-10 sm:py-16">
 <p className="eyebrow">{copy.text("help.eyebrow")}</p>
 <h1 className="mt-2 text-4xl sm:text-5xl">{copy.text("help.title")}</h1>
-<div className="mt-8 divide-y divide-line">{sections.map(([title, body]) => <section key={title} className="py-6">
+<div className="mt-8 divide-y divide-line">{sections.map(([title, body]) => <section key={title} id={title === "help.findTitle" ? BOOKING_LOOKUP_SECTION_ID : undefined} className="py-6">
 <h2 className="text-2xl">{copy.text(title)}</h2>
 <p className="mt-2 text-ink-soft">{copy.text(body)}</p>
 </section>)}</div>

@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { japaneseTextOutsideNihoSans } from "./support/japanese-type";
+import { japaneseHeadingsOutsideW6, japaneseTextOutsideNihoSans } from "./support/japanese-type";
 
 const ID = "00000000-0000-4000-8000-000000000478";
 const COVER_ID = "00000000-0000-4000-8000-000000000479";
@@ -148,12 +148,13 @@ test("lets a writer remove a saved experience link that is no longer available",
   expect(api.events.some((event) => event.startsWith("save:"))).toBe(true);
 });
 
-test("画面の日本語は NIHO Sans、英語の記事の題と本文は英語のサイトと同じ書体（#615）", async ({ page }, testInfo) => {
+test("画面の日本語は NIHO Sans、英語の記事の題と本文は英語のサイトと同じ書体（#670）", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "write-desktop", "the type is the same at every width");
   await mockWriterApi(page);
   await page.goto(`/write/write-e2e-fixture/edit/${ID}`);
   await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
   expect(await japaneseTextOutsideNihoSans(page)).toEqual([]);
+  expect(await japaneseHeadingsOutsideW6(page)).toEqual([]);
   const family = (selector: string) => page.locator(selector).first().evaluate((element) => getComputedStyle(element).fontFamily);
   expect(await family("#write-settings-title")).toMatch(/^"Nunito Variable", "NIHO Sans"/);
   // 英語の記事（fixture は language: "en"）は、公開される英語のページと同じ見た目で書く

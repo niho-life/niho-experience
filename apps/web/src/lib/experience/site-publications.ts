@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import type { PublicExperiencePublication, PublicHostBio, PublicSellerDisclosure } from "@niho-experience/experience-store";
 import type { PublicBookingTerms } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
@@ -77,7 +78,7 @@ export async function getSitePublicExperience(slug: string, locale: SitePublicLo
 }
 
 /** List public Experience products with a valid sale; products without sale terms stay out of the booking catalog. */
-export async function listSitePublicExperiences(locale: SitePublicLocale = "en"): Promise<SitePublicCatalog> {
+export const listSitePublicExperiences = cache(async (locale: SitePublicLocale = "en"): Promise<SitePublicCatalog> => {
   if (config.apiMode !== "http") return { experiences: [], claimedSlugs: [] };
   if (!config.experiencePublicationsEnabled) return { experiences: [], claimedSlugs: [] };
   const publications = experiencePublicationRepository();
@@ -100,7 +101,7 @@ export async function listSitePublicExperiences(locale: SitePublicLocale = "en")
     return { publication, saleTerms, sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null, hostBio: null };
   }));
   return { experiences: sales, claimedSlugs };
-}
+});
 
 /** Every HTTP sale endpoint requires a currently active Experience publication. */
 export async function publicExperienceRouteAllowedForSlug(slug: string): Promise<boolean> {

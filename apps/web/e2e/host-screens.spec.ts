@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { japaneseTextOutsideNihoSans } from "./support/japanese-type";
+import { japaneseHeadingsOutsideW6, japaneseTextOutsideNihoSans } from "./support/japanese-type";
 
 // The console screens (#84 / #88) on synthetic data. Runs against the second server
 // (HOST_CONSOLE_ENABLED=true, mock mode; see playwright.config.ts): the mock sign-in
@@ -366,7 +366,7 @@ test("console screens have no WCAG 2.2 AA violations", async ({ page }) => {
   await audit("/host/home (no provider)");
 });
 
-test("日本語の字は、見出しも本文も NIHO アプリと同じ NIHO Sans で描く（#615）", async ({ page }) => {
+test("日本語の字は、見出しも本文も ヒラギノ角ゴの NIHO Sans で描く（#670）", async ({ page }) => {
   await signIn(page);
   for (const path of CONSOLE_PAGES) {
     await page.goto(path);
@@ -375,6 +375,7 @@ test("日本語の字は、見出しも本文も NIHO アプリと同じ NIHO Sa
     // 以前は Fraunces から明朝に落ちていた
     expect(await heading.evaluate((element) => getComputedStyle(element).fontFamily), path).toMatch(/^"Nunito Variable", "NIHO Sans"/);
     expect(await japaneseTextOutsideNihoSans(page), path).toEqual([]);
+    expect(await japaneseHeadingsOutsideW6(page), path).toEqual([]);
   }
 });
 

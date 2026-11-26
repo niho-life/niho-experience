@@ -2,28 +2,26 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/ja", useSearchParams: () => new URLSearchParams() }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/", useSearchParams: () => new URLSearchParams() }));
 
-import { defaultStaticCopyValuesV1 } from "@niho/experience-presentation/v1";
-import { SiteLocaleProvider } from "./SiteLocale";
+import { siteNavigation } from "@/lib/site-nav";
 import { SiteMenu } from "./SiteMenu";
 
-const render = (props: Parameters<typeof SiteMenu>[0]) => renderToStaticMarkup(createElement(SiteLocaleProvider, { locale: "en", releaseId: "r", values: defaultStaticCopyValuesV1() } as never, createElement(SiteMenu, props)));
-
-describe("SiteMenu (#645, #658)", () => {
-  it("renders the items in order, then the language row, then the quiet foot link", () => {
-    const html = render({ items: [{ href: "/a", label: "Alpha" }, { href: "/b", label: "Beta" }], foot: { href: "/f", label: "Foot" }, language: createElement("a", { href: "/x" }, "Lang") });
-    const rows = [...html.matchAll(/<li([^>]*)>(.*?)<\/li>/g)].map((m) => m[2]!.replace(/<[^>]*>/g, ""));
-    expect(rows).toEqual(["Alpha", "Beta", "Lang", "Foot"]);
-    expect(html).toContain('href="/f"');
-    expect(html).toContain("text-ink-soft");
-    expect(html).toContain("empty:hidden");
+describe("SiteMenu (#672)", () => {
+  it("labels the native trigger and shows the navigation groups in order", () => {
+    const html = renderToStaticMarkup(createElement(SiteMenu, {
+      navigation: siteNavigation("en", { guides: true, categories: ["food"] }).mobile,
+      language: createElement("a", { href: "/ja" }, "日本語"),
+    }));
+    expect(html).toContain('role="button" aria-label="Menu" aria-expanded="false" aria-controls="site-menu-panel"');
+    expect([...html.matchAll(/<h2[^>]*>([^<]*)<\/h2>/g)].map((m) => m[1])).toEqual(["Explore", "Plan your visit", "For hosts", "Language"]);
+    expect([...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1])).toEqual([
+      "/experiences", "/experiences?category=food", "/about", "/help", "/help#find-booking", "/guides", "/host", "/host/auth/login", "/ja",
+    ]);
   });
 
-  it("names the button and the nav with `label` (default Menu) and leaves out the foot when none is given", () => {
-    const html = render({ items: [{ href: "/a", label: "Alpha" }], label: "メニュー" });
-    expect(html.match(/aria-label="メニュー"/g)).toHaveLength(2);
-    expect(html.match(/<li/g)).toHaveLength(1);
-    expect(render({ items: [] })).toContain('aria-label="Menu"');
+  it("leaves the language group out when it has no choice to offer", () => {
+    const html = renderToStaticMarkup(createElement(SiteMenu, { navigation: siteNavigation("en").mobile }));
+    expect(html).not.toContain(">Language<");
   });
 });

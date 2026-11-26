@@ -8,6 +8,7 @@ import { config, isExperienceStaging } from "@/lib/config";
 import type { CardModel } from "@/lib/card-model";
 import { parseDateParam, parseGuestsParam, upcomingDays } from "@/lib/date-filter";
 import { categoryLabel, categoryLeadJa, filterByCategory, parseCategoryParam, resolveCategories } from "@/lib/experience-categories";
+import { japaneseListPublication } from "@/lib/experience-list-catalog";
 import { loadCategoryBySlug } from "@/lib/experience-categories-server";
 import { sitePublicationCard } from "@/lib/experience/site-card-model";
 import { listSitePublicExperiences } from "@/lib/experience/site-publications";
@@ -34,7 +35,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     const query = await searchParams;
     const requested = parseCategoryParam(query.category);
     const [catalog, bySlug] = await Promise.all([listSitePublicExperiences("ja"), loadCategoryBySlug()]);
-    const slugs = catalog.experiences.filter(({ publication, saleTerms }) => publication.japanese && (saleTerms?.offers.length ?? 0) > 0).map(({ publication }) => publication.slug);
+    const slugs = catalog.experiences.filter(japaneseListPublication).map(({ publication }) => publication.slug);
     const category = bySlug ? requested : null;
     const count = category ? slugs.filter((slug) => bySlug?.get(slug) === category).length : slugs.length;
     const hasFilter = query.date !== undefined || query.guests !== undefined || normalizeExperienceQuery(query.q) !== "";

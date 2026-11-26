@@ -6,16 +6,16 @@ vi.mock("next/image", () => ({ default: () => null }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/ja", useSearchParams: () => new URLSearchParams() }));
 
 import { HomeLivingRoom } from "../HomeLivingRoom";
-import { ConsultBand, PeopleBand } from "./JapaneseHomeSections";
+import { PeopleBand } from "./JapaneseHomeSections";
 
 describe("日本語トップ（#563）", () => {
-  it("街のリビングの帯：日本語の見出し・説明・NIHOについてへのリンク。英語の既定の文は出ない", () => {
-    const html = renderToStaticMarkup(createElement(HomeLivingRoom, { hand: "it starts here", title: "街のリビング、NIHO", body: "鎌倉駅から歩いて2分。街の人がふらりと寄って、一緒につくり、話し、手を動かす場所です。", action: { href: "/ja/about", label: "NIHOについて" }, alt: "NIHOの長いテーブルを囲む街の人たち", titleClassName: "mt-1 text-[2rem]" } as never));
+  it("街のリビングの帯：日本語の見出し・説明・はじめての方へへのリンク。英語の既定の文は出ない", () => {
+    const html = renderToStaticMarkup(createElement(HomeLivingRoom, { hand: "it starts here", title: "街のリビング、NIHO", body: "鎌倉駅から歩いて2分。街の人がふらりと寄って、一緒につくり、話し、手を動かす場所です。", action: { href: "/ja/about", label: "はじめての方へ" }, alt: "NIHOの長いテーブルを囲む街の人たち", titleClassName: "mt-1 text-[2rem]" } as never));
     expect(html).toContain("街のリビング、NIHO");
     expect(html).toContain("it starts here");
     expect(html).toContain("鎌倉駅から歩いて2分。");
     expect(html).toContain('href="/ja/about"');
-    expect(html).toContain("NIHOについて");
+    expect(html).toContain("はじめての方へ");
     expect(html).not.toContain("living room");
     expect(html).not.toContain("About NIHO Travel");
   });
@@ -24,17 +24,6 @@ describe("日本語トップ（#563）", () => {
     const html = renderToStaticMarkup(createElement(HomeLivingRoom));
     expect(html).toContain("NIHO, the town’s living room");
     expect(html).toContain('href="/about"');
-  });
-
-  it("相談の節。「あいだに立ちます」のような約束は押し出さない", () => {
-    const consult = renderToStaticMarkup(createElement(ConsultBand));
-    expect(consult).toContain("企業・学校・グループのご相談");
-    expect(consult).not.toContain("載っていないことも");
-    expect(consult).toContain('href="/ja/inquiry"');
-    expect(consult).toContain("企業・学校の方へ");
-    expect(consult).toContain('href="/ja/business"');
-    expect(consult).not.toContain("法人・団体の方へ");
-    expect(consult).not.toContain("あいだに立ち");
   });
 
   it("街の人：1人の紹介、顔の並び、「街の人 ◯人」への入口", () => {

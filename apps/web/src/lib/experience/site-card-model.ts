@@ -1,3 +1,4 @@
+import { japaneseListPublication } from "@/lib/experience-list-catalog";
 import { providerNameFor } from "./provider-name";
 import type { SitePublicExperience, SitePublicOffer } from "./site-publications";
 import type { CardModel } from "@/lib/card-model";
@@ -14,10 +15,10 @@ export type SiteCardOptions = {
 };
 
 function japaneseSiteCard(item: SitePublicExperience, { people = [], copy }: SiteCardOptions): CardModel | null {
+  if (!japaneseListPublication(item)) return null;
   const { publication, saleTerms } = item;
-  const japanese = publication.japanese;
-  const offers = saleTerms?.offers ?? [];
-  if (!japanese || offers.length === 0) return null;
+  const { japanese } = publication;
+  const offers = saleTerms.offers;
   // The same decisions as the Japanese list's card (`jaCardOf`): the people it is met through, else the provider's public name.
   const providerName = publication.providerPublicName?.trim() || null;
   const person = publication.providerKind === "PERSON";
