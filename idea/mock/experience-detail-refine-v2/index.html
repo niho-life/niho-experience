@@ -3,9 +3,10 @@
   mock: 体験詳細ページ（/experiences/[slug]）のリファイン案 v2 — Community Dinner を題材に、PC とスマホ
   Issue: #675（見た目の整理）/ #676（日にちと人数を詳細ページで選ぶ）/ #677（地図）
   v1 からの変更（2026-11-26 オーナー）:
-    - 「会いにいく人」の欄を、体験の説明より下（レビューの次）へ移した
-    - 提供者が団体（NIHO kamakura）で、運営メンバーが日によって変わる体験の見せ方を作り直した
-    - 相談の1行を「会いにいく人」の欄の末尾へまとめた
+    - ホストの欄を「料金に含まれるもの」の次、「場所」の前に置いた。体験の説明の後で、ホストそのものが体験の価値なので場所・レビューより前
+    - 欄の見出しを「ホスト」にした
+    - 提供者が団体（NIHO kamakura）の体験は「団体＋人」で出す（確定）。団体の紹介文（200字ほど）を全文で見せ、その下にメンバーを並べる
+    - 相談の1行はページの下（販売者の1行の前）に置く
   論点:
     1. ファーストビューを「写真 → 題名 → 1行の要点」に絞る（パンくず・販売者・日程帯を題名の上下から外す）
     2. 販売者の表示はページ末尾の1行と予約入力の同意文だけにする（現状は題名の下・事実の下・提供者について・予約カードの4か所）
@@ -15,12 +16,13 @@
     6. 場所の欄に地図を入れる。集合場所を予約後に伝える体験は、ピンを出さずエリアの円だけにする
     7. 日にちと人数は詳細ページの上で選ぶ（PCは予約カードから開く吹き出し、スマホは下から出るシート）。/book は連絡先と決済だけにする
     8. レビュー欄を地図の次に置く。実データがある体験だけに出す
-    9. 提供者が団体のとき、誰を主語にするか。上の「提供者」で3つを見比べられる
-       - 団体＋人（提案）: 約束できる単位（NIHO kamakura）を主語にし、会える人の顔を添える。形は「丸＝人、角丸の四角＝場所・団体」で分ける
-       - 人だけ: v1 の出し方。担当が日によって変わる体験では、その人に会えると約束できない
-       - 団体だけ: 顔が無く、ほかの予約サイトの「催行会社」と同じ見え方になる
+    9. ホストの欄は提供者の種別で出し分ける（確定）。上の「提供者」で3つの場合を見られる
+       - 団体＋人: 約束できる単位（NIHO kamakura）を主語にし、紹介文と、会える人の顔を添える。形は「丸＝人、角丸の四角＝場所・団体」で分ける
+       - 個人のホスト: 顔写真・名前・肩書き・ひとこと・紹介文
+       - 団体のみ: 人が紐づかないとき。屋号と紹介文だけ
+       紹介文は200字前後を想定し、全文を見せる（300字を超える分だけたたむ）
   作っていない:
-    - 「会いにいく人」の2人目・3人目（みさき・けん）は並び方を見るためのサンプルで、実在しない。団体の紹介文（街のリビング…）も仮
+    - ホストの欄の2人目・3人目（みさき・けん）は並び方を見るためのサンプルで、実在しない。団体の紹介文（約200字）も長さを見るための仮の文
     - レビュー3件・評価 4.9・件数 12 は見た目確認用のサンプル。実在の感想ではない（本番は実データがあるときだけ表示）
     - 地図は絵。縮尺・道・ピンの位置は正確ではない。実装では地図の部品に置き換える（#677）
     - 「Google マップで開く」「相談する」「特定商取引法に基づく表記」「すべて見る（12件）」、ヘッダーとフッターのリンク、ほかの体験のカード、人のページへのリンクは押しても遷移しない
@@ -173,7 +175,7 @@ html[data-lang=en] .lead{font-size:18px;line-height:1.6}
 .host .role{font-size:13.5px;color:var(--muted);font-weight:600;line-height:1.4;margin-top:2px}
 .host .body{grid-column:1/-1}
 .host blockquote{font-weight:700;font-size:16.5px;line-height:1.6}
-.host .bio{margin-top:8px;color:var(--ink2);font-size:15px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.host .bio{margin-top:8px;color:var(--ink2);font-size:15.5px;line-height:1.8;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:12;overflow:hidden}
 .host .bio.open{display:block}
 .more{margin-top:6px;font-size:14px;font-weight:800;text-decoration:underline;text-underline-offset:4px}
 /* 会いにいく人: 団体が主語、人が顔。丸＝人、角丸の四角＝場所・団体 */
@@ -182,7 +184,7 @@ html[data-lang=en] .lead{font-size:18px;line-height:1.6}
 .org-img{width:56px;height:56px;border-radius:14px;object-fit:cover;flex:none}
 .org h3{font-size:18px;font-family:var(--sans)!important;font-weight:800!important;letter-spacing:0!important}
 .org .role{font-size:14px;color:var(--ink2);font-weight:600;line-height:1.5;margin-top:2px}
-.orgbio{margin-top:14px;color:var(--ink2);font-size:15px}
+.orgbio{margin-top:16px;color:var(--ink2);font-size:15.5px;line-height:1.8}
 .members{margin-top:18px;padding-top:18px;border-top:1px solid var(--line2);display:grid;gap:16px}
 .members li{display:flex;gap:12px;align-items:flex-start}
 .members li>img,.members li>.ini{width:48px;height:48px;border-radius:50%;object-fit:cover;object-position:50% 20%;flex:none;font-size:17px}
@@ -191,7 +193,7 @@ html[data-lang=en] .lead{font-size:18px;line-height:1.6}
 .members .who span{font-size:13px;color:var(--muted);font-weight:600}
 .members .q{margin-top:2px;font-size:15px;color:var(--ink2);line-height:1.6}
 .hostbox .note{margin-top:16px}
-.hostask{margin-top:16px;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;font-size:15px;color:var(--ink2)}
+.ask{padding-block:22px;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;font-size:15px;color:var(--ink2)}
 .note{margin-top:12px;font-size:13.5px;color:var(--muted)}
 
 .incl{display:grid;gap:22px}
@@ -237,7 +239,7 @@ html[data-lang=en] .rv-head h2{font-size:25px}
 .know ul.rest li::before{content:"";position:absolute;left:3px;top:.8em;width:4px;height:4px;border-radius:50%;background:var(--muted)}
 .know .more{margin-top:16px}
 
-.seller{padding-top:22px;font-size:12.5px;color:var(--muted)}
+.seller{padding-top:4px;font-size:12.5px;color:var(--muted)}
 .seller a{text-decoration:underline;text-underline-offset:3px}
 
 /* booking card */
@@ -461,7 +463,7 @@ html[data-lang=en] .bk h1{font-size:31px}
   <div class="seg" data-key="cta"><span>予約ボタン</span><button data-val="leaf">緑</button><button data-val="ink">黒（現状のPC）</button></div>
   <div class="seg" data-key="reviews"><span>レビュー</span><button data-val="on">あり（サンプル）</button><button data-val="off">なし</button></div>
   <div class="seg" data-key="place"><span>集合場所</span><button data-val="pin">公開</button><button data-val="area">予約後に案内</button></div>
-  <div class="seg" data-key="host"><span>提供者</span><button data-val="team">団体＋人（提案）</button><button data-val="person">人だけ</button><button data-val="org">団体だけ</button></div>
+  <div class="seg" data-key="host"><span>提供者</span><button data-val="team">団体＋人</button><button data-val="person">個人のホスト</button><button data-val="org">団体のみ</button></div>
 </div>
 
 <div class="stage">
@@ -565,6 +567,42 @@ html[data-lang=en] .bk h1{font-size:31px}
               </div>
             </section>
 
+            <section class="sec" id="host">
+              <h2 data-en="Your host">ホスト</h2>
+
+              <!-- 団体＋人: 屋号が主語。紹介文（200字ほど）と、会える人の顔 -->
+              <div class="hostbox host-team">
+                <div class="org"><img class="org-img" data-from="g1" alt=""><div><h3>NIHO kamakura</h3><p class="role" data-en="Around Kamakura Station">鎌倉駅まわり</p></div></div>
+                <p class="orgbio" data-en="NIHO kamakura is “the town’s living room”, a two-minute walk from the west exit of Kamakura Station. Every weekend, travellers and people who live in Kamakura cook, eat and talk at the same table here. You’ll be welcomed by the staff who run the space and by neighbours who join in. No cooking experience is needed. Take home one place in Kamakura you can come back to.">NIHO kamakura は、鎌倉駅西口から歩いて2分の「街のリビング」です。旅で訪れた人と、鎌倉に暮らす人が、同じテーブルで料理をして、食べて、話す。そんな時間を毎週末にひらいています。迎えるのは、ここを運営するスタッフと、近所に住むメンバーたち。料理の経験は要りません。はじめての鎌倉に、また帰ってこられる場所をひとつ持ち帰ってください。</p>
+                <ul class="members">
+                  <li><img data-from="hostImg" alt="キッチンでフライパンを手に笑う高浜拓也さん"><div><p class="who"><b data-en="Takuya Takahama">高浜拓也</b><span data-en="Community manager">コミュニティマネージャー</span></p><p class="q" data-en="“I love a way of living where people are loosely connected.”">「人がゆるやかにつながる暮らしが好きです。」</p></div></li>
+                  <li><span class="ini">み</span><div><p class="who"><b data-en="Misaki">みさき</b><span data-en="Kitchen">キッチン担当</span></p><p class="q" data-en="“Come hungry. We’ll cook the rest together.”">「お腹をすかせて来てください。あとは一緒に作りましょう。」</p></div></li>
+                  <li><span class="ini">け</span><div><p class="who"><b data-en="Ken">けん</b><span data-en="Lives in Kamakura">鎌倉の住民</span></p><p class="q" data-en="“Ask me where locals really go at the weekend.”">「週末に地元の人が行く場所、聞いてください。」</p></div></li>
+                </ul>
+                <p class="note" data-en="Who hosts on the day may vary.">当日の担当は、日によって変わることがあります。</p>
+              </div>
+
+              <!-- 個人のホスト -->
+              <div class="host host-person">
+                <img id="hostImg" src="https://travel.niho.life/api/public/experience-provider-media/52d5d15f-1857-4239-8bd2-8e352c9699a3" alt="キッチンでフライパンを手に笑う高浜拓也さん">
+                <div>
+                  <h3 data-en="Takuya Takahama">高浜拓也</h3>
+                  <p class="role" data-en="Community manager, NIHO kamakura">NIHO kamakura コミュニティマネージャー</p>
+                </div>
+                <div class="body">
+                  <blockquote data-en="“I love a way of living where people are loosely connected.”">「人がゆるやかにつながる暮らしが好きです。」</blockquote>
+                  <p class="bio" id="bio" data-en="Born in Osaka. Living between Izu and Tokyo, and later in a multi-generational share house, I came to love ways of living where people are loosely connected. At NIHO kamakura, a shared living room by the west exit of Kamakura Station, I make time to spend with people of the town, like this community dinner. I like travelling and hiking.">大阪生まれ。伊豆と東京の二拠点で暮らしたり、多世代シェアハウスで暮らしたりする中で、人がゆるやかにつながる暮らしが好きになりました。鎌倉駅西口のシェアリビングスペース NIHO kamakura で、コミュニティディナーなど、街の人と一緒に過ごす時間をつくっています。趣味は旅と登山。</p>
+                  <button class="more" id="bioMore" aria-expanded="false" data-en="Read more">続きを読む</button>
+                </div>
+              </div>
+
+              <!-- 団体のみ（人が紐づかないとき） -->
+              <div class="hostbox host-org">
+                <div class="org"><img class="org-img" data-from="g1" alt=""><div><h3>NIHO kamakura</h3><p class="role" data-en="Around Kamakura Station">鎌倉駅まわり</p></div></div>
+                <p class="orgbio" data-en="NIHO kamakura is “the town’s living room”, a two-minute walk from the west exit of Kamakura Station. Every weekend, travellers and people who live in Kamakura cook, eat and talk at the same table here. You’ll be welcomed by the staff who run the space and by neighbours who join in. No cooking experience is needed. Take home one place in Kamakura you can come back to.">NIHO kamakura は、鎌倉駅西口から歩いて2分の「街のリビング」です。旅で訪れた人と、鎌倉に暮らす人が、同じテーブルで料理をして、食べて、話す。そんな時間を毎週末にひらいています。迎えるのは、ここを運営するスタッフと、近所に住むメンバーたち。料理の経験は要りません。はじめての鎌倉に、また帰ってこられる場所をひとつ持ち帰ってください。</p>
+              </div>
+            </section>
+
             <section class="sec" id="place">
               <h2 data-en="Getting there">場所</h2>
               <div class="mapbox">
@@ -638,45 +676,6 @@ html[data-lang=en] .bk h1{font-size:31px}
               <a class="tlink rv-all" href="#" data-en="See all 12 reviews">12件すべて見る</a>
             </section>
 
-            <section class="sec" id="host">
-              <h2 data-en="Who you’ll meet">会いにいく人</h2>
-
-              <!-- 団体＋人（提案）: NIHO kamakura が主語、会える人の顔を添える -->
-              <div class="hostbox host-team">
-                <div class="org"><img class="org-img" data-from="g1" alt=""><div><h3>NIHO kamakura</h3><p class="role" data-en="The town’s living room, two minutes from Kamakura Station">鎌倉駅西口から歩いて2分の、街のリビング</p></div></div>
-                <ul class="members">
-                  <li><img data-from="hostImg" alt="キッチンでフライパンを手に笑う高浜拓也さん"><div><p class="who"><b data-en="Takuya Takahama">高浜拓也</b><span data-en="Community manager">コミュニティマネージャー</span></p><p class="q" data-en="“I love a way of living where people are loosely connected.”">「人がゆるやかにつながる暮らしが好きです。」</p></div></li>
-                  <li><span class="ini">み</span><div><p class="who"><b data-en="Misaki">みさき</b><span data-en="Kitchen">キッチン担当</span></p><p class="q" data-en="“Come hungry. We’ll cook the rest together.”">「お腹をすかせて来てください。あとは一緒に作りましょう。」</p></div></li>
-                  <li><span class="ini">け</span><div><p class="who"><b data-en="Ken">けん</b><span data-en="Lives in Kamakura">鎌倉の住民</span></p><p class="q" data-en="“Ask me where locals really go at the weekend.”">「週末に地元の人が行く場所、聞いてください。」</p></div></li>
-                </ul>
-                <p class="note" data-en="Who hosts, and which residents join, varies by date.">当日の担当や参加する住民は、日によって変わります。</p>
-              </div>
-
-              <!-- 人だけ（v1） -->
-              <div class="host host-person">
-                <img id="hostImg" src="https://travel.niho.life/api/public/experience-provider-media/52d5d15f-1857-4239-8bd2-8e352c9699a3" alt="キッチンでフライパンを手に笑う高浜拓也さん">
-                <div>
-                  <h3 data-en="Takuya Takahama">高浜拓也</h3>
-                  <p class="role" data-en="Community manager, NIHO kamakura">NIHO kamakura コミュニティマネージャー</p>
-                </div>
-                <div class="body">
-                  <blockquote data-en="“I love a way of living where people are loosely connected.”">「人がゆるやかにつながる暮らしが好きです。」</blockquote>
-                  <p class="bio" id="bio" data-en="Born in Osaka. Living between Izu and Tokyo, and later in a multi-generational share house, I came to love ways of living where people are loosely connected. At NIHO kamakura, a shared living room by the west exit of Kamakura Station, I make time to spend with people of the town, like this community dinner. I like travelling and hiking.">大阪生まれ。伊豆と東京の二拠点で暮らしたり、多世代シェアハウスで暮らしたりする中で、人がゆるやかにつながる暮らしが好きになりました。鎌倉駅西口のシェアリビングスペース NIHO kamakura で、コミュニティディナーなど、街の人と一緒に過ごす時間をつくっています。趣味は旅と登山。</p>
-                  <button class="more" id="bioMore" aria-expanded="false" data-en="Read more">続きを読む</button>
-                </div>
-              </div>
-              <p class="note host-person" data-en="Residents and hosts who join may vary by date.">参加する住民や担当ホストは、開催日によって変わります。</p>
-
-              <!-- 団体だけ -->
-              <div class="hostbox host-org">
-                <div class="org"><img class="org-img" data-from="g1" alt=""><div><h3>NIHO kamakura</h3><p class="role" data-en="The town’s living room, two minutes from Kamakura Station">鎌倉駅西口から歩いて2分の、街のリビング</p></div></div>
-                <p class="orgbio" data-en="A shared living room by the west exit of Kamakura Station, where travellers and people of the town sit at the same table. The community dinner is hosted by its staff together with local residents.">鎌倉駅西口にあるシェアリビング。旅の人と街の人が、同じ食卓を囲む場所です。コミュニティディナーは、スタッフと地域の住民が一緒に開いています。</p>
-                <p class="note" data-en="Who hosts, and which residents join, varies by date.">当日の担当や参加する住民は、日によって変わります。</p>
-              </div>
-
-              <p class="hostask"><span data-en="Coming as a school, a company or a group? Talk to us before you book.">学校・会社・グループでの参加は、予約の前に相談できます。</span><a class="tlink" href="#" data-en="Get in touch">相談する</a></p>
-            </section>
-
             <section class="sec" id="know">
               <h2 data-en="Know before you go">参加前にご確認ください</h2>
               <div class="know">
@@ -699,6 +698,10 @@ html[data-lang=en] .bk h1{font-size:31px}
               </div>
             </section>
 
+            <div class="ask">
+              <span data-en="Coming as a school, a company or a group? Talk to us before you book.">学校・会社・グループでの参加は、予約の前に相談できます。</span>
+              <a class="tlink" href="#" data-en="Get in touch">相談する</a>
+            </div>
             <p class="seller"><span data-en="Sold by NIHO kamakura (Panasonic Holdings Corporation) · ">販売者：NIHO kamakura（Panasonic Holdings Corporation）・</span><a href="#" data-en="Seller information">特定商取引法に基づく表記</a></p>
           </div>
 
@@ -930,6 +933,7 @@ html[data-lang=en] .bk h1{font-size:31px}
     if (k === 'lang') applyLang();
     if (k === 'view') closePicker();
     render();
+    const bio = $('#bio'); $('#bioMore').hidden = !bio.classList.contains('open') && bio.scrollHeight <= bio.clientHeight + 2;
   }
   $$('.seg button').forEach(b => b.addEventListener('click', () => setOpt(b.parentElement.dataset.key, b.dataset.val)));
   $$('[data-setlang]').forEach(b => b.addEventListener('click', () => setOpt('lang', b.dataset.setlang)));
