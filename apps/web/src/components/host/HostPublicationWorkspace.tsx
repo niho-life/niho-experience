@@ -282,8 +282,23 @@ function MeetingCoordinatesEditor({ value, onChange, radius, onRadiusChange, app
   onRadiusChange: (radius: number) => void;
   approximate: boolean;
 }) {
-  const [lat, setLat] = useState(value ? String(value.lat) : "");
-  const [lng, setLng] = useState(value ? String(value.lng) : "");
+  const sourceLat = value?.lat ?? null;
+  const sourceLng = value?.lng ?? null;
+  const [coordinates, setCoordinates] = useState(() => ({
+    sourceLat,
+    sourceLng,
+    lat: sourceLat === null ? "" : String(sourceLat),
+    lng: sourceLng === null ? "" : String(sourceLng),
+  }));
+  if (coordinates.sourceLat !== sourceLat || coordinates.sourceLng !== sourceLng) {
+    setCoordinates({
+      sourceLat,
+      sourceLng,
+      lat: sourceLat === null ? "" : String(sourceLat),
+      lng: sourceLng === null ? "" : String(sourceLng),
+    });
+  }
+  const { lat, lng } = coordinates;
   const edit = (nextLat: string, nextLng: string) => {
     const parsedLat = Number(nextLat);
     const parsedLng = Number(nextLng);
@@ -295,8 +310,8 @@ function MeetingCoordinatesEditor({ value, onChange, radius, onRadiusChange, app
   const input = "mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 font-normal text-ink outline-none focus-visible:border-moss focus-visible:ring-2 focus-visible:ring-moss/20";
   return <div className="space-y-3">
     <div className="grid gap-3 sm:grid-cols-2">
-      <label className="block text-sm font-bold text-ink-soft">緯度<input inputMode="decimal" value={lat} onChange={(event) => setLat(event.target.value)} onBlur={() => edit(lat, lng)} className={input} /></label>
-      <label className="block text-sm font-bold text-ink-soft">経度<input inputMode="decimal" value={lng} onChange={(event) => setLng(event.target.value)} onBlur={() => edit(lat, lng)} className={input} /></label>
+      <label className="block text-sm font-bold text-ink-soft">緯度<input inputMode="decimal" value={lat} onChange={(event) => setCoordinates((current) => ({ ...current, lat: event.target.value }))} onBlur={() => edit(lat, lng)} className={input} /></label>
+      <label className="block text-sm font-bold text-ink-soft">経度<input inputMode="decimal" value={lng} onChange={(event) => setCoordinates((current) => ({ ...current, lng: event.target.value }))} onBlur={() => edit(lat, lng)} className={input} /></label>
     </div>
     {approximate ? <label className="block text-sm font-bold text-ink-soft">公開する半径: {radius} m
       <input type="range" min={50} max={10_000} step={50} value={radius} disabled={!value} onChange={(event) => onRadiusChange(Number(event.target.value))} className="mt-2 w-full accent-moss disabled:opacity-45" />
@@ -1631,7 +1646,6 @@ export function HostPublicationWorkspace({
                   : { ...current, publicMapPoint: null, publicMapArea: { ...coordinate, radiusMeters: mapArea(current.publicMapArea)?.radiusMeters ?? 500 } })}
               />
               <MeetingCoordinatesEditor
-                key={`${disclosure}:${publicMapPoint?.lat ?? ""}:${publicMapPoint?.lng ?? ""}:${publicMapArea?.lat ?? ""}:${publicMapArea?.lng ?? ""}:${publicMapArea?.radiusMeters ?? ""}`}
                 value={disclosure === "PUBLIC" ? publicMapPoint : publicMapArea}
                 approximate={disclosure === "AFTER_BOOKING"}
                 radius={publicMapArea?.radiusMeters ?? 500}
