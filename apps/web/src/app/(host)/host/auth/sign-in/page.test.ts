@@ -35,6 +35,17 @@ describe("sign-in page", () => {
     for (const absent of ["メール", "<form", "<input", "体験の提供について"]) expect(html, absent).not.toContain(absent);
   });
 
+  it("puts the site's wordmark above the page, outside main, and NIHO's mark on the button without a name of its own", async () => {
+    const html = await render({});
+    const [header, main] = html.split('<main id="main"');
+    expect(header).toContain('href="/ja"');
+    expect(header).toContain("NIHO Travel");
+    expect(main).toContain('src="/host-app/icon-192.png" alt=""');
+    expect(main).toMatch(/<span aria-hidden="true"[^>]*><img src="\/niho-mark.svg" alt=""/);
+    // The email fallback keeps the same wordmark above it.
+    expect(await render({ method: "email" })).toContain('href="/ja"');
+  });
+
   it("sends a signed-in host on, and keeps the email form behind method=email", async () => {
     state.session = { kind: "experience" };
     await expect(render({ next: "/write" })).rejects.toThrow("redirect:/write");
