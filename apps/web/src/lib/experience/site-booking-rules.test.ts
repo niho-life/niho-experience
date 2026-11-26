@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SitePublicOffer } from "./site-publications";
-import { expectedSiteBookingTotalYen } from "./site-booking-rules";
+import { canEditSitePartyCounts, expectedSiteBookingTotalYen } from "./site-booking-rules";
 
 const offer: SitePublicOffer = {
   id: "synthetic-rule",
@@ -32,6 +32,16 @@ describe("Experience public booking amount", () => {
     expect(expectedSiteBookingTotalYen(withChildren, 1, 1)).toBe(8_000);
     expect(expectedSiteBookingTotalYen(withChildren, 2, 1)).toBe(9_000);
     expect(expectedSiteBookingTotalYen(withChildren, 0, 1)).toBeNull();
+  });
+
+  it("lets travelers adjust a family mix below the minimum, but keeps that intermediate count unbookable", () => {
+    const familyOffer = { ...offer, minimumParticipants: 2, pricing: { ...offer.pricing, child: { priceYen: 1_000, minAge: 0, maxAge: 12, adultRequired: true } } };
+    expect(canEditSitePartyCounts(familyOffer, 1, 0, 2)).toBe(true);
+    expect(expectedSiteBookingTotalYen(familyOffer, 1, 0)).toBeNull();
+    expect(canEditSitePartyCounts(familyOffer, 1, 1, 2)).toBe(true);
+    expect(expectedSiteBookingTotalYen(familyOffer, 1, 1)).toBe(8_000);
+    expect(canEditSitePartyCounts(familyOffer, 0, 1, 2)).toBe(false);
+    expect(canEditSitePartyCounts(familyOffer, 1, 2, 2)).toBe(false);
   });
 
   it("closes invalid counts instead of displaying a guessed amount", () => {

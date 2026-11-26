@@ -97,12 +97,12 @@ describe("site publication booking seller terms", () => {
   });
 
   // ホストのサイトへの埋め込み (#638): the page keeps its one screen; only the date became a calendar.
-  it("keeps every field of the booking page on one screen, with a calendar for the date", () => {
+  it("keeps every field of the booking page on one screen, with a calendar and a host note field", () => {
     const html = renderToStaticMarkup(createElement(SitePublicationBooking, {
       item: { publication: { slug: "paid-one", publicTitle: "Paid one", sellerDisplayName: "NIHO" }, saleTerms: { sellerDisplayName: "NIHO", offers: [offer] }, sellerDisclosure: null } as never,
       siteOrigin: "https://experience.example.test", consentVersion: "terms-v1", bookingsEnabled: true,
     }));
-    for (const field of ["Adults", "Full name", "Email", "Note", "Total", 'type="checkbox"', 'type="submit"', "Continue to secure checkout"]) expect(html, field).toContain(field);
+    for (const field of ["Adults", "Full name", "Email", "Note for your host", "Total", 'type="checkbox"', 'type="submit"', "Continue to secure checkout"]) expect(html, field).toContain(field);
     expect(html).not.toContain("<select");
     expect(html).toMatch(/<div role="group" aria-labelledby="([^"]+)"[^>]*><p id="\1">Date<\/p>/);
     expect(html).toContain("Loading dates…");

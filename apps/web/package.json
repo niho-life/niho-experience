@@ -39,6 +39,7 @@
     "@tiptap/react": "3.31.3",
     "@tiptap/starter-kit": "3.31.3",
     "google-auth-library": "9.15.1",
+    "mapbox-gl": "3.35.0",
     "next": "16.3.8",
     "nodemailer": "10.1.2",
     "pg": "8.23.1",
