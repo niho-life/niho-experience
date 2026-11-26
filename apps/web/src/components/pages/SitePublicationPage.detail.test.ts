@@ -175,7 +175,7 @@ describe("the detail page in Japanese: the differences that stay", () => {
     expect(off).not.toContain("/ja/people/");
   });
 
-  it("keeps the provider block in both languages when the business identity falls back to its public seller name", async () => {
+  it("labels a business seller-name fallback as the host in both languages", async () => {
     const business = item({ publication: {
       providerPublicName: null,
       providerPublicNameEn: null,
@@ -186,8 +186,12 @@ describe("the detail page in Japanese: the differences that stay", () => {
 
     const ja = await render("ja", business);
     const en = await render("en", business);
-    expect(ja).toContain("提供者について");
-    expect(en).toContain("About the provider");
+    expect(ja).toContain("ホストについて");
+    expect(en).toContain("About your host");
+    expect(ja).toContain("ホスト: ");
+    expect(en).toContain("Hosted by ");
+    expect(ja).not.toContain("提供者: ");
+    expect(en).not.toContain("Offered by ");
     for (const html of [ja, en]) {
       expect(html).toContain("NIHO kamakura (Panasonic Holdings Corporation)");
       expect(html.match(/id="host"/g)).toHaveLength(1);

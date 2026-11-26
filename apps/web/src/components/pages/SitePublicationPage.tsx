@@ -85,9 +85,6 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   // The host's own bio (#146) in the page's language only: English needs the host's confirmed English. No filler.
   const hostBioText = (ja ? hostBio?.ja : hostBio?.en) ?? null;
   const providerName = providerNameFor(publication, locale);
-  const providerSectionHeading = providerName || hostBioText
-    ? (ja ? "ホストについて" : "About your host")
-    : (ja ? "提供者について" : "About the provider");
   const providerIdentityMedia = providerName
     ? publication.providerPhoto ?? (publication.providerKind === "BUSINESS" ? publication.businessLogo : null)
     : null;
@@ -108,7 +105,11 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   ]);
   const linkedPeople = allPeople.filter((entry) => entry.experienceSlugs.includes(publication.slug));
   const people = ja ? linkedPeople : [];
-  const showProviderSection = Boolean(providerName || hostBioText || publication.providerKind || linkedPeople.length);
+  const hasHostIdentity = Boolean(providerName || hostBioText || publication.providerKind || linkedPeople.length);
+  const hostSectionHeading = hasHostIdentity
+    ? (ja ? "ホストについて" : "About your host")
+    : (ja ? "提供者について" : "About the provider");
+  const showHostSection = hasHostIdentity;
   const category = classification?.category ?? null;
   const area = classification?.area ?? null;
   const peopleLinks = config.peoplePagesEnabled;
@@ -143,7 +144,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
             ? <Link href={headline.href} aria-label={headline.accessibleLabel} className="mt-3 inline-flex font-extrabold text-moss hover:underline">{headline.label}</Link>
             : <span className="mt-3 inline-flex rounded-full bg-sand px-3 py-1 text-sm font-extrabold">{headline.label}</span>
           : null}
-          <p className="mt-4 text-[0.9375rem] text-ink-soft">{providerName ? (ja ? "ホスト: " : "Hosted by ") : (ja ? "提供者: " : "Offered by ")}<b className="text-ink">{providerName ?? publication.sellerDisplayName}</b></p>
+          <p className="mt-4 text-[0.9375rem] text-ink-soft">{hasHostIdentity ? (ja ? "ホスト: " : "Hosted by ") : (ja ? "提供者: " : "Offered by ")}<b className="text-ink">{providerName ?? publication.sellerDisplayName}</b></p>
           {hostStoryGuide ? <p className="mt-2"><Link href={`/guides/${hostStoryGuide.slug}`} className="link-leaf">Read the host story</Link></p> : null}
           <ul className="mt-[18px] grid grid-cols-2 gap-x-3 gap-y-4 border-y border-line py-[18px] lg:flex lg:flex-wrap lg:gap-x-9 lg:border-0 lg:py-0">
             {durations ? <li><span className="eyebrow">{ja ? "所要時間" : "Duration"}</span><p className="font-extrabold">{durations}</p></li> : null}
@@ -209,9 +210,9 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 {publication.meetingPoint.exteriorPhotoIndex !== null && photos[publication.meetingPoint.exteriorPhotoIndex] ? <Photo image={photos[publication.meetingPoint.exteriorPhotoIndex]!} alt={photos[publication.meetingPoint.exteriorPhotoIndex]!.alt || `${publication.meetingPoint.name} exterior`} aspect="" rounded="rounded-xl" className="mt-4 h-52 w-64" sizes="256px" /> : null}
               </div> : publication.meetingPointDisclosure === "AFTER_BOOKING" ? <p className="mt-4 text-ink-soft">The meeting point is shared after your booking is confirmed.</p> : null}
             </section> : null}
-            {/* 提供者の紹介は日英で共通。日本語だけの街の人情報は、その中に追加表示する。 */}
-            {showProviderSection ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
-              <h2 id="host-heading" className="text-2xl">{providerSectionHeading}</h2>
+            {/* ホストの紹介は日英で共通。販売者情報は予約欄に分け、日本語だけの街の人情報はその中に追加表示する。 */}
+            {showHostSection ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
+              <h2 id="host-heading" className="text-2xl">{hostSectionHeading}</h2>
               <div className="mt-4 flex items-start gap-4">
                 {providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt={providerIdentityPhoto.alt} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" /> : null}
                 <div><p className="font-extrabold">{providerName ?? publication.sellerDisplayName}</p>{hostBioText ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{hostBioText}</p> : null}</div>
