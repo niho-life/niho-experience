@@ -31,4 +31,13 @@ describe("日英のサイトナビ（#672）", () => {
     expect(nav.headerHost).toEqual({ href: "/host/home", label: "ホスト画面" });
     expect(nav.mobile.hosts.links).toEqual([nav.headerHost]);
   });
+
+  it("ホストのログイン入口は有効な認証方式を選ぶルートを通る", () => {
+    const en = siteNavigation("en");
+    const ja = siteNavigation("ja");
+    expect(en.mobile.hosts.links[1]).toEqual({ href: "/host/auth/login", label: "Log in" });
+    expect(ja.mobile.hosts.links[1]).toEqual({ href: "/host/auth/login", label: "ログイン" });
+    expect(en.footer.at(-1)?.links[1]?.href).toBe("/host/auth/login");
+    expect(ja.footer.at(-1)?.links[1]?.href).toBe("/host/auth/login");
+  });
 });

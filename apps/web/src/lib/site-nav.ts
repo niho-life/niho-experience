@@ -1,7 +1,7 @@
 import { BOOKING_LOOKUP_SECTION_ID } from "@niho/experience-presentation/v1";
 import type { ExperienceCategoryId } from "@niho-experience/experience-domain";
 import { categoryLabel } from "./experience-categories";
-import { HOST_EMAIL_SIGN_IN_PATH, HOST_HOME_PATH } from "./host/routes";
+import { HOST_HOME_PATH, HOST_LOGIN_PATH } from "./host/routes";
 import type { SiteLocale } from "./localized-content";
 
 export const JAPANESE_ABOUT_LABEL = "はじめての方へ";
@@ -67,7 +67,8 @@ export function siteNavigation(locale: SiteLocale, {
     { ...help, label: words.help },
   ];
   const host = { href: `${prefix}/host`, label: words.host };
-  const login = { href: HOST_EMAIL_SIGN_IN_PATH, label: words.login };
+  // The route handler selects NIHO, email, or the migration login from runtime flags.
+  const login = { href: HOST_LOGIN_PATH, label: words.login };
   const dashboard = { href: HOST_HOME_PATH, label: words.dashboard };
   const explore = experienceNavLinks(locale, categories);
   const visit = {
