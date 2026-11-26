@@ -25,7 +25,7 @@ test("public pages share their canonical URL without carrying queries or unappro
 
 test("independently authored Japanese pages have self-canonical Open Graph URLs without hreflang", async ({ request }) => {
   for (const path of ["/ja/usage", "/ja/business", "/ja/schools"]) {
-    const response = await request.get(path);
+    const response = await request.get(path, { headers: { "user-agent": CRAWLERS.Googlebot } });
     expect(response.status(), path).toBe(200);
     const html = await response.text();
     const head = html.slice(0, html.indexOf("</head>"));
