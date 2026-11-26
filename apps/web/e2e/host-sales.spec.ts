@@ -200,7 +200,8 @@ test("提供者情報: preview saves an ordinary change without review", async (
   await signIn(page);
   await page.goto("/host/settings?section=all");
   const provider = providerPanel(page);
-  const bio = provider.getByRole("textbox", { name: "紹介" });
+  const displayName = provider.getByRole("textbox", { name: "掲載名", exact: true });
+  await expect(provider.getByRole("textbox", { name: "紹介", exact: true })).toHaveCount(0);
   const save = page.getByRole("button", { name: "保存", exact: true });
   await expect(provider).not.toContainText("審査");
   await expect(provider.getByRole("radio", { name: "個人" })).toBeChecked();
@@ -213,19 +214,19 @@ test("提供者情報: preview saves an ordinary change without review", async (
   await expect(provider).toContainText("提供者規約");
   await expect(provider).toContainText("同意済み");
 
-  await bio.fill("  合成の新しい紹介  ");
+  await displayName.fill("  合成の提供者  ");
   await save.click();
   await expect(page.getByRole("dialog", { name: /提供者情報/ })).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();
   // What the preview kept for this request: the words without the spaces around them.
-  await expect(bio).toHaveValue("合成の新しい紹介");
+  await expect(displayName).toHaveValue("合成の提供者");
   await expect(provider).not.toContainText("審査");
 
   // The preview does not keep it (the contract mock keeps a change for one request only): a
-  // reload shows the synthetic provider again. In http mode NIHO keeps it.
+  // reload shows the synthetic provider again.
   await page.reload();
   await expect(providerPanel(page)).not.toContainText("審査");
-  await expect(providerPanel(page).getByRole("textbox", { name: "紹介" })).toHaveValue("家庭料理を一緒に作る体験の、合成データの提供者です（sample）。");
+  await expect(providerPanel(page).getByRole("textbox", { name: "掲載名", exact: true })).toHaveValue("サンプルの台所");
 });
 
 test("the payout account: Stripe's page in the preview, and the way back from Stripe", async ({ page }) => {
@@ -261,7 +262,7 @@ test("sales, payout and registration screens have no WCAG 2.2 AA violations", as
   await page.goto("/host/sales?month=2026-11");
   await audit(page, "/host/sales (empty month)");
   await page.goto("/host/settings?section=all");
-  await providerPanel(page).getByRole("textbox", { name: "紹介" }).fill("合成の紹介");
+  await providerPanel(page).getByRole("textbox", { name: "掲載名", exact: true }).fill("合成の提供者");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();

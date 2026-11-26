@@ -19,7 +19,7 @@ function error(status: 404 | 503) {
   return Response.json({ error: status === 404 ? "not_found" : "media_storage_unavailable" }, { status, headers: HEADERS });
 }
 
-/** A provider image is returned only while it remains selected and a product by its seller is public. */
+/** Return a provider or member photo when it appears on a public page. */
 export async function GET(_request: Request, context: Context) {
   if (config.apiMode !== "http" || !config.experiencePublicationsEnabled) return error(404);
   const assetId = (await context.params).assetId;
@@ -27,7 +27,7 @@ export async function GET(_request: Request, context: Context) {
   try {
     const [repository, storage] = [experiencePublicationRepository(), experiencePublicMediaStorage()];
     if (repository === null || storage === null) return error(503);
-    const asset = await repository.getPublicProviderMediaAsset(assetId);
+    const asset = await repository.getPublicProviderMediaAsset(assetId, config.peoplePagesEnabled ?? false);
     if (asset === null) return error(404);
     const bytes = await storage.read(asset.objectKey);
     if (bytes.byteLength !== asset.byteSize) return error(503);

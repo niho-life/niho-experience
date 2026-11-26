@@ -91,6 +91,22 @@ export class ProviderHostBioRepository {
   readonly #pool: Pool;
   constructor(pool: Pool) { this.#pool = pool; }
 
+  async getConsoleOverview(actor: HostActor): Promise<{ state: HostBioState; kind: "PERSON" | "BUSINESS" | null }> {
+    assertStoreIdentifier(actor.providerId, "providerId");
+    assertStoreIdentifier(actor.nihoUserId, "nihoUserId");
+    const result = await this.#pool.query<DbRow>(
+      `SELECT bio.*,profile.provider_kind FROM provider_memberships membership
+         LEFT JOIN provider_host_bios bio ON bio.provider_id=membership.provider_id
+         LEFT JOIN experience_provider_public_profiles profile ON profile.provider_id=membership.provider_id
+        WHERE membership.provider_id=$1 AND membership.niho_user_id=$2
+          AND membership.active AND membership.role IN ('OWNER','COHOST')`,
+      [actor.providerId, actor.nihoUserId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new StoreAccessDeniedError();
+    return { state: row.version === null ? EMPTY_HOST_BIO_STATE : stateFromRow(row), kind: row.provider_kind === "PERSON" || row.provider_kind === "BUSINESS" ? row.provider_kind : null };
+  }
+
   async getForOwner(actor: HostActor): Promise<HostBioState> {
     return withTransaction(this.#pool, async (client) => {
       await assertCurrentOwner(client, actor);

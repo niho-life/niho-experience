@@ -115,7 +115,7 @@ describe("Experience public publication routes", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("x-robots-tag")).toBe("noindex");
     expect(await response.arrayBuffer()).toEqual(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]).buffer);
-    expect(mocks.repository.getPublicProviderMediaAsset).toHaveBeenCalledWith(assetId);
+    expect(mocks.repository.getPublicProviderMediaAsset).toHaveBeenCalledWith(assetId, false);
     expect(mocks.storage.read).toHaveBeenCalledWith(`experience-provider-media/${assetId}.jpg`);
 
     mocks.repository.getPublicProviderMediaAsset.mockResolvedValue(null);

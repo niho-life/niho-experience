@@ -237,8 +237,8 @@ test("設定の後方互換表示 has six panels, and 保存 checks the fields a
   await expect(provider).not.toContainText("審査");
   await expect(provider.getByRole("textbox", { name: "掲載名" })).toHaveValue("サンプルの台所");
   await expect(provider.getByRole("radio", { name: "個人" })).toBeChecked();
-  // The provider's own values come from the host contract's mock (@niho-experience/api-client/host/mock).
-  await expect(provider.getByRole("textbox", { name: "紹介" })).toHaveValue("家庭料理を一緒に作る体験の、合成データの提供者です（sample）。");
+  await expect(provider.getByRole("textbox", { name: "紹介", exact: true })).toHaveCount(0);
+  await expect(provider.getByRole("group", { name: "ホスト紹介" })).toContainText("ホスト紹介の公開設定は利用できません。");
   await expect(provider.getByRole("textbox", { name: "特商法表示 URL" })).toHaveCount(0);
   await expect(provider.getByRole("link", { name: "販売者情報を確認・編集" })).toHaveAttribute("href", "/host/seller?providerId=sample-provider-kitchen");
   const payout = page.getByRole("region", { name: "売上受取口座" });
@@ -298,7 +298,7 @@ test("あなたのアカウント holds the login, the address, this device and 
   await signIn(page);
   await page.goto("/host/account?providerId=sample-provider-studio");
   await expect(page.getByRole("heading", { level: 1, name: "あなたのアカウント" })).toBeVisible();
-  await expect(page.locator("main")).toContainText("あなた個人の設定です。どの提供者を開いていても同じです。");
+  await expect(page.locator("main")).toContainText("あなた個人の設定です。");
   const login = page.getByRole("region", { name: "ログイン" });
   await expect(login).toContainText("サンプル ホスト");
   await expect(login.getByRole("link", { name: "NIHO アプリ" })).toHaveAttribute("href", "https://niho.life");
@@ -335,7 +335,7 @@ test("an account without a provider is led to registration, and registering open
   await expect(page.getByRole("radio", { name: "個人" })).toBeChecked();
   await page.getByRole("radio", { name: "店舗・事業者" }).check();
   await page.getByRole("textbox", { name: "掲載名" }).fill("合成スタジオ");
-  await page.getByRole("textbox", { name: "紹介" }).fill("合成の紹介文");
+  await expect(page.getByRole("textbox", { name: "紹介", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "登録する" }).click();
   // The consent is required before anything happens.
   await expect(page).toHaveURL(/\/host\/register$/);

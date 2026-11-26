@@ -83,7 +83,8 @@ test("preview の提供者設定は審査を出さず、公開条件の案内を
   await expect(provider).not.toContainText("審査");
   await expect(page.getByRole("region", { name: "売上受取口座" })).toContainText("準備済み");
 
-  await provider.getByRole("textbox", { name: "紹介" }).fill("合成データの紹介を更新");
+  await expect(provider.getByRole("textbox", { name: "紹介", exact: true })).toHaveCount(0);
+  await provider.getByRole("textbox", { name: "掲載名", exact: true }).fill("合成データの提供者");
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("dialog", { name: /提供者情報/ })).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: "保存しました" })).toBeVisible();

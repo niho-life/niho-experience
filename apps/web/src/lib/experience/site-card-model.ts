@@ -14,7 +14,7 @@ export type SiteCardOptions = {
   readonly copy?: StaticCopyAccessorV1;
 };
 
-function japaneseSiteCard(item: SitePublicExperience, { people = [], copy }: SiteCardOptions): CardModel | null {
+function japaneseSiteCard(item: SitePublicExperience, { people = item.memberProfiles ?? [], copy }: SiteCardOptions): CardModel | null {
   if (!japaneseListPublication(item)) return null;
   const { publication, saleTerms } = item;
   const { japanese } = publication;

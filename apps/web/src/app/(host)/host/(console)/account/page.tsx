@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { MemberProfileEditor } from "@/components/host/MemberProfileEditor";
 import { FieldRow, FieldSection } from "@/components/host/fields";
 import { AccountPanel } from "@/components/host/HostAccountPanel";
 import { HostAppInstall } from "@/components/host/HostAppInstall";
@@ -57,9 +58,19 @@ export default async function HostAccountPage({ searchParams }: { searchParams: 
   return (
     <HostPageBody>
       <PageHead title="あなたのアカウント" />
-      <p className="-mt-1.5 mb-3.5 text-ink-soft md:mb-[18px]">あなた個人の設定です。どの提供者を開いていても同じです。</p>
+      <p className="-mt-1.5 mb-3.5 text-ink-soft md:mb-[18px]">あなた個人の設定です。</p>
       <div className="grid gap-3.5">
         <AccountPanel session={session} niho={await nihoAccount(session, provider?.id ?? null, query)} />
+
+        {provider && !context.providerNotFound && !isHostMock() && config.experienceHostPublicationApiEnabled
+          && (provider.memberRole === "OWNER" || provider.memberRole === "COHOST") ? (
+          <FieldSection id="account-member-profile" title="メンバーの紹介">
+            <div className="space-y-4 px-4 pb-4 md:px-5">
+              <p className="text-sm text-ink-soft">{provider.displayName} のメンバーとして旅行者に見せる紹介です。</p>
+              <MemberProfileEditor key={provider.id} api={`/host/api/member-profiles/${encodeURIComponent(provider.id)}`} />
+            </div>
+          </FieldSection>
+        ) : null}
 
         {addressProviderId && address ? (
           <FieldSection id="account-notification" title="通知の宛先">

@@ -14,7 +14,6 @@ import { config } from "@/lib/config";
 import { areaLabel, categoryHand, categoryLabel } from "@/lib/experience-categories";
 import { loadClassificationOf } from "@/lib/experience-categories-server";
 import { jaYen } from "@/lib/ja-catalog";
-import { loadPeople } from "@/lib/ja-people";
 import { inquiryHref } from "@/lib/group-inquiry-entry";
 import { detailGuideHeading, detailTokyoRailLine, publicStationAccess } from "@/lib/detail-page";
 import { siteNextDates } from "@/lib/guest-booking-source";
@@ -90,21 +89,20 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
     : null;
   // Guides and other experiences are English-only for now, as on the NIHO-sourced page. Both are optional and never break the page.
   // Guides are English-only for now (the Japanese reading pieces come in a later step); the other experiences are in both languages.
-  const [relatedGuides, relatedCards, classification, allPeople] = await Promise.all([
+  const [relatedGuides, relatedCards, classification] = await Promise.all([
     ja ? NO_GUIDES : guidesAboutExperience(publication.slug).catch(() => NO_GUIDES),
     relatedSiteExperienceCards(publication.slug, locale),
     loadClassificationOf(publication.slug),
-    // 街の人 exist in Japanese only: the people this experience is met through (the provider's own listing and any person linked to it).
-    ja || !publication.providerKind ? loadPeople() : Promise.resolve([]),
   ]);
-  const linkedPeople = allPeople.filter((entry) => entry.experienceSlugs.includes(publication.slug));
-  const people = ja ? linkedPeople : [];
-  const hasHostIdentity = Boolean(providerName || hostBioText || publication.providerKind || linkedPeople.length);
-  const hostSectionHeading = ja ? "ホスト" : "Your host";
+  const people = item.memberProfiles ?? [];
+  const hasHostIdentity = Boolean(providerName || hostBioText || publication.providerKind || people.length);
+  const hostSectionHeading = hasHostIdentity
+    ? (ja ? "ホストについて" : "About your host")
+    : (ja ? "提供者について" : "About the provider");
   const showHostSection = hasHostIdentity;
   const category = classification?.category ?? null;
   const area = classification?.area ?? null;
-  const peopleLinks = config.peoplePagesEnabled;
+  const peopleLinks = ja && config.peoplePagesEnabled;
   const bookable = Boolean(config.bookingsEnabled && config.guestBookingEnabled && offers.length);
   // The Japanese site writes yen with the half-width ¥, as its cards do.
   const yen = (amount: number) => ja ? jaYen(amount) : formatYen(amount, "en");
@@ -148,7 +146,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
               {headline ? <Link href="#reviews" aria-label={headline.accessibleLabel} className="text-moss hover:underline">{headline.label}</Link> : null}
               <Link href="#place" className="hover:text-ink">{placeHeadline}</Link>
               {showHostSection ? <Link href="#host" className="inline-flex items-center gap-2 hover:text-ink">
-                {isBusiness && people.length > 0 ? <span aria-hidden className="flex -space-x-2">{people.slice(0, 3).map((person) => <Photo key={person.slug} image={{ url: person.photo.src, alt: person.photo.altJa }} alt="" aspect="" rounded="rounded-full" className="size-7 border-2 border-white" sizes="28px" />)}</span>
+                {isBusiness && people.length > 0 ? <span aria-hidden className="flex -space-x-2">{people.slice(0, 3).map((person, index) => <Photo key={person.name + "/" + index} image={{ url: person.photo.src, alt: person.photo.alt }} alt="" aspect="" rounded="rounded-full" className="size-7 border-2 border-white" sizes="28px" />)}</span>
                   : providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt="" aspect="" rounded={isBusiness ? "rounded-lg" : "rounded-full"} className="size-7 shrink-0" sizes="28px" /> : null}
                 <span>{providerName ? isBusiness ? ja ? people.length ? `${providerName} のみなさんと` : `${providerName} が開催` : providerName : ja ? `${providerName}さんと` : `with ${providerName}` : ja ? "ホスト" : "Your host"}</span>
               </Link> : null}
@@ -214,21 +212,25 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 </div>
               </div>}
               {people.length ? <div className="mt-6 border-t border-line pt-5">
-                <h3 className="text-lg font-extrabold">{people.length === 1 ? "会いにいく人" : "案内する人"}</h3>
-                  <ul className="mt-6 grid gap-5">
-                    {people.slice(0, 3).map((entry) => <li key={entry.slug} className="flex min-w-0 items-start gap-4">
-                      {peopleLinks
-                        ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} aria-label={`${entry.name}さんのページ`} className="shrink-0"><Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-16" sizes="64px" /></Link>
-                        : <Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-16 shrink-0" sizes="64px" />}
+                <h3 className="text-lg font-extrabold">{ja ? people.length === 1 ? "会いにいく人" : "案内する人" : "Meet your guides"}</h3>
+                <ul className="mt-6 grid gap-5">
+                  {people.slice(0, 3).map((entry, index) => {
+                    const href = peopleLinks && entry.slug ? "/ja/people/" + encodeURIComponent(entry.slug) : null;
+                    const subtitle = [entry.text.role, entry.text.area].filter(Boolean).join(ja ? "・" : " · ");
+                    const photo = <Photo image={{ url: entry.photo.src, alt: entry.photo.alt }} alt={entry.photo.alt} aspect="" rounded="rounded-full" className="size-16 shrink-0" sizes="64px" />;
+                    return <li key={entry.name + "/" + index} className="flex min-w-0 items-start gap-4">
+                      {href ? <Link href={href} aria-label={entry.name + "さんのページ"} className="shrink-0">{photo}</Link> : photo}
                       <div className="min-w-0">
-                        <p className="font-extrabold">{entry.name}<span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{entry.roleJa}{entry.areaJa ? `・${entry.areaJa}` : ""}</span></p>
-                        {entry.quoteJa ? <p className="mt-1.5 text-[1.0625rem] leading-snug">「{entry.quoteJa}」</p> : null}
-                        {entry.introJa ? <HostBioText text={entry.introJa} locale="ja" /> : null}
-                        {peopleLinks ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} className="mt-1 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{entry.name}さんのページ</Link> : null}
+                        <p className="font-extrabold">{entry.name}{subtitle ? <span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{subtitle}</span> : null}</p>
+                        {entry.text.quote ? <p className="mt-1.5 text-[1.0625rem] leading-snug">{ja ? "「" + entry.text.quote + "」" : "“" + entry.text.quote + "”"}</p> : null}
+                        {entry.text.intro ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{entry.text.intro}</p> : null}
+                        {entry.photo.credit ? <p className="mt-1 text-xs text-ink-soft">{entry.photo.credit}</p> : null}
+                        {href ? <Link href={href} className="mt-1 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{entry.name}さんのページ</Link> : null}
                       </div>
-                    </li>)}
-                  </ul>
-                  <p className="mt-4 text-sm text-ink-soft">当日の担当は、日によって変わることがあります。</p>
+                    </li>;
+                  })}
+                </ul>
+                {isBusiness ? <p className="mt-4 text-sm text-ink-soft">{ja ? "当日の担当は、日によって変わることがあります。" : "The person leading your experience may vary by date."}</p> : null}
               </div> : null}
             </section> : null}
             {publication.meetingOverview || publication.meetingPointDisclosure === "PUBLIC" || publication.meetingPointDisclosure === "AFTER_BOOKING" ? <section id="place" className="scroll-mt-24 border-b border-line py-8 lg:py-10">

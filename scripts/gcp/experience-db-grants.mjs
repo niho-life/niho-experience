@@ -119,10 +119,12 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // separate operator role (docs/group-inquiry.md), so no DELETE here. The mail rows are removed with the inquiry (CASCADE).
   group_inquiries: { write: IU },
   group_inquiry_mails: { write: IU },
-  // 街の人 (#564, 0077): the Admin lists, edits and withdraws (DELETE) people on the Japanese site's 街の人.
+  // 街の人 (#564, #680): the Admin manages featured-listing metadata; profile drafts and public versions have separate tables.
   experience_people_listings: { write: IUD },
-  // 街の人 → 体験の結び付け (#585, 0080): replaced as a whole by the Admin (delete and insert); removed with the listing.
-  experience_people_listing_experiences: { write: ID },
+  // Read-only history retained for old people-page assignments; new product selections use the member-profile relation.
+  experience_people_listing_experiences: { write: [] },
+  // 体験のメンバー (#680): an OWNER replaces the selected members as a whole (delete and insert).
+  experience_product_member_profiles: { write: ID },
   guest_review_invitations: { write: IU },
   guest_reviews: { write: IU },
   // PII-free post-accept mail feedback; DELETE with the booking guest's PII erasure.
@@ -201,6 +203,10 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   provider_seller_disclosure_commands: { write: I },
   // ホスト紹介文 (#146): the current OWNER saves and withdraws (DELETE) the provider's one public bio. No history.
   provider_host_bios: { write: IUD },
+  // Member profile drafts, current public snapshots and proxy-input permissions (#680).
+  experience_provider_member_profiles: { write: IU },
+  experience_provider_member_profile_publications: { write: IU },
+  experience_provider_member_proxy_permissions: { write: IU },
   // Explicit Connect lookup mappings and host-account sellers (0065) are written by the operator registration scripts
   // only. The BFF's FOR SHARE needs UPDATE on a non-identity timestamp column to lock the matched row; no runtime path
   // changes it.

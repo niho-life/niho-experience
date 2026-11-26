@@ -27,7 +27,7 @@ const URL_ = "https://experience.example/admin/api/people";
 const PROVIDER = "prv_00000000000000000000000000000001";
 const LISTING_ID = "plg_00000000000000000000000000000001";
 const MEMBER = "hst_00000000000000000000000000000001";
-const LISTING = { slug: "kintsugi-sato", nameJa: "佐藤", roleJa: "金継ぎ職人", areaJa: "鎌倉・長谷", quoteJa: null, introJa: "紹介", sortOrder: 10 };
+const LISTING = { slug: "kintsugi-sato", sortOrder: 10 };
 const send = (method: "PUT" | "DELETE", body: unknown, headers: Record<string, string> = {}) =>
   (method === "PUT" ? PUT : DELETE)(new Request(URL_, { method, headers: { "content-type": "application/json", ...headers }, body: typeof body === "string" ? body : JSON.stringify(body) }));
 
@@ -65,22 +65,17 @@ describe("/admin/api/people", () => {
     expect(state.repository!.adminSave).not.toHaveBeenCalled();
   });
 
-  it("passes the linked experiences (#585) only when they are given, and leaves the check to the store", async () => {
-    const experiences = [{ providerId: "prov-zen", productId: "zen-karate" }];
-    expect((await send("PUT", { listingId: LISTING_ID, providerId: PROVIDER, memberId: MEMBER, expectedVersion: 3, listing: { ...LISTING, experiences } })).status).toBe(200);
-    expect(state.repository!.adminSave).toHaveBeenLastCalledWith("adm_00000000000000000000000000000001", LISTING_ID, 3, { providerId: PROVIDER, memberId: MEMBER }, { ...LISTING, experiences });
-    expect((await send("PUT", { listingId: LISTING_ID, providerId: PROVIDER, memberId: MEMBER, expectedVersion: 3, listing: { ...LISTING } })).status).toBe(200);
-    expect(state.repository!.adminSave).toHaveBeenLastCalledWith("adm_00000000000000000000000000000001", LISTING_ID, 3, { providerId: PROVIDER, memberId: MEMBER }, { ...LISTING });
-    state.repository!.adminSave!.mockRejectedValueOnce(new StoreNotFoundError("A linked experience was not found."));
-    expect((await send("PUT", { listingId: LISTING_ID, providerId: PROVIDER, memberId: MEMBER, expectedVersion: 3, listing: { ...LISTING, experiences } })).status).toBe(404);
+  it("rejects the former profile and experience-link fields", async () => {
+    for (const field of ["nameJa", "introJa", "experiences", "photo"]) {
+      const body = { listingId: LISTING_ID, providerId: PROVIDER, memberId: MEMBER, expectedVersion: 3, listing: { ...LISTING, [field]: null } };
+      expect((await send("PUT", body)).status).toBe(400);
+    }
+    expect(state.repository!.adminSave).not.toHaveBeenCalled();
   });
 
-  it("lists a person with no id and no version, and a draft with no member (memberId left out is null), and passes the photo only when given", async () => {
-    expect((await send("PUT", { providerId: PROVIDER, expectedVersion: null, listing: LISTING })).status).toBe(200);
-    expect(state.repository!.adminSave).toHaveBeenLastCalledWith("adm_00000000000000000000000000000001", null, null, { providerId: PROVIDER, memberId: null }, { ...LISTING });
-    const photo = { assetId: "00000000-0000-4000-8000-000000000001", altJa: "写真", credit: null };
-    expect((await send("PUT", { providerId: PROVIDER, memberId: MEMBER, expectedVersion: null, listing: { ...LISTING, photo } })).status).toBe(200);
-    expect(state.repository!.adminSave).toHaveBeenLastCalledWith("adm_00000000000000000000000000000001", null, null, { providerId: PROVIDER, memberId: MEMBER }, { ...LISTING, photo });
+  it("passes placement fields for a new listing", async () => {
+    expect((await send("PUT", { providerId: PROVIDER, memberId: MEMBER, expectedVersion: null, listing: LISTING })).status).toBe(200);
+    expect(state.repository!.adminSave).toHaveBeenLastCalledWith("adm_00000000000000000000000000000001", null, null, { providerId: PROVIDER, memberId: MEMBER }, LISTING);
     expect((await send("PUT", { providerId: PROVIDER })).status).toBe(400);
     expect((await send("PUT", { listingId: 5, providerId: PROVIDER, expectedVersion: 1, listing: LISTING })).status).toBe(400);
     expect((await send("PUT", { providerId: 7, expectedVersion: null, listing: LISTING })).status).toBe(400);

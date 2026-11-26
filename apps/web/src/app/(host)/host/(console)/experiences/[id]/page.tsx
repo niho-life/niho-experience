@@ -44,10 +44,12 @@ function EditorUnavailable({ backHref }: { backHref: string }) {
 export default async function HostExperiencePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SearchParams> }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   if (config.experienceHostPublicationApiEnabled) {
+    const context = await hostPageContext(query);
+    const membersProviderId = !context?.providerNotFound && context?.provider?.memberRole === "OWNER" ? context.provider.id : undefined;
     // With Experience host accounts the OWNER consents in 設定 › 受取口座 (ADR 0003 slice 3), not on NIHO.
     return config.hostAccountsEnabled
-      ? <HostPublicationWorkspace productId={id} paymentConsentHref={hostPayoutSettingsPath(null)} paymentConsentLabel="受取口座の同意へ" embedEnabled={config.embedEnabled} />
-      : <HostPublicationWorkspace productId={id} paymentConsentHref={new URL("/connect/experience-payments", config.nihoWebOrigin).href} embedEnabled={config.embedEnabled} />;
+      ? <HostPublicationWorkspace productId={id} membersProviderId={membersProviderId} paymentConsentHref={hostPayoutSettingsPath(null)} paymentConsentLabel="受取口座の同意へ" embedEnabled={config.embedEnabled} />
+      : <HostPublicationWorkspace productId={id} membersProviderId={membersProviderId} paymentConsentHref={new URL("/connect/experience-payments", config.nihoWebOrigin).href} embedEnabled={config.embedEnabled} />;
   }
   const context = await hostPageContext(query);
   if (!context) return null;

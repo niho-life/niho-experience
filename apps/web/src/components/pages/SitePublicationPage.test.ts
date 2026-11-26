@@ -131,7 +131,7 @@ describe("native publication reviews", () => {
     const html = await render(null);
     expect(html).toContain('href="#host"');
     expect(html).toContain("with Synthetic Actual Host");
-    expect(html).toContain("Your host");
+    expect(html).toContain("About your host");
     expect(html).toContain("Synthetic Actual Host");
     expect(html).toContain("Sold by ");
     expect(html).toContain("Synthetic Legal Seller");
@@ -233,7 +233,7 @@ describe("native publication host bio (#146)", () => {
   it("shows the confirmed English bio as plain text with the host name, after reviews", async () => {
     const html = await render(ok(2), withBio({ ja: "鎌倉で茶道を教えています。", en: "I teach tea ceremony.\n\n<b>Synthetic</b> host." }));
     expect(html).toContain('<section id="host" aria-labelledby="host-heading"');
-    expect(html).toMatch(/<h2 id="host-heading"[^>]*>Your host<\/h2>/);
+    expect(html).toMatch(/<h2 id="host-heading"[^>]*>About your host<\/h2>/);
     expect(html).toContain("Synthetic Actual Host");
     expect(html).toContain("I teach tea ceremony.\n\n&lt;b&gt;Synthetic&lt;/b&gt; host.");
     expect(html).not.toContain("鎌倉で茶道を教えています。");
@@ -245,7 +245,7 @@ describe("native publication host bio (#146)", () => {
     for (const page of [withBio({ ja: "鎌倉で茶道を教えています。", en: null }), withBio(null)]) {
       const html = await render(null, page);
       expect(html).toContain('id="host"');
-      expect(html).toContain("Your host");
+      expect(html).toContain("About your host");
       expect(html).toContain("Synthetic Actual Host");
       expect(html).not.toContain("鎌倉で茶道を教えています。");
     }
@@ -253,7 +253,7 @@ describe("native publication host bio (#146)", () => {
 
   it("shows the Japanese bio and keeps the consented host identity when no bio is present", async () => {
     const html = await renderJa(withBio({ ja: "鎌倉で茶道を教えています。\n合成データです。", en: null }));
-    expect(html).toMatch(/<h2 id="host-heading"[^>]*>ホスト<\/h2>/);
+    expect(html).toMatch(/<h2 id="host-heading"[^>]*>ホストについて<\/h2>/);
     expect(html).toContain("鎌倉で茶道を教えています。\n合成データです。");
     expect(html).not.toContain("About your host");
     const withoutBio = await renderJa(withBio(null));

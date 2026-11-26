@@ -13,6 +13,7 @@ import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";
 import { anthropicTranslator } from "@/lib/translation/anthropic";
 import { hostBioToEnglish } from "@/lib/translation/prompts";
 import { publicationHostBoundary, publicationHostMutationAllowed } from "./publication-host-boundary";
+import { hostMemberActor } from "./member-profile-http";
 import { providerHostBioRepository } from "./store-server";
 
 /*
@@ -47,16 +48,26 @@ function storeError(caught: unknown): Response {
   return error("UNAVAILABLE", 503);
 }
 
-async function prepared() {
-  const boundary = await publicationHostBoundary("OWNER");
-  if (!boundary.ok) return boundary;
+async function prepared(request: Request) {
+  const query = new URL(request.url).searchParams;
+  if (query.size > 1 || (query.size === 1 && !query.get("providerId"))) return { ok: false as const, response: error("INVALID_INPUT", 400) };
+  const providerId = query.get("providerId");
+  let actor;
+  if (providerId) {
+    const member = await hostMemberActor(providerId, true);
+    if (member instanceof Response) return { ok: false as const, response: member };
+    actor = { providerId: member.providerId, nihoUserId: member.memberId };
+  } else {
+    const boundary = await publicationHostBoundary("OWNER");
+    if (!boundary.ok) return boundary;
+    actor = boundary.value.actor;
+  }
   const repository = providerHostBioRepository();
-  return repository ? { ok: true as const, actor: boundary.value.actor, repository } : { ok: false as const, response: error("UNAVAILABLE", 503) };
+  return repository ? { ok: true as const, actor, repository } : { ok: false as const, response: error("UNAVAILABLE", 503) };
 }
 
 export async function getHostBio(request: Request): Promise<Response> {
-  if (new URL(request.url).search) return error("INVALID_INPUT", 400);
-  const context = await prepared();
+  const context = await prepared(request);
   if (!context.ok) return context.response;
   try {
     return noStoreJson({ hostBio: await context.repository.getForOwner(context.actor), consentVersion: HOST_BIO_CONSENT_VERSION });
@@ -65,14 +76,13 @@ export async function getHostBio(request: Request): Promise<Response> {
 
 export async function putHostBio(request: Request): Promise<Response> {
   if (!publicationHostMutationAllowed(request)) return error("FORBIDDEN", 403);
-  if (new URL(request.url).search) return error("INVALID_INPUT", 400);
   const body = await bodyOf(request);
   if (body instanceof Response) return body;
   if (!exactKeys(body, ["bioJa", "bioEn", "expectedVersion", "consentVersion"])) return error("INVALID_INPUT", 400);
   if (typeof body.bioJa !== "string" || (body.bioEn !== null && typeof body.bioEn !== "string")) return error("INVALID_INPUT", 400);
   if (body.expectedVersion !== null && !positiveVersion(body.expectedVersion)) return error("INVALID_INPUT", 400);
   if (body.consentVersion !== HOST_BIO_CONSENT_VERSION) return error("INVALID_INPUT", 400);
-  const context = await prepared();
+  const context = await prepared(request);
   if (!context.ok) return context.response;
   try {
     const saved = await context.repository.save(context.actor, {
@@ -84,11 +94,10 @@ export async function putHostBio(request: Request): Promise<Response> {
 
 export async function deleteHostBio(request: Request): Promise<Response> {
   if (!publicationHostMutationAllowed(request)) return error("FORBIDDEN", 403);
-  if (new URL(request.url).search) return error("INVALID_INPUT", 400);
   const body = await bodyOf(request);
   if (body instanceof Response) return body;
   if (!exactKeys(body, ["expectedVersion"]) || !positiveVersion(body.expectedVersion)) return error("INVALID_INPUT", 400);
-  const context = await prepared();
+  const context = await prepared(request);
   if (!context.ok) return context.response;
   try {
     return noStoreJson({ hostBio: await context.repository.withdraw(context.actor, body.expectedVersion) });
@@ -98,13 +107,12 @@ export async function deleteHostBio(request: Request): Promise<Response> {
 /** An English draft of the Japanese bio for the OWNER to check. Nothing is saved. */
 export async function translateHostBio(request: Request): Promise<Response> {
   if (!publicationHostMutationAllowed(request)) return error("FORBIDDEN", 403);
-  if (new URL(request.url).search) return error("INVALID_INPUT", 400);
   const body = await bodyOf(request);
   if (body instanceof Response) return body;
   if (!exactKeys(body, ["bioJa"]) || typeof body.bioJa !== "string") return error("INVALID_INPUT", 400);
   const japanese = normalizeHostBioText(body.bioJa);
   if (hostBioTextIssue(japanese, "ja")) return error("INVALID_INPUT", 400);
-  const context = await prepared();
+  const context = await prepared(request);
   if (!context.ok) return context.response;
   // The boundary resolves the mapped OWNER; the Store confirms the current OWNER membership before any text leaves.
   try { await context.repository.getForOwner(context.actor); }

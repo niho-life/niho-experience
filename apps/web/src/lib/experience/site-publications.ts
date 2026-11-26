@@ -1,9 +1,9 @@
 import "server-only";
 import { cache } from "react";
-import type { PublicExperiencePublication, PublicHostBio, PublicSellerDisclosure } from "@niho-experience/experience-store";
+import type { PublicExperiencePublication, PublicHostBio, PublicMemberProfile, PublicSellerDisclosure } from "@niho-experience/experience-store";
 import type { PublicBookingTerms } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
-import { experiencePublicationRepository, guestBookingRepository, providerHostBioRepository, providerSellerDisclosureRepository } from "@/lib/experience/store-server";
+import { experiencePublicationRepository, guestBookingRepository, memberProfileRepository, providerHostBioRepository, providerSellerDisclosureRepository } from "@/lib/experience/store-server";
 
 /** Public checkout terms without the internal Experience provider/product keys. */
 export type SitePublicSaleTerms = Omit<PublicBookingTerms, "providerId" | "productId">;
@@ -14,6 +14,7 @@ export type SitePublicExperience = {
   readonly sellerDisclosure: PublicSellerDisclosure | null;
   /** ホスト紹介文 (#146), read for the detail page only; catalog cards carry null. */
   readonly hostBio: PublicHostBio | null;
+  readonly memberProfiles?: readonly PublicMemberProfile[];
 };
 export type SitePublicExperienceLookup =
   | { readonly kind: "published"; readonly item: SitePublicExperience }
@@ -69,12 +70,22 @@ export async function getSitePublicExperience(slug: string, locale: SitePublicLo
   const disclosures = providerSellerDisclosureRepository();
   const disclosure = disclosures ? await disclosures.getPublicBySlug(slug) : null;
   const saleTerms = projectSitePublicSaleTerms(terms);
+  const [hostBio, profiles] = await Promise.all([readHostBio(slug), readMemberProfiles([slug], locale)]);
   return { kind: "published", item: {
     publication,
     saleTerms,
     sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null,
-    hostBio: await readHostBio(slug),
+    hostBio,
+    memberProfiles: profiles.get(slug) ?? [],
   } };
+}
+
+async function readMemberProfiles(slugs: readonly string[], locale: SitePublicLocale): Promise<ReadonlyMap<string, readonly PublicMemberProfile[]>> {
+  try {
+    return await memberProfileRepository()?.listPublicForExperiences(slugs, locale) ?? new Map();
+  } catch {
+    return new Map();
+  }
 }
 
 /** List public Experience products with a valid sale; products without sale terms stay out of the booking catalog. */
@@ -86,8 +97,9 @@ export const listSitePublicExperiences = cache(async (locale: SitePublicLocale =
   const claimedSlugs = await publications.listClaimedSlugs();
   const items = (await publications.listPublic()).filter((publication) => visibleInLocale(publication, locale));
   const disclosures = providerSellerDisclosureRepository();
+  const profiles = await readMemberProfiles(items.map((item) => item.slug), locale);
   if (!config.guestBookingEnabled) return {
-    experiences: await Promise.all(items.map(async (publication) => ({ publication, saleTerms: null, sellerDisclosure: disclosures ? await disclosures.getPublicBySlug(publication.slug) : null, hostBio: null }))),
+    experiences: await Promise.all(items.map(async (publication) => ({ publication, saleTerms: null, sellerDisclosure: disclosures ? await disclosures.getPublicBySlug(publication.slug) : null, hostBio: null, memberProfiles: profiles.get(publication.slug) ?? [] }))),
     claimedSlugs,
   };
   const bookings = guestBookingRepository();
@@ -98,7 +110,7 @@ export const listSitePublicExperiences = cache(async (locale: SitePublicLocale =
       disclosures ? disclosures.getPublicBySlug(publication.slug) : null,
     ]);
     const saleTerms = projectSitePublicSaleTerms(terms);
-    return { publication, saleTerms, sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null, hostBio: null };
+    return { publication, saleTerms, sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null, hostBio: null, memberProfiles: profiles.get(publication.slug) ?? [] };
   }));
   return { experiences: sales, claimedSlugs };
 });

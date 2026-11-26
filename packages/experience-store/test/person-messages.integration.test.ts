@@ -5,6 +5,7 @@ import type { Pool } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
 import { GuestQuestionRepository, PERSON_THREAD_LABEL, type ClaimedQuestionReply, type SubmitPersonMessageInput } from "../src/guest-questions.ts";
+import { MemberProfileRepository } from "../src/member-profiles.ts";
 import { PeopleListingRepository } from "../src/people-listings.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
@@ -22,15 +23,23 @@ async function listedPerson(pool: Pool, name: string, slug: string, owner: boole
   if (!providerId) {
     const provider = await publications.createAdminProvider(ADMIN, { publicDisplayName: `${name} 事業`, providerKind: "BUSINESS", consentVersion: CONSENT });
     providerId = provider.providerId;
-    const assetId = randomUUID();
-    await publications.addProviderMediaAsAdmin(ADMIN, providerId, 1, CONSENT, {
-      id: assetId, objectKey: `experience-provider-media/${assetId}.jpg`, sourceRefHash: "b".repeat(64), width: 800, height: 800, byteSize: 4096,
-      placement: "PROVIDER_PHOTO", altText: `${name} photo`, altTextJa: `${name}の写真`, publicCredit: null,
-    });
   }
   const nihoUserId = `owner-${slug}`;
-  if (owner) await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,$2,$3,true)", [providerId, nihoUserId, existing ? "COHOST" : "OWNER"]);
-  await new PeopleListingRepository(pool).adminSave(ADMIN.nihoUserId, null, null, { providerId, memberId: owner ? nihoUserId : null }, { slug, nameJa: name, roleJa: "合成の職人", areaJa: "合成の町", quoteJa: null, introJa: null, sortOrder: 100 });
+  if (owner) {
+    await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,$2,$3,true)", [providerId, nihoUserId, existing ? "COHOST" : "OWNER"]);
+    const target = { providerId, memberId: nihoUserId };
+    const profiles = new MemberProfileRepository(pool);
+    const initial = await profiles.save(target, { expectedVersion: null, name, ja: { role: "合成の職人", area: "合成の町", quote: null, intro: "合成の紹介です。" }, en: null, photo: null });
+    const id = randomUUID();
+    const withPhoto = await profiles.addPhoto(target, initial.draft!.version, `${name}の写真`, {
+      id, objectKey: `experience-provider-media/${id}.jpg`, sourceRefHash: "b".repeat(64), width: 800, height: 800, byteSize: 4096,
+    });
+    await profiles.publish(target, withPhoto.draft!.version, true);
+    await new PeopleListingRepository(pool).adminSave(ADMIN.nihoUserId, null, null, target, { slug, sortOrder: 100 });
+  } else {
+    const listingId = `plg_${randomUUID().replaceAll("-", "")}`;
+    await pool.query("INSERT INTO experience_people_listings (id,provider_id,slug,name_ja,updated_by_admin_niho_user_id) VALUES ($1,$2,$3,$4,$5)", [listingId, providerId, slug, name, ADMIN.nihoUserId]);
+  }
   return { providerId, actor: { providerId, nihoUserId } };
 }
 

@@ -14,8 +14,7 @@ import { groupInquiryOpen } from "@/lib/group-inquiry-links";
 import { JA_HOME_FACES_LIMIT, pickFeaturedPerson } from "@/lib/ja-home";
 import { loadJapaneseGuides } from "@/lib/ja-guides";
 import { homeJournal } from "@/lib/home-journal";
-import { loadPeople, loadPeoplePages } from "@/lib/ja-people";
-import { peopleByExperience } from "@/lib/ja-people-links";
+import { loadPeoplePages } from "@/lib/ja-people";
 import { getReviewSummaries } from "@/lib/journey";
 import type { StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
 import { getJapaneseCopy } from "@/lib/localized-content";
@@ -48,10 +47,9 @@ export default async function JapaneseHome() {
   let cards: CardModel[];
   try {
     copy = (await getJapaneseCopy()).copy;
-    const [catalog, people] = await Promise.all([listSitePublicExperiences("ja"), loadPeople()]);
-    const guides = peopleByExperience(people);
+    const catalog = await listSitePublicExperiences("ja");
     cards = catalog.experiences.flatMap((item) => {
-      const card = sitePublicationCard(item, "ja", { people: guides.get(item.publication.slug) ?? [], copy });
+      const card = sitePublicationCard(item, "ja", { copy });
       return card ? [card] : [];
     });
   } catch { return <JapaneseUnavailable />; }

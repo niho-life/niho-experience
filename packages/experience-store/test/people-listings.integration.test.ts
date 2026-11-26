@@ -2,251 +2,199 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import type { Pool } from "pg";
-import { StoreConflictError, StoreNotFoundError, StoreValidationError } from "../src/errors.ts";
+import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "../src/errors.ts";
 import { ExperiencePublicationRepository } from "../src/experience-publication.ts";
-import { PeopleListingRepository, validatePeopleListingInput, type PeopleListingInput } from "../src/people-listings.ts";
+import { MemberProfileRepository, type MemberProfileRef } from "../src/member-profiles.ts";
+import { PeopleListingRepository } from "../src/people-listings.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const ADMIN = { nihoUserId: "adm_synthetic_people" } as const;
-const CONSENT = "provider-public-profile-v1";
-const input = (slug: string, over: Record<string, unknown> = {}): PeopleListingInput => ({
-  slug, nameJa: `名前 ${slug}`, roleJa: "合成の職人", areaJa: "合成の町", quoteJa: "合成のひとこと", introJa: "合成の紹介文です。", sortOrder: 100, ...over,
-} as PeopleListingInput);
+const JA = { role: "金継ぎ職人", area: "長谷", quote: null, intro: "合成の紹介文です。" };
+const EN = { role: "Kintsugi artist", area: "Hase", quote: null, intro: "Synthetic introduction." };
+const draft = (name: string) => ({ name, ja: JA, en: null, photo: null, expectedVersion: null });
 
-/** Providers, photos, members and saves for these cases. */
-function fixtures(pool: Pool) {
+async function fixture(pool: Pool) {
   const publications = new ExperiencePublicationRepository(pool);
   const people = new PeopleListingRepository(pool);
-  const provider = async (name: string, kind: "PERSON" | "BUSINESS" = "BUSINESS", photo = true): Promise<{ providerId: string; assetId: string | null }> => {
-    const created = await publications.createAdminProvider(ADMIN, { publicDisplayName: name, providerKind: kind, consentVersion: CONSENT });
-    if (!photo) return { providerId: created.providerId, assetId: null };
-    const assetId = randomUUID();
-    await publications.addProviderMediaAsAdmin(ADMIN, created.providerId, 1, CONSENT, {
-      id: assetId, objectKey: `experience-provider-media/${assetId}.jpg`, sourceRefHash: "b".repeat(64), width: 800, height: 800, byteSize: 4096,
-      placement: "PROVIDER_PHOTO", altText: `${name} photo`, altTextJa: `${name}の写真`, publicCredit: "合成の撮影者",
-    });
-    return { providerId: created.providerId, assetId };
+  const profiles = new MemberProfileRepository(pool);
+  const { providerId } = await publications.createAdminProvider(ADMIN, { publicDisplayName: "Synthetic Business", providerKind: "BUSINESS", consentVersion: "public-profile-v1" });
+  async function member(memberId: string, role: "OWNER" | "COHOST" | "EDITOR"): Promise<MemberProfileRef> {
+    await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,$2,$3,true)", [providerId, memberId, role]);
+    return { providerId, memberId };
+  }
+  const photo = async (ref: MemberProfileRef, version: number, admin?: string) => {
+    const id = randomUUID();
+    return profiles.addPhoto(ref, version, "合成写真", { id, objectKey: `experience-provider-media/${id}.jpg`, sourceRefHash: "a".repeat(64), width: 800, height: 800, byteSize: 4096 }, admin);
   };
-  const member = (providerId: string, memberId: string, role: "OWNER" | "COHOST" | "EDITOR" | "VIEWER" = "OWNER", active = true) =>
-    pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,$2,$3,$4)", [providerId, memberId, role, active]);
-  const create = (providerId: string, memberId: string | null, slug: string, over: Record<string, unknown> = {}) =>
-    people.adminSave(ADMIN.nihoUserId, null, null, { providerId, memberId }, input(slug, over));
-  const row = async (slug: string) => (await people.adminList()).find((item) => item.listing?.slug === slug)!;
-  const update = async (slug: string, target: { providerId: string; memberId: string | null }, over: Record<string, unknown> = {}) => {
-    const current = (await row(slug)).listing!;
-    return people.adminSave(ADMIN.nihoUserId, current.id, current.version, target, input(slug, over));
+  const list = (ref: MemberProfileRef, slug: string, sortOrder = 100) => people.adminSave(ADMIN.nihoUserId, null, null, ref, { slug, sortOrder });
+  const product = async (slug: string, current: boolean) => {
+    await pool.query(
+      `INSERT INTO experience_products (provider_id,id,slug,status,public_title,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
+       VALUES ($1,$2,$2,$3,$2,'JPY',5000,'terms','seller','acct_x','Seller')`, [providerId, slug, current ? "PUBLISHED" : "DRAFT"],
+    );
+    if (!current) return;
+    const versions = await pool.query<{ id: string }>(
+      `INSERT INTO experience_product_publications (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,cancellation_terms_ref,
+         seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id)
+       VALUES ($1,$2,1,$2,$2,'{}','JPY',5000,'terms','seller','acct_x','Seller','consent-v1','member-owner') RETURNING id::text`, [providerId, slug],
+    );
+    await pool.query("INSERT INTO experience_product_publication_states (provider_id,product_id,current_publication_id,first_published_at) VALUES ($1,$2,$3::bigint,clock_timestamp())", [providerId, slug, versions.rows[0]!.id]);
   };
-  return { publications, people, provider, member, create, row, update };
+  return { providerId, publications, people, profiles, member, photo, list, product };
 }
 
-describe("街の人 listings (#564, #589)", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
-  it("lists people of a provider (several per provider), shows them while their membership and photo stand, and says why not otherwise", async () => {
-    const db = await createIsolatedDatabase(databaseUrl, "people_listings");
+describe("Member profiles and people listings", { skip: databaseUrl === undefined }, () => {
+  it("separates listing, Japanese and English publication, draft edits, and photo revocation", async () => {
+    const db = await createIsolatedDatabase(databaseUrl, "member_profile_public");
     try {
-      const { publications, people, provider, member, create, row, update } = fixtures(db.pool);
-      const business = await provider("Synthetic Business");
-      const other = await provider("Synthetic Other");
-      await member(business.providerId, "member-a", "OWNER");
-      await member(business.providerId, "member-b", "COHOST");
-      await member(business.providerId, "member-editor", "EDITOR");
-      await member(business.providerId, "member-gone", "COHOST", false);
-      await member(other.providerId, "member-o", "OWNER");
+      const { people, profiles, publications, member, photo, list, product } = await fixture(db.pool);
+      const owner = await member("member-owner", "OWNER");
+      const cohost = await member("member-cohost", "COHOST");
+      const editor = await member("member-editor", "EDITOR");
+      await product("public-product", true);
+      await assert.rejects(profiles.save(editor, draft("編集者")), StoreAccessDeniedError);
+      await assert.rejects(list(editor, "editor-person"), StoreValidationError);
+      const initial = await profiles.save(cohost, draft("名前"));
+      const withPhoto = await photo(cohost, initial.draft!.version);
+      const photoId = withPhoto.draft!.photo!.assetId;
+      const listed = await list(cohost, "member-person");
+      await assert.rejects(list(cohost, "duplicate"), StoreConflictError);
+      assert.equal(await people.getPublicBySlug("member-person"), null);
+      assert.equal(await publications.getPublicProviderMediaAsset(photoId), null);
+      await assert.rejects(profiles.saveProductSelection(owner, "public-product", [cohost], []), StoreValidationError);
+      await assert.rejects(profiles.publish(cohost, withPhoto.draft!.version, false), StoreValidationError);
 
-      // Nothing is public before anyone is listed; the Admin sees the members who could be listed (OWNER and co-host, current).
+      const publishedJa = await profiles.publish(cohost, withPhoto.draft!.version, true);
+      assert.equal((await people.getPublicBySlug("member-person"))?.name, "名前");
+      assert.ok(await publications.getPublicProviderMediaAsset(photoId));
+      assert.equal(await publications.getPublicProviderMediaAsset(photoId, false), null);
+      await assert.rejects(profiles.saveProductSelection(cohost, "public-product", [cohost], []), StoreAccessDeniedError);
+      await profiles.saveProductSelection(owner, "public-product", [cohost], []);
+      await assert.rejects(profiles.saveProductSelection(owner, "public-product", [], []), StoreConflictError);
+      await assert.rejects(profiles.saveProductSelection(owner, "public-product", [owner, cohost, editor, owner], [cohost]), StoreValidationError);
+      assert.equal((await profiles.listPublicForExperience("public-product", "ja"))[0]?.name, "名前");
+      assert.deepEqual(await profiles.listPublicForExperience("public-product", "en"), []);
+      assert.deepEqual((await people.getPublicBySlug("member-person"))?.experienceSlugs, ["public-product"]);
+
+      const updated = await profiles.save(cohost, { name: "更新した名前", ja: JA, en: EN, photo: withPhoto.draft!.photo, expectedVersion: withPhoto.draft!.version });
+      assert.equal(updated.publication?.id, publishedJa.publication?.id);
+      assert.equal((await people.getPublicBySlug("member-person"))?.name, "名前");
+      assert.deepEqual(await profiles.listPublicForExperience("public-product", "en"), []);
+      const publishedEn = await profiles.publish(cohost, updated.draft!.version, true);
+      assert.equal((await profiles.listPublicForExperience("public-product", "en"))[0]?.text.intro, EN.intro);
+
+      await people.adminWithdraw(ADMIN.nihoUserId, listed.id, 1);
+      assert.equal(await people.getPublicBySlug("member-person"), null);
+      assert.equal((await profiles.listPublicForExperience("public-product", "en"))[0]?.slug, null);
+      assert.ok(await publications.getPublicProviderMediaAsset(photoId, false));
+      await list(cohost, "member-person");
+      await db.pool.query("UPDATE provider_memberships SET active=false WHERE provider_id=$1 AND niho_user_id=$2", [cohost.providerId, cohost.memberId]);
       assert.deepEqual(await people.listPublic(), []);
-      const before = await people.adminList();
-      assert.deepEqual(before.map((item) => [item.memberId, item.memberRole, item.listing, item.key.startsWith("new:")]).sort(), [
-        ["member-a", "OWNER", null, true], ["member-b", "COHOST", null, true], ["member-o", "OWNER", null, true],
-      ]);
-
-      // Two people of one provider; the second has a photo of her own (another provider's asset), the first takes the provider's.
-      const hers = await provider("Synthetic Photographer", "PERSON");
-      await create(business.providerId, "member-a", "person-a", { sortOrder: 20 });
-      await create(business.providerId, "member-b", "person-b", { sortOrder: 10, quoteJa: null, introJa: null, photo: { assetId: hers.assetId, altJa: "彼女の写真", credit: null } });
-      // A draft that waits for the person's account, and one whose member is the provider's but not a responder.
-      await create(other.providerId, null, "person-draft");
-      await assert.rejects(create(business.providerId, "member-editor", "person-editor"), StoreValidationError);
-      await assert.rejects(create(business.providerId, "member-gone", "person-gone"), StoreValidationError);
-      await assert.rejects(create(business.providerId, "not-a-member", "person-stranger"), StoreValidationError);
-      // A provider's member listed twice, and a slug twice, are conflicts.
-      await assert.rejects(create(business.providerId, "member-a", "person-a-again"), StoreConflictError);
-      await assert.rejects(create(other.providerId, "member-o", "person-a"), StoreConflictError);
-
-      const listed = await people.listPublic();
-      assert.deepEqual(listed.map((person) => person.slug), ["person-b", "person-a"]);
-      assert.equal(listed[1]?.name, "名前 person-a");
-      assert.equal(listed[1]?.introJa, "合成の紹介文です。");
-      assert.equal(listed[1]?.photo.src, `/api/public/experience-provider-media/${business.assetId}`);
-      assert.equal(listed[1]?.photo.credit, "合成の撮影者");
-      assert.equal(listed[1]?.photo.altJa, "Synthetic Businessの写真");
-      assert.deepEqual(listed[1]?.experienceSlugs, []);
-      assert.equal(listed[0]?.photo.src, `/api/public/experience-provider-media/${hers.assetId}`);
-      assert.equal(listed[0]?.photo.altJa, "彼女の写真");
-      assert.equal(listed[0]?.photo.credit, null);
-      assert.equal(listed[0]?.quoteJa, null);
-      assert.equal(listed[0]?.introJa, null);
-      assert.equal(await people.getPublicBySlug("person-draft"), null);
-      assert.equal((await people.getPublicBySlug("person-a"))?.name, "名前 person-a");
-      assert.equal(await people.getPublicBySlug("Person_A!"), null);
-
-      const admin = await people.adminList();
-      assert.deepEqual(admin.filter((item) => item.visible).map((item) => item.listing?.slug), ["person-b", "person-a"]);
-      assert.equal((await row("person-draft")).memberRole, null);
-      assert.equal((await row("person-draft")).visible, false);
-      assert.equal((await row("person-draft")).photoReady, true);
-      assert.equal((await row("person-a")).providerName, "Synthetic Business");
-
-      // Photos are public through the listing, whichever provider holds the asset; others are not.
-      assert.ok(await publications.getPublicProviderMediaAsset(business.assetId!));
-      assert.ok(await publications.getPublicProviderMediaAsset(hers.assetId!));
-      assert.equal(await publications.getPublicProviderMediaAsset(randomUUID()), null);
-
-      // A stale version is refused, the page changes with the row, and the listing can be moved to another provider and member.
-      await assert.rejects(people.adminSave(ADMIN.nihoUserId, (await row("person-a")).listing!.id, 7, { providerId: business.providerId, memberId: "member-a" }, input("person-a")), StoreConflictError);
-      await update("person-a", { providerId: business.providerId, memberId: "member-a" }, { roleJa: "合成の職人（変更後）" });
-      assert.equal((await people.getPublicBySlug("person-a"))?.roleJa, "合成の職人（変更後）");
-      assert.equal((await people.getPublicBySlug("person-a"))?.photo.src, `/api/public/experience-provider-media/${business.assetId}`);
-      await assert.rejects(people.adminSave(ADMIN.nihoUserId, null, null, { providerId: "prv_00000000000000000000000000000000", memberId: null }, input("nobody")), StoreNotFoundError);
-      await assert.rejects(people.adminSave(ADMIN.nihoUserId, null, null, { providerId: other.providerId, memberId: null }, input("no-photo", { photo: { assetId: randomUUID(), altJa: "x", credit: null } })), StoreNotFoundError);
-      await update("person-draft", { providerId: other.providerId, memberId: "member-o" });
-      assert.equal((await people.getPublicBySlug("person-draft"))?.name, "名前 person-draft");
-      await update("person-draft", { providerId: other.providerId, memberId: null });
-      assert.equal(await people.getPublicBySlug("person-draft"), null);
-      // A member of another provider cannot be attached.
-      await assert.rejects(update("person-draft", { providerId: other.providerId, memberId: "member-a" }), StoreValidationError);
-
-      // The member stops being OWNER or co-host: the person leaves every page at once. A role that is not a responder is not enough.
-      await db.pool.query("UPDATE provider_memberships SET active=false WHERE provider_id=$1 AND niho_user_id='member-b'", [business.providerId]);
-      assert.deepEqual((await people.listPublic()).map((person) => person.slug), ["person-a"]);
-      assert.equal(await people.getPublicBySlug("person-b"), null);
-      assert.equal((await row("person-b")).memberRole, null);
-      await db.pool.query("UPDATE provider_memberships SET active=true,role='EDITOR' WHERE provider_id=$1 AND niho_user_id='member-b'", [business.providerId]);
-      assert.deepEqual((await people.listPublic()).map((person) => person.slug), ["person-a"]);
-      await db.pool.query("UPDATE provider_memberships SET role='COHOST' WHERE provider_id=$1 AND niho_user_id='member-b'", [business.providerId]);
-      assert.deepEqual((await people.listPublic()).map((person) => person.slug), ["person-b", "person-a"]);
-
-      // Withdrawing a photo's permission takes that person off every page and the photo off the public route.
-      await publications.revokeProviderMediaAsAdmin(ADMIN, hers.providerId, hers.assetId!, 2);
-      assert.deepEqual((await people.listPublic()).map((person) => person.slug), ["person-a"]);
-      assert.equal(await publications.getPublicProviderMediaAsset(hers.assetId!), null);
-      assert.equal((await row("person-b")).visible, false);
-      assert.equal((await row("person-b")).photoReady, false);
-
-      // Withdrawing a listing deletes the row (and needs the version the Admin saw); the photo stays with its provider.
-      const a = (await row("person-a")).listing!;
-      await assert.rejects(people.adminWithdraw(ADMIN.nihoUserId, a.id, a.version + 5), StoreConflictError);
-      await people.adminWithdraw(ADMIN.nihoUserId, a.id, a.version);
+      assert.deepEqual(await profiles.listPublicForExperience("public-product", "ja"), []);
+      assert.equal(await publications.getPublicProviderMediaAsset(photoId), null);
+      await db.pool.query("UPDATE provider_memberships SET active=true WHERE provider_id=$1 AND niho_user_id=$2", [cohost.providerId, cohost.memberId]);
+      await profiles.withdraw(cohost, publishedEn.publication!.id, true);
       assert.deepEqual(await people.listPublic(), []);
-      assert.equal((await people.adminList()).some((item) => item.listing?.slug === "person-a"), false);
-      assert.equal(new Map(await people.personForExperiences(["no-such-experience"])).size, 0);
-      assert.equal((await people.personForExperiences([])).size, 0);
-    } finally {
-      await db.dispose();
-    }
+      assert.deepEqual(await profiles.listPublicForExperience("public-product", "ja"), []);
+      assert.deepEqual(await profiles.listPublicForExperience("public-product", "en"), []);
+      assert.equal(await publications.getPublicProviderMediaAsset(photoId), null);
+      const withdrawn = await db.pool.query("SELECT photo_consent_withdrawn_at FROM experience_provider_member_profile_publications WHERE id=$1", [publishedEn.publication!.id]);
+      assert.ok(withdrawn.rows[0]?.photo_consent_withdrawn_at);
+    } finally { await db.dispose(); }
   });
 
-  it("links a person to experiences of any provider: public ones only, replaced as a whole, and seen from the experience (#585)", async () => {
-    const db = await createIsolatedDatabase(databaseUrl, "people_listing_experiences");
+  it("requires active proxy permission plus version-specific consent and separate Admin verification", async () => {
+    const db = await createIsolatedDatabase(databaseUrl, "member_profile_proxy");
     try {
-      const pool = db.pool;
-      const { people, provider, member, create, row, update } = fixtures(pool);
-      const publish = async (providerId: string, slug: string, status: "PUBLISHED" | "DRAFT" | "ARCHIVED" = "PUBLISHED", live = true) => {
-        await pool.query(
-          `INSERT INTO experience_products (provider_id,id,slug,status,public_title,currency,unit_amount,cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
-           VALUES ($1,$2,$2,$3,$4,'JPY',5000,'terms','seller','acct_x','Seller')`, [providerId, slug, status, `体験 ${slug}`],
-        );
-        if (!live) return;
-        await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ($1,'publisher','VIEWER',true) ON CONFLICT DO NOTHING", [providerId]);
-        const publication = await pool.query<{ id: string }>(
-          `INSERT INTO experience_product_publications (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,cancellation_terms_ref,
-             seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id)
-           VALUES ($1,$2,1,$2,$3,'{}','JPY',5000,'terms','seller','acct_x','Seller','consent-v1','publisher') RETURNING id::text`, [providerId, slug, `体験 ${slug}`],
-        );
-        await pool.query("INSERT INTO experience_product_publication_states (provider_id,product_id,current_publication_id,first_published_at) VALUES ($1,$2,$3::bigint,clock_timestamp())", [providerId, slug, publication.rows[0]!.id]);
-      };
-      const zenKarate = (await provider("ZEN KARATE")).providerId;
-      const kamakura = (await provider("NIHO kamakura")).providerId;
-      await member(kamakura, "suga", "OWNER");
-      await member(kamakura, "takuya", "COHOST");
-      await publish(zenKarate, "zen-karate");
-      await publish(zenKarate, "zen-karate-draft", "DRAFT", false);
-      await publish(zenKarate, "zen-karate-gone", "PUBLISHED", false);
-      await publish(kamakura, "dinner");
-      await create(kamakura, "suga", "suga", { sortOrder: 10 });
-      await create(kamakura, "takuya", "takuya", { sortOrder: 20 });
-      const ref = (providerId: string, productId: string) => ({ providerId, productId });
-      const at = { providerId: kamakura };
-
-      // A person shows only the experiences they are linked to: not everything their provider sells.
-      assert.deepEqual((await people.getPublicBySlug("suga"))?.experienceSlugs, []);
-      assert.deepEqual((await people.getPublicBySlug("takuya"))?.experienceSlugs, []);
-
-      // Products of any provider can be pointed at, in the order given. A product that is only a draft or was never published is linked
-      // but not shown; a left-out `experiences` leaves the links as they are.
-      await update("suga", { ...at, memberId: "suga" }, { sortOrder: 10, experiences: [ref(zenKarate, "zen-karate"), ref(zenKarate, "zen-karate-draft"), ref(zenKarate, "zen-karate-gone"), ref(kamakura, "dinner")] });
-      assert.deepEqual((await people.getPublicBySlug("suga"))?.experienceSlugs.slice().sort(), ["dinner", "zen-karate"]);
-      const listing = (await row("suga")).listing;
-      assert.deepEqual(listing?.experiences.map((link) => [link.slug, link.status, link.title]), [["zen-karate", "PUBLISHED", "体験 zen-karate"], ["zen-karate-draft", "DRAFT", "体験 zen-karate-draft"], ["zen-karate-gone", "PUBLISHED", "体験 zen-karate-gone"], ["dinner", "PUBLISHED", "体験 dinner"]]);
-      await update("suga", { ...at, memberId: "suga" }, { sortOrder: 10, roleJa: "空手指導者" });
-      assert.equal((await row("suga")).listing?.experiences.length, 4);
-
-      // Several people can share one experience; the experience sees them in the Admin's order, and an experience nobody is linked to has none.
-      await update("takuya", { ...at, memberId: "takuya" }, { sortOrder: 20, experiences: [ref(zenKarate, "zen-karate"), ref(kamakura, "dinner")] });
-      const seen = await people.personForExperiences(["zen-karate", "dinner", "zen-karate-draft", "nope"]);
-      assert.deepEqual(seen.get("zen-karate")?.map((p) => p.slug), ["suga", "takuya"]);
-      assert.deepEqual(seen.get("dinner")?.map((p) => p.slug), ["suga", "takuya"]);
-      assert.deepEqual(seen.get("zen-karate")?.map((p) => p.name), ["名前 suga", "名前 takuya"]);
-      assert.equal(seen.has("zen-karate-draft"), false);
-      assert.equal(seen.has("nope"), false);
-
-      // A person whose membership ended leaves the experience's people, and a stopped product leaves the person's page, at once.
-      await pool.query("UPDATE provider_memberships SET active=false WHERE niho_user_id='takuya'");
-      assert.deepEqual((await people.personForExperiences(["zen-karate"])).get("zen-karate")?.map((p) => p.slug), ["suga"]);
-      await pool.query("UPDATE provider_memberships SET active=true WHERE niho_user_id='takuya'");
-      await pool.query("UPDATE experience_product_publication_states SET self_stopped_at=clock_timestamp() WHERE product_id='zen-karate'");
-      assert.deepEqual((await people.getPublicBySlug("suga"))?.experienceSlugs, ["dinner"]);
-      assert.equal((await people.personForExperiences(["zen-karate"])).has("zen-karate"), false);
-      await pool.query("UPDATE experience_product_publication_states SET self_stopped_at=NULL WHERE product_id='zen-karate'");
-      assert.equal((await people.getPublicBySlug("suga"))?.experienceSlugs.includes("zen-karate"), true);
-
-      // Replaced as a whole; an empty list clears; a product that does not exist or is archived, a repeat and too many are refused.
-      await update("suga", { ...at, memberId: "suga" }, { sortOrder: 10, roleJa: "空手指導者", experiences: [] });
-      assert.deepEqual((await people.getPublicBySlug("suga"))?.experienceSlugs, []);
-      await publish(zenKarate, "zen-karate-old", "ARCHIVED", false);
-      for (const bad of [[ref(zenKarate, "no-such")], [ref(zenKarate, "zen-karate-old")]]) {
-        await assert.rejects(update("suga", { ...at, memberId: "suga" }, { sortOrder: 10, roleJa: "空手指導者", experiences: bad }), StoreNotFoundError);
-      }
-      for (const bad of [[ref(zenKarate, "zen-karate"), ref(zenKarate, "zen-karate")], [{ providerId: zenKarate }], "zen-karate", Array.from({ length: 51 }, (_, i) => ref(zenKarate, `p${i}`))]) {
-        await assert.rejects(update("suga", { ...at, memberId: "suga" }, { sortOrder: 10, roleJa: "空手指導者", experiences: bad as never }), StoreValidationError);
-      }
-      assert.deepEqual((await people.getPublicBySlug("suga"))?.experienceSlugs, []);
-
-      // Withdrawing the person takes their links with them.
-      const takuya = (await row("takuya")).listing!;
-      await people.adminWithdraw(ADMIN.nihoUserId, takuya.id, takuya.version);
-      assert.equal((await pool.query("SELECT count(*)::int AS n FROM experience_people_listing_experiences")).rows[0]?.n, 0);
-    } finally {
-      await db.dispose();
-    }
+      const { people, profiles, member, photo, list } = await fixture(db.pool);
+      const ref = await member("member-owner", "OWNER");
+      const adminId = ADMIN.nihoUserId;
+      const verifier = "adm_synthetic_verifier";
+      await list(ref, "proxy-person");
+      await assert.rejects(profiles.save(ref, draft("代理入力"), adminId), StoreAccessDeniedError);
+      await profiles.setProxyPermission(ref, true, { id: adminId, method: "ORAL" });
+      const saved = await profiles.save(ref, draft("代理入力"), adminId);
+      assert.equal(saved.proxyPermission?.grantedBy, adminId);
+      assert.equal(saved.draft?.updatedBy.id, adminId);
+      const attached = await photo(ref, saved.draft!.version, adminId);
+      const version = attached.draft!.version;
+      assert.equal(await people.getPublicBySlug("proxy-person"), null);
+      await assert.rejects(profiles.publish(ref, version, true, verifier), StoreValidationError);
+      await assert.rejects(profiles.recordConsent(ref, version, adminId, "WRITTEN", false), StoreValidationError);
+      await profiles.recordConsent(ref, version, adminId, "WRITTEN", true);
+      assert.equal(await people.getPublicBySlug("proxy-person"), null);
+      const edited = await profiles.save(ref, { ...draft("更新した紹介"), photo: attached.draft!.photo, expectedVersion: version }, adminId);
+      await assert.rejects(profiles.publish(ref, version, true, verifier), StoreConflictError);
+      await assert.rejects(profiles.publish(ref, edited.draft!.version, true, verifier), StoreValidationError);
+      await profiles.recordConsent(ref, edited.draft!.version, adminId, "WRITTEN", true);
+      await assert.rejects(profiles.publish(ref, edited.draft!.version, false, verifier), StoreValidationError);
+      await profiles.publish(ref, edited.draft!.version, true, verifier);
+      assert.equal((await people.getPublicBySlug("proxy-person"))?.name, "更新した紹介");
+      const recorded = await db.pool.query("SELECT consent_method,consent_recorded_by,verified_by_admin,photo_consented_at,verified_at FROM experience_provider_member_profile_publications");
+      assert.equal(recorded.rows[0]?.consent_method, "WRITTEN");
+      assert.equal(recorded.rows[0]?.consent_recorded_by, adminId);
+      assert.equal(recorded.rows[0]?.verified_by_admin, verifier);
+      assert.ok(recorded.rows[0]?.photo_consented_at && recorded.rows[0]?.verified_at);
+      await profiles.setProxyPermission(ref, false);
+      assert.equal((await profiles.getAsAdmin(ref)).draft, null);
+      await assert.rejects(profiles.recordConsent(ref, edited.draft!.version, adminId, "WRITTEN", true), StoreAccessDeniedError);
+      await assert.rejects(profiles.save(ref, { ...draft("禁止"), expectedVersion: edited.draft!.version }, adminId), StoreAccessDeniedError);
+      assert.equal((await people.getPublicBySlug("proxy-person"))?.name, "更新した紹介");
+    } finally { await db.dispose(); }
   });
 
-  it("checks what the Admin typed the way the table does", () => {
-    const ok = validatePeopleListingInput(input("kintsugi-2"));
-    assert.equal(ok.slug, "kintsugi-2");
-    for (const bad of [
-      input("A"), input("a"), input("Has Space"), input("double--hyphen"), input("-lead"), input("x".repeat(61)),
-      input("ok-slug", { nameJa: "" }), input("ok-slug", { nameJa: "あ".repeat(41) }), input("ok-slug", { nameJa: " padded " }),
-      input("ok-slug", { roleJa: "" }), input("ok-slug", { roleJa: " padded " }), input("ok-slug", { areaJa: "あ".repeat(41) }),
-      input("ok-slug", { quoteJa: "改行\nあり" }), input("ok-slug", { introJa: "あ".repeat(1201) }),
-      input("ok-slug", { sortOrder: -1 }), input("ok-slug", { sortOrder: 1.5 }), input("ok-slug", { introJa: "制御\u0007文字" }),
-      input("ok-slug", { photo: { assetId: "not-a-uuid", altJa: "x", credit: null } }),
-      input("ok-slug", { photo: { assetId: randomUUID(), altJa: "", credit: null } }),
-    ]) {
-      assert.throws(() => validatePeopleListingInput(bad as never), (error: unknown) => error instanceof StoreValidationError, JSON.stringify(bad).slice(0, 80));
-    }
-    assert.equal(validatePeopleListingInput(input("ok-slug", { introJa: "一行目\r\n\r\n\r\n\r\n二行目 " })).introJa, "一行目\n\n二行目");
-    assert.equal(validatePeopleListingInput(input("ok-slug", { quoteJa: "" })).quoteJa, null);
-    assert.equal(validatePeopleListingInput(input("ok-slug", { photo: null })).photo, null);
+  it("copies an unassigned legacy listing into a draft when the member is attached", async () => {
+    const db = await createIsolatedDatabase(databaseUrl, "member_profile_legacy");
+    try {
+      const { providerId, people, profiles, member } = await fixture(db.pool);
+      const ref = await member("member-owner", "OWNER");
+      const id = "plg_00000000000000000000000000000011";
+      await db.pool.query(
+        `INSERT INTO experience_people_listings (id,provider_id,slug,name_ja,area_ja,role_ja,intro_ja,sort_order,updated_by_admin_niho_user_id)
+         VALUES ($1,$2,'legacy-person','既存の名前','鎌倉','職人','既存の原稿',10,'adm_original')`,
+        [id, providerId],
+      );
+      await people.adminSave(ADMIN.nihoUserId, id, 1, ref, { slug: "legacy-person", sortOrder: 10 });
+      const state = await profiles.get(ref);
+      assert.equal(state.draft?.name, "既存の名前");
+      assert.equal(state.draft?.updatedBy.id, "adm_original");
+      assert.equal(state.publication, null);
+      assert.equal(state.proxyPermission, null);
+      assert.equal(await people.getPublicBySlug("legacy-person"), null);
+    } finally { await db.dispose(); }
   });
+});
+
+it("migration 0090 keeps legacy content and the first three identifiable links without granting consent", { skip: databaseUrl === undefined }, async () => {
+  const db = await createIsolatedDatabase(databaseUrl, "member_profile_migration");
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const { providerId, profiles, member, product } = await fixture(db.pool);
+    await product("migration-product", false);
+    // Remove only the empty tables added in 0090 so the migration runs with legacy rows in place.
+    await db.pool.query(`DROP TABLE experience_product_member_profiles,experience_provider_member_proxy_permissions,
+      experience_provider_member_profile_publications,experience_provider_member_profiles`);
+    const originalIds = ["member-one", "member-two", "member-three", "member-four"];
+    const refs = await Promise.all(originalIds.map((id) => member(id, "OWNER")));
+    for (const [order, memberId] of [...originalIds, null].entries()) {
+      const id = `plg_${String(order + 1).padStart(32, "0")}`;
+      await db.pool.query(
+        `INSERT INTO experience_people_listings (id,provider_id,member_id,slug,name_ja,role_ja,area_ja,intro_ja,sort_order,updated_by_admin_niho_user_id)
+         VALUES ($1,$2,$3,$4,$5,'職人','長谷','旧版の紹介文',$6,'adm_original')`,
+        [id, providerId, memberId, `migration-person-${order}`, `旧版の名前 ${order}`, memberId === null ? 0 : (order + 1) * 10],
+      );
+      await db.pool.query("INSERT INTO experience_people_listing_experiences (listing_id,product_provider_id,product_id,sort_order) VALUES ($1,$2,'migration-product',0)", [id, providerId]);
+    }
+    await db.pool.query(await readFile(new URL("../migrations/0090_member_profiles.sql", import.meta.url), "utf8"));
+    const state = await profiles.get(refs[0]!);
+    assert.equal(state.draft?.name, "旧版の名前 0");
+    assert.equal(state.draft?.ja.intro, "旧版の紹介文");
+    assert.equal(state.draft?.updatedBy.id, "adm_original");
+    assert.equal(state.publication, null);
+    assert.equal(state.proxyPermission, null);
+    assert.deepEqual((await profiles.getProductSelection(refs[0]!, "migration-product")).selected.map(({ memberId }) => memberId), originalIds.slice(0, 3));
+    const unassigned = await db.pool.query("SELECT name_ja FROM experience_people_listings WHERE member_id IS NULL");
+    assert.equal(unassigned.rows[0]?.name_ja, "旧版の名前 4");
+  } finally { await db.dispose(); }
 });

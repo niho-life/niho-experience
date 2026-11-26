@@ -63,13 +63,9 @@ export async function PUT(request: Request) {
     if (typeof body.providerId !== "string") throw new StoreValidationError("providerId is required.");
     const memberId = body.memberId ?? null;
     if (memberId !== null && typeof memberId !== "string") throw new StoreValidationError("memberId must be null or text.");
+    if (Object.keys(value).some((key) => key !== "slug" && key !== "sortOrder")) throw new StoreValidationError("Only slug and sortOrder are listing fields.");
     await peopleListingRepository()!.adminSave(actorId, listingId, expected as number | null, { providerId: body.providerId, memberId }, {
-      slug: value.slug as string, nameJa: value.nameJa as string, roleJa: value.roleJa as string, areaJa: value.areaJa as string,
-      quoteJa: (value.quoteJa ?? null) as string | null, introJa: (value.introJa ?? null) as string | null, sortOrder: value.sortOrder as number,
-      // 街の人 → 体験 (#585): written only when given; the store checks each product and replaces the links as a whole.
-      ...(value.experiences === undefined ? {} : { experiences: value.experiences as never }),
-      // The photo: written only when given (null clears it); a new listing takes the provider's own photo.
-      ...(value.photo === undefined ? {} : { photo: value.photo as never }),
+      slug: value.slug as string, sortOrder: value.sortOrder as number,
     });
   });
 }
