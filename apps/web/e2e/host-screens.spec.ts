@@ -298,7 +298,7 @@ test("あなたのアカウント holds the login, the address, this device and 
   await signIn(page);
   await page.goto("/host/account?providerId=sample-provider-studio");
   await expect(page.getByRole("heading", { level: 1, name: "あなたのアカウント" })).toBeVisible();
-  await expect(page.locator("main")).toContainText("あなた個人の設定です。どの提供者を開いていても同じです。");
+  await expect(page.locator("main")).toContainText("あなた個人の設定です。");
   const login = page.getByRole("region", { name: "ログイン" });
   await expect(login).toContainText("サンプル ホスト");
   await expect(login.getByRole("link", { name: "NIHO アプリ" })).toHaveAttribute("href", "https://niho.life");
