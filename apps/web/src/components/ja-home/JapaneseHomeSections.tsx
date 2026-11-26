@@ -1,32 +1,7 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
 import type { PublicPerson } from "@niho-experience/experience-store";
 import { Photo } from "../Photo";
 import { buttonClass } from "../ui";
-import { inquiryHref } from "@/lib/group-inquiry-entry";
-
-/** 日本語トップの、写真と文字だけで出来るまとまり（#563）。体験のカードを並べるまとまりは `page.tsx` が持つ。 */
-
-function Band({ id, hand, title, children, tone }: { id: string; hand: string; title: ReactNode; children: ReactNode; tone: "leaf" | "sand" }) {
-  return <section aria-labelledby={id} className="container-page my-14 sm:my-16">
-    <div className={`rounded-[22px] px-6 py-9 sm:px-12 sm:py-12 ${tone === "leaf" ? "bg-leaf-pale" : "bg-sand"}`}>
-      <span className="hand text-[1.5rem] text-moss">{hand}</span>
-      <h2 id={id} className="text-[1.75rem] leading-snug sm:text-[2.25rem]">{title}</h2>
-      {children}
-    </div>
-  </section>;
-}
-
-/** 相談：企業・学校・グループのご相談。企業・学校のページへの入口を添える（#532、#612）。 */
-export function ConsultBand() {
-  return <Band id="consult-band" hand="ask the town" title="企業・学校・グループのご相談" tone="leaf">
-    <p className="mt-3 max-w-[40rem] text-ink-soft">学校や会社、グループでの参加、探している体験や人のこと。体験を選び切れなくても、日にちが決まっていなくても大丈夫です。目的を聞かせてください。はじめの相談は無料です。</p>
-    <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
-      <a href={inquiryHref("ja")} className={buttonClass("primary", "max-sm:w-full")}>相談する</a>
-      <Link href="/ja/business" className="font-extrabold underline underline-offset-4">企業・学校の方へ</Link>
-    </div>
-  </Band>;
-}
 
 /**
  * 街の人（#564・#563）：1人の紹介、顔の並び、「街の人 ◯人」への入口。載せる人が0人のときは、呼ぶ側が出さない。

@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest";
 import { NIHO_SANS_FAMILY, NIHO_SANS_FONT_FACES } from "./niho-sans";
 
 /*
- * 日本語の画面の書体「NIHO Sans」(#615)。NIHO アプリ（niho-app docs/design/font-style-guide.md §3.1）と同じ組み方を、
- * html[lang="ja"] の画面（/ja・/host・/write・/admin）すべてに。英語のサイトの書体は変えない。
+ * 日本語の画面はヒラギノ角ゴ＋Nunito（#670）。英語のサイトは Fraunces＋Nunito。
  * 描画の結果は e2e（host-screens・write-ui・english-type）が確かめる。
  */
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -23,10 +22,11 @@ const faces = (text: string, family: string) => [...text.matchAll(/@font-face\s*
   .map((body) => ({ weight: declaration(body, "font-weight"), src: declaration(body, "src") }));
 
 describe("日本語の画面の書体（NIHO Sans）", () => {
-  it("NIHO Sans は端末の書体を名前で指すだけで、細字は丸ゴ W4、600–700 は角ゴ W6、800 は W7、900 は W8", () => {
+  it("NIHO Sans は端末の書体を名前で指すだけで、細字は角ゴ W3、500 は W5、600–700 は W6、800 は W7、900 は W8", () => {
     expect(faces(rules, "NIHO Sans")).toEqual([
-      { weight: "100500", src: 'local("HiraginoMaruGothicProNW4"),local("HiraMaruProN-W4")' },
-      { weight: "600700", src: 'local("HiraginoSansW6"),local("HiraginoSans-W6")' },
+      { weight: "100400", src: 'local("HiraginoSansW3"),local("HiraginoSans-W3"),local("HiraginoKakuGothicProNW3"),local("HiraKakuProN-W3")' },
+      { weight: "500", src: 'local("HiraginoSansW5"),local("HiraginoSans-W5")' },
+      { weight: "600700", src: 'local("HiraginoSansW6"),local("HiraginoSans-W6"),local("HiraginoKakuGothicProNW6"),local("HiraKakuProN-W6")' },
       { weight: "800", src: 'local("HiraginoSansW7"),local("HiraginoSans-W7")' },
       { weight: "900", src: 'local("HiraginoSansW8"),local("HiraginoSans-W8")' },
     ]);
@@ -34,15 +34,20 @@ describe("日本語の画面の書体（NIHO Sans）", () => {
     for (const [, body] of rules.matchAll(/@font-face\s*\{([^}]*)\}/g)) expect(body).not.toMatch(/url\(/);
   });
 
-  it("日本語の画面は本文も見出しも NIHO Sans。手書きの中の日本語は縮めた丸ゴ。公開サイトの部品のルートにも置く", () => {
+  it("日本語の画面は本文も見出しも NIHO Sans。手書きの中の日本語は縮めた角ゴ。公開サイトの部品のルートにも置く", () => {
     const ja = block('html[lang="ja"] .nexp-v1 {');
     expect(rules).toMatch(/html\[lang="ja"\],\s*html\[lang="ja"\] \.nexp-v1 \{/);
-    expect(declaration(ja, "--font-sans")).toMatch(/^"NunitoVariable","NIHOSans","HiraginoMaruGothicProN"/);
+    expect(declaration(ja, "--font-sans")).toMatch(/^"NunitoVariable","NIHOSans","HiraginoSans"/);
     expect(declaration(ja, "--font-display")).toBe("var(--font-sans)");
     expect(declaration(ja, "--font-hand")).toBe('"CaveatVariable","NIHOHandJA","BradleyHand",cursive');
     const hand = faces(rules, "NIHO Hand JA");
     expect(hand).toHaveLength(1);
-    expect(hand[0]!.src.startsWith('local("HiraginoMaruGothicProNW4")')).toBe(true);
+    expect(hand[0]!.src).toMatch(/^local\("HiraginoSansW3"\)/);
+    expect(hand[0]!.src).not.toMatch(/Maru/i);
+    expect(rules).not.toMatch(/Hiragino Maru|HiraMaru/i);
+    expect(declaration(ja, "font-synthesis-weight")).toBe("none");
+    expect(block('html[lang="ja"] :is(h1, h2, h3).font-bold:not(:lang(en)) {')).toContain("font-weight: 700");
+    expect(rules).toMatch(/html\[lang="ja"\] :is\(h1, h2, h3\):not\(:lang\(en\)\) \{\s*font-weight: 600/);
     expect(rules).toMatch(/size-adjust:\s*\d+%/);
   });
 

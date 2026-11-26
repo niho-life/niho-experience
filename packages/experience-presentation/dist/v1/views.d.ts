@@ -17,6 +17,8 @@ export type HomeViewModelV1 = Readonly<{
     /** Optional action rendered right below the hero body text. */
     heroAction?: ReactNode;
     finder: ReactNode;
+    /** Entries attached by the consumer immediately below the hero. */
+    afterHero?: ReactNode;
     themes: readonly {
         key: string;
         href: string;
@@ -31,6 +33,8 @@ export type HomeViewModelV1 = Readonly<{
         dates?: ReactNode;
     }[];
     empty?: ReactNode;
+    hideHostInvite?: boolean;
+    hostBandExtraAction?: ReactNode;
     /** Consumer-owned editorial entry placed directly after the experience-card section. */
     afterCards?: ReactNode;
     feature?: {
@@ -134,6 +138,7 @@ export declare function CatalogueViewV1({ heading, intro, content, copy }: {
     content: ReactNode;
     copy?: StaticCopyAccessorV1;
 }): import("react").JSX.Element;
+export declare const BOOKING_LOOKUP_SECTION_ID = "find-booking";
 export type HelpViewModelV1 = Readonly<{
     primaryHref: string;
     primaryLabelKey: "help.niho" | "help.email";

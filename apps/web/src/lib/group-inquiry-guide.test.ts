@@ -8,7 +8,7 @@ vi.mock("@/lib/config", () => ({ get config() { return state.config; } }));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NEXT_NOT_FOUND"); } }));
 
 import { GroupGuidePage } from "@/components/pages/GroupGuidePage";
-import { ConsultBand } from "@/components/ja-home/JapaneseHomeSections";
+import { siteNavigation } from "@/lib/site-nav";
 import { inquiryContextFromSearch } from "@/lib/group-inquiry-entry";
 import { BUSINESS_GUIDE, GROUP_GUIDE_FACTS, GROUP_GUIDE_NUMBERS, SCHOOLS_GUIDE, from, n, range, type GroupGuide } from "@/lib/group-inquiry-guide";
 
@@ -70,11 +70,10 @@ describe("GroupGuidePage", () => {
 
 describe("the Japanese home links", () => {
   it("invites from the top page to the form and to the company and school guide (the school guide is reached from there, #612)", () => {
-    const html = renderToStaticMarkup(createElement(ConsultBand));
-    expect(html).toContain('href="/ja/inquiry"');
-    expect(html).toContain('href="/ja/business"');
-    expect(html).toContain("企業・学校の方へ");
+    expect(siteNavigation("ja", { inquiry: true }).groups?.links).toEqual([
+      { href: "/ja/business", label: "企業・学校の方へ" },
+      { href: "/ja/inquiry", label: "体験のご相談" },
+    ]);
     expect(BUSINESS_GUIDE.otherLink).toEqual({ href: "/ja/schools", label: "学校の方はこちら" });
-    expect(html).toContain("はじめの相談は無料です");
   });
 });

@@ -1,16 +1,16 @@
 import { expect, test } from "@playwright/test";
 
-// The English header, its phone menu and the new About / Help pages (#645). The menu trigger is an accessible button on its
+// The English header, its phone menu and the About / Help pages (#672). The menu trigger is an accessible button on its
 // native <summary>, with an expanded state. The mock preview registers the sample guides, so Journal is shown.
 
 test.describe("desktop header", () => {
   test.beforeEach(({}, testInfo) => test.skip(testInfo.project.name !== "desktop"));
 
-  test("shows Experiences, Journal, About and Help, and no host link", async ({ page }) => {
+  test("shows the traveler tabs and a host entrance", async ({ page }) => {
     await page.goto("/");
     const nav = page.getByRole("navigation", { name: "Main" });
-    await expect(nav.getByRole("link")).toHaveText(["Experiences", "Journal", "About", "Help"]);
-    await expect(page.getByRole("banner").getByRole("link", { name: "Host with NIHO" })).toHaveCount(0);
+    await expect(nav.getByRole("link")).toHaveText(["Experiences", "Journal", "About", "Help", "For hosts"]);
+    await expect(nav.getByRole("link", { name: "For hosts" })).toHaveAttribute("href", "/host");
     await expect(page.getByRole("banner").getByRole("button", { name: "Menu" })).toBeHidden();
   });
 
@@ -34,7 +34,11 @@ test.describe("phone menu", () => {
     await button.click();
     await expect(button).toHaveAttribute("aria-expanded", "true");
     const menu = page.getByRole("navigation", { name: "Menu" });
-    for (const name of ["Experiences", "Journal", "About", "Help", "For hosts"]) await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
+    await expect(menu.getByRole("heading")).toHaveText(["Explore", "Plan your visit", "For hosts"]);
+    for (const name of ["All experiences", "Kamakura Journal", "About", "Booking help", "Manage your booking", "Host an experience", "Log in"]) {
+      await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
+    }
+    await expect(menu.getByRole("link", { name: "Log in", exact: true })).toHaveAttribute("href", "/host/auth/sign-in");
     await menu.getByRole("link", { name: "About" }).click();
     await expect(page).toHaveURL(/\/about$/);
     await expect(page.getByRole("navigation", { name: "Menu" })).toBeHidden();
@@ -59,6 +63,8 @@ test.describe("phone menu", () => {
 test("Help shows the common questions and one opens", async ({ page }) => {
   await page.goto("/help");
   await expect(page.getByRole("heading", { name: "Common questions" })).toBeVisible();
+  const lookup = page.locator("#find-booking");
+  await expect(lookup.getByRole("heading")).toContainText("booking");
   const question = page.getByText("Do I need an account?");
   await question.click();
   await expect(page.getByText("No. You book as a guest with your name and email address.")).toBeVisible();

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { EXPERIENCE_CATEGORIES, type ExperienceCategoryId } from "@niho-experience/experience-domain";
 import { EXPERIENCE_AREAS } from "@niho-experience/experience-domain";
+import { englishListCatalog, japaneseListPublication } from "./experience-list-catalog";
+import type { SitePublicExperience } from "./experience/site-publications";
 import { ALL_CATEGORIES_LABEL, areaLabel, categoryLabel, filterByCategory, parseCategoryParam, resolveCategories } from "./experience-categories";
 
 describe("カテゴリーの名前（日英）", () => {
@@ -30,6 +32,21 @@ describe("カテゴリーの絞り込み", () => {
     expect(resolveCategories(["a", "b"], bySlug, null).available).toEqual(["walk", "sea"]);
     expect(resolveCategories(["b"], bySlug, "zen").available).toEqual(["zen", "sea"]);
     expect(resolveCategories(["x"], bySlug, null).available).toEqual([]);
+  });
+
+  it("一覧の掲載条件と同じ判定で、販売のない商品やその言語の原稿がない商品のカテゴリを除く", () => {
+    const publication = (slug: string, offers: number, japanese: boolean) => ({
+      publication: { slug, japanese: japanese ? { title: slug } : null },
+      saleTerms: { offers: Array.from({ length: offers }, () => ({})) },
+    }) as unknown as SitePublicExperience;
+    const experiences = [publication("a", 1, true), publication("b", 0, true), publication("d", 1, false)];
+    const classifications = new Map([...bySlug, ["d", "zen"] as const]);
+    const en = englishListCatalog([{ slug: "b" }, { slug: "e" }], { experiences, claimedSlugs: ["b"] });
+    const ja = experiences.filter(japaneseListPublication).map(({ publication }) => publication.slug);
+
+    expect(en.slugs).toEqual(["e", "a", "d"]);
+    expect(resolveCategories(en.slugs, classifications, null).available).toEqual(["walk", "zen"]);
+    expect(resolveCategories(ja, classifications, null).available).toEqual(["walk"]);
   });
 
   it("分類を読めないときは並びを出さず、絞り込みもしない", () => {

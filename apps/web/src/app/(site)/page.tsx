@@ -27,6 +27,7 @@ import { englishAlternates } from "@/lib/locale-metadata";
 import { getPublicSiteAnalyticsSettings } from "@/lib/public-site-analytics";
 import { listSitePublicExperiences } from "@/lib/experience/site-publications";
 import { sitePublicationCard } from "@/lib/experience/site-card-model";
+import { loadSiteCategories } from "@/lib/site-categories";
 import { withoutNativeSlugs } from "@/lib/experience/dedupe-slugs";
 
 const NUMBER_WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
@@ -102,7 +103,7 @@ function homeRest(summaries: { slug: string; title: string }[], cards: CardModel
 
 export default async function Home({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
-  const siteCatalogPromise = listSitePublicExperiences().catch((error: unknown) => {
+  const siteCatalogPromise = listSitePublicExperiences("en").catch((error: unknown) => {
     if (!isExperienceStaging) throw error;
     console.error("[home] staging public catalog unavailable");
     return null;
@@ -124,6 +125,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   const guideEntry = journal.items.length ? <HomeJournal journal={journal} allHref={hasGuidesPage(guideCatalogResult) ? "/guides" : null} moreClassName={buttonClass("secondary")} /> : undefined;
   return <>
     <JsonLd data={siteJsonLd(config.siteUrl, SITE_NAME, LISTING_NAME)} />
-    <HomePageView locale="en" copy={EN_STATIC_COPY_V1} cards={cards} cardDates={cardDates} rest={homeRest(summaries, cards, listed, EN_STATIC_COPY_V1, null)} journal={guideEntry} />
+    <HomePageView locale="en" copy={EN_STATIC_COPY_V1} cards={cards} cardDates={cardDates} rest={homeRest(summaries, cards, listed, EN_STATIC_COPY_V1, null)} journal={guideEntry} categories={await loadSiteCategories("en")} />
   </>;
 }

@@ -59,7 +59,7 @@ function invitePage(): string {
 <title>招待 | NIHO Travel ホスト</title>
 <style>
 ${NIHO_SANS_FONT_FACES}
-body{margin:0;font-family:${NIHO_SANS_FAMILY};background:#ffffff;color:#1c1c1a;line-height:1.6}
+body{margin:0;font-family:${NIHO_SANS_FAMILY};font-synthesis-weight:none;background:#ffffff;color:#1c1c1a;line-height:1.6}
 main{max-width:36rem;margin:0 auto;padding:4rem 1rem}
 h1{font-size:1.5rem;margin:0 0 .75rem}
 p{margin:0 0 1rem;color:#4b4b47}

@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { createExperienceApiClient, type ExperienceCatalogResponseV11, type ExperienceDetailResponseV11, type RegionKey, type ReadResult } from "@niho-experience/api-client";
 import { config } from "./config";
 import { normalizeExperienceDate, normalizeExperienceTheme } from "./filters";
@@ -21,13 +22,17 @@ export async function getApi(searchParams?: Record<string, string | string[] | u
   });
 }
 
+const readPublicationSummaries = cache(async (region?: RegionKey) => {
+  const { listPublicationSummaries } = await import("./experience/publication-site");
+  return listPublicationSummaries(region);
+});
+
 /** HTTP products come only from enabled Experience publications; mock keeps the selected fixture contract. */
 export async function listExperiencesForSite(region?: RegionKey, searchParams?: Record<string, string | string[] | undefined>) {
   if (config.apiMode === "http") {
     if (!config.experiencePublicationsEnabled) return { ok: true, data: { experiences: [] } } satisfies ReadResult<ExperienceCatalogResponseV11>;
     try {
-      const { listPublicationSummaries } = await import("./experience/publication-site");
-      return { ok: true, data: { experiences: await listPublicationSummaries(region) } } satisfies ReadResult<ExperienceCatalogResponseV11>;
+      return { ok: true, data: { experiences: await readPublicationSummaries(region) } } satisfies ReadResult<ExperienceCatalogResponseV11>;
     } catch {
       return { ok: false, kind: "network_error" } as const;
     }

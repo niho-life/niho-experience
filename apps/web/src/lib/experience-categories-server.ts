@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import type { ExperienceCategoryId, ExperienceClassification } from "@niho-experience/experience-domain";
 import { productClassificationRepository } from "./experience/store-server";
 
@@ -7,7 +8,7 @@ import { productClassificationRepository } from "./experience/store-server";
  * for both languages. Null when the classification cannot be read (no store, or a failed read): the list then has no category
  * row and no category filter, but still shows every experience.
  */
-export async function loadCategoryBySlug(): Promise<ReadonlyMap<string, ExperienceCategoryId> | null> {
+export const loadCategoryBySlug = cache(async (): Promise<ReadonlyMap<string, ExperienceCategoryId> | null> => {
   try {
     const repository = productClassificationRepository();
     if (!repository) return null;
@@ -18,7 +19,7 @@ export async function loadCategoryBySlug(): Promise<ReadonlyMap<string, Experien
   } catch {
     return null;
   }
-}
+});
 
 /** One product's public classification (category and area), or null when it has none or cannot be read: the detail page then shows neither. */
 export async function loadClassificationOf(slug: string): Promise<ExperienceClassification | null> {

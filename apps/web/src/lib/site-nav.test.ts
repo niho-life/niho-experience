@@ -1,26 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { siteNav } from "./site-nav";
+import { siteNavigation } from "./site-nav";
 
-describe("ヘッダーのタブ（日英で1つの定義、#658）", () => {
-  it("英語：Experiences、Journal（ページがあるとき）、About、Help。日本語だけの項目は無い", () => {
-    expect(siteNav("en", { guides: true, inquiry: true }).map((entry) => [entry.href, entry.label, entry.where])).toEqual([
-      ["/experiences", "Experiences", "row"], ["/guides", "Journal", "tabs"], ["/about", "About", "tabs"], ["/help", "Help", "tabs"],
+describe("日英のサイトナビ（#672）", () => {
+  it("共通のヘッダーを使い、企業・学校と体験のご相談は日本語の公開中だけ出す", () => {
+    const en = siteNavigation("en", { guides: true, inquiry: true });
+    const ja = siteNavigation("ja", { guides: true, inquiry: true });
+    expect(en.header.map(({ href, label }) => [href, label])).toEqual([
+      ["/experiences", "Experiences"], ["/guides", "Journal"], ["/about", "About"], ["/help", "Help"],
     ]);
-    expect(siteNav("en", { guides: false, inquiry: false }).map((entry) => entry.href)).toEqual(["/experiences", "/about", "/help"]);
+    expect(ja.header.map(({ href, label }) => [href, label])).toEqual([
+      ["/ja/experiences", "体験をさがす"], ["/ja/guides", "読みもの"], ["/ja/about", "はじめての方へ"],
+      ["/ja/business", "企業・学校"], ["/ja/help", "ヘルプ"],
+    ]);
+    expect(ja.mobile.groups?.links.map(({ href }) => href)).toEqual(["/ja/business", "/ja/inquiry"]);
+    expect(ja.footer).toContainEqual(ja.mobile.groups);
+    expect(en.mobile.groups).toBeNull();
+    expect(siteNavigation("ja").mobile.groups).toBeNull();
   });
 
-  it("日本語：同じ並びに、日本語だけの「企業・学校」（タブ）と「ご相談」（メニューだけ）が入る", () => {
-    expect(siteNav("ja", { guides: true, inquiry: true }).map((entry) => [entry.href, entry.label, entry.where])).toEqual([
-      ["/ja/experiences", "体験をさがす", "row"], ["/ja/guides", "読みもの", "tabs"], ["/ja/about", "NIHOについて", "tabs"],
-      ["/ja/business", "企業・学校", "tabs"], ["/ja/inquiry", "ご相談", "menu"], ["/ja/help", "ヘルプ", "tabs"],
-    ]);
-    expect(siteNav("ja", { guides: false, inquiry: false }).map((entry) => entry.href)).toEqual(["/ja/experiences", "/ja/about", "/ja/help"]);
+  it("掲載中のカテゴリと公開中の読みものに入口を出す", () => {
+    const nav = siteNavigation("ja", { categories: ["walk"] });
+    expect(nav.mobile.explore.links.map(({ href }) => href)).toEqual(["/ja/experiences", "/ja/experiences?category=walk"]);
+    expect(nav.mobile.visit.links.map(({ href }) => href)).toEqual(["/ja/about", "/ja/help", "/ja/help#find-booking"]);
+    expect(nav.footer.slice(0, 2)).toEqual([nav.mobile.explore, nav.mobile.visit]);
+    expect(siteNavigation("en", { guides: true }).mobile.visit.links.at(-1)).toEqual({ href: "/guides", label: "Kamakura Journal" });
   });
 
-  it("日英とも、行に常に残るのは1つ目だけ。日本語と英語で同じページは同じ順番に並ぶ", () => {
-    for (const locale of ["en", "ja"] as const) expect(siteNav(locale, { guides: true, inquiry: true }).filter((entry) => entry.where === "row")).toHaveLength(1);
-    const strip = (href: string) => href.replace(/^\/ja/, "");
-    const shared = siteNav("ja", { guides: true, inquiry: true }).map((entry) => strip(entry.href)).filter((href) => !["/business", "/inquiry"].includes(href));
-    expect(shared).toEqual(siteNav("en", { guides: true, inquiry: true }).map((entry) => entry.href));
+  it("ログイン中はヘッダーとメニューからホスト画面へ進める", () => {
+    const nav = siteNavigation("ja", { signedIn: true });
+    expect(nav.headerHost).toEqual({ href: "/host/home", label: "ホスト画面" });
+    expect(nav.mobile.hosts.links).toEqual([nav.headerHost]);
   });
 });

@@ -32,9 +32,9 @@ describe("About page (#645)", () => {
 describe("日本語の About（#658）", () => {
   const html = renderToStaticMarkup(AboutPage({ content: JA_ABOUT_CONTENT }));
 
-  it("h1 は1つで「、」のあとで改行し、主要な文言が日本語", () => {
+  it("h1 でこの予約サイトの役割を伝える", () => {
     expect(html.match(/<h1/g)).toHaveLength(1);
-    expect(html).toContain("はじまりは、<br/>街のリビング。");
+    expect(html).toContain("NIHO Travel は、鎌倉の人に会いにいく体験の予約サイトです。");
     expect(html).toContain('aria-label="NIHO Travel について"');
     for (const text of ["どの体験も、鎌倉に暮らす人が開きます。", "観光名所ではなく、暮らしと文化のなかへ。", "ひとつの食卓を囲んで話せる人数で。", "予約のしくみ", "日にちを選ぶ", "安全に支払う", "ホストに会う", "鎌倉にお住まいの方へ"]) expect(html).toContain(text);
     expect(html.match(/<li class="flex items-start gap-4 rounded-\[22px\]/g)).toHaveLength(3);
@@ -46,6 +46,6 @@ describe("日本語の About（#658）", () => {
     const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
     expect(hrefs).toEqual(expect.arrayContaining(["/ja/experiences", "/ja/help", "/ja/host"]));
     expect(hrefs.every((href) => !href!.startsWith("/ja/ja"))).toBe(true);
-    expect(JA_ABOUT_TITLE).toBe("NIHOについて");
+    expect(JA_ABOUT_TITLE).toBe("はじめての方へ");
   });
 });

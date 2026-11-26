@@ -21,6 +21,7 @@ import { listSitePublicExperiences } from "@/lib/experience/site-publications";
 import { sitePublicationCard } from "@/lib/experience/site-card-model";
 import { filterByCategory, parseCategoryParam, resolveCategories } from "@/lib/experience-categories";
 import { loadCategoryBySlug } from "@/lib/experience-categories-server";
+import { englishListCatalog } from "@/lib/experience-list-catalog";
 import { withoutNativeSlugs } from "@/lib/experience/dedupe-slugs";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +49,7 @@ const FINDER_DAYS = 14;
 export default async function ExperiencesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
   const searchQuery = normalizeExperienceQuery(query.q);
-  const siteCatalogPromise = listSitePublicExperiences().catch((error: unknown) => {
+  const siteCatalogPromise = listSitePublicExperiences("en").catch((error: unknown) => {
     if (!isExperienceStaging) throw error;
     console.error("[experiences] staging public catalog unavailable");
     return null;
@@ -59,22 +60,16 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   // Native publications have no theme field yet; keep the unsupported filter out of the live form.
   const themesEnabled = config.apiMode === "mock" && config.publicApiVersion === "1.2";
   const theme = themesEnabled ? normalizeExperienceTheme(query.theme) : undefined;
-  const sitePublications = siteCatalog.experiences;
-  // A slug this site sells is never also read from the legacy list (#643). The legacy summaries are made from the same published
-  // products, and the claimed slugs cover host-seller products only, so a product published for a provider without a host seller
-  // profile came out twice. Dropped here: the claimed slugs and every slug sold here (its native card stays). A published product
-  // with no sale here keeps its legacy card.
-  const soldHere = sitePublications.filter(({ saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0).map(({ publication }) => publication.slug);
-  const catalog = result.ok ? withoutNativeSlugs(result.data.experiences, [...siteCatalog.claimedSlugs, ...soldHere]) : [];
+  const { catalog, native, slugs } = englishListCatalog(result.ok ? result.data.experiences : [], siteCatalog);
   const items = filterExperienceSummaries(catalog, searchQuery);
   const legacyCards = buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview);
-  const nativeCards = sitePublications
-    .filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && !theme && matchesExperienceQuery(`${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${publication.providerPublicName ?? publication.sellerDisplayName} ${NATIVE_REGION_NAME}`, searchQuery))
+  const nativeCards = native
+    .filter(({ publication }) => !theme && matchesExperienceQuery(`${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${publication.providerPublicName ?? publication.sellerDisplayName} ${NATIVE_REGION_NAME}`, searchQuery))
     .map((entry) => sitePublicationCard(entry));
   const bySlug = await loadCategoryBySlug();
   const { available: categories, selected: category } = resolveCategories(
     // Every experience on this list before the search narrows it, so the row does not change while searching.
-    [...catalog.map((experience) => experience.slug), ...soldHere],
+    slugs,
     bySlug,
     parseCategoryParam(query.category),
   );

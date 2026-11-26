@@ -12,8 +12,10 @@ import { SITE_DESCRIPTION } from "@/lib/public-metadata";
 import { SiteLocaleProvider } from "@/components/SiteLocale";
 import { LanguageButton } from "@/components/site/LanguageButton";
 import { getJapaneseStaticCounterparts } from "@/lib/localized-content";
-import { guideCatalogForSite, hasGuidesPage } from "@/lib/guide-registry";
-import { privacyFooterLink } from "@/lib/privacy-link";
+import { guideCatalogForSite } from "@/lib/guide-registry";
+import { hostSignedIn } from "@/lib/host/signed-in";
+import { loadSiteCategories } from "@/lib/site-categories";
+import { siteNavigation } from "@/lib/site-nav";
 import { EN_STATIC_COPY_V1 } from "@niho/experience-presentation/v1";
 import { getPublicSiteAnalyticsSettings } from "@/lib/public-site-analytics";
 
@@ -43,16 +45,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const publicAnalytics = await getPublicSiteAnalyticsSettings();
   let counterparts: Readonly<Record<string, string>> = {};
   try { counterparts = await getJapaneseStaticCounterparts(); } catch { /* no approved JA release: expose no link */ }
-  const guides = await guideCatalogForSite();
+  const [guides, categories, signedIn] = await Promise.all([guideCatalogForSite(), loadSiteCategories("en"), hostSignedIn()]);
   const hasCounterparts = Object.keys(counterparts).length > 0;
-  const hasGuides = hasGuidesPage(guides);
-  const footerLinks = [
-    { href: "/about", label: "About" },
-    ...(hasGuides ? [{ href: "/guides", label: "Kamakura Journal" }] : []),
-    { href: "/write", label: "For writers" },
-    // The traveler privacy notice (#285): always linked, last and quiet like the rest.
-    privacyFooterLink("en"),
-  ];
+  const navigation = siteNavigation("en", { guides: guides.guides.length > 0, categories, signedIn });
 
   return (
     <html lang="en">
@@ -64,7 +59,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <AnalyticsSetup mode={analyticsMode} websiteId={config.umamiWebsiteId} />
           <ExperienceGa4Analytics measurementId={publicAnalytics?.ga4MeasurementId ?? null} />
           <AttributionCapture enabled={attributionEnabled()} />
-          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={hasCounterparts ? <LanguageButton counterparts={counterparts} /> : undefined} menuLanguage={hasCounterparts ? <LanguageButton counterparts={counterparts} variant="text" /> : undefined} journalHref={hasGuides ? "/guides" : null} footerLinks={footerLinks}>
+          <CodeSiteChrome preview={isPreview ? config.mockCatalog : null} copy={EN_STATIC_COPY_V1} languageSwitch={hasCounterparts ? <LanguageButton counterparts={counterparts} /> : undefined} languageChoices={hasCounterparts ? <LanguageButton counterparts={counterparts} variant="choices" /> : undefined} navigation={navigation} signedIn={signedIn}>
             {children}
           </CodeSiteChrome>
         </SiteLocaleProvider>

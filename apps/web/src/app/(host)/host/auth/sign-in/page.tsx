@@ -6,6 +6,7 @@ import { config } from "@/lib/config";
 import { HostLoginLink } from "@/components/host/HostAppWindow";
 import { HostEntranceHeader, NIHO_LOGIN_BUTTON, NihoMark } from "@/components/host/HostEntrance";
 import { HOST_EMAIL_LOGIN_PATH, HOST_EMAIL_SIGN_IN_PATH, HOST_HOME_PATH, HOST_INTRO_PATH, HOST_LOGIN_PATH, hostReturnPathOrNull, withQuery } from "@/lib/host/routes";
+import { bookingLookupHref } from "@/lib/site-nav";
 import { readHostSession, requireHostConsole } from "@/lib/host/server";
 
 export const metadata: Metadata = { title: "ログイン", robots: { index: false, follow: false } };
@@ -14,6 +15,13 @@ const ERRORS = {
   email: "メールアドレスの形を確かめて、もう一度入力してください。",
   unavailable: "いまはリンクを送れません。時間をおいて、もう一度お試しください。",
 } as const;
+
+function SignInHelpLinks() {
+  return <ul className="mt-6 grid gap-3 text-sm text-ink-soft">
+    <li>はじめての方は <a href="/ja/host" className="font-bold underline underline-offset-4">ホストになるには</a></li>
+    <li>旅行者の方は <a href={bookingLookupHref("ja")} className="font-bold underline underline-offset-4">ご予約の確認はログイン不要です</a></li>
+  </ul>;
+}
 
 /**
  * ホストのログイン (ADR 0003, EXPERIENCE_HOST_ACCOUNTS_ENABLED): the email form every 「ログイン」 link leads to
@@ -25,7 +33,7 @@ const ERRORS = {
  * opened link returns to that page.
  *
  * With the NIHO account login (EXPERIENCE_HOST_NIHO_LOGIN_ENABLED, Epic #591) this page is the host's entrance: a heading
- * and one button, 「NIHO アカウントでログイン」, and nothing else (no explanation, no email link, no 「体験の提供について」).
+ * and one login button, 「NIHO アカウントでログイン」, followed by links for new hosts and travelers (#672).
  * The email form stays behind `?method=email` (and for a sign-in a sensitive change asked for, `reauth=1`), reached by
  * address only: the migration fallback until #598 removes it.
  */
@@ -54,6 +62,7 @@ export default async function HostEmailSignInPage({ searchParams }: { searchPara
               <NihoMark />
               NIHO アカウントでログイン
             </HostLoginLink>
+            <SignInHelpLinks />
           </div>
         </main>
       </>
@@ -125,7 +134,7 @@ export default async function HostEmailSignInPage({ searchParams }: { searchPara
           <button type="submit" className={hostButtonClass("primary", "w-full justify-center sm:w-auto")}>ログインのリンクを送る</button>
         </form>
         <p className="mt-4 text-sm text-muted">リンクは {minutes} 分間、このブラウザでだけ使えます。</p>
-        <p className="mt-8"><a href={HOST_INTRO_PATH} className="text-[0.875rem] font-bold text-ink-soft underline underline-offset-4 hover:text-ink">体験の提供について</a></p>
+        <SignInHelpLinks />
       </main>
     </>
   );
