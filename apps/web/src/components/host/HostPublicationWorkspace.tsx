@@ -284,10 +284,6 @@ function MeetingCoordinatesEditor({ value, onChange, radius, onRadiusChange, app
 }) {
   const [lat, setLat] = useState(value ? String(value.lat) : "");
   const [lng, setLng] = useState(value ? String(value.lng) : "");
-  useEffect(() => {
-    setLat(value ? String(value.lat) : "");
-    setLng(value ? String(value.lng) : "");
-  }, [value?.lat, value?.lng]);
   const edit = (nextLat: string, nextLng: string) => {
     const parsedLat = Number(nextLat);
     const parsedLng = Number(nextLng);
@@ -1635,6 +1631,7 @@ export function HostPublicationWorkspace({
                   : { ...current, publicMapPoint: null, publicMapArea: { ...coordinate, radiusMeters: mapArea(current.publicMapArea)?.radiusMeters ?? 500 } })}
               />
               <MeetingCoordinatesEditor
+                key={`${disclosure}:${publicMapPoint?.lat ?? ""}:${publicMapPoint?.lng ?? ""}:${publicMapArea?.lat ?? ""}:${publicMapArea?.lng ?? ""}:${publicMapArea?.radiusMeters ?? ""}`}
                 value={disclosure === "PUBLIC" ? publicMapPoint : publicMapArea}
                 approximate={disclosure === "AFTER_BOOKING"}
                 radius={publicMapArea?.radiusMeters ?? 500}

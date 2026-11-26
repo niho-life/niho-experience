@@ -35,6 +35,8 @@ type EmbedStep = 1 | 2 | 3;
 type EmbedOutcome = { readonly kind: "pay"; readonly checkoutUrl: string } | { readonly kind: "done"; readonly type: BookingReturnType | null; readonly free: boolean };
 export type SiteBookingSelection = { readonly date: string; readonly offerId: string; readonly adults: number; readonly children: number };
 
+const NO_OFFERS: readonly SitePublicOffer[] = [];
+
 /**
  * The booking form. `layout="page"` is the public booking page: one screen, and checkout opens on its own after the request.
  * `layout="embed"` is the widget another site frames (/embed, docs/embed.md): the same fields in three steps; payment opens
@@ -46,7 +48,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
   const ja = locale === "ja";
   const sellerInformationUrl = siteSellerInformationHref(item, locale);
   const sellerInformationName = siteSellerDisplayName(item, locale);
-  const offers = saleTerms?.offers ?? [];
+  const offers = saleTerms?.offers ?? NO_OFFERS;
   const firstOffer = offers[0];
   const [api] = useState<ExperienceApiClient>(() => getSiteBookingApi(siteOrigin, locale));
   // An offer is one 開催枠 of this experience (a schedule rule: its start time, and its price when the host set one). The

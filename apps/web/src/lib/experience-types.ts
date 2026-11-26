@@ -21,6 +21,17 @@ export type ExperienceOfferForSite = ExperienceOffer & {
 };
 
 type WithSiteOffers<T> = T extends unknown ? Omit<T, "offers"> & { offers: ExperienceOfferForSite[] } : never;
-export type ExperienceDetailForSite = WithSiteOffers<ExperienceDetail | ExperienceDetailV11>;
+export type PublicMapPointForSite = Readonly<{ lat: number; lng: number }>;
+export type PublicMapAreaForSite = PublicMapPointForSite & Readonly<{ radiusMeters: number }>;
+
+/** Experience-owned map disclosure projected for the site; these fields are not part of NIHO's shared API DTO. */
+export type ExperienceDetailForSite = WithSiteOffers<ExperienceDetail | ExperienceDetailV11> & {
+  readonly publicMapPoint?: PublicMapPointForSite | null;
+  readonly publicMapArea?: PublicMapAreaForSite | null;
+};
+export type ExperiencePublicationDetailForSite = WithSiteOffers<ExperienceDetailV11> & {
+  readonly publicMapPoint: PublicMapPointForSite | null;
+  readonly publicMapArea: PublicMapAreaForSite | null;
+};
 export type ExperienceSummaryForSite = ExperienceSummary | ExperienceSummaryV11 | ExperienceSummaryV12;
 export type PublicImageForSite = PublicImage | PublicImageV11;

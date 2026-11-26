@@ -1,6 +1,7 @@
 import "server-only";
-import type { ExperienceDetailV11, ExperienceSummaryV11 } from "@niho-experience/api-client";
+import type { ExperienceSummaryV11 } from "@niho-experience/api-client";
 import type { PublicBookingTerms, PublicExperiencePublication, PublicSellerDisclosure } from "@niho-experience/experience-store";
+import type { ExperiencePublicationDetailForSite } from "@/lib/experience-types";
 import { experiencePublicationRepository, guestBookingRepository, providerSellerDisclosureRepository } from "./store-server";
 import { config } from "@/lib/config";
 import { providerNameFor } from "./provider-name";
@@ -29,7 +30,7 @@ function summaryOf(publication: PublicExperiencePublication, terms: PublicBookin
   };
 }
 
-function detailOf(publication: PublicExperiencePublication, terms: PublicBookingTerms | null, locale: Locale, disclosure: PublicSellerDisclosure | null): ExperienceDetailV11 {
+function detailOf(publication: PublicExperiencePublication, terms: PublicBookingTerms | null, locale: Locale, disclosure: PublicSellerDisclosure | null): ExperiencePublicationDetailForSite {
   const japanese = locale === "ja" ? publication.japanese : null;
   const content = japanese ? {
     title: japanese.title,
@@ -135,11 +136,11 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
     timeline: [...content.timeline],
     title: content.title,
     updatedAt: publication.publishedAtUtc,
-  } as unknown as ExperienceDetailV11;
+  } as unknown as ExperiencePublicationDetailForSite;
 }
 
 /** Experience's active publication and sale snapshot, exposed to existing page components through their read model. */
-export async function getPublicationDetail(slug: string, locale: Locale = "en"): Promise<ExperienceDetailV11 | null> {
+export async function getPublicationDetail(slug: string, locale: Locale = "en"): Promise<ExperiencePublicationDetailForSite | null> {
   if (!config.experiencePublicationsEnabled) return null;
   const publications = experiencePublicationRepository();
   if (!publications) throw new Error("Experience publication store unavailable");

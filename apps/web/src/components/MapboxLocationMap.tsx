@@ -30,7 +30,10 @@ export function MapboxLocationMap({ point, area, editable = false, onChoose, lab
   const [nearViewport, setNearViewport] = useState(false);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
-  current.current = { point, area, onChoose };
+
+  useEffect(() => {
+    current.current = { point, area, onChoose };
+  }, [point, area, onChoose]);
 
   useEffect(() => {
     const node = wrapper.current;
@@ -94,7 +97,7 @@ export function MapboxLocationMap({ point, area, editable = false, onChoose, lab
     void import("mapbox-gl").then(({ default: mapboxgl }) => { if (map.current === instance) syncMarker(instance, marker, mapboxgl.Marker, point); });
     const focus = point ?? area;
     if (focus) instance.easeTo({ center: [focus.lng, focus.lat], duration: 250 });
-  }, [area?.lat, area?.lng, area?.radiusMeters, point?.lat, point?.lng, ready]);
+  }, [area, point, ready]);
 
   if (!editable && !token) return null;
 

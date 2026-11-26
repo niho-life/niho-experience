@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Occurrence } from "@niho-experience/api-client";
-import type { SitePublicExperience } from "@/lib/experience/site-publications";
+import type { SitePublicExperience, SitePublicOffer } from "@/lib/experience/site-publications";
 import { getSiteBookingApi } from "@/lib/browser-api";
 import { BookingCalendar } from "@/components/BookingCalendar";
 import { buttonClass } from "@/components/ui";
 import { formatTime, formatYen, jstDateKey } from "@/lib/format";
 import { calendarDayLabel, occurrenceStartTime } from "@/lib/experience/booking-calendar";
-import { expectedSiteBookingTotalYen } from "@/lib/experience/site-booking-rules";
+import { canEditSitePartyCounts, expectedSiteBookingTotalYen } from "@/lib/experience/site-booking-rules";
 import { cancellationSummary } from "@/lib/experience/site-card-model";
 import { bookingCloseOf } from "@/components/NextDateBand";
 import { dayOption } from "@/lib/date-filter";
@@ -27,6 +27,8 @@ type Props = {
   readonly ratingLabel: string | null;
 };
 
+const NO_OFFERS: readonly SitePublicOffer[] = [];
+
 /** Date, occurrence and party selection stays on the detail page; only public selector values go to /book. */
 export function SitePublicationDatePicker({ item, locale, siteOrigin, bookingHref, nextDates, inquiryHref, enabled, priceFrom, ratingLabel }: Props) {
   const card = useRef<HTMLElement>(null);
@@ -36,26 +38,31 @@ export function SitePublicationDatePicker({ item, locale, siteOrigin, bookingHre
   const [dialogStyle, setDialogStyle] = useState<CSSProperties>({});
   const [availability, setAvailability] = useState<{ state: "idle" | "loading" | "failed" | "ready"; occurrences: Occurrence[] }>({ state: "idle", occurrences: [] });
   const [selected, setSelected] = useState<Occurrence | null>(null);
-  const [pendingDate, setPendingDate] = useState<{ readonly date: string; readonly offerId: string } | null>(null);
+  const pendingDate = useRef<{ readonly date: string; readonly offerId: string } | null>(null);
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
   const [api] = useState(() => getSiteBookingApi(siteOrigin, locale));
-  const offers = item.saleTerms?.offers ?? [];
+  const offers = item.saleTerms?.offers ?? NO_OFFERS;
   const offersById = useMemo(() => new Map(offers.map((offer) => [offer.id, offer])), [offers]);
   const offer = selected ? offersById.get(selected.offerId) : undefined;
   const selectedOccurrence = selected && availability.state === "ready"
     ? availability.occurrences.find((occurrence) => occurrence.offerId === selected.offerId && occurrence.date === selected.date && occurrence.bookable) ?? null
     : null;
-  const total = offer && selectedOccurrence ? expectedSiteBookingTotalYen(offer, adults, children) : null;
+  const maxParty = offer && selectedOccurrence ? Math.min(selectedOccurrence.seatsLeft, offer.maxPartySize) : offer?.maxPartySize ?? 1;
+  const partyNeedsClamp = Boolean(offer && selectedOccurrence && adults + children > maxParty);
+  const selectedAdults = partyNeedsClamp && offer ? offer.minimumParticipants : adults;
+  const selectedChildren = partyNeedsClamp ? 0 : children;
+  const partySize = selectedAdults + selectedChildren;
+  const partyFitsSeats = !selectedOccurrence || partySize <= selectedOccurrence.seatsLeft;
+  const total = offer && partyFitsSeats ? expectedSiteBookingTotalYen(offer, selectedAdults, selectedChildren) : null;
   const ja = locale === "ja";
   const money = (amount: number) => ja ? jaYen(amount) : formatYen(amount, locale);
-  const approval = offers.some((candidate) => candidate.acceptanceMode === "APPROVAL");
+  const approval = offer ? offer.acceptanceMode === "APPROVAL" : offers.length > 0 && offers.every((candidate) => candidate.acceptanceMode === "APPROVAL");
   const query = selectedOccurrence && offer && total !== null
-    ? `?date=${encodeURIComponent(selectedOccurrence.date)}&offer=${encodeURIComponent(offer.id)}&adults=${adults}&children=${children}`
+    ? `?date=${encodeURIComponent(selectedOccurrence.date)}&offer=${encodeURIComponent(offer.id)}&adults=${selectedAdults}&children=${selectedChildren}`
     : "";
   const selectionHref = `${bookingHref}${query}`;
-  const partySize = adults + children;
-  const partyLabel = ja ? `大人${adults}名${children > 0 ? `・子ども${children}名` : ""}` : `${adults} adults${children > 0 ? `, ${children} children` : ""}`;
+  const partyLabel = ja ? `大人${selectedAdults}名${selectedChildren > 0 ? `・子ども${selectedChildren}名` : ""}` : `${selectedAdults} adults${selectedChildren > 0 ? `, ${selectedChildren} children` : ""}`;
   const selectedClose = selectedOccurrence ? bookingCloseOf(selectedOccurrence) : null;
   const cardActionLabel = selectedOccurrence && total !== null
     ? approval ? (ja ? "申込みへ進む" : "Request to book") : (ja ? "予約へ進む" : "Continue to book")
@@ -78,7 +85,8 @@ export function SitePublicationDatePicker({ item, locale, siteOrigin, bookingHre
 
   function openPicker(trigger: HTMLElement, date?: { readonly date: string; readonly offerId: string }) {
     opener.current = trigger;
-    setPendingDate(date ?? null);
+    pendingDate.current = date ?? null;
+    setAvailability({ state: "loading", occurrences: [] });
     positionDialog();
     setOpen(true);
   }
@@ -86,6 +94,14 @@ export function SitePublicationDatePicker({ item, locale, siteOrigin, bookingHre
   function closePicker() {
     dialog.current?.close();
   }
+
+  const chooseOccurrence = useCallback((occurrence: Occurrence) => {
+    const nextOffer = offersById.get(occurrence.offerId);
+    if (!nextOffer || !occurrence.bookable) return;
+    setSelected(occurrence);
+    setAdults(nextOffer.minimumParticipants);
+    setChildren(0);
+  }, [offersById]);
 
   useEffect(() => {
     const element = dialog.current;
@@ -104,10 +120,10 @@ export function SitePublicationDatePicker({ item, locale, siteOrigin, bookingHre
   useEffect(() => {
     if (!open) return;
     let active = true;
-    setAvailability({ state: "loading", occurrences: [] });
     api.getAvailability(item.publication.slug).then((result) => {
       if (!active) return;
       if (!result.ok) {
+        pendingDate.current = null;
         setAvailability({ state: "failed", occurrences: [] });
         setSelected(null);
         return;
@@ -115,45 +131,34 @@ export function SitePublicationDatePicker({ item, locale, siteOrigin, bookingHre
       const offerIds = new Set(offers.map((candidate) => candidate.id));
       const fresh = result.data.occurrences.filter((occurrence) => offerIds.has(occurrence.offerId));
       setAvailability({ state: "ready", occurrences: fresh });
-      setSelected((current) => current
-        ? fresh.find((occurrence) => occurrence.bookable && occurrence.offerId === current.offerId && occurrence.date === current.date) ?? null
-        : null);
+      const requestedDate = pendingDate.current;
+      pendingDate.current = null;
+      if (requestedDate) {
+        const occurrence = fresh.find((candidate) => candidate.bookable && candidate.date === requestedDate.date && candidate.offerId === requestedDate.offerId) ?? null;
+        if (occurrence) chooseOccurrence(occurrence);
+        else setSelected(null);
+      } else {
+        setSelected((current) => current
+          ? fresh.find((occurrence) => occurrence.bookable && occurrence.offerId === current.offerId && occurrence.date === current.date) ?? null
+          : null);
+      }
     }).catch(() => {
       if (active) {
+        pendingDate.current = null;
         setAvailability({ state: "failed", occurrences: [] });
         setSelected(null);
       }
     });
     return () => { active = false; };
-  }, [api, item.publication.slug, offers, open]);
-
-  function chooseOccurrence(occurrence: Occurrence) {
-    const nextOffer = offersById.get(occurrence.offerId);
-    if (!nextOffer || !occurrence.bookable) return;
-    setSelected(occurrence);
-    setAdults(nextOffer.minimumParticipants);
-    setChildren(0);
-  }
-
-  useEffect(() => {
-    if (availability.state !== "ready" || !pendingDate) return;
-    const occurrence = availability.occurrences.find((candidate) => candidate.bookable && candidate.date === pendingDate.date && candidate.offerId === pendingDate.offerId);
-    setPendingDate(null);
-    if (occurrence) chooseOccurrence(occurrence);
-  }, [availability, pendingDate, offersById]);
-
-  useEffect(() => {
-    if (availability.state !== "ready" || !selectedOccurrence || !offer) return;
-    const max = Math.min(selectedOccurrence.seatsLeft, offer.maxPartySize);
-    if (partySize > max) {
-      setAdults(offer.minimumParticipants);
-      setChildren(0);
-    }
-  }, [availability.state, selectedOccurrence?.seatsLeft, offer?.maxPartySize, offer?.minimumParticipants, partySize]);
+  }, [api, chooseOccurrence, item.publication.slug, offers, open]);
 
   const setPartyCount = (kind: "adults" | "children", nextValue: number) => {
-    if (kind === "adults") setAdults(nextValue);
-    else setChildren(nextValue);
+    if (!offer || !selectedOccurrence) return;
+    const nextAdults = kind === "adults" ? nextValue : selectedAdults;
+    const nextChildren = kind === "children" ? nextValue : selectedChildren;
+    if (!canEditSitePartyCounts(offer, nextAdults, nextChildren, maxParty)) return;
+    setAdults(nextAdults);
+    setChildren(nextChildren);
   };
 
   const button = (mobile = false) => <a
@@ -232,15 +237,15 @@ export function SitePublicationDatePicker({ item, locale, siteOrigin, bookingHre
             <p className="text-sm text-ink-soft">{ja ? `残り ${selectedOccurrence.seatsLeft} 席` : `${selectedOccurrence.seatsLeft} places left`}</p>
             {closeLine ? <p className="text-sm text-ink-soft">{closeLine}</p> : null}
             <div className="grid gap-3 sm:grid-cols-2">
-              <PartyStepper label={ja ? "大人" : "Adults"} value={adults} price={offer.pricing.adultPriceYen} locale={locale} disabledMinus={adults <= 0 || partySize - 1 < offer.minimumParticipants || (children > 0 && Boolean(offer.pricing.child?.adultRequired) && adults <= 1)} disabledPlus={partySize >= Math.min(selectedOccurrence.seatsLeft, offer.maxPartySize)} onChange={(value) => setPartyCount("adults", value)} />
-              {offer.pricing.child ? <PartyStepper label={ja ? `子ども（${offer.pricing.child.minAge}〜${offer.pricing.child.maxAge}歳）` : `Children (${offer.pricing.child.minAge}–${offer.pricing.child.maxAge})`} value={children} price={offer.pricing.child.priceYen} locale={locale} disabledMinus={children <= 0 || partySize - 1 < offer.minimumParticipants} disabledPlus={partySize >= Math.min(selectedOccurrence.seatsLeft, offer.maxPartySize)} onChange={(value) => setPartyCount("children", value)} /> : null}
+              <PartyStepper label={ja ? "大人" : "Adults"} value={selectedAdults} price={offer.pricing.adultPriceYen} locale={locale} disabledMinus={selectedAdults <= 0 || (selectedChildren > 0 && Boolean(offer.pricing.child?.adultRequired) && selectedAdults <= 1)} disabledPlus={partySize >= maxParty} onChange={(value) => setPartyCount("adults", value)} />
+              {offer.pricing.child ? <PartyStepper label={ja ? `子ども（${offer.pricing.child.minAge}〜${offer.pricing.child.maxAge}歳）` : `Children (${offer.pricing.child.minAge}–${offer.pricing.child.maxAge})`} value={selectedChildren} price={offer.pricing.child.priceYen} locale={locale} disabledMinus={selectedChildren <= 0} disabledPlus={partySize >= maxParty} onChange={(value) => setPartyCount("children", value)} /> : null}
             </div>
             <p className="text-sm text-ink-soft">{ja ? `参加人数 ${partyLabel}` : partyLabel}</p>
-            <div className="flex items-center justify-between border-t border-line-strong pt-3"><span className="font-bold">{ja ? "合計" : "Total"}</span><b className="text-lg">{total === null ? (ja ? "人数を確認してください" : "Check party size") : money(total)}</b></div>
+            <div className="flex items-center justify-between border-t border-line-strong pt-3"><span className="font-bold">{ja ? "合計" : "Total"}</span><b className="text-lg">{total === null ? partySize < offer.minimumParticipants ? (ja ? `最低${offer.minimumParticipants}名です` : `Minimum ${offer.minimumParticipants} guests`) : (ja ? "人数を確認してください" : "Check party size") : money(total)}</b></div>
             {minimumCharge ? <p className="text-xs text-ink-soft">{minimumCharge}</p> : null}
           </div>
           <p className="text-xs text-muted">{ja ? "次の画面で連絡先と同意内容を入力します。お名前やメールアドレスはURLに含まれません。" : "Add your contact details and consent on the next page. Names and email addresses are never included in the URL."}</p>
-          <a href={selectionHref || bookingHref} aria-disabled={total === null ? true : undefined} onClick={(event) => { if (total === null) event.preventDefault(); }} className={buttonClass("primary", "w-full")}>
+          <a href={selectionHref || bookingHref} aria-disabled={total === null ? true : undefined} onClick={(event) => { if (total === null) event.preventDefault(); }} className={buttonClass("primary", `w-full${total === null ? " opacity-50" : ""}`)}>
             {approval ? ja ? "申込みへ進む" : "Request to book" : ja ? "予約へ進む" : "Continue to book"}
           </a>
         </> : <p className="text-sm text-ink-soft">{ja ? "開催日を選ぶと、開始時刻と参加人数を選べます。" : "Choose a date to see its start time and party size options."}</p>}
