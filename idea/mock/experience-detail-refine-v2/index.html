@@ -1,0 +1,976 @@
+<!doctype html>
+<!--
+  mock: 体験詳細ページ（/experiences/[slug]）のリファイン案 v2 — Community Dinner を題材に、PC とスマホ
+  Issue: #675（見た目の整理）/ #676（日にちと人数を詳細ページで選ぶ）/ #677（地図）
+  v1 からの変更（2026-11-26 オーナー）:
+    - ホストの欄を「料金に含まれるもの」の次、「場所」の前に置いた。体験の説明の後で、ホストそのものが体験の価値なので場所・レビューより前
+    - 欄の見出しを「ホスト」にした
+    - 提供者が団体（NIHO kamakura）の体験は「団体＋人」で出す（確定）。団体の紹介文（200字ほど）を全文で見せ、その下にメンバーを並べる
+    - 相談の1行はページの下（販売者の1行の前）に置く
+    - 予約入力の欄名を「担い手に伝えておきたいこと」から「ホストに伝えておきたいこと」にした（言葉を「ホスト」に揃える）
+  論点:
+    1. ファーストビューを「写真 → 題名 → 1行の要点」に絞る（パンくず・販売者・日程帯を題名の上下から外す）
+    2. 販売者の表示はページ末尾の1行と予約入力の同意文だけにする（現状は題名の下・事実の下・提供者について・予約カードの4か所）
+    3. 「鎌倉・東京から1時間」を題名の下から外し、アクセスの欄へ移す
+    4. 主ボタンを葉緑（leaf）に揃える。上の「予約ボタン」で黒（現状のPC）と見比べられる
+    5. 相談の導線は文字リンク2本だけにする（枠付きの大きなボタンをやめる）
+    6. 場所の欄に地図を入れる。集合場所を予約後に伝える体験は、ピンを出さずエリアの円だけにする
+    7. 日にちと人数は詳細ページの上で選ぶ（PCは予約カードから開く吹き出し、スマホは下から出るシート）。/book は連絡先と決済だけにする
+    8. レビュー欄を地図の次に置く。実データがある体験だけに出す
+    9. ホストの欄は提供者の種別で出し分ける（確定）。上の「提供者」で3つの場合を見られる
+       - 団体＋人: 約束できる単位（NIHO kamakura）を主語にし、紹介文と、会える人の顔を添える。形は「丸＝人、角丸の四角＝場所・団体」で分ける
+       - 個人のホスト: 顔写真・名前・肩書き・ひとこと・紹介文
+       - 団体のみ: 人が紐づかないとき。屋号と紹介文だけ
+       紹介文は200字前後を想定し、全文を見せる（300字を超える分だけたたむ）
+  作っていない:
+    - ホストの欄の2人目・3人目（みさき・けん）は並び方を見るためのサンプルで、実在しない。団体の紹介文（約200字）も長さを見るための仮の文
+    - レビュー3件・評価 4.9・件数 12 は見た目確認用のサンプル。実在の感想ではない（本番は実データがあるときだけ表示）
+    - 地図は絵。縮尺・道・ピンの位置は正確ではない。実装では地図の部品に置き換える（#677）
+    - 「Google マップで開く」「相談する」「特定商取引法に基づく表記」「すべて見る（12件）」、ヘッダーとフッターのリンク、ほかの体験のカード、人のページへのリンクは押しても遷移しない
+    - 「安全な決済へ進む」は押しても Stripe へ進まない。入力の検証・エラー表示・同意チェックの必須判定は作っていない
+    - 満席・受付終了・販売停止・読込中・通信失敗の表示は作っていない（カレンダーの 11/28 が受付終了の例）
+    - 承認制の体験（Request to book）の文言、複数の開始時刻がある日、最低請求人数は作っていない
+    - よくある質問・当日の流れ・ガイド記事の欄は、この体験に原稿が無いので置いていない（実装では原稿があれば出す。順番は #675）
+    - 英語の本文の一部、ホスト紹介とメンバーの英訳はモック用の仮訳
+    - 「体験内容」の本文は、上の要点の行と重なる文（開催曜日・所要時間・定員）を省いて見せている。実装で原稿を自動で削ることはしない
+    - レビューの翻訳表示、写真の拡大・送り（一覧だけ作った）、ヘッダーのメニュー（≡）は作っていない
+    - PCの吹き出しの位置合わせは簡易（予約カードの右端に揃えるだけ）。キーボードのフォーカス閉じ込めは作っていない
+  写真: 本番サイト（travel.niho.life）で公開中の画像をURLで参照している。リポには写真を置かない。通信できない環境では写真が出ない
+  書体: ../home-list-neighborhoods-v1/assets/fonts/ を参照
+  参照: docs/design-brief.md（詳細ページの主操作は「日時と人数を選ぶ」。提供者の顔・名前・話を商品の価値として見せる）/
+        docs/design-system.md（主ボタンは leaf）/ docs/provider-seller-disclosure.md（販売者情報）/
+        docs/api-contract.md（正確な集合場所は予約前に出さない）
+  実データ: 題名・本文・料金（大人 ¥30,000／子ども ¥12,000）・開催日（土日 18:00、残席8）・写真・1人目の紹介は 2026-11-26 の本番ページと公開APIから
+-->
+<html lang="ja" data-lang="ja" data-view="pc" data-cta="leaf" data-reviews="on" data-place="pin" data-host="team">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>体験詳細ページ リファイン案 v2</title>
+<style>
+@font-face{font-family:"Nunito";src:url(../home-list-neighborhoods-v1/assets/fonts/nunito-latin-wght-normal.woff2) format("woff2");font-weight:200 1000;font-display:swap}
+@font-face{font-family:"Fraunces";src:url(../home-list-neighborhoods-v1/assets/fonts/fraunces-latin-wght-normal.woff2) format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"Caveat";src:url(../home-list-neighborhoods-v1/assets/fonts/caveat-latin-wght-normal.woff2) format("woff2");font-weight:400 700;font-display:swap}
+:root{
+  --bg:#fff;--sand:#f5f5f2;--ink:#1c1c1a;--ink2:#4b4b47;--muted:#6c6c67;--line:#e8e8e4;--line2:#d4d4cf;
+  --moss:#355e1f;--leaf:#b2d67c;--leaf-h:#a3c86b;--leaf-pale:#eef5e3;--r:22px;
+  --sans:"Nunito","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;display:flex;flex-direction:column;height:100dvh;background:#e6e5df;color:var(--ink);font:15px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0}
+a{color:inherit;text-decoration:none}
+img{display:block;max-width:100%}
+h1,h2,h3,p,ul,ol,figure,blockquote{margin:0}
+ul,ol{padding:0;list-style:none}
+
+/* ---- mock chrome (owner-facing, not part of the design) ---- */
+.mockbar{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;padding:7px 14px;background:var(--ink);color:rgba(255,255,255,.8);font-size:12.5px}
+.mockbar>b{color:#fff;font-weight:800;margin-right:4px}
+.seg{display:flex;align-items:center;gap:3px}
+.seg>span{margin-right:3px;white-space:nowrap}
+.seg button{padding:3px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.28);white-space:nowrap;color:rgba(255,255,255,.86)}
+.seg button[aria-pressed=true]{background:var(--leaf);border-color:var(--leaf);color:var(--ink);font-weight:800}
+.stage{flex:1;min-height:0;display:flex;justify-content:center;padding:10px}
+.frame{display:flex;flex-direction:column;width:min(100%,1440px);height:100%;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 14px rgba(0,0,0,.14)}
+html[data-view=sp] .frame{width:390px;max-height:860px;margin-block:auto;border:9px solid var(--ink);border-radius:36px}
+.urlbar{flex:none;display:flex;align-items:center;gap:7px;padding:7px 14px;background:#f1f0ec;border-bottom:1px solid var(--line2);font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden}
+.urlbar svg{width:13px;height:13px;flex:none}
+.urlbar b{color:var(--ink);font-weight:800;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:760px){
+  .stage{padding:0}
+  .frame,html[data-view=sp] .frame{width:100%;max-height:none;margin:0;border:0;border-radius:0}
+  .seg[data-key=view]{display:none}
+  .mockbar{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding:6px 12px}
+  .mockbar>b{display:none}
+}
+
+/* ---- page ---- */
+.vp{flex:1;min-height:0;position:relative;overflow:hidden;container:page/size;font:16px/1.75 var(--sans);background:var(--bg)}
+html[data-lang=en] .vp{line-height:1.65}
+.scroll{height:100%;overflow-y:auto;overscroll-behavior:contain}
+.vp :focus-visible{outline:3px solid var(--moss);outline-offset:3px;border-radius:6px}
+.wrap{max-width:1200px;margin-inline:auto;padding-inline:20px}
+.ico{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.hand{font-family:"Caveat",cursive;font-weight:600;color:var(--moss);font-size:23px;line-height:1}
+.vp h1,.vp h2,.vp h3{font-weight:600;line-height:1.3;letter-spacing:.01em;text-wrap:balance;word-break:auto-phrase;line-break:strict}
+html[data-lang=en] .vp h1,html[data-lang=en] .vp h2{font-family:"Fraunces",Georgia,serif;font-weight:400;letter-spacing:-.012em;line-height:1.15}
+html[data-lang=ja] .en-only,html[data-lang=en] .ja-only{display:none!important}
+html[data-reviews=off] .rv-only{display:none!important}
+html[data-place=pin] .area-only,html[data-place=area] .pin-only{display:none!important}
+html:not([data-host=team]) .host-team,html:not([data-host=person]) .host-person,html:not([data-host=org]) .host-org{display:none!important}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 24px;border-radius:999px;font-weight:800;font-size:16px;white-space:nowrap;background:var(--leaf);color:var(--ink);transition:background .15s}
+.btn:hover{background:var(--leaf-h)}
+html[data-cta=ink] .btn{background:var(--ink);color:#fff}
+html[data-cta=ink] .btn:hover{background:#3a3a36}
+.btn[aria-disabled=true]{background:var(--sand);color:var(--muted);cursor:default}
+.btn.block{width:100%}
+.tlink{color:var(--moss);font-weight:700;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:4px}
+.tlink:hover{color:var(--ink)}
+
+/* header */
+.hd{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.95);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.hd .wrap{display:flex;align-items:center;gap:8px;height:58px}
+.logo{display:flex;align-items:center;gap:8px;font-family:"Fraunces",serif;font-size:19px;font-weight:650;letter-spacing:-.01em}
+.logo img{width:28px;height:28px}
+.logo span{font-weight:400;color:var(--ink2)}
+.hd nav{margin-left:auto;display:flex;align-items:center;gap:2px}
+.hd nav a{display:none;padding:7px 11px;border-radius:999px;font-weight:700;font-size:14.5px;white-space:nowrap}
+.hd nav a:hover{background:var(--sand)}
+.hd nav a.find{display:inline-flex;align-items:center;gap:5px}
+.hd nav a.find .ico{width:18px;height:18px}
+.hd .lang{border:1px solid var(--line2);border-radius:999px;padding:5px 11px;font-size:12.5px;font-weight:800;margin-left:4px}
+.hd .menu{width:38px;height:38px;display:grid;place-items:center;border-radius:50%}
+
+/* gallery: one markup, carousel on phone / mosaic on desktop */
+.galwrap{padding-inline:0!important}
+.galbox{position:relative}
+.gal{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;aspect-ratio:4/3;scrollbar-width:none;background:var(--sand)}
+.gal::-webkit-scrollbar{display:none}
+.gal img{flex:0 0 100%;width:100%;height:100%;object-fit:cover;scroll-snap-align:start;cursor:pointer}
+.gal-count{position:absolute;right:12px;bottom:12px;padding:3px 11px;border-radius:999px;background:rgba(28,28,26,.72);color:#fff;font-size:12.5px;font-weight:800}
+.gal-all{display:none}
+.crumb{display:none}
+
+/* title block */
+.main{padding-top:20px;padding-bottom:36px}
+.title h1{font-size:27px;margin-top:6px}
+html[data-lang=en] .title h1{font-size:31px}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 20px;margin-top:12px;font-size:14.5px;color:var(--ink2)}
+.meta li{display:inline-flex;align-items:center}
+.meta a{display:inline-flex;align-items:center;gap:6px;font-weight:700;color:var(--ink);text-decoration:underline;text-decoration-color:var(--line2);text-underline-offset:4px}
+.meta a:hover{text-decoration-color:var(--ink)}
+.meta .ico{width:17px;height:17px}
+.meta .av{width:24px;height:24px;border-radius:50%;object-fit:cover;object-position:50% 22%}
+.ini{display:grid;place-items:center;background:var(--leaf-pale);color:var(--moss);font-weight:800;flex:none}
+.faces{display:inline-flex;align-items:center}
+.faces .av{box-shadow:0 0 0 2px #fff}
+.faces .av+.av{margin-left:-7px}
+.meta .ini{width:24px;height:24px;border-radius:50%;font-size:11px}
+.meta .av.sq{border-radius:7px;object-position:50% 50%}
+.star{width:15px;height:15px;fill:var(--ink);flex:none}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:14px 12px;margin-top:20px;padding:18px 0;border-block:1px solid var(--line)}
+.facts li{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;line-height:1.35}
+.facts .ico{width:26px;height:26px;color:var(--moss);stroke-width:1.5}
+
+/* sections */
+.sec{padding-block:30px;border-bottom:1px solid var(--line);scroll-margin-top:72px}
+.sec:last-of-type{border-bottom:0}
+.sec>h2{font-size:21px;margin-bottom:14px}
+html[data-lang=en] .sec>h2{font-size:25px}
+.lead{font-size:17px;line-height:1.8}
+html[data-lang=en] .lead{font-size:18px;line-height:1.6}
+.checks{margin-top:16px;display:grid;gap:10px}
+.checks li{display:flex;gap:11px;align-items:flex-start;font-weight:600}
+.checks .ico{color:var(--moss);margin-top:3px;stroke-width:2.2}
+.prose p+p{margin-top:14px}
+.prose{color:var(--ink2)}
+
+.host{display:grid;grid-template-columns:64px 1fr;gap:14px 16px;padding:20px;background:var(--sand);border-radius:var(--r)}
+.host>img{width:64px;height:64px;border-radius:50%;object-fit:cover;object-position:50% 20%}
+.host h3{font-size:18px}
+.host .role{font-size:13.5px;color:var(--muted);font-weight:600;line-height:1.4;margin-top:2px}
+.host .body{grid-column:1/-1}
+.host blockquote{font-weight:700;font-size:16.5px;line-height:1.6}
+.host .bio{margin-top:8px;color:var(--ink2);font-size:15.5px;line-height:1.8;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:12;overflow:hidden}
+.host .bio.open{display:block}
+.more{margin-top:6px;font-size:14px;font-weight:800;text-decoration:underline;text-underline-offset:4px}
+/* 会いにいく人: 団体が主語、人が顔。丸＝人、角丸の四角＝場所・団体 */
+.hostbox{padding:20px;background:var(--sand);border-radius:var(--r)}
+.org{display:flex;gap:14px;align-items:center}
+.org-img{width:56px;height:56px;border-radius:14px;object-fit:cover;flex:none}
+.org h3{font-size:18px;font-family:var(--sans)!important;font-weight:800!important;letter-spacing:0!important}
+.org .role{font-size:14px;color:var(--ink2);font-weight:600;line-height:1.5;margin-top:2px}
+.orgbio{margin-top:16px;color:var(--ink2);font-size:15.5px;line-height:1.8}
+.members{margin-top:18px;padding-top:18px;border-top:1px solid var(--line2);display:grid;gap:16px}
+.members li{display:flex;gap:12px;align-items:flex-start}
+.members li>img,.members li>.ini{width:48px;height:48px;border-radius:50%;object-fit:cover;object-position:50% 20%;flex:none;font-size:17px}
+.members .who{line-height:1.45}
+.members .who b{font-weight:800;margin-right:8px}
+.members .who span{font-size:13px;color:var(--muted);font-weight:600}
+.members .q{margin-top:2px;font-size:15px;color:var(--ink2);line-height:1.6}
+.hostbox .note{margin-top:16px}
+.ask{padding-block:22px;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;font-size:15px;color:var(--ink2)}
+.note{margin-top:12px;font-size:13.5px;color:var(--muted)}
+
+.incl{display:grid;gap:22px}
+.incl h3{font-size:15px;font-weight:800;margin-bottom:8px}
+.incl li{display:flex;gap:10px;align-items:flex-start;padding:3px 0;color:var(--ink2)}
+.incl .ico{width:18px;height:18px;margin-top:5px;color:var(--moss);stroke-width:2.2}
+.incl .no .ico{color:var(--muted)}
+
+.mapbox{position:relative;border-radius:var(--r);overflow:hidden;border:1px solid var(--line);background:#f3f1ea}
+.mapbox svg.map{display:block;width:100%;height:auto;aspect-ratio:3/2}
+.mapbox .open{position:absolute;left:12px;top:12px;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 14px;border-radius:999px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.18);font-size:13.5px;font-weight:800}
+.mapbox .open .ico{width:15px;height:15px}
+.map text{font-family:var(--sans);font-size:12px;font-weight:700;fill:#6c6c67}
+.access{margin-top:16px;display:grid;gap:10px}
+.access li{display:flex;gap:11px;align-items:flex-start}
+.access .ico{color:var(--moss);margin-top:3px}
+.access .sub{color:var(--muted);font-size:14.5px}
+
+.rv-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 16px;margin-bottom:14px}
+.rv-head h2{font-size:21px}
+html[data-lang=en] .rv-head h2{font-size:25px}
+.rv-sum{display:inline-flex;align-items:center;gap:6px;font-weight:800}
+.rv-sum span{font-weight:600;color:var(--muted)}
+.rv-list{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;margin-inline:-20px;padding-inline:20px;scrollbar-width:none}
+.rv-list::-webkit-scrollbar{display:none}
+.rv-card{flex:0 0 86%;scroll-snap-align:center;border:1px solid var(--line);border-radius:18px;padding:16px 18px}
+.rv-card header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.rv-av{width:38px;height:38px;border-radius:50%;background:var(--leaf-pale);color:var(--moss);display:grid;place-items:center;font-weight:800}
+.rv-card b{display:block;line-height:1.3}
+.rv-card small{color:var(--muted);font-size:12.5px;white-space:nowrap}
+.rv-stars{margin-left:auto;display:flex;gap:1px}
+.rv-stars .star{width:12px;height:12px}
+.rv-card p{font-size:15px;color:var(--ink2);line-height:1.7}
+.rv-all{display:inline-block;margin-top:16px}
+
+.know{background:var(--sand);border-radius:var(--r);padding:20px}
+.know ul.key{display:grid;gap:12px}
+.know ul.key li{display:flex;gap:11px;align-items:flex-start;font-weight:700;line-height:1.55}
+.know ul.key .ico{margin-top:2px;color:var(--moss)}
+.know ul.key .warn .ico{color:#9a5b12}
+.know ul.rest{margin-top:14px;padding-top:14px;border-top:1px solid var(--line2);display:grid;gap:9px;color:var(--ink2);font-size:15px}
+.know ul.rest li{padding-left:16px;position:relative}
+.know ul.rest li::before{content:"";position:absolute;left:3px;top:.8em;width:4px;height:4px;border-radius:50%;background:var(--muted)}
+.know .more{margin-top:16px}
+
+.seller{padding-top:4px;font-size:12.5px;color:var(--muted)}
+.seller a{text-decoration:underline;text-underline-offset:3px}
+
+/* booking card */
+.aside{display:none}
+.bcard{border:1px solid var(--line);border-radius:var(--r);padding:22px;box-shadow:0 6px 24px rgba(28,28,26,.07);background:#fff}
+.price{display:flex;align-items:baseline;gap:6px}
+.price b{font-size:27px;font-weight:800;letter-spacing:-.01em}
+.price span{color:var(--ink2);font-size:14.5px;font-weight:600}
+.price .rate{margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:14px;font-weight:800;align-self:center}
+.fields{display:grid;grid-template-columns:1.25fr 1fr;margin-top:16px;border:1px solid var(--line2);border-radius:14px;overflow:hidden}
+.field{display:block;text-align:left;padding:9px 14px 10px;min-height:58px}
+.field+.field{border-left:1px solid var(--line2)}
+.field:hover{background:var(--sand)}
+.field small{display:block;font-size:11.5px;font-weight:800;color:var(--muted)}
+.field span{display:block;font-weight:700;font-size:15px;line-height:1.4}
+.field span.ph{color:var(--muted);font-weight:600}
+.nexts{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;font-size:13px;color:var(--muted);font-weight:700}
+.chip{padding:5px 11px;border-radius:999px;background:var(--leaf-pale);color:var(--ink);font-weight:700;font-size:13px}
+.chip:hover{background:#e2eed0}
+.chip[aria-pressed=true]{background:var(--ink);color:#fff}
+.sum{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);font-size:14.5px}
+.sum div{display:flex;justify-content:space-between;gap:12px;color:var(--ink2)}
+.sum .tot{margin-top:8px;font-weight:800;color:var(--ink);font-size:16.5px}
+.bcard .btn{margin-top:16px}
+.assure{margin-top:14px;display:grid;gap:5px;font-size:13.5px;color:var(--ink2)}
+.assure li{display:flex;gap:8px;align-items:flex-start}
+.assure .ico{width:16px;height:16px;margin-top:3px;color:var(--moss);stroke-width:2.2}
+.bcard .tlink{display:inline-block;margin-top:14px;font-size:13.5px}
+
+/* others + footer */
+.others{padding-block:36px;border-top:1px solid var(--line)}
+.others>.wrap>h2{font-size:23px;margin-bottom:18px}
+html[data-lang=en] .others>.wrap>h2{font-size:28px}
+.cards{display:flex;gap:14px;overflow-x:auto;margin-inline:-20px;padding-inline:20px;scrollbar-width:none}
+.cards::-webkit-scrollbar{display:none}
+.card{flex:0 0 250px}
+.card figure{position:relative;border-radius:var(--r);overflow:hidden;aspect-ratio:4/3;background:var(--sand)}
+.card figure img{width:100%;height:100%;object-fit:cover}
+.card .badge{position:absolute;left:10px;top:10px;padding:3px 10px;border-radius:999px;background:#fff;font-size:12px;font-weight:800}
+.card .by{margin-top:10px;font-size:13px;font-weight:700;color:var(--moss)}
+.card h3{font-size:16.5px;margin-top:2px;line-height:1.4}
+html[data-lang=en] .card h3{font-family:"Fraunces",serif;font-weight:400;font-size:19px;line-height:1.2}
+.card .m{font-size:13px;color:var(--muted);margin-top:4px}
+.card .p{font-weight:800;margin-top:4px;font-size:15px}
+.ft{background:var(--sand);padding:28px 0 110px;font-size:13.5px;color:var(--ink2)}
+.ft .wrap{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center}
+.ft .logo{font-size:17px;margin-right:auto}
+.ft a:hover{text-decoration:underline}
+
+/* phone booking bar */
+.mbar{position:absolute;left:0;right:0;bottom:0;z-index:30;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px 12px;background:#fff;border-top:1px solid var(--line);box-shadow:0 -4px 16px rgba(28,28,26,.06)}
+.mbar b{display:block;font-size:17px;font-weight:800;line-height:1.3}
+.mbar b span{font-size:12.5px;font-weight:600;color:var(--ink2)}
+.mbar small{display:block;font-size:12.5px;color:var(--muted);font-weight:700}
+.mbar .btn{min-height:46px;padding:0 20px;font-size:15.5px}
+
+/* date & guests picker: sheet on phone / popover on desktop */
+.scrim{position:absolute;inset:0;z-index:40;background:rgba(28,28,26,.36)}
+.picker{position:absolute;z-index:50;left:0;right:0;bottom:0;max-height:94%;display:flex;flex-direction:column;background:#fff;border-radius:22px 22px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.2)}
+.pk-head{flex:none;display:flex;align-items:center;justify-content:space-between;padding:14px 12px 6px 20px}
+.pk-head h2{font-size:18px;font-family:var(--sans)!important;font-weight:800!important;letter-spacing:0!important}
+.xbtn{width:40px;height:40px;border-radius:50%;display:grid;place-items:center}
+.xbtn:hover{background:var(--sand)}
+.pk-body{flex:1;min-height:0;overflow-y:auto;padding:4px 20px 16px}
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:2px}
+.cal-head b{font-weight:800}
+.cal-head button{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--line2)}
+.cal-head button:disabled{opacity:.3;cursor:default}
+.cal-head .ico{width:18px;height:18px}
+.dow,.days{display:grid;grid-template-columns:repeat(7,1fr);text-align:center}
+.dow span{font-size:12px;font-weight:800;color:var(--muted);padding:4px 0}
+.days>*{width:40px;height:40px;justify-self:center;display:grid;place-items:center;font-size:15px;color:#b9b9b3;border-radius:50%;margin:1px 0}
+.days button.ok{background:var(--leaf-pale);color:var(--ink);font-weight:800}
+.days button.ok:hover{background:#dcebc6}
+.days button.ok[aria-pressed=true]{background:var(--ink);color:#fff}
+.days .closed{text-decoration:line-through}
+.legend{display:flex;gap:16px;margin-top:8px;font-size:12.5px;color:var(--muted);font-weight:600}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--leaf-pale);border:1px solid #cfe2b4;margin-right:6px;vertical-align:-1px}
+.pk-side{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+.slot{padding:12px 14px;border-radius:14px;background:var(--sand)}
+.slot .hint{color:var(--muted);font-size:14.5px}
+.slot b{display:block;font-weight:800}
+.slot .t{display:flex;justify-content:space-between;gap:10px;margin-top:2px;font-weight:700}
+.slot .t span{color:var(--moss)}
+.slot small{display:block;margin-top:4px;color:var(--muted);font-size:12.5px;font-weight:600}
+.steps{margin-top:14px;display:grid;gap:12px}
+.steps>div{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.steps b{display:block;font-weight:800;line-height:1.3}
+.steps small{color:var(--muted);font-size:13px;font-weight:600}
+.stepper{display:flex;align-items:center;gap:6px}
+.stepper button{width:38px;height:38px;border-radius:50%;border:1px solid var(--line2);display:grid;place-items:center}
+.stepper button:disabled{opacity:.3;cursor:default}
+.stepper .ico{width:16px;height:16px;stroke-width:2.2}
+.stepper output{min-width:26px;text-align:center;font-weight:800;font-size:16.5px}
+.pk-foot{flex:none;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 20px 16px;border-top:1px solid var(--line)}
+.pk-foot small{display:block;font-size:12px;color:var(--muted);font-weight:700}
+.pk-foot b{font-size:20px;font-weight:800}
+.pk-foot .btn{min-width:150px}
+
+/* lightbox */
+.lb{position:absolute;inset:0;z-index:60;background:#fff;overflow-y:auto}
+.lb header{position:sticky;top:0;display:flex;align-items:center;justify-content:space-between;padding:10px 12px 10px 20px;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line)}
+.lb header h2{font-size:17px;font-family:var(--sans)!important;font-weight:800!important}
+.lb .grid{max-width:1000px;margin:0 auto;padding:16px;display:grid;gap:10px}
+.lb img{width:100%;border-radius:14px}
+
+/* booking page */
+.bk{max-width:660px;margin-inline:auto;padding:18px 20px 60px}
+.back{display:inline-flex;align-items:center;gap:4px;font-weight:800;font-size:14.5px}
+.back .ico{width:18px;height:18px}
+.bk h1{font-size:25px;margin:14px 0 16px}
+html[data-lang=en] .bk h1{font-size:31px}
+.bsum{display:grid;grid-template-columns:84px 1fr auto;gap:14px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:18px}
+.bsum img{width:84px;height:84px;border-radius:12px;object-fit:cover}
+.bsum b{display:block;font-weight:800;line-height:1.4;font-size:15px}
+.bsum span{display:block;font-size:14px;color:var(--ink2);font-weight:600;line-height:1.5}
+.bsum .tlink{font-size:14px}
+.form{margin-top:22px;display:grid;gap:16px}
+.form label{display:block;font-weight:800;font-size:14.5px}
+.form label span{font-weight:600;color:var(--muted)}
+.form input,.form textarea{display:block;width:100%;margin-top:6px;padding:11px 14px;border:1px solid var(--line2);border-radius:12px;font:inherit;font-size:16px;background:#fff}
+.form textarea{min-height:84px;resize:vertical}
+.btot{margin-top:22px;padding:16px 18px;border-radius:18px;background:var(--sand);font-size:15px}
+.btot div{display:flex;justify-content:space-between;gap:12px;color:var(--ink2)}
+.btot .tot{margin-top:8px;padding-top:10px;border-top:1px solid var(--line2);font-weight:800;font-size:18px;color:var(--ink)}
+.btot .free{margin-top:10px;display:flex;justify-content:flex-start;gap:8px;align-items:center;font-size:13.5px;font-weight:700;color:var(--moss)}
+.btot .free .ico{width:16px;height:16px;stroke-width:2.2}
+.consent{display:flex;gap:10px;align-items:flex-start;margin-top:18px;font-size:13.5px;color:var(--ink2);line-height:1.65}
+.consent input{width:20px;height:20px;margin:2px 0 0;accent-color:var(--moss);flex:none}
+.consent a{text-decoration:underline;text-underline-offset:3px;color:var(--ink)}
+.bk .btn{margin-top:18px}
+.pay{margin-top:10px;text-align:center;font-size:12.5px;color:var(--muted)}
+
+/* ---- desktop (page container ≥ 960px) ---- */
+@container page (min-width:700px){
+  .wrap{padding-inline:28px}
+  .gal{aspect-ratio:16/9}
+  .facts{grid-template-columns:repeat(4,auto);justify-content:start;gap:12px 34px}
+  .incl{grid-template-columns:1fr 1fr}
+  .mapbox svg.map{aspect-ratio:680/300}
+  .rv-card{flex-basis:46%}
+  .picker{left:50%;right:auto;bottom:50%;transform:translate(-50%,50%);width:440px;border-radius:22px}
+}
+@container page (min-width:960px){
+  .wrap{padding-inline:40px}
+  .hd .wrap{height:64px}
+  .logo{font-size:20px}
+  .hd nav a{display:inline-flex}
+  .hd nav a.find,.hd .menu{display:none}
+  .crumb{display:flex;gap:7px;align-items:center;padding:12px 0 10px;font-size:13.5px;color:var(--muted);font-weight:700}
+  .crumb a:hover{color:var(--ink);text-decoration:underline}
+  .galwrap{padding-inline:40px!important}
+  .gal{display:grid;grid-template-columns:2fr 1fr 1fr;grid-template-rows:1fr 1fr;gap:6px;aspect-ratio:auto;height:clamp(300px,50cqh,470px);overflow:hidden;border-radius:var(--r)}
+  .gal img{width:100%;height:100%;min-height:0}
+  .gal img:first-child{grid-row:1/3}
+  .gal img:nth-child(n+6){display:none}
+  .gal-count{display:none}
+  .gal-all{display:inline-flex;align-items:center;gap:7px;position:absolute;right:14px;bottom:14px;min-height:38px;padding:0 15px;border-radius:999px;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.2);font-size:13.5px;font-weight:800}
+  .gal-all .ico{width:16px;height:16px}
+  .cols{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:72px;align-items:start}
+  .main{padding-top:28px;padding-bottom:56px}
+  .title h1{font-size:38px;margin-top:8px}
+  html[data-lang=en] .title h1{font-size:46px}
+  .meta{font-size:15px;margin-top:14px}
+  .sec{padding-block:38px;scroll-margin-top:84px}
+  .sec>h2,.rv-head h2{font-size:24px}
+  html[data-lang=en] .sec>h2,html[data-lang=en] .rv-head h2{font-size:28px}
+  .host{grid-template-columns:84px 1fr;padding:24px;gap:6px 20px}
+  .host>img{width:84px;height:84px;grid-row:1/3}
+  .host .body{grid-column:2}
+  .rv-list{display:grid;grid-template-columns:1fr 1fr;overflow:visible;margin:0;padding:0}
+  .rv-card:nth-child(n+3){display:none}
+  .know{padding:26px}
+  .hostbox{padding:26px}
+  .aside{display:block;position:sticky;top:88px}
+  .mbar{display:none}
+  .others{padding-block:56px}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;overflow:visible;margin:0;padding:0}
+  .ft{padding-bottom:36px}
+  .picker{transform:none;left:auto;bottom:auto;width:700px;max-height:none}
+  .pk-body{display:grid;grid-template-columns:1fr 1fr;gap:26px;padding-bottom:20px;overflow:visible}
+  .pk-side{margin-top:0;padding-top:0;border-top:0}
+  .lb .grid{grid-template-columns:1fr 1fr}
+  .lb .grid img:first-child{grid-column:1/-1}
+  .bk{padding-top:28px}
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.2V12l3.2 2"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4.2 6.6c0-1.2 1-2.2 2.2-2.2h11.2c1.2 0 2.2 1 2.2 2.2v7.2c0 1.2-1 2.2-2.2 2.2h-5.5l-4.3 3.4v-3.4H6.4c-1.2 0-2.2-1-2.2-2.2z"/><path d="M8.3 9h7.4M8.3 12h4.6"/></symbol>
+    <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8.4" r="3.1"/><path d="M3.3 19.2c.5-3.2 2.8-5.2 5.7-5.2s5.2 2 5.7 5.2"/><circle cx="17" cy="9.4" r="2.4"/><path d="M16.4 14.2c2.3.1 3.9 1.8 4.3 4.3"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.8" y="5.4" width="16.4" height="14.6" rx="2.6"/><path d="M3.8 10h16.4M8.2 3.4v3.6M15.8 3.4v3.6"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21c4.2-4.4 6.4-7.8 6.4-10.8A6.4 6.4 0 0 0 5.600 10.200C5.600 13.200 7.800 16.600 12 21z"/><circle cx="12" cy="10.200" r="2.300"/></symbol>
+    <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4.600" r="1.700"/><path d="M9.200 21l2.200-6.200-2-2.600 1.200-4.400 3.200 1.400 1.600 3 2.800 1M10.600 7.800L7.400 9.600l-.8 3M13.400 14.600l2 2.200.8 4.200"/></symbol>
+    <symbol id="i-train" viewBox="0 0 24 24"><rect x="5.600" y="3.600" width="12.800" height="13.200" rx="3"/><path d="M5.600 10.800h12.800M9 13.900h.01M15 13.900h.01M8.400 16.800L6.400 20.400M15.600 16.800l2 3.600"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3.600" y="5.400" width="16.800" height="13.200" rx="2.600"/><path d="M4.400 7.400l7.600 5.800 7.600-5.800"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M4.800 12.600l4.600 4.600L19.400 7"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.400 6.400l11.200 11.200M17.600 6.400L6.400 17.600"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.600"/><path d="M12 7.600v5.200M12 16.200h.01"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M14.600 5.600L8.200 12l6.400 6.400"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="M9.400 5.600l6.400 6.400-6.400 6.400"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.600" height="6.600" rx="1.400"/><rect x="13.400" y="4" width="6.600" height="6.600" rx="1.400"/><rect x="4" y="13.400" width="6.600" height="6.600" rx="1.400"/><rect x="13.400" y="13.400" width="6.600" height="6.600" rx="1.400"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24"><path d="M13.600 5.200h5.200v5.200M18.400 5.600l-7.600 7.600M10.400 6.800H7a2 2 0 0 0-2 2V17a2 2 0 0 0 2 2h8.200a2 2 0 0 0 2-2v-3.400"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5.400" y="10.600" width="13.200" height="9.400" rx="2.200"/><path d="M8.400 10.600V8a3.600 3.600 0 0 1 7.200 0v2.600"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4.600 7.400h14.800M4.600 12h14.800M4.600 16.600h14.800"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.800" cy="10.800" r="6.200"/><path d="M15.400 15.400l4.400 4.400"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2.800l2.800 5.900 6.400.8-4.700 4.400 1.200 6.400L12 17.200l-5.700 3.100 1.200-6.400L2.800 9.500l6.400-.8z"/></symbol>
+  </defs>
+</svg>
+
+<div class="mockbar">
+  <b>体験詳細ページ リファイン案 v2</b>
+  <div class="seg" data-key="view"><span>画面</span><button data-val="pc">PC</button><button data-val="sp">スマホ</button></div>
+  <div class="seg" data-key="lang"><span>言語</span><button data-val="ja">日本語</button><button data-val="en">English</button></div>
+  <div class="seg" data-key="cta"><span>予約ボタン</span><button data-val="leaf">緑</button><button data-val="ink">黒（現状のPC）</button></div>
+  <div class="seg" data-key="reviews"><span>レビュー</span><button data-val="on">あり（サンプル）</button><button data-val="off">なし</button></div>
+  <div class="seg" data-key="place"><span>集合場所</span><button data-val="pin">公開</button><button data-val="area">予約後に案内</button></div>
+  <div class="seg" data-key="host"><span>提供者</span><button data-val="team">団体＋人</button><button data-val="person">個人のホスト</button><button data-val="org">団体のみ</button></div>
+</div>
+
+<div class="stage">
+<div class="frame">
+  <div class="urlbar"><svg class="ico"><use href="#i-lock"/></svg><span>travel.niho.life</span><b id="path">/ja/experiences/community-dinner-with-locals</b></div>
+  <div class="vp" id="vp">
+    <div class="scroll" id="scroll">
+
+      <header class="hd">
+        <div class="wrap">
+          <a class="logo" href="#"><img src="https://travel.niho.life/icon.svg" alt=""><b>NIHO</b><span>Travel</span></a>
+          <nav class="ja-only">
+            <a class="find" href="#"><svg class="ico"><use href="#i-search"/></svg>さがす</a>
+            <a href="#">体験をさがす</a><a href="#">NIHOについて</a><a href="#">企業・学校</a><a href="#">ヘルプ</a>
+            <button class="lang" data-setlang="en">EN</button>
+            <button class="menu" aria-label="メニュー"><svg class="ico"><use href="#i-menu"/></svg></button>
+          </nav>
+          <nav class="en-only">
+            <a class="find" href="#"><svg class="ico"><use href="#i-search"/></svg>Find</a>
+            <a href="#">Experiences</a><a href="#">Journal</a><a href="#">About</a><a href="#">Help</a>
+            <button class="lang" data-setlang="ja">日本語</button>
+            <button class="menu" aria-label="Menu"><svg class="ico"><use href="#i-menu"/></svg></button>
+          </nav>
+        </div>
+      </header>
+
+      <!-- ============ detail ============ -->
+      <div id="screen-detail">
+        <div class="wrap gwrap">
+          <nav class="crumb" aria-label="breadcrumb"><a href="#" data-en="Experiences">体験</a><span>/</span><a href="#" data-en="Cook &amp; eat">つくる・食べる</a></nav>
+        </div>
+        <div class="wrap gwrap galwrap">
+          <div class="galbox">
+            <div class="gal" id="gal">
+              <img id="g1" src="https://travel.niho.life/api/public/experience-media/c3c1fd51-f1bf-4477-8868-eb6fa90ed290" alt="NIHO kamakuraで夕食と会話を楽しむ参加者。">
+              <img src="https://travel.niho.life/api/public/experience-media/ef4632ee-40e6-4cf5-9a1c-f9ffba371358" alt="一緒に作った料理の一例。献立は季節によって変わります。">
+              <img src="https://travel.niho.life/api/public/experience-media/ed552df1-80c2-4654-a9ce-3468c581fd6b" alt="シェアキッチンで季節の野菜を切り、和える様子。">
+              <img src="https://travel.niho.life/api/public/experience-media/02ec6083-3e2d-4154-ae07-da38f33ecf5d" alt="以前の集まりで作ったデザートの一例。">
+              <img src="https://travel.niho.life/api/public/experience-media/e26812d4-06f5-4c0b-9a35-0e7987bfb02f" alt="シェアキッチンで一緒に家庭料理を準備する様子。">
+              <img src="https://travel.niho.life/api/public/experience-media/18f41faa-e2b9-486e-8d98-e54412511d4a" alt="以前の交流会でギターを楽しむ参加者。">
+            </div>
+            <span class="gal-count" id="galCount">1 / 6</span>
+            <button class="gal-all" id="galAll"><svg class="ico"><use href="#i-grid"/></svg><span data-en="Show all 6 photos">写真をすべて見る（6）</span></button>
+          </div>
+        </div>
+
+        <div class="wrap main cols">
+          <div class="left">
+            <div class="title">
+              <p class="hand">cook &amp; eat</p>
+              <h1 data-en="Kamakura Community Dinner with Locals">鎌倉の住民と作って囲む<wbr>コミュニティディナー</h1>
+              <ul class="meta">
+                <li class="rv-only"><a href="#reviews" data-go><svg class="star"><use href="#i-star"/></svg><span>4.9</span><span data-en="(12)" style="font-weight:600;color:var(--muted)">（12件）</span></a></li>
+                <li><a href="#place" data-go><svg class="ico"><use href="#i-pin"/></svg><span class="pin-only" data-en="2 min walk from Kamakura Station">鎌倉駅 西口から徒歩2分</span><span class="area-only" data-en="Around Kamakura Station">鎌倉駅まわり</span></a></li>
+                <li><a href="#host" data-go><span class="faces host-team"><img class="av" data-from="hostImg" alt=""><span class="av ini">み</span><span class="av ini">け</span></span><img class="av host-person" data-from="hostImg" alt=""><img class="av sq host-org" data-from="g1" alt=""><span class="host-team" data-en="with the NIHO kamakura team">NIHO kamakura のみなさんと</span><span class="host-person" data-en="Hosted by Takuya">高浜拓也さんが案内</span><span class="host-org" data-en="by NIHO kamakura">NIHO kamakura が開催</span></a></li>
+              </ul>
+              <ul class="facts">
+                <li><svg class="ico"><use href="#i-clock"/></svg><span data-en="2 hours">2時間</span></li>
+                <li><svg class="ico"><use href="#i-chat"/></svg><span data-en="English &amp; Japanese">英語・日本語</span></li>
+                <li><svg class="ico"><use href="#i-people"/></svg><span data-en="1–8 guests">1〜8名</span></li>
+                <li><svg class="ico"><use href="#i-cal"/></svg><span data-en="Sat &amp; Sun · 6:00 PM">土・日 18:00</span></li>
+              </ul>
+            </div>
+
+            <section class="sec" id="overview">
+              <p class="lead" data-en="Cook a seasonal Japanese dinner with local residents, then share a relaxed meal and conversation at NIHO kamakura, a two-minute walk from Kamakura Station.">鎌倉駅から徒歩2分のNIHO kamakuraで、地域の住民と季節の家庭料理を作り、食卓を囲んで会話を楽しむ体験です。</p>
+              <ul class="checks">
+                <li><svg class="ico"><use href="#i-check"/></svg><span data-en="Cook seasonal Japanese dishes alongside local residents">地域の住民と季節の家庭料理を一緒に作る</span></li>
+                <li><svg class="ico"><use href="#i-check"/></svg><span data-en="Share dinner and conversation around one table">一つの食卓を囲む食事と文化交流</span></li>
+                <li><svg class="ico"><use href="#i-check"/></svg><span data-en="A small group of up to eight guests, close to Kamakura Station">鎌倉駅近くで最大8名の少人数体験</span></li>
+              </ul>
+            </section>
+
+            <section class="sec" id="what">
+              <h2 data-en="What you’ll do">体験内容</h2>
+              <div class="prose">
+                <p data-en="Spend an evening cooking and eating together in a shared kitchen in Kamakura. After a welcome drink and introductions, prepare four or five seasonal, home-style Japanese dishes with your hosts. No cooking experience is needed. Then sit down at one table to share the meal and talk about everyday life and culture in Kamakura.">ウェルカムドリンクと自己紹介のあと、ホストと一緒に旬の食材を使う家庭料理を4〜5品作ります。料理の経験は必要ありません。できあがった料理を一つのテーブルで囲み、鎌倉の日常や文化について話しましょう。</p>
+                <p data-en="The menu changes with the seasons. English fluency varies among community members.">献立は季節に応じて変わります。英語力には個人差があります。</p>
+              </div>
+            </section>
+
+            <section class="sec" id="included">
+              <h2 data-en="What’s included">料金に含まれるもの</h2>
+              <div class="incl">
+                <div>
+                  <h3 data-en="Included">含まれるもの</h3>
+                  <ul>
+                    <li><svg class="ico"><use href="#i-check"/></svg><span data-en="A welcome non-alcoholic drink">ウェルカムドリンク（ノンアルコール）</span></li>
+                    <li><svg class="ico"><use href="#i-check"/></svg><span data-en="Ingredients and hands-on cooking with your hosts">食材とホストとの料理体験</span></li>
+                    <li><svg class="ico"><use href="#i-check"/></svg><span data-en="Dinner with four or five seasonal dishes">季節の料理4〜5品の夕食</span></li>
+                    <li><svg class="ico"><use href="#i-check"/></svg><span data-en="Conversation and cultural exchange">会話と文化交流</span></li>
+                  </ul>
+                </div>
+                <div class="no">
+                  <h3 data-en="Not included">含まれないもの</h3>
+                  <ul>
+                    <li><svg class="ico"><use href="#i-x"/></svg><span data-en="Transportation to and from NIHO">会場までの往復交通費</span></li>
+                    <li><svg class="ico"><use href="#i-x"/></svg><span data-en="Additional drinks">追加の飲み物</span></li>
+                  </ul>
+                </div>
+              </div>
+            </section>
+
+            <section class="sec" id="host">
+              <h2 data-en="Your host">ホスト</h2>
+
+              <!-- 団体＋人: 屋号が主語。紹介文（200字ほど）と、会える人の顔 -->
+              <div class="hostbox host-team">
+                <div class="org"><img class="org-img" data-from="g1" alt=""><div><h3>NIHO kamakura</h3><p class="role" data-en="Around Kamakura Station">鎌倉駅まわり</p></div></div>
+                <p class="orgbio" data-en="NIHO kamakura is “the town’s living room”, a two-minute walk from the west exit of Kamakura Station. Every weekend, travellers and people who live in Kamakura cook, eat and talk at the same table here. You’ll be welcomed by the staff who run the space and by neighbours who join in. No cooking experience is needed. Take home one place in Kamakura you can come back to.">NIHO kamakura は、鎌倉駅西口から歩いて2分の「街のリビング」です。旅で訪れた人と、鎌倉に暮らす人が、同じテーブルで料理をして、食べて、話す。そんな時間を毎週末にひらいています。迎えるのは、ここを運営するスタッフと、近所に住むメンバーたち。料理の経験は要りません。はじめての鎌倉に、また帰ってこられる場所をひとつ持ち帰ってください。</p>
+                <ul class="members">
+                  <li><img data-from="hostImg" alt="キッチンでフライパンを手に笑う高浜拓也さん"><div><p class="who"><b data-en="Takuya Takahama">高浜拓也</b><span data-en="Community manager">コミュニティマネージャー</span></p><p class="q" data-en="“I love a way of living where people are loosely connected.”">「人がゆるやかにつながる暮らしが好きです。」</p></div></li>
+                  <li><span class="ini">み</span><div><p class="who"><b data-en="Misaki">みさき</b><span data-en="Kitchen">キッチン担当</span></p><p class="q" data-en="“Come hungry. We’ll cook the rest together.”">「お腹をすかせて来てください。あとは一緒に作りましょう。」</p></div></li>
+                  <li><span class="ini">け</span><div><p class="who"><b data-en="Ken">けん</b><span data-en="Lives in Kamakura">鎌倉の住民</span></p><p class="q" data-en="“Ask me where locals really go at the weekend.”">「週末に地元の人が行く場所、聞いてください。」</p></div></li>
+                </ul>
+                <p class="note" data-en="Who hosts on the day may vary.">当日の担当は、日によって変わることがあります。</p>
+              </div>
+
+              <!-- 個人のホスト -->
+              <div class="host host-person">
+                <img id="hostImg" src="https://travel.niho.life/api/public/experience-provider-media/52d5d15f-1857-4239-8bd2-8e352c9699a3" alt="キッチンでフライパンを手に笑う高浜拓也さん">
+                <div>
+                  <h3 data-en="Takuya Takahama">高浜拓也</h3>
+                  <p class="role" data-en="Community manager, NIHO kamakura">NIHO kamakura コミュニティマネージャー</p>
+                </div>
+                <div class="body">
+                  <blockquote data-en="“I love a way of living where people are loosely connected.”">「人がゆるやかにつながる暮らしが好きです。」</blockquote>
+                  <p class="bio" id="bio" data-en="Born in Osaka. Living between Izu and Tokyo, and later in a multi-generational share house, I came to love ways of living where people are loosely connected. At NIHO kamakura, a shared living room by the west exit of Kamakura Station, I make time to spend with people of the town, like this community dinner. I like travelling and hiking.">大阪生まれ。伊豆と東京の二拠点で暮らしたり、多世代シェアハウスで暮らしたりする中で、人がゆるやかにつながる暮らしが好きになりました。鎌倉駅西口のシェアリビングスペース NIHO kamakura で、コミュニティディナーなど、街の人と一緒に過ごす時間をつくっています。趣味は旅と登山。</p>
+                  <button class="more" id="bioMore" aria-expanded="false" data-en="Read more">続きを読む</button>
+                </div>
+              </div>
+
+              <!-- 団体のみ（人が紐づかないとき） -->
+              <div class="hostbox host-org">
+                <div class="org"><img class="org-img" data-from="g1" alt=""><div><h3>NIHO kamakura</h3><p class="role" data-en="Around Kamakura Station">鎌倉駅まわり</p></div></div>
+                <p class="orgbio" data-en="NIHO kamakura is “the town’s living room”, a two-minute walk from the west exit of Kamakura Station. Every weekend, travellers and people who live in Kamakura cook, eat and talk at the same table here. You’ll be welcomed by the staff who run the space and by neighbours who join in. No cooking experience is needed. Take home one place in Kamakura you can come back to.">NIHO kamakura は、鎌倉駅西口から歩いて2分の「街のリビング」です。旅で訪れた人と、鎌倉に暮らす人が、同じテーブルで料理をして、食べて、話す。そんな時間を毎週末にひらいています。迎えるのは、ここを運営するスタッフと、近所に住むメンバーたち。料理の経験は要りません。はじめての鎌倉に、また帰ってこられる場所をひとつ持ち帰ってください。</p>
+              </div>
+            </section>
+
+            <section class="sec" id="place">
+              <h2 data-en="Getting there">場所</h2>
+              <div class="mapbox">
+                <a class="open pin-only" href="#"><svg class="ico"><use href="#i-ext"/></svg><span data-en="Open in Google Maps">Google マップで開く</span></a>
+                <svg class="map" viewBox="0 0 680 300" preserveAspectRatio="xMidYMid slice" role="img" aria-label="鎌倉駅まわりの地図">
+                  <rect width="680" height="300" fill="#f3f1ea"/>
+                  <path d="M0 0h196c14 38-12 66-52 82S58 122 0 112z" fill="#e3ebd4"/>
+                  <path d="M486 0h194v104c-44 12-92-4-132-30S496 32 486 0z" fill="#e3ebd4"/>
+                  <path d="M0 264c92-24 204-32 332-23s250 30 348 8v51H0z" fill="#d5e7ed"/>
+                  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M456 0L408 258" stroke-width="13"/>
+                    <path d="M392 14l-24 112" stroke-width="6"/>
+                    <path d="M246 44l10 96 8 106" stroke-width="7"/>
+                    <path d="M0 152l250-12 78-2" stroke-width="7"/>
+                    <path d="M352 140l76 6 252 30" stroke-width="7"/>
+                    <path d="M112 0l34 148 22 108" stroke-width="5"/>
+                    <path d="M0 214l264-10 148 8 268 30" stroke-width="6"/>
+                    <path d="M566 100l-22 150" stroke-width="5"/>
+                    <path d="M196 84l54 6M256 190l-90 6" stroke-width="4"/>
+                  </g>
+                  <path id="jr" d="M296 0c10 58 18 98 32 138s52 104 104 162" fill="none" stroke="#8f8f88" stroke-width="5.500"/>
+                  <path d="M296 0c10 58 18 98 32 138s52 104 104 162" fill="none" stroke="#fff" stroke-width="2.600" stroke-dasharray="9 9"/>
+                  <path d="M322 152c-30 24-82 40-140 76S62 250 0 246" fill="none" stroke="#7da35c" stroke-width="3" stroke-dasharray="1 6" stroke-linecap="round"/>
+                  <g class="area-only">
+                    <circle cx="300" cy="146" r="70" fill="#b2d67c" fill-opacity=".34" stroke="#355e1f" stroke-width="1.800" stroke-dasharray="5 6"/>
+                  </g>
+                  <rect x="314" y="120" width="34" height="40" rx="7" fill="#1c1c1a" transform="rotate(-17 331 140)"/>
+                  <text x="358" y="136" style="fill:#1c1c1a;font-size:12.500px;font-weight:800"><tspan class="ja-only">鎌倉駅</tspan><tspan class="en-only">Kamakura Sta.</tspan></text>
+                  <text x="464" y="44"><tspan class="ja-only">鶴岡八幡宮 ↑</tspan><tspan class="en-only">Hachimangu ↑</tspan></text>
+                  <text x="424" y="196"><tspan class="ja-only">若宮大路</tspan><tspan class="en-only">Wakamiya Oji</tspan></text>
+                  <text x="60" y="238" style="fill:#5d8440"><tspan class="ja-only">江ノ電</tspan><tspan class="en-only">Enoden</tspan></text>
+                  <text x="300" y="286" style="fill:#5f8a99"><tspan class="ja-only">由比ヶ浜</tspan><tspan class="en-only">Yuigahama Beach</tspan></text>
+                  <text x="312" y="22"><tspan class="ja-only">↑ 東京・北鎌倉</tspan><tspan class="en-only">↑ Tokyo</tspan></text>
+                  <g class="pin-only">
+                    <path d="M314 138l-34-6" fill="none" stroke="#355e1f" stroke-width="2.600" stroke-dasharray="1 5.500" stroke-linecap="round"/>
+                    <path d="M268 136c10-11 15.500-19 15.500-26.500a15.500 15.500 0 1 0-31 0c0 7.500 5.500 15.500 15.500 26.500z" fill="#b2d67c" stroke="#1c1c1a" stroke-width="2"/>
+                    <circle cx="268" cy="109" r="5.200" fill="#1c1c1a"/>
+                    <rect x="150" y="96" width="96" height="26" rx="13" fill="#fff" stroke="#d4d4cf"/>
+                    <text x="198" y="113.500" text-anchor="middle" style="fill:#1c1c1a;font-size:12px;font-weight:800">NIHO kamakura</text>
+                  </g>
+                </svg>
+              </div>
+              <ul class="access">
+                <li class="pin-only"><svg class="ico"><use href="#i-walk"/></svg><span><b data-en="NIHO kamakura">NIHO kamakura</b><span data-en=" — a 2-minute walk from Kamakura Station West Exit">　鎌倉駅 西口から徒歩2分</span></span></li>
+                <li class="area-only"><svg class="ico"><use href="#i-walk"/></svg><span data-en="Within walking distance of Kamakura Station">鎌倉駅から歩ける範囲です</span></li>
+                <li><svg class="ico"><use href="#i-train"/></svg><span data-en="About 1 hour from Tokyo Station on the JR Yokosuka Line, no transfers">東京駅からJR横須賀線で約1時間（乗り換えなし）</span></li>
+                <li class="sub pin-only"><svg class="ico"><use href="#i-mail"/></svg><span data-en="We email the exact entrance and arrival instructions after you book.">建物の入り方は、予約の確定メールでお伝えします。</span></li>
+                <li class="sub area-only"><svg class="ico"><use href="#i-mail"/></svg><span data-en="The exact meeting point is shared after your booking is confirmed.">正確な集合場所は、予約が確定したあとにお伝えします。</span></li>
+              </ul>
+            </section>
+
+            <section class="sec rv-only" id="reviews">
+              <div class="rv-head">
+                <h2 data-en="What guests say">参加した人の声</h2>
+                <span class="rv-sum"><svg class="star"><use href="#i-star"/></svg>4.9 <span data-en="· 12 reviews">・12件</span></span>
+              </div>
+              <div class="rv-list">
+                <article class="rv-card">
+                  <header><span class="rv-av">E</span><div><b>Emma</b><small data-en="Netherlands · October 2026">オランダ・2026年10月</small></div><span class="rv-stars"><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg></span></header>
+                  <p>We cooked five dishes with people who actually live in Kamakura, then sat down at one long table. It felt like being invited to a friend’s home, not a class.</p>
+                </article>
+                <article class="rv-card">
+                  <header><span class="rv-av">美</span><div><b>美香</b><small data-en="Tokyo · October 2026">東京・2026年10月</small></div><span class="rv-stars"><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg></span></header>
+                  <p>旅行者の方と地元の方が自然に混ざって話せる食卓でした。料理が得意でなくても、みんなで手を動かすうちに打ち解けられます。駅から近いのも助かりました。</p>
+                </article>
+                <article class="rv-card">
+                  <header><span class="rv-av">L</span><div><b>Lucas</b><small data-en="France · September 2026">フランス・2026年9月</small></div><span class="rv-stars"><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg><svg class="star"><use href="#i-star"/></svg></span></header>
+                  <p>Easy to find from the station. Within minutes everyone was chopping and talking. The simmered pumpkin was one of the best things I ate in Japan.</p>
+                </article>
+              </div>
+              <a class="tlink rv-all" href="#" data-en="See all 12 reviews">12件すべて見る</a>
+            </section>
+
+            <section class="sec" id="know">
+              <h2 data-en="Know before you go">参加前にご確認ください</h2>
+              <div class="know">
+                <ul class="key">
+                  <li><svg class="ico"><use href="#i-check"/></svg><span data-en="Free cancellation until 24 hours before the start">開始24時間前までキャンセル無料</span></li>
+                  <li class="warn"><svg class="ico"><use href="#i-alert"/></svg><span data-en="We cannot accommodate food allergies">食物アレルギーには対応できません</span></li>
+                  <li class="warn"><svg class="ico"><use href="#i-alert"/></svg><span data-en="The venue is on the second floor, stairs only (no wheelchair access)">会場は2階で、階段のみです（車いす不可）</span></li>
+                  <li><svg class="ico"><use href="#i-clock"/></svg><span data-en="Book at least 48 hours before the start">受付は開始48時間前まで</span></li>
+                </ul>
+                <ul class="rest" id="knowRest" hidden>
+                  <li data-en="Your reservation is confirmed immediately after successful card payment.">カード決済の成立後、予約が即時に確定します。</li>
+                  <li data-en="Children aged 0–17 must be accompanied by an adult.">0〜17歳の子どもは大人の同伴が必要です。</li>
+                  <li data-en="The menu changes with ingredient availability. Specific hosts or community members cannot be guaranteed.">献立は食材の入荷状況により変わります。特定のホストや住民の参加は保証しません。</li>
+                  <li data-en="Smoking is not permitted.">喫煙はできません。</li>
+                  <li data-en="Ordinary rain does not affect this indoor experience. If severe weather makes hosting unsafe, we will offer rescheduling or a full refund.">通常の雨天は屋内で開催します。荒天などで安全な開催が難しい場合は、日程変更または全額返金をご案内します。</li>
+                  <li data-en="If train services are suspended, contact us before the start to discuss rescheduling or a full refund.">交通機関が運休した場合は、開始前にご連絡ください。日程変更または全額返金をご相談できます。</li>
+                  <li data-en="We can wait up to 15 minutes. Arriving more than 15 minutes late without notice is treated as a no-show and is not refundable.">お待ちできるのは15分までです。連絡のない15分超の遅刻は無断不参加として返金できません。</li>
+                </ul>
+                <button class="more" id="knowMore" aria-expanded="false" data-en="Show 7 more">ほかの注意事項を見る（7）</button>
+              </div>
+            </section>
+
+            <div class="ask">
+              <span data-en="Coming as a school, a company or a group? Talk to us before you book.">学校・会社・グループでの参加は、予約の前に相談できます。</span>
+              <a class="tlink" href="#" data-en="Get in touch">相談する</a>
+            </div>
+            <p class="seller"><span data-en="Sold by NIHO kamakura (Panasonic Holdings Corporation) · ">販売者：NIHO kamakura（Panasonic Holdings Corporation）・</span><a href="#" data-en="Seller information">特定商取引法に基づく表記</a></p>
+          </div>
+
+          <aside class="aside">
+            <div class="bcard" id="bcard">
+              <div class="price"><b>¥30,000</b><span data-en="/ adult">/ 大人1名</span><a class="rate rv-only" href="#reviews" data-go><svg class="star"><use href="#i-star"/></svg>4.9</a></div>
+              <div class="fields">
+                <button class="field" data-open><small data-en="Date">日にち</small><span id="fDate"></span></button>
+                <button class="field" data-open><small data-en="Guests">人数</small><span id="fGuests"></span></button>
+              </div>
+              <div class="nexts" id="chips"></div>
+              <div class="sum" id="cardSum" hidden></div>
+              <button class="btn block" id="cta"></button>
+              <ul class="assure">
+                <li><svg class="ico"><use href="#i-check"/></svg><span data-en="Free cancellation until 24 hours before the start">開始24時間前までキャンセル無料</span></li>
+                <li id="assureBy" hidden><svg class="ico"><use href="#i-clock"/></svg><span></span></li>
+              </ul>
+              <a class="tlink" href="#" data-en="Ask about other dates or a group">ほかの日・グループの相談</a>
+            </div>
+          </aside>
+        </div>
+
+        <section class="others">
+          <div class="wrap">
+            <h2 data-en="More experiences in Kamakura">ほかの体験</h2>
+            <div class="cards">
+              <a class="card" href="#"><figure><img src="https://travel.niho.life/api/public/experience-media/b80d8cae-f07b-484e-ba53-a3ae7256a252" alt=""><span class="badge" data-en="Up to 4 guests">最大4名</span></figure>
+                <p class="by" data-en="with Kamakura Hitohako">鎌倉ひとはこが案内</p><h3 data-en="Kamakura Home-Buying Area Tour with a Local Real Estate Office">地元の不動産会社と歩く、鎌倉の住まい探しエリアツアー</h3>
+                <p class="m" data-en="2 hr 30 min · Wed, Sat, Sun · 10:00 AM">2時間30分・水土日 10:00</p><p class="p" data-en="¥5,500 / adult">¥5,500 / 大人1名</p></a>
+              <a class="card" href="#"><figure><img src="https://travel.niho.life/api/public/experience-media/04b93a54-97a3-45c8-8083-368ad8ef271a" alt=""><span class="badge" data-en="Up to 6 guests">最大6名</span></figure>
+                <p class="by" data-en="with Shiryu">志龍さんと</p><h3 data-en="Write Your Own Kanji with a Kamakura Calligrapher">鎌倉の書家と、自分の漢字を書く</h3>
+                <p class="m" data-en="1 hr 30 min · Sat, Sun · 3:30 PM">1時間30分・土日 15:30</p><p class="p" data-en="¥6,600 / adult">¥6,600 / 大人1名</p></a>
+              <a class="card" href="#"><figure><img src="https://travel.niho.life/api/public/experience-media/8d74e758-ef2b-4e99-b2af-f53bb3594c93" alt=""><span class="badge" data-en="Private · 2–4 guests">貸切・2〜4名</span></figure>
+                <p class="by" data-en="with ZEN KARATE">ZEN KARATEが案内</p><h3 data-en="Zen and Karate at Engakuji Temple">円覚寺で禅と空手を体験</h3>
+                <p class="m" data-en="2 hr 30 min · Sat, Sun · 10:00 AM">2時間30分・土日 10:00</p><p class="p" data-en="¥62,000 / adult">¥62,000 / 大人1名</p></a>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ============ booking page ============ -->
+      <div id="screen-book" hidden>
+        <div class="bk">
+          <button class="back" id="backBtn"><svg class="ico"><use href="#i-left"/></svg><span data-en="Back to the experience">体験のページへ</span></button>
+          <h1 data-en="Review and pay">予約内容の確認</h1>
+          <div class="bsum">
+            <img data-from="g1" alt="">
+            <div><b data-en="Kamakura Community Dinner with Locals">鎌倉の住民と作って囲むコミュニティディナー</b><span id="bkWhen"></span><span id="bkWho"></span></div>
+            <button class="tlink" data-open data-en="Change">変更</button>
+          </div>
+          <div class="form">
+            <label><span style="font-weight:800;color:var(--ink)" data-en="Full name">お名前</span><input type="text" autocomplete="name"></label>
+            <label><span style="font-weight:800;color:var(--ink)" data-en="Email">メールアドレス</span><input type="email" autocomplete="email" inputmode="email"></label>
+            <label><span style="font-weight:800;color:var(--ink)" data-en="Note for your host">ホストに伝えておきたいこと</span> <span data-en="(optional)">（任意）</span><textarea></textarea></label>
+          </div>
+          <div class="btot" id="bkTot"></div>
+          <label class="consent"><input type="checkbox"><span class="ja-only">予約・キャンセル条件とプライバシーポリシー、および NIHO kamakura（Panasonic Holdings Corporation）の<a href="#">販売者情報</a>に同意します。</span><span class="en-only">I agree to the booking and cancellation terms, the privacy policy, and the <a href="#">seller information</a> for NIHO kamakura (Panasonic Holdings Corporation).</span></label>
+          <button class="btn block" data-en="Continue to secure checkout">安全な決済へ進む</button>
+          <p class="pay" data-en="You’ll enter your payment details on Stripe Checkout.">お支払い情報は Stripe Checkout で入力します。</p>
+        </div>
+      </div>
+
+      <footer class="ft">
+        <div class="wrap">
+          <a class="logo" href="#"><b>NIHO</b><span>Travel</span></a>
+          <a href="#" data-en="All experiences">すべての体験</a><a href="#" data-en="Booking help">予約のヘルプ</a><a href="#" data-en="About NIHO">NIHOについて</a><a href="#" data-en="Host an experience">体験を提供する</a><a href="#" data-en="Privacy">プライバシー</a>
+        </div>
+      </footer>
+    </div>
+
+    <!-- phone booking bar -->
+    <div class="mbar" id="mbar">
+      <div><b id="mbPrice"></b><small id="mbSub"></small></div>
+      <button class="btn" id="mbCta"></button>
+    </div>
+
+    <!-- date & guests picker -->
+    <div class="scrim" id="scrim" hidden></div>
+    <div class="picker" id="picker" role="dialog" aria-modal="true" aria-labelledby="pkTitle" hidden>
+      <div class="pk-head"><h2 id="pkTitle" data-en="Date &amp; guests">日にちと人数</h2><button class="xbtn" id="pkClose" aria-label="閉じる"><svg class="ico"><use href="#i-x"/></svg></button></div>
+      <div class="pk-body">
+        <div class="cal">
+          <div class="cal-head"><button id="calPrev" aria-label="前の月"><svg class="ico"><use href="#i-left"/></svg></button><b id="calTitle"></b><button id="calNext" aria-label="次の月"><svg class="ico"><use href="#i-right"/></svg></button></div>
+          <div class="dow" id="calDow"></div>
+          <div class="days" id="calDays"></div>
+          <div class="legend"><span><i></i><span data-en="Available">予約できる日</span></span></div>
+        </div>
+        <div class="pk-side">
+          <div class="slot" id="slot"></div>
+          <div class="steps">
+            <div><div><b data-en="Adults">大人</b><small>¥30,000</small></div>
+              <div class="stepper"><button data-step="adults:-1" aria-label="大人を減らす"><svg class="ico"><use href="#i-minus"/></svg></button><output id="nAdults">2</output><button data-step="adults:1" aria-label="大人を増やす"><svg class="ico"><use href="#i-plus"/></svg></button></div></div>
+            <div><div><b data-en="Children (0–17)">子ども（0〜17歳）</b><small>¥12,000</small></div>
+              <div class="stepper"><button data-step="children:-1" aria-label="子どもを減らす"><svg class="ico"><use href="#i-minus"/></svg></button><output id="nChildren">0</output><button data-step="children:1" aria-label="子どもを増やす"><svg class="ico"><use href="#i-plus"/></svg></button></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="pk-foot"><div><small data-en="Total (tax included)">合計（税込）</small><b id="pkTotal"></b></div><button class="btn" id="pkGo"></button></div>
+    </div>
+
+    <!-- all photos -->
+    <div class="lb" id="lb" hidden>
+      <header><h2 data-en="All photos">すべての写真</h2><button class="xbtn" id="lbClose" aria-label="閉じる"><svg class="ico"><use href="#i-x"/></svg></button></header>
+      <div class="grid" id="lbGrid"></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const root = document.documentElement, vp = $('#vp'), sc = $('#scroll');
+  const PRICE = { adults: 30000, children: 12000 }, SEATS = 8;
+  const st = { date: null, adults: 2, children: 0, month: new Date(2026, 10, 1), screen: 'detail' };
+  const pad = n => String(n).padStart(2, '0');
+  const key = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const toDate = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
+  const yen = n => '¥' + n.toLocaleString('en-US');
+
+  // 公開の空き枠API（2026-11-26）と同じ形: 土日 18:00、残席8。11/28 は受付終了。
+  const AV = {};
+  for (let d = new Date(2026, 10, 28); d <= new Date(2027, 1, 21); d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    if (d.getDay() === 0 || d.getDay() === 6) AV[key(d)] = { ok: key(d) !== '2026-11-28', seats: SEATS };
+  }
+  const NEXT = Object.keys(AV).filter(k => AV[k].ok).slice(0, 3);
+
+  const DJ = ['日', '月', '火', '水', '木', '金', '土'], DE = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const ME = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const MEL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const L = {
+    ja: {
+      long: d => `${d.getMonth() + 1}月${d.getDate()}日（${DJ[d.getDay()]}）`, short: d => `${d.getMonth() + 1}/${d.getDate()}（${DJ[d.getDay()]}）`,
+      month: d => `${d.getFullYear()}年${d.getMonth() + 1}月`, dow: DJ, start: '18:00', time: '18:00–20:00 JST',
+      addDate: '日付を選ぶ', guests: (a, c) => `大人${a}名` + (c ? `・子ども${c}名` : ''), next: '次回',
+      choose: '日にちを選ぶ', go: '予約へ進む', apply: 'この内容にする', seats: n => `残り${n}席`, by: s => `予約締切 ${s} 18:00`,
+      hint: '日にちを選ぶと、開始時刻と残りの席数が出ます。', adultRow: n => `大人 ¥30,000 × ${n}`, childRow: n => `子ども ¥12,000 × ${n}`,
+      total: '合計（税込）', perAdult: '/ 大人1名', free: '開始24時間前までキャンセル無料', base: '/ja/experiences/community-dinner-with-locals'
+    },
+    en: {
+      long: d => `${DE[d.getDay()]} ${d.getDate()} ${ME[d.getMonth()]}`, short: d => `${DE[d.getDay()]} ${d.getDate()} ${ME[d.getMonth()]}`,
+      month: d => `${MEL[d.getMonth()]} ${d.getFullYear()}`, dow: DE, start: '6:00 PM', time: '6:00–8:00 PM JST',
+      addDate: 'Add a date', guests: (a, c) => `${a} adult${a > 1 ? 's' : ''}` + (c ? `, ${c} child${c > 1 ? 'ren' : ''}` : ''), next: 'Next',
+      choose: 'Choose a date', go: 'Continue to book', apply: 'Update', seats: n => `${n} seats left`, by: s => `Book by ${s}, 6:00 PM`,
+      hint: 'Pick a date to see the start time and seats left.', adultRow: n => `Adults ¥30,000 × ${n}`, childRow: n => `Children ¥12,000 × ${n}`,
+      total: 'Total (tax included)', perAdult: '/ adult', free: 'Free cancellation until 24 hours before the start', base: '/experiences/community-dinner-with-locals'
+    }
+  };
+  const t = () => L[root.dataset.lang];
+  const total = () => st.adults * PRICE.adults + st.children * PRICE.children;
+  const bookBy = k => { const d = toDate(k); return new Date(d.getFullYear(), d.getMonth(), d.getDate() - 2); };
+  const wide = () => vp.clientWidth >= 960;
+
+  function render() {
+    const T = t(), d = st.date && toDate(st.date);
+    // booking card
+    const fd = $('#fDate'); fd.textContent = d ? `${T.long(d)} ${T.start}` : T.addDate; fd.classList.toggle('ph', !d);
+    $('#fGuests').textContent = T.guests(st.adults, st.children);
+    $('#chips').innerHTML = `<span>${T.next}</span>` + NEXT.map(k => `<button class="chip" data-date="${k}" aria-pressed="${st.date === k}">${T.short(toDate(k))}</button>`).join('');
+    const rows = `<div><span>${T.adultRow(st.adults)}</span><span>${yen(st.adults * PRICE.adults)}</span></div>` +
+      (st.children ? `<div><span>${T.childRow(st.children)}</span><span>${yen(st.children * PRICE.children)}</span></div>` : '') +
+      `<div class="tot"><span>${T.total}</span><span>${yen(total())}</span></div>`;
+    $('#cardSum').hidden = !d; $('#cardSum').innerHTML = rows;
+    $('#cta').textContent = d ? T.go : T.choose;
+    $('#assureBy').hidden = !d; if (d) $('#assureBy span').textContent = T.by(T.short(bookBy(st.date)));
+    // phone bar
+    $('#mbPrice').innerHTML = d ? yen(total()) : `¥30,000 <span>${T.perAdult}</span>`;
+    $('#mbSub').textContent = d ? `${T.short(d)} ${T.start}・${T.guests(st.adults, st.children)}` : `${T.next} ${T.short(toDate(NEXT[0]))}`;
+    $('#mbCta').textContent = d ? T.go : T.choose;
+    $('#mbar').hidden = st.screen !== 'detail';
+    // picker
+    const m = st.month, first = new Date(m.getFullYear(), m.getMonth(), 1), n = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
+    $('#calTitle').textContent = T.month(m);
+    $('#calDow').innerHTML = T.dow.map(x => `<span>${x}</span>`).join('');
+    let h = '<span></span>'.repeat(first.getDay());
+    for (let i = 1; i <= n; i++) {
+      const k = key(new Date(m.getFullYear(), m.getMonth(), i)), a = AV[k];
+      h += a && a.ok ? `<button class="ok" data-date="${k}" aria-pressed="${st.date === k}">${i}</button>` : `<span class="${a ? 'closed' : ''}">${i}</span>`;
+    }
+    $('#calDays').innerHTML = h;
+    $('#calPrev').disabled = m <= new Date(2026, 10, 1); $('#calNext').disabled = m >= new Date(2027, 1, 1);
+    $('#slot').innerHTML = d
+      ? `<b>${T.long(d)}</b><div class="t">${T.time}<span>${T.seats(AV[st.date].seats)}</span></div><small>${T.by(T.short(bookBy(st.date)))}</small>`
+      : `<p class="hint">${T.hint}</p>`;
+    $('#nAdults').textContent = st.adults; $('#nChildren').textContent = st.children;
+    $$('[data-step]').forEach(b => { const [f, v] = b.dataset.step.split(':'); const nv = st[f] + Number(v);
+      b.disabled = nv < (f === 'adults' ? 1 : 0) || (Number(v) > 0 && st.adults + st.children >= SEATS); });
+    $('#pkTotal').textContent = yen(total());
+    const go = $('#pkGo'); go.textContent = st.screen === 'book' ? T.apply : T.go; go.setAttribute('aria-disabled', String(!d));
+    // booking page
+    if (d) { $('#bkWhen').textContent = `${T.long(d)} ${T.time}`; $('#bkWho').textContent = T.guests(st.adults, st.children);
+      $('#bkTot').innerHTML = rows + `<div class="free"><svg class="ico"><use href="#i-check"/></svg>${T.free}</div>`; }
+    // url
+    $('#path').textContent = T.base + (st.screen === 'book' ? `/book?date=${st.date}&adults=${st.adults}` + (st.children ? `&children=${st.children}` : '') : '');
+  }
+
+  function applyLang() {
+    const en = root.dataset.lang === 'en'; root.lang = en ? 'en' : 'ja';
+    $$('[data-en]').forEach(el => { if (el.dataset.ja === undefined) el.dataset.ja = el.innerHTML; el.innerHTML = en ? el.dataset.en : el.dataset.ja; });
+    syncMore();
+  }
+  function syncMore() {
+    const en = root.dataset.lang === 'en';
+    const b = $('#bioMore'), k = $('#knowMore');
+    b.textContent = b.getAttribute('aria-expanded') === 'true' ? (en ? 'Show less' : '閉じる') : (en ? 'Read more' : '続きを読む');
+    k.textContent = k.getAttribute('aria-expanded') === 'true' ? (en ? 'Show less' : '閉じる') : (en ? 'Show 7 more' : 'ほかの注意事項を見る（7）');
+  }
+
+  function openPicker() {
+    if (st.date) st.month = new Date(toDate(st.date).getFullYear(), toDate(st.date).getMonth(), 1);
+    render();
+    const p = $('#picker'); p.hidden = false; $('#scrim').hidden = false; p.style.cssText = '';
+    if (wide()) { // 予約カードに重ねて、左へ広がる吹き出し
+      const v = vp.getBoundingClientRect(), c = (st.screen === 'detail' ? $('#bcard') : $('.bsum')).getBoundingClientRect();
+      const top = Math.max(76, Math.min(c.top - v.top, v.height - p.offsetHeight - 16));
+      p.style.top = top + 'px'; p.style.right = Math.max(16, v.right - c.right) + 'px';
+    }
+    $('#pkClose').focus();
+  }
+  function closePicker() { $('#picker').hidden = true; $('#scrim').hidden = true; }
+  function goBook() { st.screen = 'book'; $('#screen-detail').hidden = true; $('#screen-book').hidden = false; sc.scrollTop = 0; render(); }
+  function goDetail() { st.screen = 'detail'; $('#screen-detail').hidden = false; $('#screen-book').hidden = true; sc.scrollTop = 0; render(); }
+  const primary = () => st.date ? goBook() : openPicker();
+
+  // mock toggles
+  function setOpt(k, v) {
+    root.dataset[k] = v;
+    $$(`.seg[data-key=${k}] button`).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.val === v)));
+    if (k === 'lang') applyLang();
+    if (k === 'view') closePicker();
+    render();
+    const bio = $('#bio'); $('#bioMore').hidden = !bio.classList.contains('open') && bio.scrollHeight <= bio.clientHeight + 2;
+  }
+  $$('.seg button').forEach(b => b.addEventListener('click', () => setOpt(b.parentElement.dataset.key, b.dataset.val)));
+  $$('[data-setlang]').forEach(b => b.addEventListener('click', () => setOpt('lang', b.dataset.setlang)));
+
+  document.addEventListener('click', e => {
+    const dt = e.target.closest('[data-date]'); if (dt) { st.date = dt.dataset.date; render(); return; }
+    const sp = e.target.closest('[data-step]'); if (sp && !sp.disabled) { const [f, v] = sp.dataset.step.split(':'); st[f] += Number(v); render(); return; }
+    if (e.target.closest('[data-open]')) { openPicker(); return; }
+    const go = e.target.closest('[data-go]'); if (go) { e.preventDefault(); $(go.getAttribute('href')).scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    const a = e.target.closest('a[href="#"]'); if (a) e.preventDefault();
+  });
+  $('#cta').addEventListener('click', primary); $('#mbCta').addEventListener('click', primary);
+  $('#pkGo').addEventListener('click', () => { if (!st.date) return; closePicker(); st.screen === 'book' ? render() : goBook(); });
+  $('#pkClose').addEventListener('click', closePicker); $('#scrim').addEventListener('click', closePicker);
+  $('#calPrev').addEventListener('click', () => { st.month = new Date(st.month.getFullYear(), st.month.getMonth() - 1, 1); render(); });
+  $('#calNext').addEventListener('click', () => { st.month = new Date(st.month.getFullYear(), st.month.getMonth() + 1, 1); render(); });
+  $('#backBtn').addEventListener('click', goDetail);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closePicker(); $('#lb').hidden = true; } });
+
+  // expanders
+  $('#bioMore').addEventListener('click', e => { const o = $('#bio').classList.toggle('open'); e.currentTarget.setAttribute('aria-expanded', String(o)); syncMore(); });
+  $('#knowMore').addEventListener('click', e => { const r = $('#knowRest'); r.hidden = !r.hidden; e.currentTarget.setAttribute('aria-expanded', String(!r.hidden)); syncMore(); });
+
+  // gallery
+  const gal = $('#gal');
+  gal.addEventListener('scroll', () => { $('#galCount').textContent = `${Math.round(gal.scrollLeft / gal.clientWidth) + 1} / 6`; }, { passive: true });
+  function openLb() { const g = $('#lbGrid'); if (!g.children.length) $$('img', gal).forEach(i => { const c = new Image(); c.src = i.src; c.alt = i.alt; g.append(c); }); $('#lb').hidden = false; $('#lb').scrollTop = 0; }
+  $('#galAll').addEventListener('click', openLb); gal.addEventListener('click', openLb);
+  $('#lbClose').addEventListener('click', () => { $('#lb').hidden = true; });
+
+  // shared images (kept once in the file)
+  $$('img[data-from]').forEach(i => { i.src = $('#' + i.dataset.from).src; });
+
+  if (matchMedia('(max-width:760px)').matches) root.dataset.view = 'sp';
+  ['view', 'lang', 'cta', 'reviews', 'place', 'host'].forEach(k => setOpt(k, root.dataset[k]));
+})();
+</script>
+</body>
+</html>
