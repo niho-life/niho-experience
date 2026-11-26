@@ -82,11 +82,12 @@ test("console links carry ?providerId=, and each provider has its own data", asy
   await expect(todo.getByRole("link", { name: "メッセージを見る" })).toHaveAttribute("href", "/host/messages?providerId=sample-provider-studio");
   await expect(page.getByRole("region", { name: "明日の開催" })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "これからの開催" })).toContainText("これからの開催はまだありません。");
-  for (const [label, path] of [["ホーム", "/host/home"], ["体験", "/host/experiences"], ["カレンダー", "/host/calendar"]]) {
+  for (const [label, path] of [["体験", "/host/experiences"], ["カレンダー", "/host/calendar"]]) {
     await expect(menu(page).getByRole("link", { name: label }), label).toHaveAttribute("href", `${path}?providerId=sample-provider-studio`);
   }
   await expect(menu(page).getByRole("link", { name: "予約" })).toHaveCount(0);
   await expect(menu(page).getByRole("link", { name: "売上" })).toHaveCount(0);
+  await expect(menu(page).getByRole("link", { name: "メッセージ" })).toHaveCount(0);
   // An editor has no メンバー; 設定 is theirs.
   await expect(menu(page).getByRole("link", { name: "メンバー" })).toHaveCount(0);
   await openSettings(page);
@@ -106,9 +107,9 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
   await signIn(page);
   const nav = menu(page);
   await expect(nav).toHaveCount(1);
-  const dailyLinks = ["ホーム", "体験", "カレンダー", "予約", "売上"];
-  await expect(nav.getByRole("link")).toHaveText(isDesktop(testInfo.project.name) ? [...dailyLinks, "メンバー", "設定", "記事"] : dailyLinks);
-  await expect(nav.getByRole("link", { name: "ホーム" })).toHaveAttribute("aria-current", "page");
+  const phoneTabs = ["ホーム", "体験", "カレンダー", "予約", "メッセージ"];
+  const desktopLinks = ["体験", "カレンダー", "予約", "メッセージ", "売上", "設定", "記事"];
+  await expect(nav.getByRole("link")).toHaveText(isDesktop(testInfo.project.name) ? desktopLinks : phoneTabs);
   const viewport = page.viewportSize()!;
   const navBox = (await nav.boundingBox())!;
   const banner = page.getByRole("banner");
@@ -119,8 +120,10 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
     expect(bannerBox).toEqual({ x: 0, y: 0, width: 232, height: viewport.height });
     expect(navBox.x + navBox.width).toBeLessThanOrEqual(232);
     await expect(banner.getByRole("link", { name: "NIHO Travel" })).toHaveAttribute("href", "/host/home");
+    await expect(nav.getByRole("link", { name: "ホーム" })).toHaveCount(0);
     await expect(banner).toContainText("あなたはオーナー");
-    await expect(nav.getByRole("link", { name: "メンバー" })).toHaveAttribute("href", "/host/members");
+    await expect(nav.getByRole("link", { name: "メンバー" })).toHaveCount(0);
+    await expect(nav.getByRole("link", { name: "メッセージ" })).toHaveAttribute("href", "/host/messages");
     await expect(nav.getByRole("link", { name: "設定", exact: true })).toHaveAttribute("href", "/host/settings");
     await expect(banner.getByRole("link", { name: "体験サイトを見る" })).toHaveAttribute("href", "/experiences");
     await banner.locator("summary:visible", { hasText: "のアカウント" }).click();
@@ -141,20 +144,25 @@ test("the menu is a sidebar on PC and five bottom tabs on phones", async ({ page
     // A 52px row (and its hairline) with the provider and the account, and the tabs on the bottom edge (12px labels).
     expect(bannerBox).toMatchObject({ x: 0, y: 0, width: viewport.width, height: 53 });
     expect(Math.round(navBox.y + navBox.height)).toBe(viewport.height);
-    for (const label of ["ホーム", "体験", "カレンダー", "予約", "売上"]) {
+    for (const label of phoneTabs) {
       expect(await nav.getByRole("link", { name: label }).evaluate((link) => getComputedStyle(link).fontSize), label).toBe("12px");
     }
-    await nav.getByRole("link", { name: "売上" }).click();
+    await expect(nav.getByRole("link", { name: "ホーム" })).toHaveAttribute("aria-current", "page");
+    await expect(nav.getByRole("link", { name: "売上" })).toHaveCount(0);
+    await page.locator("summary:visible", { hasText: PROVIDER_MENU }).click();
+    await expect(page.getByRole("link", { name: "売上", exact: true })).toHaveAttribute("href", "/host/sales");
+    await expect(page.getByRole("link", { name: "メンバー", exact: true })).toHaveCount(0);
+    await page.getByRole("link", { name: "売上", exact: true }).click();
     await page.waitForURL(/\/host\/sales$/);
     await expect(page.getByRole("heading", { level: 1, name: "売上" })).toBeVisible();
-    await expect(nav.getByRole("link", { name: "売上" })).toHaveAttribute("aria-current", "page");
     await page.locator("summary:visible", { hasText: "のアカウント" }).click();
     await expect(page.getByRole("link", { name: "記事を書く" })).toHaveAttribute("href", "/write");
     await expect(page.getByRole("link", { name: "アカウント設定", exact: true })).toHaveAttribute("href", "/host/account");
-    // The provider chip opens メンバー, 設定 and the traveler site (the other menu closes), and the switcher for several providers.
+    // The provider chip opens 売上, 設定 and the traveler site (the other menu closes), and the switcher for several providers.
     await page.locator("summary:visible", { hasText: PROVIDER_MENU }).click();
     await expect(page.getByRole("link", { name: "記事を書く" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "メンバー" })).toHaveAttribute("href", "/host/members");
+    await expect(page.getByRole("link", { name: "売上", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("link", { name: "メンバー" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "設定", exact: true })).toHaveAttribute("href", "/host/settings");
     await expect(page.getByRole("link", { name: "体験サイトを見る" })).toHaveAttribute("href", "/experiences");
     await expect(page.getByText("提供者を切り替える", { exact: true })).toBeVisible();
@@ -417,7 +425,7 @@ test.describe("320px narrow phone", () => {
       expect(await overflowX(page), path).toBeLessThanOrEqual(0);
     }
     await page.goto("/host/home");
-    for (const name of ["ホーム", "体験", "カレンダー", "予約", "売上"]) await inside(menu(page).getByRole("link", { name }), `tab ${name}`);
+    for (const name of ["ホーム", "体験", "カレンダー", "予約", "メッセージ"]) await inside(menu(page).getByRole("link", { name }), `tab ${name}`);
     await inside(page.getByRole("link", { name: "返信する" }).first(), "home: 返信する");
     await inside(page.getByRole("region", { name: "これからの開催" }).locator('a[href*="/host/bookings/session"]').first(), "home: Experience session");
     const draftEditors = page.getByRole("region", { name: "次にすること" }).getByRole("link", { name: "編集する" });

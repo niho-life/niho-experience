@@ -1,4 +1,4 @@
-import { isValidElement, type ReactElement } from "react";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 type Load = Mock<(...args: unknown[]) => Promise<unknown>>;
@@ -33,6 +33,7 @@ vi.mock("@/host/guest-questions-server", () => ({
 
 import HostMessagesPage from "./page";
 import { HostMessages } from "@/components/host/HostMessages";
+import { HostSubHeader } from "@/components/host/HostSubHeader";
 
 const BOOKING = "0f8fad5b-d9cb-469f-a165-708677289501";
 const NEW_THREAD = { id: `new-booking-${BOOKING}`, experienceId: "walk", guest: "Sample Booker", topic: null, booking: { id: BOOKING, date: "2026-11-14", start: "10:00", guests: 3, site: true }, messages: [] };
@@ -51,6 +52,12 @@ async function page(query: Record<string, string> = {}): Promise<ReactElement<Re
   }
   expect(isValidElement(element)).toBe(true);
   return element as ReactElement<Record<string, unknown>>;
+}
+
+function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
+  if (Array.isArray(node)) return node.flatMap(elements);
+  if (!isValidElement<Record<string, unknown>>(node)) return [];
+  return [node, ...elements(node.props.children as ReactNode)];
 }
 
 describe("Experience messages", () => {
@@ -73,9 +80,15 @@ describe("Experience messages", () => {
     state.questions = { ...LIVE, requestedMissing: true };
     await expect(page({ booking: BOOKING })).rejects.toThrow("NOT_FOUND");
     state.questions = { status: "error" };
-    expect((await page()).props).toMatchObject({ title: "メッセージを読み込めませんでした" });
+    const listError = await page();
+    expect(listError.props).toMatchObject({ isThread: false, messagesHref: "/host/messages?providerId=sample-provider", title: "メッセージを読み込めませんでした" });
+    const renderUnavailable = (element: ReactElement<Record<string, unknown>>) => (element.type as (props: Record<string, unknown>) => ReactNode)(element.props);
+    expect(elements(renderUnavailable(listError)).some((element) => element.type === HostSubHeader)).toBe(false);
+    const threadError = await page({ thread: "th-3012" });
+    expect(threadError.props).toMatchObject({ isThread: true, messagesHref: "/host/messages?providerId=sample-provider" });
+    expect(elements(renderUnavailable(threadError)).find((element) => element.type === HostSubHeader)?.props).toMatchObject({ backLabel: "メッセージ", backHref: "/host/messages?providerId=sample-provider" });
     state.questions = { status: "closed" };
-    expect((await page()).props).toMatchObject({ homeHref: "/host/home?providerId=sample-provider" });
+    expect((await page()).props).toMatchObject({ isThread: false, messagesHref: "/host/messages?providerId=sample-provider" });
   });
 
   it("keeps the message page OWNER-only", async () => {

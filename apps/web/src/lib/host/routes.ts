@@ -45,7 +45,7 @@ export const HOST_SW_PATH = "/host/sw.js";
  */
 export const HOST_SHARE_TARGET_PATH = "/host/share-target";
 export const HOST_SHARED_QUERY = "shared";
-/** Console sections (#84). HOST_NAV below lists the same paths for the menu. */
+/** Console sections (#84). HOST_NAV below lists the desktop sidebar destinations. */
 export const HOST_EXPERIENCES_PATH = "/host/experiences";
 export const HOST_CALENDAR_PATH = "/host/calendar";
 export const HOST_BOOKINGS_PATH = "/host/bookings";
@@ -65,7 +65,7 @@ export const HOST_SUPPORT_PATH = "/host/support";
 export const HOST_SELLER_PATH = "/host/seller";
 /** ホスト紹介 (#146): OWNERが提供者ごとに1つの公開用ホスト紹介文を書く・撤回する画面。 */
 export const HOST_PROFILE_PATH = "/host/profile";
-/** メッセージ (#106): a screen under ホーム, not in the menu. */
+/** メッセージ (#106): owner/cohost console section. */
 export const HOST_MESSAGES_PATH = "/host/messages";
 /** レビュー (#108): a screen under ホーム, not in the menu. */
 export const HOST_REVIEWS_PATH = "/host/reviews";
@@ -75,21 +75,25 @@ export const HOST_PREPARATIONS_PATH = "/host/preparations";
 export const HOST_PREPARATION_REVIEW_PATH = "/host/preparations/review";
 
 export const HOST_NAV = [
-  { href: HOST_HOME_PATH, label: "ホーム" },
-  { href: "/host/experiences", label: "体験" },
+  { href: HOST_EXPERIENCES_PATH, label: "体験" },
   { href: HOST_CALENDAR_PATH, label: "カレンダー" },
-  { href: "/host/bookings", label: "予約" },
-  { href: "/host/sales", label: "売上" },
-  { href: HOST_MEMBERS_PATH, label: "メンバー" },
-  { href: "/host/settings", label: "設定" },
+  { href: HOST_BOOKINGS_PATH, label: "予約" },
+  { href: HOST_MESSAGES_PATH, label: "メッセージ" },
+  { href: HOST_SALES_PATH, label: "売上" },
+  { href: HOST_SETTINGS_PATH, label: "設定" },
 ] as const;
 
 /**
- * The five places a host uses during day-to-day operations (the phone tab bar). メンバー and 設定 stay in HOST_NAV
- * because they are permissioned console sections, but they are opened from the sidebar or the provider menu instead of
- * competing with daily work in the tab bar.
+ * The phone tab bar: a person's ホーム plus the daily provider sections. The desktop sidebar has no ホーム item;
+ * メンバー is a row in 設定 and 設定/売上 are opened from the provider menu on phones.
  */
-export const HOST_DAILY_NAV = HOST_NAV.filter((item) => item.href !== HOST_SETTINGS_PATH && item.href !== HOST_MEMBERS_PATH);
+export const HOST_DAILY_NAV = [
+  { href: HOST_HOME_PATH, label: "ホーム" },
+  { href: HOST_EXPERIENCES_PATH, label: "体験" },
+  { href: HOST_CALENDAR_PATH, label: "カレンダー" },
+  { href: HOST_BOOKINGS_PATH, label: "予約" },
+  { href: HOST_MESSAGES_PATH, label: "メッセージ" },
+] as const;
 
 /**
  * `href` with these query values set, after the query it already has. Empty values are left

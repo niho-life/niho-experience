@@ -11,6 +11,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const isDesktop = (projectName: string) => projectName === "host-desktop";
 const menu = (page: Page) => page.getByRole("navigation", { name: "ホストのメニュー" });
+const PROVIDER_MENU = /提供者を切り替える|のメニュー/;
 const monthNav = (page: Page) => page.getByRole("navigation", { name: "表示する月" });
 const summary = (page: Page, month: string) => page.getByRole("region", { name: `${month}の集計` });
 const lines = (page: Page, month: string) => page.getByRole("region", { name: `${month}の明細` });
@@ -27,6 +28,15 @@ async function signIn(page: Page, query = "") {
   await page.waitForURL(/\/host\/home(\?|$)/);
 }
 
+async function openSales(page: Page, projectName: string) {
+  if (isDesktop(projectName)) {
+    await menu(page).getByRole("link", { name: "売上" }).click();
+    return;
+  }
+  await page.locator("summary:visible", { hasText: PROVIDER_MENU }).click();
+  await page.getByRole("link", { name: "売上", exact: true }).click();
+}
+
 async function audit(page: Page, label: string) {
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
   expect(results.violations.map((v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`), label).toEqual([]);
@@ -34,7 +44,7 @@ async function audit(page: Page, label: string) {
 
 test("売上 shows the month's numbers and lines, and moves a month at a time", async ({ page }, testInfo) => {
   await signIn(page);
-  await menu(page).getByRole("link", { name: "売上" }).click();
+  await openSales(page, testInfo.project.name);
   await page.waitForURL(/\/host\/sales$/);
   await expect(page.getByRole("heading", { level: 1, name: "売上" })).toBeVisible();
   await expect(monthNav(page)).toContainText("2026年10月");
@@ -71,6 +81,9 @@ test("売上 shows the month's numbers and lines, and moves a month at a time", 
     await expect(pill).toBeVisible();
     await expect(inline).toBeHidden();
   } else {
+    await page.locator("summary:visible", { hasText: PROVIDER_MENU }).click();
+    await expect(page.getByRole("link", { name: "売上", exact: true })).toHaveAttribute("aria-current", "page");
+    await page.locator("summary:visible", { hasText: PROVIDER_MENU }).click();
     await expect(inline).toBeVisible();
     await expect(pill).toBeHidden();
   }
@@ -105,9 +118,15 @@ test("ホーム's month card has 入金予定, as 売上 counts it", async ({ pa
   await expect(month.locator("dd")).toHaveText(["¥390,000", "−¥60,000", "¥139,500", "8件"]);
 });
 
-test("an editor cannot open sales or the payout account", async ({ page }) => {
+test("an editor cannot open sales or the payout account", async ({ page }, testInfo) => {
   await signIn(page, "?providerId=sample-provider-studio");
-  await expect(menu(page).getByRole("link", { name: "売上" })).toHaveCount(0);
+  if (isDesktop(testInfo.project.name)) {
+    await expect(menu(page).getByRole("link", { name: "売上" })).toHaveCount(0);
+  } else {
+    await page.locator("summary:visible", { hasText: PROVIDER_MENU }).click();
+    await expect(page.getByRole("link", { name: "売上", exact: true })).toHaveCount(0);
+    await page.locator("summary:visible", { hasText: PROVIDER_MENU }).click();
+  }
   expect((await page.goto("/host/sales?providerId=sample-provider-studio"))?.status()).toBe(404);
 
   await page.goto("/host/settings?providerId=sample-provider-studio&section=all");
@@ -121,7 +140,7 @@ test("an editor cannot open sales or the payout account", async ({ page }) => {
   await expect(payoutPanel(page)).toHaveCount(0);
 });
 
-test("a new provider: registered through NIHO, led from 売上 to its payout account and shares a spot's account", async ({ page }) => {
+test("a new provider: registered through NIHO, led from 売上 to its payout account and shares a spot's account", async ({ page }, testInfo) => {
   await signIn(page, "?mock=empty");
   await page.getByRole("link", { name: "提供者として登録" }).click();
   await page.waitForURL(/\/host\/register$/);
@@ -155,7 +174,7 @@ test("a new provider: registered through NIHO, led from 売上 to its payout acc
   await expect(payout).toContainText("未接続");
   await expect(payout).toContainText("売上を受け取る口座を接続してください。");
 
-  await menu(page).getByRole("link", { name: "売上" }).click();
+  await openSales(page, testInfo.project.name);
   await page.waitForURL(/\/host\/sales$/);
   const notice = page.getByRole("region", { name: "受取口座の設定が済んでいません" });
   await expect(notice).toContainText("売上を受け取る口座を接続してください。");

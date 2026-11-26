@@ -40,15 +40,16 @@ test("設定の通常入口は役割に合う一覧で、providerId を保って
   const main = page.locator("main");
   await expect(page.getByRole("heading", { level: 1, name: "サンプルの台所 の設定" })).toBeVisible();
   await expect(main.getByRole("heading", { level: 2 })).toHaveText(["掲載", "販売", "運営"]);
-  // The eight rows, and the one link to あなたのアカウント under the title.
-  await expect(main.getByRole("link")).toHaveCount(9);
+  // The nine rows, and the one link to あなたのアカウント under the title.
+  await expect(main.getByRole("link")).toHaveCount(10);
   await expect(main.getByRole("link", { name: "アカウント設定", exact: true })).toHaveAttribute("href", "/host/account?providerId=sample-provider-kitchen");
-  for (const label of ["提供者情報", "ホスト紹介", "販売者表示", "受取口座", "通知の種類", "カレンダー連携", "NIHOサポート", "集合案内"]) {
+  for (const label of ["提供者情報", "ホスト紹介", "販売者表示", "受取口座", "通知の種類", "カレンダー連携", "NIHOサポート", "集合案内", "メンバー"]) {
     await expect(main.getByRole("link", { name: new RegExp(`^${label}`) }), label).toBeVisible();
   }
   await expect(main.getByRole("link", { name: /ホスト紹介/ })).toHaveAttribute("href", "/host/profile?providerId=sample-provider-kitchen");
   await expect(main.getByRole("link", { name: /販売者表示/ })).toHaveAttribute("href", "/host/seller?providerId=sample-provider-kitchen");
   await expect(main.getByRole("link", { name: /NIHOサポート/ })).toHaveAttribute("href", "/host/support?hostKind=EXPERIENCE_PROVIDER&hostId=sample-provider-kitchen");
+  await expect(main.getByRole("link", { name: /^メンバー/ })).toHaveAttribute("href", "/host/members?providerId=sample-provider-kitchen");
   await audit(page, "settings index");
 
   await main.getByRole("link", { name: /^通知の種類/ }).click();

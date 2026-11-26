@@ -12,27 +12,32 @@ describe("host navigation", () => {
       expect(hostBackLink(path)).toEqual({ href: "/host/settings", label: "設定" });
     }
   });
-  it("keeps every permissioned section while showing five daily destinations", () => {
-    expect(HOST_NAV.map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "売上", "メンバー", "設定"]);
-    expect(hostDailyNavForChoice({ kind: "MEMBER", id: "provider-a", displayName: "Synthetic seller", memberRole: "OWNER" }).map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "売上"]);
+  it("keeps permissioned desktop sections and the five owner phone tabs", () => {
+    expect(HOST_NAV.map((item) => item.label)).toEqual(["体験", "カレンダー", "予約", "メッセージ", "売上", "設定"]);
+    expect(hostDailyNavForChoice({ kind: "MEMBER", id: "provider-a", displayName: "Synthetic seller", memberRole: "OWNER" }).map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "メッセージ"]);
   });
 
-  it("shows メンバー only to the OWNER, and the sidebar list to each role as designed", () => {
+  it("shows the desktop sidebar by role, with messages only for OWNER and COHOST", () => {
     const hrefs = (role: "OWNER" | "EDITOR" | "COHOST" | "VIEWER" | null) => hostNavForRole(role).map((item) => item.href);
-    expect(hrefs("OWNER")).toEqual(["/host/home", "/host/experiences", "/host/calendar", "/host/bookings", "/host/sales", "/host/members", "/host/settings"]);
-    expect(hrefs("EDITOR")).toEqual(["/host/home", "/host/experiences", "/host/calendar", "/host/settings"]);
-    expect(hrefs("COHOST")).toEqual(["/host/home", "/host/experiences", "/host/calendar", "/host/bookings", "/host/settings"]);
-    expect(hrefs(null)).toEqual(hrefs("COHOST"));
+    expect(hrefs("OWNER")).toEqual(["/host/experiences", "/host/calendar", "/host/bookings", "/host/messages", "/host/sales", "/host/settings"]);
+    expect(hrefs("EDITOR")).toEqual(["/host/experiences", "/host/calendar", "/host/settings"]);
+    expect(hrefs("COHOST")).toEqual(["/host/experiences", "/host/calendar", "/host/bookings", "/host/messages", "/host/settings"]);
+    expect(hrefs("VIEWER")).toEqual(["/host/experiences", "/host/calendar", "/host/bookings", "/host/settings"]);
+    expect(hrefs(null)).toEqual(hrefs("VIEWER"));
     const member = (memberRole: "OWNER" | "EDITOR" | "COHOST") => ({ kind: "MEMBER", id: "provider-a", displayName: "Synthetic seller", memberRole }) as const;
-    expect(hostNavForChoice(member("OWNER")).map((item) => item.label)).toContain("メンバー");
+    expect(hostNavForChoice(member("OWNER")).map((item) => item.label)).not.toContain("ホーム");
+    expect(hostNavForChoice(member("OWNER")).map((item) => item.label)).not.toContain("メンバー");
     expect(hostNavForChoice(member("EDITOR")).map((item) => item.label)).not.toContain("メンバー");
-    // The phone tab bar keeps its five (or fewer) daily places.
-    expect(hostDailyNavForChoice(member("OWNER")).map((item) => item.href)).not.toContain("/host/members");
+    expect(hostDailyNavForChoice(member("OWNER")).map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "メッセージ"]);
+    expect(hostDailyNavForChoice(member("COHOST")).map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー", "予約", "メッセージ"]);
+    expect(hostDailyNavForChoice(member("EDITOR")).map((item) => item.label)).toEqual(["ホーム", "体験", "カレンダー"]);
+    expect(hostDailyNavForChoice({ kind: "MEMBER", id: "provider-a", displayName: "Synthetic seller", memberRole: "VIEWER" }).map((item) => item.href)).toEqual(["/host/home", "/host/experiences", "/host/calendar", "/host/bookings"]);
   });
 
   it("never gives an operator メンバー, even when the server lists it", () => {
-    const operator = { kind: "OPERATOR", id: "provider-a", displayName: "Synthetic seller", memberRole: null, screens: ["/host/calendar", "/host/members", "/host/settings"] } as const;
+    const operator = { kind: "OPERATOR", id: "provider-a", displayName: "Synthetic seller", memberRole: null, screens: ["/host/calendar", "/host/members", "/host/messages", "/host/settings"] } as const;
     expect(hostNavForChoice(operator).map((item) => item.href)).toEqual(["/host/calendar", "/host/settings"]);
+    expect(hostDailyNavForChoice(operator).map((item) => item.href)).toEqual(["/host/calendar"]);
   });
 
   it("hides sales from COHOST and EDITOR while keeping OWNER sales", () => {
@@ -45,6 +50,7 @@ describe("host navigation", () => {
 
   it("keeps an operator in the calendar-only frontend context", () => {
     expect(hostNavForChoice({ kind: "OPERATOR", id: "provider-a", displayName: "Synthetic seller", memberRole: null }).map((item) => item.href)).toEqual(["/host/calendar"]);
+    expect(hostDailyNavForChoice({ kind: "OPERATOR", id: "provider-a", displayName: "Synthetic seller", memberRole: null }).map((item) => item.href)).toEqual(["/host/calendar"]);
   });
 
   it("gives an operator 設定 for their own email address only where the server says so (#194)", () => {
@@ -58,13 +64,13 @@ describe("host navigation", () => {
   });
 
   it("selects exactly one item on each top page", () => {
-    expect(selected("/host/home")).toEqual(["ホーム"]);
-    expect(selected("/host/home/")).toEqual(["ホーム"]);
+    expect(selected("/host/home")).toEqual([]); // Home is the phone tab; the brand remains its desktop link.
+    expect(selected("/host/home/")).toEqual([]);
     expect(selected("/host/experiences")).toEqual(["体験"]);
     expect(selected("/host/bookings")).toEqual(["予約"]);
     expect(selected("/host/sales")).toEqual(["売上"]);
     expect(selected("/host/settings/")).toEqual(["設定"]);
-    expect(selected("/host/members?providerId=sample-provider-kitchen")).toEqual(["メンバー"]);
+    expect(selected("/host/members?providerId=sample-provider-kitchen")).toEqual(["設定"]);
     // あなたのアカウント belongs to the person, not to a menu item.
     expect(selected("/host/account?providerId=sample-provider-kitchen#account-device")).toEqual([]);
     expect(selected("/host/membership")).toEqual([]);
@@ -72,7 +78,7 @@ describe("host navigation", () => {
 
   it("ignores ?providerId= and other queries on either side", () => {
     expect(selected("/host/bookings?providerId=sample-provider-studio")).toEqual(["予約"]);
-    expect(selected("/host/home?providerId=sample-provider-kitchen#todo")).toEqual(["ホーム"]);
+    expect(selected("/host/home?providerId=sample-provider-kitchen#todo")).toEqual([]);
     expect(selected("/host/experiences/coffee?providerId=sample-provider-kitchen")).toEqual(["体験"]);
     expect(isHostNavActive("/host/settings", "/host/settings?providerId=sample-provider-studio")).toBe(true);
   });
@@ -81,13 +87,11 @@ describe("host navigation", () => {
     expect(selected("/host/experiences/community-dinner")).toEqual(["体験"]);
     // この回 (#107) is a screen under 予約.
     expect(selected("/host/bookings/session?providerId=sample-provider-kitchen&date=2026-10-22&start=18%3A00")).toEqual(["予約"]);
-    // メッセージ is a screen under ホーム (#106), not a menu item of its own.
-    expect(selected("/host/messages")).toEqual(["ホーム"]);
-    expect(selected("/host/messages/?providerId=sample-provider-kitchen&thread=th-3012")).toEqual(["ホーム"]);
-    // So is レビュー (#108).
-    expect(selected("/host/reviews?providerId=sample-provider-kitchen&experience=community-dinner#review-rv-5020")).toEqual(["ホーム"]);
-    // 予約なし通訳もホームの下位画面で、新しいタブにはしない (#401)。
-    expect(selected("/host/translate?providerId=sample-provider-kitchen")).toEqual(["ホーム"]);
+    expect(selected("/host/messages")).toEqual(["メッセージ"]);
+    expect(selected("/host/messages/?providerId=sample-provider-kitchen&thread=th-3012")).toEqual(["メッセージ"]);
+    // レビュー (#108) and 通訳 (#401) remain under ホーム without a desktop item.
+    expect(selected("/host/reviews?providerId=sample-provider-kitchen&experience=community-dinner#review-rv-5020")).toEqual([]);
+    expect(selected("/host/translate?providerId=sample-provider-kitchen")).toEqual([]);
     expect(selected("/host/messages-archive")).toEqual([]);
     expect(selected("/host/reviewsx")).toEqual([]);
     expect(selected("/host/experiences-archive")).toEqual([]);
@@ -102,7 +106,8 @@ describe("host navigation", () => {
     expect(hostBackLink("/host/experiences/community-dinner/?providerId=sample-provider-kitchen")).toEqual({ href: "/host/experiences", label: "体験" });
     expect(hostBackLink("/host/bookings/session", "date=2026-10-22&start=18%3A00&experience=community-dinner&offer=offer-dinner")).toEqual({ href: "/host/bookings", label: "予約" });
     expect(hostBackLink("/host/translate?providerId=sample-provider-kitchen")).toEqual({ href: "/host/home", label: "ホーム" });
-    for (const path of ["/host", "/host/home", "/host/experiences", "/host/experiences?providerId=x", "/host/settings", "/host/members", "/host/account", "/host/account?providerId=x", "/host/register"]) expect(hostBackLink(path), path).toBeNull();
+    for (const path of ["/host", "/host/home", "/host/experiences", "/host/experiences?providerId=x", "/host/settings", "/host/account", "/host/account?providerId=x", "/host/register", "/host/messages"]) expect(hostBackLink(path), path).toBeNull();
+    expect(hostBackLink("/host/members?providerId=sample-provider-kitchen")).toEqual({ href: "/host/settings", label: "設定" });
   });
 
   it("gives one booking (?booking=) the way back to 予約, from the location or from the page's query", () => {
@@ -117,14 +122,13 @@ describe("host navigation", () => {
     }
   });
 
-  it("leads メッセージ back to ホーム, and one thread (?thread= or a booking's ?booking=) back to メッセージ", () => {
-    const home = { href: "/host/home", label: "ホーム" };
+  it("keeps the message list at top level and one thread (?thread= or a booking's ?booking=) back to メッセージ", () => {
     const messages = { href: "/host/messages", label: "メッセージ" };
-    expect(hostBackLink("/host/messages")).toEqual(home);
-    expect(hostBackLink("/host/messages", "providerId=sample-provider-kitchen")).toEqual(home);
+    expect(hostBackLink("/host/messages")).toBeNull();
+    expect(hostBackLink("/host/messages", "providerId=sample-provider-kitchen")).toBeNull();
     expect(hostBackLink("/host/messages?thread=th-3012")).toEqual(messages);
     expect(hostBackLink("/host/messages", "booking=bk-2044")).toEqual(messages);
-    expect(hostBackLink("/host/messages", "thread=")).toEqual(home);
+    expect(hostBackLink("/host/messages", "thread=")).toBeNull();
   });
 
   it("leads レビュー back to ホーム, whatever experience or review it shows", () => {

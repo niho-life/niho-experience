@@ -5,8 +5,8 @@ import type { HostAccount } from "./ui";
 
 /**
  * The signed-in frame (mock v2 of the provider workspace, #84): on PC (md and up)
- * a 232px sidebar beside the page (the provider's sections, 設定 and メンバー included, then the person's own account
- * menu); on phones a provider menu and the account menu in the header, and five bottom tabs.
+ * a 232px sidebar beside the page (the provider's sections and 設定, then the person's own account menu); on phones a
+ * provider menu and the account menu in the header, and role-appropriate bottom tabs.
  * An account with no provider yet keeps the account/support exits, while the
  * provider-specific menu stays hidden.
  */

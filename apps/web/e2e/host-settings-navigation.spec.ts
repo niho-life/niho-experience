@@ -34,7 +34,7 @@ test("旧設定のブックマークは提供者・追加query・hashを保っ�
   await expect(page.getByRole("region", { name: "カレンダー", exact: true })).toHaveCount(0);
 });
 
-test("旧設定の「ログイン情報」「この端末」「チーム」の入口は新しい画面へ着く", async ({ page }) => {
+test("旧設定の「ログイン情報」「この端末」「チーム」の入口は新しい画面へ着く", async ({ page }, testInfo) => {
   await page.goto("/host/auth/mock-login");
   await page.waitForURL(/\/host\/home/);
   await page.goto("/host/settings?providerId=sample-provider-kitchen#settings-account");
@@ -45,6 +45,27 @@ test("旧設定の「ログイン情報」「この端末」「チーム」の�
   await page.goto("/host/settings?providerId=sample-provider-kitchen#settings-team");
   await expect(page).toHaveURL(/\/host\/members\?providerId=sample-provider-kitchen$/);
   await expect(page.getByRole("heading", { level: 1, name: "メンバー" })).toBeVisible();
+  if (testInfo.project.name === "host-desktop") {
+    await expect(page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: "設定", exact: true })).toHaveAttribute("aria-current", "page");
+  } else {
+    await expect(page.getByRole("link", { name: "設定へ戻る", exact: true })).toHaveAttribute("href", "/host/settings?providerId=sample-provider-kitchen");
+  }
+});
+
+test("OWNERは設定の運営からメンバーを開き、設定へ戻れる", async ({ page }, testInfo) => {
+  await page.goto("/host/auth/mock-login");
+  await page.waitForURL(/\/host\/home/);
+  await page.goto("/host/settings?providerId=sample-provider-kitchen");
+  await page.getByRole("link", { name: /^メンバー/ }).click();
+  await expect(page).toHaveURL(/\/host\/members\?providerId=sample-provider-kitchen$/);
+  if (testInfo.project.name === "host-desktop") {
+    await expect(page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: "設定", exact: true })).toHaveAttribute("aria-current", "page");
+  } else {
+    const back = page.getByRole("link", { name: "設定へ戻る", exact: true });
+    await expect(back).toHaveAttribute("href", "/host/settings?providerId=sample-provider-kitchen");
+    await back.click();
+    await expect(page.getByRole("heading", { level: 1, name: "サンプルの台所 の設定", exact: true })).toBeVisible();
+  }
 });
 
 test("項目別の設定は必要なパネルだけを開き、未保存の入力を守る", async ({ page }) => {
