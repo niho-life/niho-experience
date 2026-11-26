@@ -87,7 +87,7 @@ async function shareFromTheSheet(page: Page, file: { name: string; type: string 
   }, file);
 }
 
-test("a photo shared from the share sheet is held by the worker, shown in the console and let go on request (#177 P3)", async ({ page }) => {
+test("a photo shared from the share sheet is held by the worker, shown in the console and let go on request (#177 P3)", async ({ page }, testInfo) => {
   await page.goto("/host/auth/mock-login?surface=app");
   await page.waitForURL(/\/host\/home$/);
   const notice = page.getByRole("status").filter({ hasText: "共有された写真" });
@@ -97,7 +97,8 @@ test("a photo shared from the share sheet is held by the worker, shown in the co
   await expect(page).toHaveURL(/\/host\/experiences$/);
   await expect(notice).toContainText("共有された写真「kitchen.jpg」を受け取りました");
   // It stays while the host moves about the console, and points back to 体験.
-  await page.getByRole("link", { name: "ホーム" }).first().click();
+  if (testInfo.project.name === "host-desktop") await page.getByRole("link", { name: "NIHO Travel" }).click();
+  else await page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: "ホーム" }).click();
   await page.waitForURL(/\/host\/home$/);
   await expect(notice).toContainText("kitchen.jpg");
   await expect(notice.getByRole("link", { name: "体験を開く" })).toHaveAttribute("href", "/host/experiences");

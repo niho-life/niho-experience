@@ -139,7 +139,7 @@ test("lets a writer remove a saved experience link that is no longer available",
   await page.goto(`/write/write-e2e-fixture/edit-revoked-link/${ID}`);
   await expect(page.getByRole("heading", { name: "記事の設定" })).toBeVisible();
   await page.getByLabel("タイトル", { exact: true }).fill("Text saved after removing the expired link");
-  await expect(page.getByRole("status").filter({ hasText: "関連体験を確認してください" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("alert").filter({ hasText: "現在は関連付けられない体験があります" })).toBeVisible({ timeout: 15_000 });
   await page.getByText("関連する体験", { exact: true }).click();
   await expect(page.getByText("利用できない関連体験")).toBeVisible();
   await page.getByRole("button", { name: "関連を解除" }).click();
@@ -361,9 +361,8 @@ test("secondary list failures keep the authorized article body mounted and prese
   await expect(page.getByText("まだ記事はありません")).toHaveCount(0);
 
   await page.goto(`/write/write-e2e-fixture/edit-multi-provider/${ID}`);
-  const navigation = page.getByRole("navigation", { name: "ホストのメニュー" });
   await expect(page.locator(".write-workspace > header > details > summary")).toContainText("Second Owner");
-  await expect(navigation.getByRole("link", { name: "ホーム" })).toHaveAttribute("href", /providerId=provider-two/);
+  await expect(page.getByRole("banner").getByRole("link", { name: "NIHO Travel" })).toHaveAttribute("href", /providerId=provider-two/);
 });
 
 test("publish checks open a closed settings section and focus the field to fix", async ({ page }, testInfo) => {

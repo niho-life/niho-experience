@@ -58,12 +58,12 @@ test("返信する opens the thread; the English is made, checked and only then 
   const emma = thread(page, "Emma Wilson さんの質問");
   await expect(emma).toBeVisible();
   if (isDesktop(testInfo.project.name)) {
-    // The list on the left and the thread on the right; the menu keeps ホーム.
+    // The list on the left and the thread on the right; メッセージ is the active section.
     const listBox = (await list(page).boundingBox())!;
     const threadBox = (await emma.boundingBox())!;
     expect(threadBox.x).toBeGreaterThan(listBox.x + listBox.width);
     await expect(row(page, "Emma Wilson")).toHaveAttribute("aria-current", "true");
-    await expect(menu(page).getByRole("link", { name: "ホーム" })).toHaveAttribute("aria-current", "page");
+    await expect(menu(page).getByRole("link", { name: "メッセージ" })).toHaveAttribute("aria-current", "page");
   } else {
     // "‹ メッセージ" instead of the brand header, and no bottom tabs.
     await expect(list(page)).toBeHidden();
@@ -216,7 +216,7 @@ test("メッセージを送る starts a booking's thread; threads that are not t
   expect((await page.goto("/host/messages?providerId=sample-provider-studio&thread=th-3012"))?.status()).toBe(404);
 });
 
-test("メッセージ lists the waiting threads first; it is a screen under ホーム, and a provider without messages says so", async ({ page }, testInfo) => {
+test("メッセージ is a top-level section, lists waiting threads first, and handles a provider without messages", async ({ page }, testInfo) => {
   await signIn(page, "?providerId=sample-provider-kitchen");
   await page.getByRole("region", { name: "次にすること" }).getByRole("link", { name: "メッセージを見る" }).click();
   await expect(page).toHaveURL(/\/host\/messages\?providerId=sample-provider-kitchen$/);
@@ -236,21 +236,21 @@ test("メッセージ lists the waiting threads first; it is a screen under ホ�
   if (isDesktop(testInfo.project.name)) {
     // The longest wait shows beside the list until another is chosen.
     await expect(thread(page, "Jiwoo Han さんの質問")).toBeVisible();
-    await expect(menu(page).getByRole("link", { name: "ホーム" })).toHaveAttribute("aria-current", "page");
+    await expect(menu(page).getByRole("link", { name: "メッセージ" })).toHaveAttribute("aria-current", "page");
   } else {
-    // A screen under ホーム: "‹ ホーム", no bottom tabs, and the thread opens as its own screen.
+    // The provider header and tabs stay on the list; an individual thread replaces them.
     await expect(thread(page, "Jiwoo Han さんの質問")).toBeHidden();
-    await expect(menu(page)).toHaveCount(0);
-    const back = page.getByRole("link", { name: "ホームへ戻る" });
-    await expect(back).toHaveAttribute("href", "/host/home?providerId=sample-provider-kitchen");
+    await expect(menu(page).getByRole("link", { name: "メッセージ" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("link", { name: "ホームへ戻る" })).toHaveCount(0);
+    await expect(page.locator("summary:visible").filter({ hasText: "サンプルの台所" })).toBeVisible();
     await rows.nth(3).click();
     await expect(page).toHaveURL(/\?providerId=sample-provider-kitchen&thread=th-3007$/);
     await expect(thread(page, "Daniel Fischer さんの質問").getByRole("heading", { level: 2 })).toBeFocused();
     await page.goBack();
     await expect(list(page)).toBeVisible();
-    await back.click();
+    await menu(page).getByRole("link", { name: "ホーム" }).click();
     await page.waitForURL(/\/host\/home\?providerId=sample-provider-kitchen$/);
-    await expect(menu(page)).toHaveCount(1);
+    await expect(page.getByRole("region", { name: "次にすること" })).toBeVisible();
   }
 
   expect((await page.goto("/host/messages?providerId=sample-provider-studio"))?.status()).toBe(404);

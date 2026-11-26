@@ -310,7 +310,7 @@ test("an unknown result with writes disabled explains why the same payload canno
   await expect(panel.getByRole("button", { name: "同じ内容を再送" })).toHaveCount(0);
 });
 
-test("browser back and forward stay actions re-arm the single history guard", async ({ page }) => {
+test("browser back and forward stay actions re-arm the single history guard", async ({ page }, testInfo) => {
   await stub(page, { onTarget: async (route) => json(route, current(new URL(route.request().url()).pathname.includes("EXPERIENCE_PROVIDER") ? provider : spot, false)) });
   await openSupport(page);
   await page.getByRole("link", { name: /サンプルの台所/ }).click();
@@ -318,7 +318,11 @@ test("browser back and forward stay actions re-arm the single history guard", as
   await page.getByRole("link", { name: "支援設定の対象一覧へ戻る" }).click();
   await page.getByRole("link", { name: /合成の通常拠点/ }).click();
   await expect(page.getByRole("region", { name: /合成の通常拠点/ })).toBeVisible();
-  await page.getByRole("link", { name: /^(ホーム|ホームへ戻る)$/ }).filter({ visible: true }).first().click();
+  if (testInfo.project.name === "host-desktop") {
+    await page.getByRole("banner").getByRole("link", { name: "NIHO Travel" }).click();
+  } else {
+    await page.getByRole("link", { name: /^(ホーム|ホームへ戻る)$/ }).filter({ visible: true }).first().click();
+  }
   await page.waitForURL(/\/host\/home/);
   await page.goBack();
   const panel = page.getByRole("region", { name: /合成の通常拠点/ });

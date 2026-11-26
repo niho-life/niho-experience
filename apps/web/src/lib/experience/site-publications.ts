@@ -97,7 +97,7 @@ export const listSitePublicExperiences = cache(async (locale: SitePublicLocale =
   const claimedSlugs = await publications.listClaimedSlugs();
   const items = (await publications.listPublic()).filter((publication) => visibleInLocale(publication, locale));
   const disclosures = providerSellerDisclosureRepository();
-  const profiles = locale === "ja" ? await readMemberProfiles(items.map((item) => item.slug), locale) : new Map<string, readonly PublicMemberProfile[]>();
+  const profiles = await readMemberProfiles(items.map((item) => item.slug), locale);
   if (!config.guestBookingEnabled) return {
     experiences: await Promise.all(items.map(async (publication) => ({ publication, saleTerms: null, sellerDisclosure: disclosures ? await disclosures.getPublicBySlug(publication.slug) : null, hostBio: null, memberProfiles: profiles.get(publication.slug) ?? [] }))),
     claimedSlugs,

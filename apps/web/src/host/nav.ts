@@ -1,4 +1,4 @@
-import { HOST_BOOKINGS_PATH, HOST_HOME_PATH, HOST_MESSAGES_PATH, HOST_NAV, HOST_PROFILE_PATH, HOST_REVIEWS_PATH, HOST_SELLER_PATH, HOST_SETTINGS_PATH, HOST_SUPPORT_PATH, HOST_TRANSLATE_PATH } from "@/lib/host/routes";
+import { HOST_BOOKINGS_PATH, HOST_HOME_PATH, HOST_MEMBERS_PATH, HOST_MESSAGES_PATH, HOST_NAV, HOST_PROFILE_PATH, HOST_REVIEWS_PATH, HOST_SELLER_PATH, HOST_SETTINGS_PATH, HOST_SUPPORT_PATH, HOST_TRANSLATE_PATH } from "@/lib/host/routes";
 
 /** Path only: `?providerId=` (and any other query or hash) never changes which item is selected. */
 function pathOf(location: string): string {
@@ -7,16 +7,15 @@ function pathOf(location: string): string {
 }
 
 /**
- * Screens of their own that live under ホーム without a menu item: メッセージ (#106) and レビュー
- * (#108). The menu keeps ホーム selected and phones get "‹ ホーム" instead of the brand header and
- * the bottom tabs.
+ * Screens under ホーム without a menu item: レビュー (#108) and 通訳 (#401). Phones get "‹ ホーム"
+ * instead of the provider header and bottom tabs.
  */
-const HOME_SUB_SCREENS: readonly string[] = [HOST_MESSAGES_PATH, HOST_REVIEWS_PATH, HOST_TRANSLATE_PATH];
-const SETTINGS_SUB_SCREENS: readonly string[] = [HOST_PROFILE_PATH, HOST_SELLER_PATH, HOST_SUPPORT_PATH];
+const HOME_SUB_SCREENS: readonly string[] = [HOST_REVIEWS_PATH, HOST_TRANSLATE_PATH];
+const SETTINGS_SUB_SCREENS: readonly string[] = [HOST_MEMBERS_PATH, HOST_PROFILE_PATH, HOST_SELLER_PATH, HOST_SUPPORT_PATH];
 
 const isUnder = (path: string, target: string) => path === target || path.startsWith(`${target}/`);
 
-/** The menu item for a location: its own page and the pages under it (/host/experiences/{id}, and ホーム's screens). */
+/** The menu item for a location: its own page, the pages under it, and the settings/home sub screens. */
 export function isHostNavActive(location: string, href: string): boolean {
   const path = pathOf(location);
   const target = pathOf(href);
@@ -42,15 +41,15 @@ const QUERY_SUB_SCREENS: readonly { path: string; params: readonly string[]; lab
 ];
 
 /**
- * Pages under a menu item, ホーム's own screens and the sub screens above get a "‹ 体験" back
- * header on phones instead of the brand header and the bottom tabs. Returns where it leads back
- * to, or null on the five top pages. `search` is the page's query (useSearchParams); without
+ * Pages under a menu item, ホーム's remaining sub screens and the query sub screens above get a
+ * back header on phones instead of the provider header and bottom tabs. Returns where it leads back
+ * to, or null on the top pages. `search` is the page's query (useSearchParams); without
  * it, the query written in `location` counts.
  */
 export function hostBackLink(location: string, search?: string | URLSearchParams | null): { href: string; label: string } | null {
   const path = pathOf(location);
   for (const item of HOST_NAV) {
-    if (item.href !== HOST_HOME_PATH && path.startsWith(`${item.href}/`)) return { href: item.href, label: item.label };
+    if (path.startsWith(`${item.href}/`)) return { href: item.href, label: item.label };
   }
   const query = new URLSearchParams(search ?? queryOf(location));
   for (const sub of QUERY_SUB_SCREENS) {
@@ -68,7 +67,7 @@ export function hostBackLink(location: string, search?: string | URLSearchParams
 export function providerSwitchPath(location: string): string {
   const path = pathOf(location);
   for (const item of HOST_NAV) {
-    if (item.href !== HOST_HOME_PATH && path.startsWith(`${item.href}/`)) return item.href;
+    if (path.startsWith(`${item.href}/`)) return item.href;
   }
   return path;
 }

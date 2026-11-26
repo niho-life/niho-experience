@@ -204,7 +204,7 @@ test.describe("320px narrow phone", () => {
   test("the console frame and its menus fit", async ({ page }) => {
     await signIn(page);
     expect(await noHorizontalScroll(page)).toBeLessThanOrEqual(0);
-    for (const label of ["ホーム", "体験", "カレンダー", "予約", "売上"]) {
+    for (const label of ["ホーム", "体験", "カレンダー", "予約", "メッセージ"]) {
       const box = await page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: label }).boundingBox();
       expect(box && box.x >= 0 && box.x + box.width <= 320, label).toBe(true);
     }

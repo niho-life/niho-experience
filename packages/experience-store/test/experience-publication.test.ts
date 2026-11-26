@@ -35,6 +35,8 @@ const row = (disclosure: "PUBLIC" | "AFTER_BOOKING") => ({
     timeline: [{ time: "10:00", title: "Welcome", text: "Meet the host.", photoIndex: null, private: "timeline-private-sentinel" }],
     meetingOverview: "Near a synthetic station.",
     meetingPointDisclosure: disclosure,
+    publicMapPoint: { lat: 35.319203, lng: 139.550304 },
+    publicMapArea: { lat: 35.319, lng: 139.551, radiusMeters: 500 },
     meetingPoint: {
       name: "Synthetic meeting area",
       exteriorPhotoIndex: 0,
@@ -65,10 +67,13 @@ describe("experience publication public projection", () => {
     const projected = projectPublicExperiencePublication(row("PUBLIC"));
     assert.deepEqual(Object.keys(projected ?? {}), [
       "slug", "publicTitle", "content", "meetingOverview", "meetingPointDisclosure", "meetingPoint",
+      "publicMapPoint", "publicMapArea",
       "currency", "unitAmount", "sellerDisplayName", "providerPublicName", "providerPublicNameEn", "providerKind",
       "photos", "providerPhoto", "businessLogo", "japanese", "japaneseOnly", "publishedAtUtc",
     ]);
     assert.deepEqual(projected?.meetingPoint, { name: "Synthetic meeting area", exteriorPhotoIndex: 0 });
+    assert.deepEqual(projected?.publicMapPoint, { lat: 35.319203, lng: 139.550304 });
+    assert.equal(projected?.publicMapArea, null);
     assert.deepEqual(projected?.photos, [{
       src: "/api/public/experience-media/00000000-0000-4000-8000-000000000401",
       alt: "Synthetic photo", altJa: "合成写真", publicCredit: null,
@@ -90,7 +95,17 @@ describe("experience publication public projection", () => {
     const projected = projectPublicExperiencePublication(row("AFTER_BOOKING"));
     assert.equal(projected?.meetingPointDisclosure, "AFTER_BOOKING");
     assert.equal(projected?.meetingPoint, null);
+    assert.equal(projected?.publicMapPoint, null);
+    assert.deepEqual(projected?.publicMapArea, { lat: 35.319, lng: 139.551, radiusMeters: 500 });
+    assert.doesNotMatch(JSON.stringify(projected), /35\.319203|139\.550304/);
     assert.doesNotMatch(JSON.stringify(projected), /PRIVATE_(ADDRESS|ACCESS|ENTRANCE)|private-map-sentinel/);
+  });
+
+  it("fails closed on invalid map coordinates and never publishes both coordinate forms", () => {
+    assert.equal(projectPublicExperiencePublication({ ...row("PUBLIC"), content: { ...row("PUBLIC").content, publicMapPoint: { lat: 91, lng: 0 } } }), null);
+    const afterBooking = projectPublicExperiencePublication(row("AFTER_BOOKING"));
+    assert.equal(afterBooking?.publicMapPoint, null);
+    assert.notEqual(afterBooking?.publicMapArea, null);
   });
 
   it("projects seller profile media separately from product gallery and omits unset assets", () => {

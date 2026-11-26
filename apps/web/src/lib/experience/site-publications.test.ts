@@ -104,6 +104,20 @@ describe("Experience site publication selection", () => {
     expect(mocks.hostBios.getPublicBySlug).not.toHaveBeenCalled();
   });
 
+  it("reads locale-matched member profiles into both public catalogs", async () => {
+    const englishProfiles = [{ slug: null, name: "合成の案内役", text: { role: "Guide", area: "Kamakura", quote: null, intro: "A synthetic guide." }, photo: { src: "/synthetic.jpg", alt: "合成の案内役", credit: null } }];
+    const japaneseProfiles = [{ slug: null, name: "合成の案内役", text: { role: "案内人", area: "鎌倉", quote: null, intro: "合成の案内役です。" }, photo: { src: "/synthetic.jpg", alt: "合成の案内役", credit: null } }];
+    mocks.members.listPublicForExperiences.mockResolvedValueOnce(new Map([[publication.slug, englishProfiles]]));
+    const english = await listSitePublicExperiences("en");
+    expect(mocks.members.listPublicForExperiences).toHaveBeenLastCalledWith([publication.slug], "en");
+    expect(english.experiences[0]?.memberProfiles).toEqual(englishProfiles);
+
+    mocks.members.listPublicForExperiences.mockResolvedValueOnce(new Map([[publication.slug, japaneseProfiles]]));
+    const japanese = await listSitePublicExperiences("ja");
+    expect(mocks.members.listPublicForExperiences).toHaveBeenLastCalledWith([publication.slug], "ja");
+    expect(japanese.experiences[0]?.memberProfiles).toEqual(japaneseProfiles);
+  });
+
   it("omits a disclosure when current sale terms name another seller", async () => {
     mocks.bookings.publicBookingTerms.mockResolvedValue({ ...terms, sellerDisplayName: "Different seller" });
     const published = await getSitePublicExperience(publication.slug);

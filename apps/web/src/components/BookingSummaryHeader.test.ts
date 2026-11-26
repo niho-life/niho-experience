@@ -30,14 +30,28 @@ describe("BookingSummaryHeader", () => {
     expect(html).not.toContain("How a request works");
   });
 
-  it("says it in Japanese, with the people it is met through when there are any", () => {
+  it("uses the host as the subject for a person provider", () => {
     const html = renderToStaticMarkup(BookingSummaryHeader({ item: item(), locale: "ja", area: "kita", people: [{ name: "菅 倫明" }] }));
     expect(html).toContain('href="/ja/experiences/sample-walk"');
     expect(html).toContain("体験のページへ");
     expect(html).toContain("合成の山道を歩く");
-    expect(html).toContain("菅 倫明さんが案内");
+    expect(html).toContain("まさとさんと");
+    expect(html).not.toContain("菅 倫明さんが案内");
     expect(html).toContain("北鎌倉");
     expect(renderToStaticMarkup(BookingSummaryHeader({ item: item(), locale: "ja" }))).toContain("まさとさんと");
+  });
+
+  it("keeps a business as the subject when linked people are present", () => {
+    const business = {
+      ...item(),
+      publication: { ...item().publication, providerPublicName: "鎌倉の工房", providerPublicNameEn: "Kamakura Studio", providerKind: "BUSINESS" },
+    } as SitePublicExperience;
+    const ja = renderToStaticMarkup(BookingSummaryHeader({ item: business, locale: "ja", people: [{ name: "菅 倫明" }, { name: "高浜 拓也" }] }));
+    const en = renderToStaticMarkup(BookingSummaryHeader({ item: business, locale: "en" }));
+    expect(ja).toContain("鎌倉の工房 のみなさんと");
+    expect(ja).not.toContain("菅 倫明");
+    expect(ja).not.toContain("高浜 拓也");
+    expect(en).toContain("with Kamakura Studio");
   });
 
   it("shows the three steps of a request only for an approval product, and never calls it a booking", () => {

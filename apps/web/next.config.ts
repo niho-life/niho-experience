@@ -12,13 +12,14 @@ import type { NextConfig } from "next";
 function contentSecurityPolicy({ frameSrc = "https://www.youtube-nocookie.com", frameAncestors = "'none'" }: { frameSrc?: string; frameAncestors?: string } = {}): string {
   return [
     "default-src 'self'",
-    "img-src 'self' data: https:",
+    "img-src 'self' data: blob: https:",
+    "worker-src 'self' blob:",
     `media-src 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"}`,
     "font-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     // Next.js inlines its bootstrap script. A nonce-based policy is planned with #12/#15.
     `script-src 'self' 'unsafe-inline' https://cloud.umami.is https://www.googletagmanager.com${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
-    `connect-src 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"} https://gateway.umami.is https://storage.googleapis.com https://www.googletagmanager.com https://*.google-analytics.com https://*.google.com`,
+    `connect-src 'self' ${process.env.NEXT_PUBLIC_NIHO_WEB_ORIGIN ?? "https://niho.life"} https://gateway.umami.is https://storage.googleapis.com https://www.googletagmanager.com https://*.google-analytics.com https://*.google.com https://api.mapbox.com https://events.mapbox.com https://*.tiles.mapbox.com`,
     `frame-src ${frameSrc}`,
     `frame-ancestors ${frameAncestors}`,
     "base-uri 'self'",

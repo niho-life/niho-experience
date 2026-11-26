@@ -273,23 +273,35 @@ test("owner saves a page-only meeting point, applies for the listing, withdraws 
   await noOverflow(page);
 });
 
-test("cohost has operational navigation but no sales, Stripe or member controls", async ({ page }) => {
+test("cohost has operational navigation but no sales, Stripe or member controls", async ({ page }, testInfo) => {
   await page.goto("/host/auth/mock-login?mock=cohost");
+  await page.goto(`/host/home?providerId=${PROVIDER}`);
+  await expect(page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: "メッセージ", exact: true })).toBeVisible();
   await page.goto(`/host/members?providerId=${PROVIDER}`);
   await expect(page.getByText("あなたはサブホストです")).toBeVisible();
   await expect(page.getByLabel("登録済みNIHOアカウントのメールアドレス")).toHaveCount(0);
   await expect(page.getByText("売上受取口座")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "売上", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "予約", exact: true })).toBeVisible();
+  if (testInfo.project.name.includes("desktop")) {
+    await expect(page.getByRole("link", { name: "予約", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "ホストのメニュー" }).getByRole("link", { name: "設定", exact: true })).toHaveAttribute("aria-current", "page");
+  } else {
+    await expect(page.getByRole("link", { name: "予約", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "設定へ戻る" })).toHaveAttribute("href", `/host/settings?providerId=${PROVIDER}`);
+  }
   // 設定 is the provider's (the sidebar on PC, the provider chip's menu on phones); メンバー is the owner's.
   await expect(page.getByRole("link", { name: "メンバー", exact: true })).toHaveCount(0);
+  if (!testInfo.project.name.includes("desktop")) {
+    await page.getByRole("link", { name: "設定へ戻る" }).click();
+    await page.waitForURL(new RegExp(`/host/settings\\?providerId=${PROVIDER}$`));
+  }
   const providerChip = page.locator("summary:visible", { hasText: /のメニュー/ });
   if (await providerChip.count()) await providerChip.click();
   await expect(page.getByRole("link", { name: "設定", exact: true })).toBeVisible();
   const accountMenu = page.locator("summary:visible", { hasText: "のアカウント" });
   await accountMenu.click();
   await expect(page.getByRole("link", { name: "記事を書く", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "アカウント設定", exact: true })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("link", { name: "アカウント設定", exact: true })).toBeVisible();
   await accountMenu.click();
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);

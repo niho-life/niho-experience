@@ -6,7 +6,6 @@ import { loadMoreGuestQuestionThreads, openGuestQuestionThread, sendGuestQuestio
 import { addReply, lastMessage, listTimeLabel, messagePreview, messagesHref, sortThreads, threadHeading, threadWhen, waitingSince } from "@/host/messages";
 import { THREAD_WAITING } from "@/host/status";
 import type { HostThread } from "@/host/types";
-import { HOST_HOME_PATH, withProvider } from "@/lib/host/routes";
 import { HostIcon } from "./HostIcon";
 import { HostMessageThread, type ReplyInput } from "./HostMessageThread";
 import { HostSubHeader } from "./HostSubHeader";
@@ -49,8 +48,8 @@ export interface HostMessagesProps {
 /**
  * メッセージ (#106, the journey mock's H2; laid out like 予約 #90): the threads on the left, the
  * waiting ones first, and one thread on the right (PC). On phones the thread is a screen of its
- * own (`?thread=`, or `?booking=` for a booking's): "‹ メッセージ" instead of the header, and the
- * page itself is under ホーム ("‹ ホーム", no bottom tabs).
+ * own (`?thread=`, or `?booking=` for a booking's): "‹ メッセージ" instead of the header, with no
+ * bottom tabs. The list is a top page with the provider header and tabs.
  *
  * The thread lives in the URL and changes with pushState, so the page is not loaded again and the
  * threads keep the replies sent on this screen (mock mode: on this screen only; the preview note
@@ -191,11 +190,7 @@ export function HostMessages({ threads: initialThreads, newThread, experiences: 
 
   return (
     <>
-      {sub ? (
-        <HostSubHeader backHref={listHref} backLabel="メッセージ" title={shown ? threadHeading(shown) : "メッセージ"} onBack={(event) => move(event, listHref)} />
-      ) : (
-        <HostSubHeader backHref={withProvider(HOST_HOME_PATH, linkProviderId)} backLabel="ホーム" title="" />
-      )}
+      {sub ? <HostSubHeader backHref={listHref} backLabel="メッセージ" title={shown ? threadHeading(shown) : "メッセージ"} onBack={(event) => move(event, listHref)} /> : null}
       <HostPageBody>
         <div data-sub={sub ? "thread" : undefined} className="lg:grid lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-5">
           <div className={`min-w-0 ${sub ? "max-lg:hidden" : ""}`}>

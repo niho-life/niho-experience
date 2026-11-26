@@ -1,6 +1,7 @@
 # NIHO Travel 作業ルール
 
 - オーナー向け報告、Issue、PR、仕様文書は日本語。旅行者向けUIは、英語サイトと日本語サイトを同じレイアウトにする（オーナー決定 2026-11-25、#658。2026-11-14 の「それぞれの構成を持つ」を改めた）。1ページは1つの部品を日英で使い、言語で変えるのは文言と、意図した差だけにする。意図した差（例：日本語だけの「企業・学校」タブ）は、ヘッダーのタブなら `apps/web/src/lib/site-nav.ts` のように1か所に書き、理由を添える。日本語専用の部品（`components/ja/*`・`components/ja-home/*` など）を増やさない。いま残っているものは #658 の順に共通の部品へ寄せる。文言は訳にせず、その言語の読者向けに書く。公開ページの見た目・構成を変える Issue と PR には、日英それぞれの扱い（同じに変える・意図して変える）を書き、両方の画面を確認する。URL（`/…` と `/ja/…`）は変えない。
+- ホスト・販売者・メンバーなどの呼び方は [用語集](docs/glossary.md) に従う（#681）。
 - まず対象Issueと `docs/architecture.md`、UI変更では `docs/design-brief.md` を読む。優先順は顧客UX、開発・運用速度、コスト。
 - 担当Issue・触るファイル範囲・依存するAPI版を着手時に明示する。同じファイルの並行編集は担当を決める。対象外の差分を変更・破棄しない。
 - niho-experience の実装には固定の4 worktree `~/Documents/app/NIHO/niho-experience-paneB-1`、`niho-experience-paneB-2`、`niho-experience-paneB-3`、`niho-experience-paneB-4` を使う。`scripts/seat.sh status` で状態を確認し、clean な topic branch がある seat も再利用してよい。`scripts/seat.sh start <seat> <topic>` は最新 `origin/main` から `paneB-<seat>/<topic>` を作り、以前の branch ref は残す（上書き・削除しない）。未コミット差分がある seat は保護し、同じ worktree を複数の書き手が同時編集しない。topic や修復のために worktree を追加せず、追加はオーナーの明示指示時だけ。詳細は [座席と topic branch の運用](docs/panes/panes-workflow.md)。

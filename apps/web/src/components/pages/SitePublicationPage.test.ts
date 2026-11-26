@@ -17,6 +17,7 @@ vi.mock("@/lib/config", () => ({ config: {
   indexingAllowed: true,
   bookingsEnabled: true,
   guestBookingEnabled: true,
+  groupInquiryEnabled: true,
 } }));
 vi.mock("@/lib/journey", () => ({ getLiveReviews: vi.fn(async () => state.reviews) }));
 vi.mock("@/lib/guest-booking-source", () => ({ siteNextDates: vi.fn(async () => state.nextDates) }));
@@ -53,7 +54,7 @@ const item = {
     },
     currency: "JPY", unitAmount: 4_000, sellerDisplayName: "Synthetic Legal Seller",
     providerPublicName: "Synthetic Actual Host", providerKind: "PERSON", meetingOverview: null,
-    meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null, photos: [],
+    meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null, publicMapPoint: null, publicMapArea: null, photos: [],
     providerPhoto: { src: "/api/public/experience-provider-media/00000000-0000-4000-8000-000000000001", alt: "Synthetic actual host", altJa: "合成の実提供者", publicCredit: null }, businessLogo: null,
     japanese: null, japaneseOnly: false, publishedAtUtc: "2026-11-05T00:00:00.000Z",
   },
@@ -128,10 +129,13 @@ describe("native publication reviews", () => {
 
   it("shows the actual provider in the host introduction while retaining the legal seller for the sale", async () => {
     const html = await render(null);
-    expect(html).toContain("Hosted by <b class=\"text-ink\">Synthetic Actual Host</b>");
-    expect(html).toContain("About your host");
+    expect(html).toContain('href="#host"');
+    expect(html).toContain("with Synthetic Actual Host");
+    expect(html).toContain("Your host");
     expect(html).toContain("Synthetic Actual Host");
-    expect(html).toContain("Synthetic Legal Seller is the seller");
+    expect(html).toContain("Sold by ");
+    expect(html).toContain("Synthetic Legal Seller");
+    expect(html).toContain("Seller information");
     const nodes = jsonLd(html);
     expect(nodes[0]).toMatchObject({ provider: { name: "Synthetic Actual Host" } });
     expect(nodes[1]).not.toHaveProperty("brand");
@@ -157,16 +161,13 @@ describe("native publication next dates and booking deadline (#146)", () => {
     flags.guestBookingEnabled = true;
   });
 
-  it("puts the next dates and when the next one closes under the facts, linked to the booking page", async () => {
+  it("puts the next three dates in the booking card and waits to show the deadline until a date is selected", async () => {
     const html = await page();
     expect(siteNextDates).toHaveBeenCalledWith("native-review-page");
-    expect(html).toContain("data-next-date-band");
-    expect(html).toContain("Next date");
-    expect(html).toContain("Book by");
-    expect(html).toContain("6:00 PM JST");
-    // The band comes after the facts header and before the first section.
-    expect(html.indexOf("data-next-date-band")).toBeGreaterThan(html.indexOf("<h1"));
-    expect(html.indexOf("data-next-date-band")).toBeLessThan(html.indexOf("What you’ll do"));
+    expect(html).toContain("Upcoming dates");
+    expect(html).not.toContain("Book by");
+    expect(html.indexOf("Upcoming dates")).toBeGreaterThan(html.indexOf("<h1"));
+    expect(html.indexOf("Upcoming dates")).toBeLessThan(html.indexOf("What you’ll do"));
     expect(html).toContain('href="/experiences/native-review-page/book"');
     expect(html).not.toContain('href="#book"');
   });
@@ -174,21 +175,21 @@ describe("native publication next dates and booking deadline (#146)", () => {
   it("is shown without a deadline when the source says none", async () => {
     state.nextDates = [{ ...next, bookingClosesAt: next.startAt }];
     const html = await page();
-    expect(html).toContain("Next date");
+    expect(html).toContain("Upcoming dates");
     expect(html).not.toContain("Book by");
   });
 
   it("shows no band where nothing can be booked: bookings off, no offers, or no dates", async () => {
     flags.bookingsEnabled = false;
-    expect(await page()).not.toContain("data-next-date-band");
+    expect(await page()).not.toContain("Upcoming dates");
     expect(siteNextDates).not.toHaveBeenCalled();
     flags.bookingsEnabled = true;
     flags.guestBookingEnabled = false;
-    expect(await page()).not.toContain("data-next-date-band");
+    expect(await page()).not.toContain("Upcoming dates");
     flags.guestBookingEnabled = true;
-    expect(await page("en", { ...item, saleTerms: null } as SitePublicExperience)).not.toContain("data-next-date-band");
+    expect(await page("en", { ...item, saleTerms: null } as SitePublicExperience)).not.toContain("Upcoming dates");
     state.nextDates = [];
-    expect(await page()).not.toContain("data-next-date-band");
+    expect(await page()).not.toContain("Upcoming dates");
   });
 });
 
@@ -229,21 +230,22 @@ describe("native publication host bio (#146)", () => {
     return renderToStaticMarkup(await SitePublicationPage({ item: page, locale: "ja" }));
   };
 
-  it("shows the confirmed English bio as plain text with the host name, before reviews", async () => {
+  it("shows the confirmed English bio as plain text with the host name, after reviews", async () => {
     const html = await render(ok(2), withBio({ ja: "鎌倉で茶道を教えています。", en: "I teach tea ceremony.\n\n<b>Synthetic</b> host." }));
     expect(html).toContain('<section id="host" aria-labelledby="host-heading"');
-    expect(html).toMatch(/<h2 id="host-heading"[^>]*>About your host<\/h2>/);
+    expect(html).toMatch(/<h2 id="host-heading"[^>]*>Your host<\/h2>/);
     expect(html).toContain("Synthetic Actual Host");
     expect(html).toContain("I teach tea ceremony.\n\n&lt;b&gt;Synthetic&lt;/b&gt; host.");
     expect(html).not.toContain("鎌倉で茶道を教えています。");
-    expect(html.indexOf('id="host"')).toBeLessThan(html.indexOf('id="reviews"'));
+    expect(html.indexOf('id="host"')).toBeLessThan(html.indexOf('id="place"'));
+    expect(html.indexOf('id="place"')).toBeLessThan(html.indexOf('id="reviews"'));
   });
 
   it("keeps the consented host introduction while omitting missing or unconfirmed English bio text", async () => {
     for (const page of [withBio({ ja: "鎌倉で茶道を教えています。", en: null }), withBio(null)]) {
       const html = await render(null, page);
       expect(html).toContain('id="host"');
-      expect(html).toContain("About your host");
+      expect(html).toContain("Your host");
       expect(html).toContain("Synthetic Actual Host");
       expect(html).not.toContain("鎌倉で茶道を教えています。");
     }
@@ -251,7 +253,7 @@ describe("native publication host bio (#146)", () => {
 
   it("shows the Japanese bio and keeps the consented host identity when no bio is present", async () => {
     const html = await renderJa(withBio({ ja: "鎌倉で茶道を教えています。\n合成データです。", en: null }));
-    expect(html).toMatch(/<h2 id="host-heading"[^>]*>ホストについて<\/h2>/);
+    expect(html).toMatch(/<h2 id="host-heading"[^>]*>ホスト<\/h2>/);
     expect(html).toContain("鎌倉で茶道を教えています。\n合成データです。");
     expect(html).not.toContain("About your host");
     const withoutBio = await renderJa(withBio(null));
@@ -281,19 +283,24 @@ describe("native publication context under the title and below the sections (#14
     state.related = [];
   });
 
-  it("says where it is under the title, and adds the station walk only when the meeting overview names one", async () => {
+  it("shows local place access under the title and keeps regional rail context in the place section", async () => {
     const html = await page();
-    expect(html).toContain("Kamakura · 1 hour from Tokyo<");
-    expect(html.indexOf("Kamakura · 1 hour from Tokyo")).toBeGreaterThan(html.indexOf("<h1"));
-    expect(html.indexOf("Kamakura · 1 hour from Tokyo")).toBeLessThan(html.indexOf("Hosted by"));
-    expect(await page("en", withOverview("Meet at the gate. It is a 2-minute walk from Kamakura Station."))).toContain("Kamakura · 1 hour from Tokyo · 2-minute walk from Kamakura Station");
-    expect(await page("en", withOverview("Meet near the nearest station."))).toContain("Kamakura · 1 hour from Tokyo<");
+    expect(html).toContain('href="#place">Kamakura</a>');
+    expect(html.indexOf('href="#place">Kamakura')).toBeGreaterThan(html.indexOf("<h1"));
+    const titleBlock = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+    expect(titleBlock).not.toContain("Tokyo");
+    expect(html).toContain("About 1 hour from Tokyo Station by direct JR Yokosuka Line");
+    expect(await page("en", withOverview("Meet at the gate. It is a 2-minute walk from Kamakura Station."))).toContain("Meet at the gate. It is a 2-minute walk from Kamakura Station.");
+    expect(await page("en", withOverview("Meet near the nearest station."))).toContain("Meet near the nearest station.");
   });
 
   it("says it in Japanese too, without carrying an English station into the Japanese page", async () => {
     const ja = { ...withOverview("It is a 2-minute walk from Kamakura Station."), publication: { ...item.publication, meetingOverview: "It is a 2-minute walk from Kamakura Station.", japanese } } as SitePublicExperience;
     const html = await page("ja", ja);
-    expect(html).toContain("鎌倉・東京から1時間<");
+    expect(html).toContain('href="#place">鎌倉</a>');
+    expect(html).toContain("東京駅からJR横須賀線で約1時間（乗り換えなし）");
+    const titleBlock = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+    expect(titleBlock).not.toContain("東京駅");
     expect(html).not.toContain("Kamakura Station");
   });
 
@@ -306,8 +313,8 @@ describe("native publication context under the title and below the sections (#14
     expect(html).toContain("Guide rainy-day");
     expect(html).toContain('href="/guides/meet-the-host"');
     expect(html).toContain("Read the host story");
-    // The related guides come after the FAQ position and before the price card; the story link is up with the host line.
-    expect(html.indexOf("Read the host story")).toBeLessThan(html.indexOf("What you’ll do"));
+    // The host story link is grouped with the guide section.
+    expect(html.indexOf("Read the host story")).toBeGreaterThan(html.indexOf("Plan your"));
     expect(html.indexOf("Plan your")).toBeGreaterThan(html.indexOf("What’s included"));
 
     const ja = await page("ja", { ...item, publication: { ...item.publication, japanese } } as SitePublicExperience);
@@ -340,8 +347,8 @@ describe("native publication context under the title and below the sections (#14
     expect(relatedSiteExperienceCards).toHaveBeenCalledWith("native-review-page", "en");
     expect(html).toMatch(/<h2[^>]*>More experiences in Kamakura<\/h2>/);
     expect(html).toContain('href="/experiences/another-experience"');
-    // Full width, after the price card rather than inside the two-column body.
-    expect(html.indexOf("More experiences in Kamakura")).toBeGreaterThan(html.indexOf("</aside>"));
+    // Related experiences follow the seller information line at the end of the page.
+    expect(html.indexOf("More experiences in Kamakura")).toBeGreaterThan(html.indexOf('id="seller"'));
 
     const ja = await page("ja", { ...item, publication: { ...item.publication, japanese } } as SitePublicExperience);
     expect(ja).not.toContain("More experiences in Kamakura");

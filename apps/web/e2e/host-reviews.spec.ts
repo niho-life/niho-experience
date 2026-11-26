@@ -260,11 +260,11 @@ test("体験 links each experience's average to its reviews; レビュー is a s
   // Six published reviews: the site shows the average, and nothing waits to be published.
   await expect(page.getByRole("list", { name: "レビューの要約" })).toHaveCount(0);
   if (isDesktop(testInfo.project.name)) {
-    // The summary on the right of the title; the menu keeps ホーム.
+    // The summary on the right of the title; ホーム remains a brand link, not a sidebar item.
     const titleBox = (await page.getByRole("heading", { level: 1 }).boundingBox())!;
     const summaryBox = (await summary.boundingBox())!;
     expect(summaryBox.x).toBeGreaterThan(titleBox.x + titleBox.width);
-    await expect(menu(page).getByRole("link", { name: "ホーム" })).toHaveAttribute("aria-current", "page");
+    await expect(menu(page).getByRole("link", { name: "ホーム" })).toHaveCount(0);
   } else {
     // "‹ ホーム" instead of the brand header, and no bottom tabs.
     await expect(menu(page)).toHaveCount(0);
