@@ -117,6 +117,8 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
     meetingPoint: publication.meetingPointDisclosure === "PUBLIC" && locale === "en" && publication.meetingPoint
       ? { name: publication.meetingPoint.name, address: null, accessNote: null, entranceNote: null, mapUrl: null, exteriorPhotoIndex: publication.meetingPoint.exteriorPhotoIndex }
       : null,
+    publicMapPoint: publication.meetingPointDisclosure === "PUBLIC" ? publication.publicMapPoint : null,
+    publicMapArea: publication.meetingPointDisclosure === "AFTER_BOOKING" ? publication.publicMapArea : null,
     notIncluded: [...content.notIncluded],
     notSuitableFor: [...content.notSuitableFor],
     offers,

@@ -320,6 +320,10 @@ export type components = {
             offers: components["schemas"]["PublicExperienceOffer"][];
             photos: components["schemas"]["PublicExperienceImage"][];
             provider: components["schemas"]["PublicExperienceProvider"];
+            /** @description AFTER_BOOKING のときだけ概略円（中心と半径）を返す。正確な位置は含めない。PUBLIC では常に null。 */
+            publicMapArea?: components["schemas"]["PublicExperienceMapArea"] | null;
+            /** @description PUBLIC のときだけ正確な公開位置を返す。AFTER_BOOKING では常に null。 */
+            publicMapPoint?: components["schemas"]["PublicExperienceMapPoint"] | null;
             region: components["schemas"]["PublicExperienceRegion"];
             seller: components["schemas"]["PublicExperienceSeller"];
             slug: components["schemas"]["PublicExperienceSlug"];
@@ -362,6 +366,10 @@ export type components = {
             offers: components["schemas"]["PublicExperienceOffer"][];
             photos: components["schemas"]["PublicExperienceImageV11"][];
             provider: components["schemas"]["PublicExperienceProviderV11"];
+            /** @description AFTER_BOOKING のときだけ概略円（中心と半径）を返す。正確な位置は含めない。PUBLIC では常に null。 */
+            publicMapArea?: components["schemas"]["PublicExperienceMapArea"] | null;
+            /** @description PUBLIC のときだけ正確な公開位置を返す。AFTER_BOOKING では常に null。 */
+            publicMapPoint?: components["schemas"]["PublicExperienceMapPoint"] | null;
             region: components["schemas"]["PublicExperienceRegion"];
             seller: components["schemas"]["PublicExperienceSeller"];
             slug: components["schemas"]["PublicExperienceSlug"];
@@ -406,6 +414,17 @@ export type components = {
         PublicExperienceLocalDate: string;
         /** @description 日本時間（Asia/Tokyo）の時刻 `HH:mm`。 */
         PublicExperienceLocalTime: string;
+        /** @description AFTER_BOOKING の公開範囲。中心と半径による概略のみで、正確な位置を含めない。 */
+        PublicExperienceMapArea: {
+            lat: number;
+            lng: number;
+            radiusMeters: number;
+        };
+        /** @description PUBLIC の公開位置。公開許可を得たピンだけを含む。 */
+        PublicExperienceMapPoint: {
+            lat: number;
+            lng: number;
+        };
         /** @description 集合場所を公開してよい体験だけに入る。 */
         PublicExperienceMeetingPoint: {
             accessNote: string | null;

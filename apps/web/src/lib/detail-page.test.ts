@@ -1,6 +1,6 @@
 import type { Occurrence } from "@niho-experience/api-client";
 import { describe, expect, it } from "vitest";
-import { detailFromTokyoLine, detailGuideHeading, detailNextDates, publicStationAccess } from "./detail-page";
+import { detailFromTokyoLine, detailGuideHeading, detailNextDates, detailTokyoRailLine, publicStationAccess } from "./detail-page";
 
 const occurrence = (date: string, startAt: string, bookable = true): Occurrence => ({
   offerId: `offer-${date}-${startAt}`,
@@ -14,6 +14,11 @@ const occurrence = (date: string, startAt: string, bookable = true): Occurrence 
 });
 
 describe("detail page facts", () => {
+  it("keeps the direct Tokyo rail line in the place section copy", () => {
+    expect(detailTokyoRailLine("en")).toBe("About 1 hour from Tokyo Station by direct JR Yokosuka Line");
+    expect(detailTokyoRailLine("ja")).toBe("東京駅からJR横須賀線で約1時間（乗り換えなし）");
+  });
+
   it("uses only explicit public station and walking facts", () => {
     expect(publicStationAccess("2-minute walk from Kamakura Station West Exit.", "en")).toEqual({ station: "Kamakura Station", walkMinutes: 2 });
     expect(publicStationAccess("1-minute walk from Kita-Kamakura Station.", "en")).toEqual({ station: "Kita-Kamakura Station", walkMinutes: 1 });

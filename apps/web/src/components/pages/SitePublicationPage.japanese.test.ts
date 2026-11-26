@@ -59,7 +59,7 @@ describe("Experience publication Japanese sale presentation", () => {
     expect(html).toContain("日本語の紹介");
     expect(html).toContain("日本語の説明");
     expect(html).toContain("日本語の写真");
-    expect(html).toContain("販売者情報");
+    expect(html).toContain("特定商取引法に基づく表記");
     expect(html).toContain("開始24時間前までキャンセル無料");
     expect(html).toContain("毎日 · 10:00 JST");
     expect(html).not.toContain("English lead");

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "NIHO Experience Public API",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "niho-experience が使う NIHO 共通基盤の公開 API（選別して配布する版）。正本は niho-app の contracts/openapi.yaml。ここに無い項目・操作は使わない。",
     "x-niho-contract-status": "agreed",
     "x-niho-contract-source": "niho-app contracts/openapi.yaml"
@@ -1474,6 +1474,18 @@
               }
             ]
           },
+          "publicMapPoint": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [{ "$ref": "#/components/schemas/PublicExperienceMapPoint" }],
+            "description": "PUBLIC のときだけ正確な公開位置を返す。AFTER_BOOKING では常に null。"
+          },
+          "publicMapArea": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [{ "$ref": "#/components/schemas/PublicExperienceMapArea" }],
+            "description": "AFTER_BOOKING のときだけ概略円（中心と半径）を返す。正確な位置は含めない。PUBLIC では常に null。"
+          },
           "hosts": {
             "type": "array",
             "maxItems": 4,
@@ -1673,6 +1685,18 @@
                 "$ref": "#/components/schemas/PublicExperienceMeetingPoint"
               }
             ]
+          },
+          "publicMapPoint": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [{ "$ref": "#/components/schemas/PublicExperienceMapPoint" }],
+            "description": "PUBLIC のときだけ正確な公開位置を返す。AFTER_BOOKING では常に null。"
+          },
+          "publicMapArea": {
+            "type": "object",
+            "nullable": true,
+            "allOf": [{ "$ref": "#/components/schemas/PublicExperienceMapArea" }],
+            "description": "AFTER_BOOKING のときだけ概略円（中心と半径）を返す。正確な位置は含めない。PUBLIC では常に null。"
           },
           "meetingOverview": {
             "type": "string",
@@ -1904,6 +1928,29 @@
             "minimum": 0,
             "nullable": true
           }
+        }
+      },
+      "PublicExperienceMapPoint": {
+        "type": "object",
+        "x-niho-public-dto": true,
+        "additionalProperties": false,
+        "required": ["lat", "lng"],
+        "description": "PUBLIC の公開位置。公開許可を得たピンだけを含む。",
+        "properties": {
+          "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+          "lng": { "type": "number", "minimum": -180, "maximum": 180 }
+        }
+      },
+      "PublicExperienceMapArea": {
+        "type": "object",
+        "x-niho-public-dto": true,
+        "additionalProperties": false,
+        "required": ["lat", "lng", "radiusMeters"],
+        "description": "AFTER_BOOKING の公開範囲。中心と半径による概略のみで、正確な位置を含めない。",
+        "properties": {
+          "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+          "lng": { "type": "number", "minimum": -180, "maximum": 180 },
+          "radiusMeters": { "type": "integer", "minimum": 50, "maximum": 10000 }
         }
       },
       "PublicExperienceOccurrence": {

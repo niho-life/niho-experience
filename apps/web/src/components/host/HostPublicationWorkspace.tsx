@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HOST_SURFACE, consoleButtonClass } from "./host-ui";
+import { MapboxLocationMap, type MapArea, type MapCoordinate } from "@/components/MapboxLocationMap";
 import { HostPageBody, PageHead } from "./ui";
 import { HostSharedPhotoOffer } from "./HostSharedPhoto";
 import { HostConfirmDialog } from "./HostConfirmDialog";
@@ -97,7 +98,7 @@ type Props = {
 const blankContent = {
   lead: "", description: "", facts: { language: "" }, highlights: [], included: [], notIncluded: [],
   knowBeforeYouGo: [], notSuitableFor: [], timeline: [], meetingOverview: null,
-  meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null,
+  meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null, publicMapPoint: null, publicMapArea: null,
 };
 const blankJapanese: LocaleManuscript = { title: "", lead: "", description: "", language: "", highlights: [], included: [], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [] };
 const emptyTerms = publicationTermsForm(null, []);
@@ -161,6 +162,15 @@ function contentFrom(product: Product): Record<string, unknown> {
   };
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function mapCoordinate(value: unknown): MapCoordinate | null {
+  if (!isRecord(value) || typeof value.lat !== "number" || !Number.isFinite(value.lat) || typeof value.lng !== "number" || !Number.isFinite(value.lng)) return null;
+  return value.lat < -90 || value.lat > 90 || value.lng < -180 || value.lng > 180 ? null : { lat: value.lat, lng: value.lng };
+}
+function mapArea(value: unknown): MapArea | null {
+  const point = mapCoordinate(value);
+  if (!point || !isRecord(value) || !Number.isSafeInteger(value.radiusMeters) || Number(value.radiusMeters) < 50 || Number(value.radiusMeters) > 10_000) return null;
+  return { ...point, radiusMeters: Number(value.radiusMeters) };
+}
 function lines(value: unknown): string { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").join("\n") : ""; }
 /** The Japanese manuscript being edited: `content.ja`, or the draft `content.jaDraft` while the page is English-only. */
 function japaneseManuscript(content: Record<string, unknown>): LocaleManuscript {
@@ -263,6 +273,39 @@ function offerLabel(offer: Product["offers"][number]): string {
 function Field({ label, value, onChange, onBlur, multiline = false, rows = 3, placeholder }: { label: string; value: string; onChange: (value: string) => void; onBlur?: () => void; multiline?: boolean; rows?: number; placeholder?: string }) {
   const common = "mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 text-ink outline-none focus-visible:border-moss focus-visible:ring-2 focus-visible:ring-moss/20";
   return <label className="block text-sm font-bold text-ink-soft">{label}{multiline ? <textarea value={value} onChange={(event) => onChange(event.target.value)} onBlur={onBlur} rows={rows} placeholder={placeholder} className={`${common} resize-y font-normal`} /> : <input value={value} onChange={(event) => onChange(event.target.value)} onBlur={onBlur} placeholder={placeholder} className={`${common} font-normal`} />}</label>;
+}
+
+function MeetingCoordinatesEditor({ value, onChange, radius, onRadiusChange, approximate }: {
+  value: MapCoordinate | null;
+  onChange: (value: MapCoordinate | null) => void;
+  radius: number;
+  onRadiusChange: (radius: number) => void;
+  approximate: boolean;
+}) {
+  const [lat, setLat] = useState(value ? String(value.lat) : "");
+  const [lng, setLng] = useState(value ? String(value.lng) : "");
+  useEffect(() => {
+    setLat(value ? String(value.lat) : "");
+    setLng(value ? String(value.lng) : "");
+  }, [value?.lat, value?.lng]);
+  const edit = (nextLat: string, nextLng: string) => {
+    const parsedLat = Number(nextLat);
+    const parsedLng = Number(nextLng);
+    if (nextLat.trim() === "" || nextLng.trim() === "") { onChange(null); return; }
+    if (Number.isFinite(parsedLat) && parsedLat >= -90 && parsedLat <= 90 && Number.isFinite(parsedLng) && parsedLng >= -180 && parsedLng <= 180) {
+      onChange({ lat: parsedLat, lng: parsedLng });
+    }
+  };
+  const input = "mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 font-normal text-ink outline-none focus-visible:border-moss focus-visible:ring-2 focus-visible:ring-moss/20";
+  return <div className="space-y-3">
+    <div className="grid gap-3 sm:grid-cols-2">
+      <label className="block text-sm font-bold text-ink-soft">緯度<input inputMode="decimal" value={lat} onChange={(event) => setLat(event.target.value)} onBlur={() => edit(lat, lng)} className={input} /></label>
+      <label className="block text-sm font-bold text-ink-soft">経度<input inputMode="decimal" value={lng} onChange={(event) => setLng(event.target.value)} onBlur={() => edit(lat, lng)} className={input} /></label>
+    </div>
+    {approximate ? <label className="block text-sm font-bold text-ink-soft">公開する半径: {radius} m
+      <input type="range" min={50} max={10_000} step={50} value={radius} disabled={!value} onChange={(event) => onRadiusChange(Number(event.target.value))} className="mt-2 w-full accent-moss disabled:opacity-45" />
+    </label> : null}
+  </div>;
 }
 
 export function HostPublicationWorkspace({
@@ -1415,6 +1458,8 @@ export function HostPublicationWorkspace({
     const faqFull = faqRows.length >= PUBLICATION_FAQ_LIMITS.maxItems;
     const changeFaq = (index: number, key: keyof PublicationFaqRow, value: string) => updateFaq(L, faqRows.map((row, at) => at === index ? { ...row, [key]: value } : row));
     const disclosure = content.meetingPointDisclosure === "PUBLIC" ? "PUBLIC" : "AFTER_BOOKING";
+    const publicMapPoint = mapCoordinate(content.publicMapPoint);
+    const publicMapArea = mapArea(content.publicMapArea);
 
     const pillBase = "inline-flex h-[26px] items-center gap-1.5 rounded-full px-[11px] text-xs font-extrabold whitespace-nowrap before:size-1.5 before:rounded-full before:bg-current before:content-['']";
     const statusTone = product.status === "PUBLISHED" ? "bg-leaf-pale text-moss"
@@ -1574,9 +1619,34 @@ export function HostPublicationWorkspace({
           <section id="publication-meeting" className={sectionClass} aria-labelledby="publication-meeting-title">
             <h2 id="publication-meeting-title" className={headingClass}>集合場所</h2>
             <EditorChoice name="meeting-disclosure" legend="集合場所を見せる時期" info="「予約が確定してから案内する」では、公開ページに「集合の概要」だけが出ます。「予約前から公開する」では、公開ページに集合場所が出ます。英語と日本語で共通です。"
-              value={disclosure} onChange={(next) => setContent((current) => ({ ...current, meetingPointDisclosure: next }))}
+              value={disclosure} onChange={(next) => setContent((current) => ({ ...current, meetingPointDisclosure: next, publicMapPoint: next === "PUBLIC" ? current.publicMapPoint ?? null : null, publicMapArea: next === "AFTER_BOOKING" ? current.publicMapArea ?? null : null }))}
               options={[{ value: "AFTER_BOOKING", label: "予約が確定してから案内する" }, { value: "PUBLIC", label: "予約前から公開する" }]} />
             {L === "en" ? <EditorField label="集合の概要" rows={2} info="予約前の公開ページに出る、大まかな場所の案内です。英語のページにだけ出ます。" value={typeof content.meetingOverview === "string" ? content.meetingOverview : ""} onChange={(next) => updateContent("meetingOverview", next || null)} /> : null}
+            <div className="mt-4 space-y-3">
+              <p className="text-sm text-ink-soft">{disclosure === "PUBLIC" ? "公開してよい地点を地図上で選びます。" : "予約後に案内する地点ではなく、公開してよい範囲の中心を選びます。公開されるのは中心と半径だけです。"}</p>
+              <MapboxLocationMap
+                point={disclosure === "PUBLIC" ? publicMapPoint : null}
+                area={disclosure === "AFTER_BOOKING" ? publicMapArea : null}
+                editable
+                label={disclosure === "PUBLIC" ? "公開する集合場所のピン" : "公開する集合エリア"}
+                locale="ja"
+                onChoose={(coordinate) => setContent((current) => disclosure === "PUBLIC"
+                  ? { ...current, publicMapPoint: coordinate, publicMapArea: null }
+                  : { ...current, publicMapPoint: null, publicMapArea: { ...coordinate, radiusMeters: mapArea(current.publicMapArea)?.radiusMeters ?? 500 } })}
+              />
+              <MeetingCoordinatesEditor
+                value={disclosure === "PUBLIC" ? publicMapPoint : publicMapArea}
+                approximate={disclosure === "AFTER_BOOKING"}
+                radius={publicMapArea?.radiusMeters ?? 500}
+                onChange={(coordinate) => setContent((current) => disclosure === "PUBLIC"
+                  ? { ...current, publicMapPoint: coordinate, publicMapArea: null }
+                  : { ...current, publicMapPoint: null, publicMapArea: coordinate ? { ...coordinate, radiusMeters: mapArea(current.publicMapArea)?.radiusMeters ?? 500 } : null })}
+                onRadiusChange={(radiusMeters) => setContent((current) => {
+                  const center = mapArea(current.publicMapArea);
+                  return center ? { ...current, publicMapArea: { ...center, radiusMeters } } : current;
+                })}
+              />
+            </div>
           </section>
           <section id="publication-notes" className={sectionClass} aria-labelledby="publication-notes-title">
             <h2 id="publication-notes-title" className={headingClass}>注意事項・よくある質問</h2>

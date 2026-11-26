@@ -20,6 +20,13 @@ export const DETAIL_PAGE_COPY = {
   },
 } as const;
 
+/** Regional travel context belongs in the place section rather than beside the title. */
+export function detailTokyoRailLine(locale: "en" | "ja"): string {
+  return locale === "ja"
+    ? "東京駅からJR横須賀線で約1時間（乗り換えなし）"
+    : "About 1 hour from Tokyo Station by direct JR Yokosuka Line";
+}
+
 type PublicAccess = Readonly<{ station: string; walkMinutes: number }>;
 
 /**

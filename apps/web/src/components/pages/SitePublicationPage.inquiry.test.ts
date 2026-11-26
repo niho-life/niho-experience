@@ -39,15 +39,16 @@ describe("the experience page's inquiry links", () => {
     expect(links.filter((href) => href.includes("from=experience") && href.includes("experience=synthetic-tea") && href.includes("title=合成茶道体験") && href.includes("host=Sample Sato"))).toHaveLength(2);
     expect(links.some((href) => href.includes("from=provider"))).toBe(false);
     expect(html).not.toContain("Sample Satoさんに相談する");
-    expect(html).toContain("ほかの日を相談する");
-    expect(html).toContain("この体験について相談する");
+    expect(html).toContain("ほかの日・グループの相談");
+    expect(html).toContain("予約の前に相談できます。");
+    expect(html).toContain(">相談する</a>");
   });
 
-  it("keeps the English page's question to the host as it was", async () => {
+  it("keeps two compact inquiry links in English", async () => {
     const links = hrefs(renderToStaticMarkup(await SitePublicationPage({ item, locale: "en" })));
-    // The host's, the section's and the booking column's.
-    expect(links).toHaveLength(3);
-    expect(links.some((href) => href.includes("from=provider") && href.includes("host=Sample Sato") && !href.includes("experience="))).toBe(true);
+    expect(links).toHaveLength(2);
+    expect(links.every((href) => href.includes("from=experience") && href.includes("host=Sample Sato"))).toBe(true);
+    expect(links.some((href) => href.includes("from=provider"))).toBe(false);
   });
 
   it("go to the English form on the English page, and show nothing while the feature is off", async () => {
@@ -60,9 +61,9 @@ describe("the experience page's inquiry links", () => {
 describe("the provider's English public name (#587)", () => {
   const named = (english: string | null) => ({ ...item, publication: { ...item.publication, providerPublicName: "志龍", providerPublicNameEn: english, providerKind: "PERSON" } }) as unknown as SitePublicExperience;
 
-  it("is the name on the English page (host line, 「Ask …」 and the form's link), and no kanji of the provider is left", async () => {
+  it("is the name on the English host line and inquiry context, and no kanji of the provider is left", async () => {
     const html = renderToStaticMarkup(await SitePublicationPage({ item: named("Shiryu"), locale: "en" }));
-    expect(html).toContain("Ask Shiryu");
+    expect(html).toContain("with Shiryu");
     expect(html).toContain("Shiryu");
     expect(html).not.toContain("志龍");
     expect(hrefs(html).some((href) => href.includes("host=Shiryu"))).toBe(true);

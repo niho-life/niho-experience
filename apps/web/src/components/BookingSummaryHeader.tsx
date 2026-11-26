@@ -6,7 +6,6 @@ import { providerNameFor } from "@/lib/experience/provider-name";
 import { formatDuration } from "@/lib/format";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import type { ExperienceAreaId } from "@niho-experience/experience-domain";
-import { jaGuideLine } from "@/lib/ja-catalog";
 
 /**
  * The top of the booking page, one component for both languages (#658): which experience this is (photo, title, who the day is
@@ -26,9 +25,10 @@ export function BookingSummaryHeader({ item, locale, area = null, people = [] }:
   const title = ja ? publication.japanese?.title ?? publication.publicTitle : publication.publicTitle;
   const request = offers.some((offer) => offer.acceptanceMode === "APPROVAL");
   const providerName = providerNameFor(publication, locale)?.trim() || null;
-  const withLine = ja
-    ? jaGuideLine(people.map((entry) => entry.name)) ?? (providerName ? (publication.providerKind === "PERSON" ? `${providerName}さんと` : `${providerName}が案内`) : null)
-    : providerName ? `with ${providerName}` : null;
+  const business = publication.providerKind === "BUSINESS";
+  const withLine = business
+    ? providerName ? ja ? people.length ? `${providerName} のみなさんと` : `${providerName}が開催` : `with ${providerName}` : ja ? "ホストのみなさんと" : "with the host team"
+    : providerName ? ja ? `${providerName}さんと` : `with ${providerName}` : null;
   const durations = offers.map((offer) => offer.durationMinutes).sort((a, b) => a - b);
   const duration = durations.length ? durations[0] === durations.at(-1) ? formatDuration(durations[0]!, locale) : `${formatDuration(durations[0]!, locale)}–${formatDuration(durations.at(-1)!, locale)}` : null;
   const minimum = offers.length ? Math.min(...offers.map((offer) => offer.minimumParticipants)) : null;

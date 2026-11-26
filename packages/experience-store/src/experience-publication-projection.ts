@@ -56,6 +56,10 @@ export interface PublicExperiencePublication {
     readonly name: string;
     readonly exteriorPhotoIndex: number | null;
   } | null;
+  /** A precise public pin, emitted only for PUBLIC disclosure. */
+  readonly publicMapPoint: { readonly lat: number; readonly lng: number } | null;
+  /** An intentionally approximate area, emitted only for AFTER_BOOKING disclosure. */
+  readonly publicMapArea: { readonly lat: number; readonly lng: number; readonly radiusMeters: number } | null;
   readonly photos: readonly {
     readonly src: string;
     readonly alt: string;
@@ -325,6 +329,27 @@ interface ProjectedManuscript {
   readonly meetingOverview: string | null;
   readonly meetingPointDisclosure: "PUBLIC" | "AFTER_BOOKING";
   readonly meetingPoint: PublicExperiencePublication["meetingPoint"];
+  readonly publicMapPoint: PublicExperiencePublication["publicMapPoint"];
+  readonly publicMapArea: PublicExperiencePublication["publicMapArea"];
+}
+
+function projectMapPoint(value: unknown): PublicExperiencePublication["publicMapPoint"] | undefined {
+  if (value === null || value === undefined) return null;
+  const point = record(value);
+  if (!point || Object.keys(point).length !== 2 || !Object.hasOwn(point, "lat") || !Object.hasOwn(point, "lng")
+    || typeof point.lat !== "number" || !Number.isFinite(point.lat) || point.lat < -90 || point.lat > 90
+    || typeof point.lng !== "number" || !Number.isFinite(point.lng) || point.lng < -180 || point.lng > 180) return undefined;
+  return { lat: point.lat, lng: point.lng };
+}
+
+function projectMapArea(value: unknown): PublicExperiencePublication["publicMapArea"] | undefined {
+  if (value === null || value === undefined) return null;
+  const area = record(value);
+  if (!area || Object.keys(area).length !== 3 || !Object.hasOwn(area, "lat") || !Object.hasOwn(area, "lng") || !Object.hasOwn(area, "radiusMeters")
+    || typeof area.lat !== "number" || !Number.isFinite(area.lat) || area.lat < -90 || area.lat > 90
+    || typeof area.lng !== "number" || !Number.isFinite(area.lng) || area.lng < -180 || area.lng > 180
+    || !Number.isSafeInteger(area.radiusMeters) || Number(area.radiusMeters) < 50 || Number(area.radiusMeters) > 10_000) return undefined;
+  return { lat: area.lat, lng: area.lng, radiusMeters: Number(area.radiusMeters) };
 }
 
 export function projectPublicExperiencePublicationManuscript(value: unknown): ProjectedManuscript | null {
@@ -343,7 +368,14 @@ export function projectPublicExperiencePublicationManuscript(value: unknown): Pr
     if (name === null || exteriorPhotoIndex === undefined) return null;
     meetingPoint = { name, exteriorPhotoIndex };
   }
-  return { content, meetingOverview, meetingPointDisclosure: disclosure, meetingPoint };
+  const point = projectMapPoint(source.publicMapPoint);
+  const area = projectMapArea(source.publicMapArea);
+  if (point === undefined || area === undefined) return null;
+  return {
+    content, meetingOverview, meetingPointDisclosure: disclosure, meetingPoint,
+    publicMapPoint: disclosure === "PUBLIC" ? point : null,
+    publicMapArea: disclosure === "AFTER_BOOKING" ? area : null,
+  };
 }
 
 const instant = (value: unknown): string | null => {
