@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Occurrence } from "@niho-experience/api-client";
-import type { PublicPerson } from "@niho-experience/experience-store";
+import type { PublicMemberProfile } from "@niho-experience/experience-store";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import { SAMPLE_TERMS } from "@/lib/testing/guest-booking-fixtures";
 
@@ -11,7 +11,6 @@ const state = vi.hoisted(() => ({
   classification: null as { category: string | null; area: string | null } | null,
   nextDates: [] as unknown[],
   related: [] as unknown[],
-  people: [] as unknown[],
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
@@ -21,7 +20,6 @@ vi.mock("@/lib/guest-booking-source", () => ({ siteNextDates: vi.fn(async () => 
 vi.mock("@/lib/guide-registry", () => ({ guidesAboutExperience: vi.fn(async () => ({ guides: [], draftSlugs: [] })) }));
 vi.mock("@/lib/experience/site-related", () => ({ relatedSiteExperienceCards: vi.fn(async () => state.related) }));
 vi.mock("@/lib/experience-categories-server", () => ({ loadClassificationOf: vi.fn(async () => state.classification) }));
-vi.mock("@/lib/ja-people", () => ({ loadPeople: vi.fn(async () => state.people) }));
 vi.mock("@/components/Analytics", () => ({ TrackView: () => createElement("span", { "data-track": "experience_view" }) }));
 vi.mock("@/components/DetailGallery", () => ({ DesktopGallery: () => null, MobileGallery: () => null }));
 vi.mock("@/components/Photo", () => ({ Photo: () => createElement("img", { alt: "" }) }));
@@ -31,8 +29,8 @@ import { SitePublicationPage } from "./SitePublicationPage";
 
 const japanese = { title: "合成の体験", lead: "紹介", description: "説明", language: "日本語", highlights: [], included: ["材料"], notIncluded: ["交通費"], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [] };
 const offer = (over: Record<string, unknown> = {}) => ({ ...SAMPLE_TERMS.offers[0]!, ...over });
-const item = (over: { offers?: unknown[]; english?: Record<string, unknown>; ja?: Record<string, unknown>; publication?: Record<string, unknown> } = {}): SitePublicExperience => ({
-  sellerDisclosure: null, hostBio: null,
+const item = (over: { offers?: unknown[]; english?: Record<string, unknown>; ja?: Record<string, unknown>; publication?: Record<string, unknown>; members?: PublicMemberProfile[] } = {}): SitePublicExperience => ({
+  sellerDisclosure: null, hostBio: null, memberProfiles: over.members,
   publication: {
     slug: "detail-sample", publicTitle: "Detail sample", sellerDisplayName: "Seller", providerPublicName: "Sample Host", providerKind: "PERSON",
     content: { lead: "Lead", description: "Description", facts: { language: "English" }, highlights: [], included: ["Materials"], notIncluded: ["Transport"], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [], ...over.english },
@@ -44,7 +42,11 @@ const item = (over: { offers?: unknown[]; english?: Record<string, unknown>; ja?
 }) as unknown as SitePublicExperience;
 const render = async (locale: "en" | "ja", value = item()) => renderToStaticMarkup(await SitePublicationPage({ item: value, locale }));
 const next: Occurrence = { offerId: "offer-a", date: "2026-11-20", startAt: "2026-11-20T01:00:00.000Z", endAt: "2026-11-20T02:30:00.000Z", bookingClosesAt: "2026-11-19T09:00:00.000Z", seatsLeft: 4, bookable: true, reason: null };
-const person = (over: Partial<PublicPerson> = {}): PublicPerson => ({ slug: "suga", name: "菅 倫明", roleJa: "空手指導者", areaJa: "鎌倉", quoteJa: "大丈夫。", introJa: "円覚寺で教えています。", photo: { src: "/p/suga.jpg", altJa: "菅の写真", credit: null }, experienceSlugs: ["detail-sample"], sortOrder: 1, ...over }) as PublicPerson;
+const person = (over: Partial<PublicMemberProfile> = {}): PublicMemberProfile => ({
+  slug: "suga", name: "菅 倫明",
+  text: { role: "空手指導者", area: "鎌倉", quote: "大丈夫。", intro: "円覚寺で教えています。" },
+  photo: { src: "/p/suga.jpg", alt: "菅の写真", credit: null }, ...over,
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -52,7 +54,6 @@ beforeEach(() => {
   state.classification = { category: "food", area: "kita" };
   state.nextDates = [];
   state.related = [];
-  state.people = [];
 });
 
 describe.each([["en"], ["ja"]] as const)("the detail page in %s: the same sections", (locale) => {
@@ -156,8 +157,7 @@ describe("the detail page in Japanese: the differences that stay", () => {
   });
 
   it("keeps the provider section and nests Japanese people details beneath it", async () => {
-    state.people = [person(), person({ slug: "other", name: "別の人", experienceSlugs: ["elsewhere"] })];
-    const one = await render("ja");
+    const one = await render("ja", item({ members: [person()] }));
     expect(one).toContain("ホストについて");
     expect(one).toContain("Sample Host");
     expect(one).toContain("会いにいく人");
@@ -167,10 +167,10 @@ describe("the detail page in Japanese: the differences that stay", () => {
     expect(one.indexOf("Sample Host")).toBeLessThan(one.indexOf("会いにいく人"));
     expect(one.match(/id="host"/g)).toHaveLength(1);
     expect(one).not.toContain("Sample Hostさんに相談する");
-    state.people = [person(), person({ slug: "takuya", name: "高浜 拓也" })];
-    expect(await render("ja")).toContain("案内する人");
+    const multiple = item({ members: [person(), person({ slug: null, name: "合成の案内役" })] });
+    expect(await render("ja", multiple)).toContain("案内する人");
     state.config = { ...state.config, peoplePagesEnabled: false };
-    const off = await render("ja");
+    const off = await render("ja", multiple);
     expect(off).toContain("菅 倫明");
     expect(off).not.toContain("/ja/people/");
   });
@@ -182,9 +182,7 @@ describe("the detail page in Japanese: the differences that stay", () => {
       providerKind: "BUSINESS",
       sellerDisplayName: "NIHO kamakura (Panasonic Holdings Corporation)",
     } });
-    state.people = [person({ name: "高浜拓也", roleJa: "コミュニティマネージャー" })];
-
-    const ja = await render("ja", business);
+    const ja = await render("ja", { ...business, memberProfiles: [person({ name: "合成の案内役" })] });
     const en = await render("en", business);
     expect(ja).toContain("ホストについて");
     expect(en).toContain("About your host");
@@ -196,8 +194,16 @@ describe("the detail page in Japanese: the differences that stay", () => {
       expect(html).toContain("NIHO kamakura (Panasonic Holdings Corporation)");
       expect(html.match(/id="host"/g)).toHaveLength(1);
     }
-    expect(ja).toContain("高浜拓也");
-    expect(en).not.toContain("高浜拓也");
+    expect(ja).toContain("合成の案内役");
+    expect(en).not.toContain("合成の案内役");
+    const translated = await render("en", { ...business, memberProfiles: [person({
+      name: "合成の案内役", text: { intro: "Synthetic introduction.", role: "Guide", area: "Kamakura", quote: null },
+    })] });
+    expect(translated).toContain("Meet your guides");
+    expect(translated).toContain("Guide · Kamakura");
+    expect(translated).toContain("合成の案内役");
+    expect(translated).toContain("Synthetic introduction.");
+    expect(translated).not.toContain("/ja/people/");
   });
 
   it("falls back to the provider and the introduction when nobody is linked, with no question to the host (#589)", async () => {

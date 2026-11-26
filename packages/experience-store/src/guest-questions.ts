@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { BookingMessagesClosedError, StoreAccessDeniedError, StoreConflictError, StoreError, StoreNotFoundError, StoreRateLimitedError, StoreValidationError } from "./errors.ts";
 import { enqueueBookingMessageNotification, enqueueGuestQuestionNotification } from "./host-notification-outbox.ts";
-import { PEOPLE_MEMBER_CONDITION, PEOPLE_PHOTO_JOIN } from "./people-listings.ts";
+import { LISTED_PUBLIC_MEMBER_JOIN } from "./people-listings.ts";
 import { calendarMembershipRole } from "./product-calendar-authorization.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -696,11 +696,11 @@ export class GuestQuestionRepository {
     const message = validPersonMessage(input);
     return withTransaction(this.#pool, async (client) => {
       const person = await client.query<DbRow>(
-        `SELECT listing.id, listing.provider_id, listing.name_ja, listing.member_id
+        `SELECT listing.id, listing.provider_id, published.name_ja, listing.member_id
            FROM experience_people_listings listing
-           ${PEOPLE_PHOTO_JOIN}
-          WHERE listing.slug = $1 AND ${PEOPLE_MEMBER_CONDITION}
-          FOR SHARE OF listing`,
+           ${LISTED_PUBLIC_MEMBER_JOIN}
+          WHERE listing.slug = $1
+          FOR SHARE OF listing,published`,
         [message.personSlug],
       );
       if (!person.rows[0]) throw new StoreNotFoundError("person");

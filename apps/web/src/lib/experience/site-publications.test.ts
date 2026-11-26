@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   },
   bookings: { publicBookingTerms: vi.fn() },
   disclosures: { getPublicBySlug: vi.fn() },
+  members: { listPublicForExperiences: vi.fn() },
   hostBios: { getPublicBySlug: vi.fn() },
 }));
 
@@ -20,6 +21,7 @@ vi.mock("@/lib/experience/store-server", () => ({
   guestBookingRepository: () => mocks.bookings,
   providerSellerDisclosureRepository: () => mocks.disclosures,
   providerHostBioRepository: () => mocks.hostBios,
+  memberProfileRepository: () => mocks.members,
 }));
 
 import { getSitePublicExperience, publicExperienceRouteAllowedForSlug, listSitePublicExperiences } from "./site-publications";
@@ -57,6 +59,7 @@ describe("Experience site publication selection", () => {
     mocks.publications.listClaimedSlugs.mockResolvedValue([publication.slug, "stopped-experience"]);
     mocks.bookings.publicBookingTerms.mockResolvedValue(terms);
     mocks.disclosures.getPublicBySlug.mockResolvedValue({ method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic seller", externalUrl: "https://seller.example.test/legal" });
+    mocks.members.listPublicForExperiences.mockResolvedValue(new Map());
     mocks.hostBios.getPublicBySlug.mockResolvedValue({ ja: "合成の紹介文", en: "Synthetic bio" });
   });
 
@@ -67,6 +70,7 @@ describe("Experience site publication selection", () => {
       saleTerms: expect.objectContaining({ sellerDisplayName: "Synthetic seller", offers: terms.offers }),
       sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic seller", externalUrl: "https://seller.example.test/legal" },
       hostBio: { ja: "合成の紹介文", en: "Synthetic bio" },
+      memberProfiles: [],
     } });
     expect(mocks.hostBios.getPublicBySlug).toHaveBeenCalledWith(publication.slug);
     expect(published?.kind === "published" ? published.item.saleTerms : null).not.toHaveProperty("providerId");
@@ -76,6 +80,15 @@ describe("Experience site publication selection", () => {
     mocks.publications.claimsSlug.mockResolvedValue(true);
     expect(await getSitePublicExperience("stopped-experience")).toEqual({ kind: "reserved" });
     expect(mocks.bookings.publicBookingTerms).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the selected member profiles in the requested language", async () => {
+    const profiles = [{ slug: null, name: "合成の案内役", text: { intro: "Synthetic introduction." } }];
+    mocks.members.listPublicForExperiences.mockResolvedValue(new Map([[publication.slug, profiles]]));
+    expect(await getSitePublicExperience(publication.slug, "en")).toMatchObject({ item: { memberProfiles: profiles } });
+    expect(mocks.members.listPublicForExperiences).toHaveBeenCalledWith([publication.slug], "en");
+    mocks.members.listPublicForExperiences.mockRejectedValueOnce(new Error("profile store down"));
+    expect(await getSitePublicExperience(publication.slug, "en")).toMatchObject({ item: { memberProfiles: [] } });
   });
 
   it("shows the page without a host bio when the bio read fails", async () => {

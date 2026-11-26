@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BookingSummaryHeader } from "@/components/BookingSummaryHeader";
 import { loadClassificationOf } from "@/lib/experience-categories-server";
-import { loadPeople } from "@/lib/ja-people";
 import { BookingPageContent } from "@/components/pages/BookingPageContent";
 import { SitePublicationBooking } from "@/components/pages/SitePublicationBooking";
 import { attributionEnabled } from "@/lib/attribution-enabled";
@@ -17,8 +16,8 @@ export default async function JapaneseBookPage(props: { params: Promise<{ slug: 
     const local = await getSitePublicExperience((await props.params).slug, "ja");
     if (local?.kind !== "published" || !local.item.publication.japanese) notFound();
     const slug = local.item.publication.slug;
-    const [classification, people] = await Promise.all([loadClassificationOf(slug), loadPeople()]);
-    return <div className="container-page max-w-3xl py-8 lg:py-12"><BookingSummaryHeader item={local.item} locale="ja" area={classification?.area ?? null} people={people.filter((entry) => entry.experienceSlugs.includes(slug))} /><SitePublicationBooking item={local.item} siteOrigin={new URL(config.siteUrl).origin} consentVersion={config.guestBookingConsentVersion} bookingsEnabled={config.bookingsEnabled && config.guestBookingEnabled} locale="ja" attributionEnabled={attributionEnabled()} /></div>;
+    const classification = await loadClassificationOf(slug);
+    return <div className="container-page max-w-3xl py-8 lg:py-12"><BookingSummaryHeader item={local.item} locale="ja" area={classification?.area ?? null} people={local.item.memberProfiles} /><SitePublicationBooking item={local.item} siteOrigin={new URL(config.siteUrl).origin} consentVersion={config.guestBookingConsentVersion} bookingsEnabled={config.bookingsEnabled && config.guestBookingEnabled} locale="ja" attributionEnabled={attributionEnabled()} /></div>;
   }
   return BookingPageContent({ ...props, locale: "ja" });
 }

@@ -2,8 +2,6 @@ import "server-only";
 import type { CardModel } from "@/lib/card-model";
 import { cardsFor, readListedExperiences } from "@/lib/experience-cards";
 import { loadCategoryBySlug } from "@/lib/experience-categories-server";
-import { loadPeople } from "@/lib/ja-people";
-import { peopleByExperience } from "@/lib/ja-people-links";
 import { getReviewSummaries } from "@/lib/journey";
 import { getJapaneseCopy } from "@/lib/localized-content";
 import { pickRelatedExperiences } from "@/lib/related-experiences";
@@ -45,9 +43,8 @@ export async function relatedSiteExperienceCards(currentSlug: string, locale: "e
     const chosen = native.filter(({ publication }) => picked.some((item) => item.source === "native" && item.slug === publication.slug));
     let nativeCards: CardModel[];
     if (ja) {
-      const [people, { copy }] = await Promise.all([loadPeople(), getJapaneseCopy()]);
-      const guides = peopleByExperience(people);
-      nativeCards = chosen.flatMap((entry) => sitePublicationCard(entry, "ja", { people: guides.get(entry.publication.slug) ?? [], copy }) ?? []);
+      const { copy } = await getJapaneseCopy();
+      nativeCards = chosen.flatMap((entry) => sitePublicationCard(entry, "ja", { copy }) ?? []);
     } else {
       nativeCards = chosen.map((entry) => sitePublicationCard(entry));
     }

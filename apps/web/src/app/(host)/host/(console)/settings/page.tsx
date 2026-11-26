@@ -20,6 +20,7 @@ import { loadExperiencePayout } from "@/host/payout-account-server";
 import { NOTIFICATION_ADDRESS_TEXT, previewNotificationAddress } from "@/host/notification-address";
 import { loadNotificationAddress } from "@/host/notification-address-server";
 import { config } from "@/lib/config";
+import { providerHostBioRepository } from "@/lib/experience/store-server";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
 import { nihoAccount } from "@/lib/host/niho-account-row-server";
 import { HOST_ACCOUNT_PATH, HOST_MEMBERS_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
@@ -131,6 +132,12 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
     ? <HostPayoutAccountPanel providerId={provider.id} load={accountPayout.experience} notice={payoutOutcome ? PAYOUT_CONSENT_OUTCOMES[payoutOutcome] : null} />
     : undefined;
   const teamMode = hostTeamMode(session);
+  const bioEnabled = !isHostMock() && config.experienceHostPublicationApiEnabled && !providerNotFound;
+  const showBio = bioEnabled && (section === "all" || section === "provider") && (provider.memberRole === "OWNER" || provider.memberRole === "COHOST");
+  const hostBio = showBio
+    ? await providerHostBioRepository()?.getConsoleOverview({ providerId: provider.id, nihoUserId: provider.nihoUserId })
+      .then(({ state }) => state).catch(() => "unavailable" as const) ?? "unavailable"
+    : null;
 
   // Provider-wide only: the person's own settings (login, device, address) are at /host/account, the team at /host/members.
   const showAccountSection = (part: HostSettingsSection) => section === "all" || section === part;
@@ -161,6 +168,8 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
         notificationAddress={notificationAddress}
         payoutPanel={payoutPanel}
         bookingGuidesHref={config.experienceHostPublicationApiEnabled ? withProvider("/host/booking-guides", provider.id) : null}
+        hostBio={hostBio}
+        hostBioHref={bioEnabled && provider.memberRole === "OWNER" ? withProvider("/host/profile", provider.id) : null}
         account={accountContent}
       />
     </HostPageBody>

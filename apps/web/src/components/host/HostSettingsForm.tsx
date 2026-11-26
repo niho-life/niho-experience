@@ -10,11 +10,12 @@ import { notificationChanges, notificationPanelView, notificationRows, toggleNot
 import { reviewRow, saveNeedsReviewConfirm, type HostNotice, type HostPayoutLoad, type ProviderProfile } from "@/host/payout";
 import { PROVIDER_REVIEW_STATUS } from "@/host/status";
 import type { HostGoogleConnection, HostMeetingDefaults, HostNotificationKey, HostSettings } from "@/host/types";
+import type { HostBioState } from "@niho-experience/experience-store";
 import type { HostProviderRole } from "@/lib/host/providers";
 import { HOST_CALENDAR_PATH, HOST_SELLER_PATH, withProvider } from "@/lib/host/routes";
 import type { HostSettingsSection } from "@/lib/host/settings-navigation";
 import { DISABLED } from "./editor-parts";
-import { FieldRow, FieldSection, INPUT, KindSegment, NARROW, TEXTAREA } from "./fields";
+import { FieldRow, FieldSection, INPUT, KindSegment, NARROW } from "./fields";
 import { MeetingPointFields } from "./MeetingPointFields";
 import { HostCalendarPanel, HostLiveCalendarPanel } from "./HostCalendarPanel";
 import { HostConfirmDialog } from "./HostConfirmDialog";
@@ -30,7 +31,6 @@ import { StatusPill } from "./ui";
 function changedFields(saved: ProviderProfile, now: ProviderProfile): Partial<ProviderProfile> {
   const changes: Partial<ProviderProfile> = {};
   if (now.displayName !== saved.displayName) changes.displayName = now.displayName;
-  if (now.bio !== saved.bio) changes.bio = now.bio;
   return changes;
 }
 
@@ -63,6 +63,8 @@ export interface HostSettingsFormProps {
    * points in http mode, where NIHO's provider-wide default is not read.
    */
   bookingGuidesHref?: string | null;
+  hostBio?: HostBioState | "unavailable" | null;
+  hostBioHref?: string | null;
 }
 
 /**
@@ -82,11 +84,11 @@ export interface HostSettingsFormProps {
  * their own, and a form cannot hold another. The meeting fields join it with `form`, so 保存 still
  * checks them.
  */
-export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account, notificationAddress, payoutPanel , bookingGuidesHref = null, section = "all" }: HostSettingsFormProps) {
+export function HostSettingsForm({ providerId, role, settings, payout: initialPayout, connectNotice, googleConnection, liveCalendar, preview, account, notificationAddress, payoutPanel , bookingGuidesHref = null, hostBio, hostBioHref, section = "all" }: HostSettingsFormProps) {
   const ids = useId();
   const formId = `${ids}-form`;
   const owner = role === "OWNER";
-  const initialProfile: ProviderProfile = { displayName: settings.displayName, bio: settings.bio, sellerDisclosureUrl: settings.sellerDisclosureUrl };
+  const initialProfile: ProviderProfile = { displayName: settings.displayName, bio: "", sellerDisclosureUrl: settings.sellerDisclosureUrl };
   const [saved, setSaved] = useState(initialProfile);
   const [profile, setProfile] = useState(initialProfile);
   const [reviewStatus, setReviewStatus] = useState(settings.reviewStatus);
@@ -254,6 +256,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
             <FieldRow label="掲載名" htmlFor="settings-display-name">
               <input
                 id="settings-display-name"
+                readOnly={!preview}
                 required
                 maxLength={100}
                 pattern=".*\S.*"
@@ -269,8 +272,14 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
                 種別を変えるときは NIHO にお問い合わせください。
               </p>
             </FieldRow>
-            <FieldRow label="紹介" htmlFor="settings-bio">
-              <textarea id="settings-bio" rows={3} maxLength={4000} value={profile.bio} onChange={(event) => edit("bio", event.currentTarget.value)} className={TEXTAREA} />
+            <FieldRow label="ホスト紹介" labelId="settings-host-bio">
+              <div role="group" aria-labelledby="settings-host-bio" className="space-y-2 text-sm">
+                {hostBio === "unavailable" ? <p className="text-muted">公開状態を確認できませんでした。</p>
+                  : hostBio ? <><p className="font-bold">{hostBio.bioJa ? "公開設定済み" : "未公開"}{hostBio.englishConfirmed ? "・英語版あり" : ""}</p>
+                    {hostBio.bioJa ? <p className="line-clamp-2 break-words text-ink-soft">{hostBio.bioJa}</p> : null}</>
+                  : <p className="text-muted">{owner ? "ホスト紹介の公開設定は利用できません。" : "ホスト紹介はオーナーが編集します。"}</p>}
+                {hostBioHref ? <Link href={hostBioHref} className={consoleButtonClass("secondary", "sm")}>ホスト紹介を確認・編集</Link> : null}
+              </div>
             </FieldRow>
             <FieldRow label="販売者表示" labelId="settings-seller-label">
               <div role="group" aria-labelledby="settings-seller-label" className="space-y-2">

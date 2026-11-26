@@ -14,7 +14,6 @@ import { dayOption } from "@/lib/date-filter";
 import { areaLabel, categoryHand, categoryLabel } from "@/lib/experience-categories";
 import { loadClassificationOf } from "@/lib/experience-categories-server";
 import { jaYen } from "@/lib/ja-catalog";
-import { loadPeople } from "@/lib/ja-people";
 import { inquiryHref } from "@/lib/group-inquiry-entry";
 import { buttonClass } from "@/components/ui";
 import { detailFromTokyoLine, detailGuideHeading } from "@/lib/detail-page";
@@ -96,23 +95,20 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   const locationLine = detailFromTokyoLine(ja ? "鎌倉" : "Kamakura", publication.meetingOverview, locale);
   // Guides and other experiences are English-only for now, as on the NIHO-sourced page. Both are optional and never break the page.
   // Guides are English-only for now (the Japanese reading pieces come in a later step); the other experiences are in both languages.
-  const [relatedGuides, relatedCards, classification, allPeople] = await Promise.all([
+  const [relatedGuides, relatedCards, classification] = await Promise.all([
     ja ? NO_GUIDES : guidesAboutExperience(publication.slug).catch(() => NO_GUIDES),
     relatedSiteExperienceCards(publication.slug, locale),
     loadClassificationOf(publication.slug),
-    // 街の人 exist in Japanese only: the people this experience is met through (the provider's own listing and any person linked to it).
-    ja || !publication.providerKind ? loadPeople() : Promise.resolve([]),
   ]);
-  const linkedPeople = allPeople.filter((entry) => entry.experienceSlugs.includes(publication.slug));
-  const people = ja ? linkedPeople : [];
-  const hasHostIdentity = Boolean(providerName || hostBioText || publication.providerKind || linkedPeople.length);
+  const people = item.memberProfiles ?? [];
+  const hasHostIdentity = Boolean(providerName || hostBioText || publication.providerKind || people.length);
   const hostSectionHeading = hasHostIdentity
     ? (ja ? "ホストについて" : "About your host")
     : (ja ? "提供者について" : "About the provider");
   const showHostSection = hasHostIdentity;
   const category = classification?.category ?? null;
   const area = classification?.area ?? null;
-  const peopleLinks = config.peoplePagesEnabled;
+  const peopleLinks = ja && config.peoplePagesEnabled;
   const bookable = Boolean(config.bookingsEnabled && config.guestBookingEnabled && offers.length);
   // The Japanese site writes yen with the half-width ¥, as its cards do.
   const yen = (amount: number) => ja ? jaYen(amount) : formatYen(amount, "en");
@@ -210,7 +206,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 {publication.meetingPoint.exteriorPhotoIndex !== null && photos[publication.meetingPoint.exteriorPhotoIndex] ? <Photo image={photos[publication.meetingPoint.exteriorPhotoIndex]!} alt={photos[publication.meetingPoint.exteriorPhotoIndex]!.alt || `${publication.meetingPoint.name} exterior`} aspect="" rounded="rounded-xl" className="mt-4 h-52 w-64" sizes="256px" /> : null}
               </div> : publication.meetingPointDisclosure === "AFTER_BOOKING" ? <p className="mt-4 text-ink-soft">The meeting point is shared after your booking is confirmed.</p> : null}
             </section> : null}
-            {/* ホストの紹介は日英で共通。販売者情報は予約欄に分け、日本語だけの街の人情報はその中に追加表示する。 */}
+            {/* 提供者と案内するメンバーの紹介。 */}
             {showHostSection ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 id="host-heading" className="text-2xl">{hostSectionHeading}</h2>
               <div className="mt-4 flex items-start gap-4">
@@ -218,21 +214,23 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 <div><p className="font-extrabold">{providerName ?? publication.sellerDisplayName}</p>{hostBioText ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{hostBioText}</p> : null}</div>
               </div>
               {people.length ? <div className="mt-7 border-t border-line pt-5">
-                <h3 className="text-lg font-extrabold">{people.length === 1 ? "会いにいく人" : "案内する人"}</h3>
+                <h3 className="text-lg font-extrabold">{ja ? people.length === 1 ? "会いにいく人" : "案内する人" : "Meet your guides"}</h3>
                 <ul className="mt-4 grid gap-6">
-                  {people.map((entry) => (
-                    <li key={entry.slug} className="flex items-start gap-4">
-                      {peopleLinks
-                        ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} aria-label={`${entry.name}さんのページ`} className="shrink-0"><Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20" sizes="80px" /></Link>
-                        : <Photo image={{ url: entry.photo.src, alt: entry.photo.altJa }} alt={entry.photo.altJa} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" />}
+                  {people.map((entry, index) => {
+                    const href = peopleLinks && entry.slug ? `/ja/people/${encodeURIComponent(entry.slug)}` : null;
+                    const subtitle = [entry.text.role, entry.text.area].filter(Boolean).join(ja ? "・" : " · ");
+                    const photo = <Photo image={{ url: entry.photo.src, alt: entry.photo.alt }} alt={entry.photo.alt} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" />;
+                    return <li key={`${entry.name}/${index}`} className="flex items-start gap-4">
+                      {href ? <Link href={href} aria-label={`${entry.name}さんのページ`} className="shrink-0">{photo}</Link> : photo}
                       <div className="min-w-0">
-                        <p className="font-extrabold">{entry.name}<span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{entry.roleJa}・{entry.areaJa}</span></p>
-                        {entry.quoteJa ? <p className="mt-1.5 text-[1.0625rem] leading-snug">「{entry.quoteJa}」</p> : null}
-                        {entry.introJa ? <p className="mt-2 line-clamp-3 whitespace-pre-line break-words text-ink-soft">{entry.introJa}</p> : null}
-                        {peopleLinks ? <Link href={`/ja/people/${encodeURIComponent(entry.slug)}`} className="mt-2 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{entry.name}さんのページ</Link> : null}
+                        <p className="font-extrabold">{entry.name}{subtitle ? <span className="ml-2 text-[0.8125rem] font-bold text-ink-soft">{subtitle}</span> : null}</p>
+                        {entry.text.quote ? <p className="mt-1.5 text-[1.0625rem] leading-snug">{ja ? `「${entry.text.quote}」` : `“${entry.text.quote}”`}</p> : null}
+                        {entry.text.intro ? <p className="mt-2 whitespace-pre-line break-words text-ink-soft">{entry.text.intro}</p> : null}
+                        {entry.photo.credit ? <p className="mt-1 text-xs text-ink-soft">{entry.photo.credit}</p> : null}
+                        {href ? <Link href={href} className="mt-2 inline-flex min-h-11 items-center text-sm font-extrabold text-moss underline underline-offset-4">{entry.name}さんのページ</Link> : null}
                       </div>
-                    </li>
-                  ))}
+                    </li>;
+                  })}
                 </ul>
               </div> : null}
               {config.groupInquiryEnabled && providerName && !ja ? <a href={inquiryHref(locale, { from: "PROVIDER", hostName: providerName })} className={buttonClass("secondary", "mt-5 w-full sm:w-auto")}>{ja ? `${providerName}さんに相談する` : `Ask ${providerName} about a group visit`}</a> : null}

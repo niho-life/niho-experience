@@ -30,8 +30,8 @@ export const HOST_BIO_CONSENT_TEXT = "ここに書いた内容は、あなたの
 
 type ReadResult = { kind: "ok"; load: HostBioLoad } | { kind: "auth" } | { kind: "failed" };
 
-async function readHostBio(signal?: AbortSignal): Promise<ReadResult> {
-  const response = await fetch(API, { cache: "no-store", signal });
+async function readHostBio(api: string, signal?: AbortSignal): Promise<ReadResult> {
+  const response = await fetch(api, { cache: "no-store", signal });
   if (response.status === 401 || response.status === 403) return { kind: "auth" };
   if (!response.ok) return { kind: "failed" };
   let value: unknown = null;
@@ -47,7 +47,9 @@ function Counter({ id, text, locale }: { id: string; text: string; locale: "ja" 
   </p>;
 }
 
-export function HostBioForm() {
+export function HostBioForm({ providerId }: { providerId?: string }) {
+  const query = providerId ? `?providerId=${encodeURIComponent(providerId)}` : "";
+  const api = `${API}${query}`;
   const id = useId();
   const [loaded, setLoaded] = useState<HostBioLoad | null>(null);
   const [draft, setDraft] = useState<HostBioDraft>(EMPTY_DRAFT);
@@ -64,7 +66,7 @@ export function HostBioForm() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void readHostBio(controller.signal).then((result) => {
+    void readHostBio(api, controller.signal).then((result) => {
       if (result.kind === "auth") { setLoaded(null); setDraft(EMPTY_DRAFT); setMessage(AUTH_MESSAGE); return; }
       if (result.kind === "failed") { setMessage("ホスト紹介を読み込めませんでした。時間をおいて再度お試しください。"); return; }
       setLoaded(result.load); setDraft(draftFromState(result.load.hostBio)); setMessage("");
@@ -72,14 +74,14 @@ export function HostBioForm() {
       if (!(caught instanceof DOMException && caught.name === "AbortError")) setMessage("ホスト紹介を読み込めませんでした。再読込してください。");
     });
     return () => controller.abort();
-  }, []);
+  }, [api]);
 
   /** Re-read the saved value. The host's text stays in the form unless `replaceDraft` (nothing to lose). */
   const reload = async (after: "unknown" | "conflict" | "manual") => {
     const unknownOperation = unknownResult;
     setBusy("reload");
     try {
-      const result = await readHostBio();
+      const result = await readHostBio(api);
       if (result.kind === "auth") return clearPrivateView(AUTH_MESSAGE);
       if (result.kind === "failed") return setMessage("現在の内容を読み込めませんでした。時間をおいて再度お試しください。");
       const state = result.load.hostBio;
@@ -107,7 +109,7 @@ export function HostBioForm() {
     setBusy(method === "PUT" ? "save" : "withdraw");
     setMessage("");
     try {
-      const response = await fetch(API, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const response = await fetch(api, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       let value: unknown = null;
       try { value = await response.json(); } catch { /* An unreadable body is an unknown result. */ }
       const outcome = hostBioMutationOutcome(response.status, value);
@@ -132,7 +134,7 @@ export function HostBioForm() {
     setBusy("translate");
     setMessage("");
     try {
-      const response = await fetch(`${API}/translation`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ bioJa: draft.bioJa }) });
+      const response = await fetch(`${API}/translation${query}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ bioJa: draft.bioJa }) });
       let value: unknown = null;
       try { value = await response.json(); } catch { /* treated as a failure */ }
       const outcome = hostBioTranslationOutcome(response.status, value);

@@ -10,10 +10,7 @@ import { listSitePublicExperiences, type SitePublicExperience } from "@/lib/expe
  * rights-confirmed photo); a failed or missing read shows an empty page, never an error that names a person.
  */
 
-/**
- * Everyone on 街の人, in the Admin's order. Not gated by the people pages' flag: an experience still shows the name and face of
- * the people it is met through (#612). What links to a person's page asks `loadPeoplePages` instead.
- */
+/** Everyone eligible to appear on 街の人, in the office’s order. */
 export async function loadPeople(): Promise<readonly PublicPerson[]> {
   try { return await peopleListingRepository()?.listPublic() ?? []; } catch { return []; }
 }

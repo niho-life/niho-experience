@@ -1,3 +1,4 @@
+import { VISIBLE_MEMBER_PROFILE } from "./member-profiles.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
@@ -2908,10 +2909,9 @@ export class ExperiencePublicationRepository {
   }
 
   /**
-   * A provider profile image is public only while an active product by that seller is published, or while it is the photo of
-   * a person listed on 街の人 (#564, #589: the listing names the asset, whichever provider holds it).
+   * A provider or member photo is public while it is used on an eligible public page.
    */
-  async getPublicProviderMediaAsset(assetId: string): Promise<PublicExperienceMediaAsset | null> {
+  async getPublicProviderMediaAsset(assetId: string, peoplePagesEnabled = true): Promise<PublicExperienceMediaAsset | null> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assetId)) return null;
     const result = await this.#pool.query<DbRow>(
       `WITH ${VISIBLE_PUBLICATIONS_CTE}
@@ -2922,10 +2922,20 @@ export class ExperiencePublicationRepository {
             EXISTS (SELECT 1 FROM experience_provider_media_selection selection
                      WHERE selection.asset_id=asset.id AND selection.provider_id=asset.provider_id
                        AND EXISTS (SELECT 1 FROM visible_publications publication WHERE publication.provider_id=selection.provider_id))
-            -- 街の人: a listed person's photo is public too, also while they have no experience on sale.
-            OR EXISTS (SELECT 1 FROM experience_people_listings listing WHERE listing.photo_asset_id=asset.id AND listing.photo_provider_id=asset.provider_id)
+            OR EXISTS (
+              SELECT 1 FROM experience_provider_member_profile_publications published
+               WHERE published.photo_asset_id=asset.id AND published.photo_provider_id=asset.provider_id
+                 AND ${VISIBLE_MEMBER_PROFILE}
+                 AND (
+                   ($2 AND EXISTS (SELECT 1 FROM experience_people_listings listing
+                      WHERE listing.provider_id=published.provider_id AND listing.member_id=published.member_id))
+                   OR EXISTS (SELECT 1 FROM experience_product_member_profiles link
+                       JOIN visible_publications visible ON visible.provider_id=link.product_provider_id AND visible.product_id=link.product_id
+                      WHERE link.profile_provider_id=published.provider_id AND link.member_id=published.member_id)
+                 )
+            )
           )
-        LIMIT 1`, [assetId],
+        LIMIT 1`, [assetId, peoplePagesEnabled],
     );
     const row = result.rows[0];
     if (!row) return null;

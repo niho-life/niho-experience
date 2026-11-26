@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ProductMemberSelection } from "./ProductMemberSelection";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -78,6 +79,7 @@ type ProductResponse = { product: Product; publicationConsentVersion?: string; m
 type TimelineItem = { time: string; title: string; text: string; photoIndex: number | null };
 type LocaleManuscript = { title: string; lead: string; description: string; language: string; highlights: string[]; included: string[]; notIncluded: string[]; knowBeforeYouGo: string[]; notSuitableFor: string[]; timeline: TimelineItem[]; faq?: PublicationFaqRow[] };
 type Props = {
+  membersProviderId?: string;
   productId?: string;
   create?: boolean;
   bookingGuideHref?: string;
@@ -267,6 +269,7 @@ function Field({ label, value, onChange, onBlur, multiline = false, rows = 3, pl
 
 export function HostPublicationWorkspace({
   productId,
+  membersProviderId,
   create = false,
   bookingGuideHref,
   paymentConsentHref,
@@ -1662,6 +1665,10 @@ export function HostPublicationWorkspace({
           ]} />
         {listingNotice ? <p role="status" className="mt-2 text-sm font-bold text-warn">{listingNotice}</p> : null}
       </section>
+      {membersProviderId ? <section id="publication-members" className={sectionClass} aria-labelledby="publication-members-title">
+        <h2 id="publication-members-title" className={headingClass}>案内するメンバー</h2>
+        <ProductMemberSelection key={`${membersProviderId}/${product.id}`} providerId={membersProviderId} productId={product.id} />
+      </section> : null}
       <section id="publication-slug" className={sectionClass} aria-labelledby="publication-slug-title">
         <h2 id="publication-slug-title" className={headingClass}>ページのアドレス<HostInfoTip label="ページのアドレス">体験を作ったときに自動で決まります。変えたいときだけ「変更」を押してください。半角の英小文字・数字・ハイフンで入力します。</HostInfoTip></h2>
         {slugEditing ? <div className="flex items-center overflow-hidden rounded-[10px] border border-line-strong bg-canvas focus-within:border-moss focus-within:ring-2 focus-within:ring-moss/20">

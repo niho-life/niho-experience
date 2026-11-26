@@ -15,8 +15,6 @@ import { listSitePublicExperiences } from "@/lib/experience/site-publications";
 import { normalizeExperienceQuery, type SearchParams } from "@/lib/filters";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
 import { guestBookingSources } from "@/lib/guest-booking-source";
-import { loadPeople } from "@/lib/ja-people";
-import { peopleByExperience } from "@/lib/ja-people-links";
 import { getReviewSummaries } from "@/lib/journey";
 import { filterCardsByText } from "@/lib/list-text";
 import { getJapaneseCopy } from "@/lib/localized-content";
@@ -57,10 +55,9 @@ export default async function JapaneseExperiencesPage({ searchParams }: { search
   let allCards: CardModel[];
   try {
     copy = (await getJapaneseCopy()).copy;
-    const [catalog, people] = await Promise.all([listSitePublicExperiences("ja"), loadPeople()]);
-    const guides = peopleByExperience(people);
+    const catalog = await listSitePublicExperiences("ja");
     allCards = catalog.experiences.flatMap((item) => {
-      const card = sitePublicationCard(item, "ja", { people: guides.get(item.publication.slug) ?? [], copy });
+      const card = sitePublicationCard(item, "ja", { copy });
       return card ? [card] : [];
     });
   } catch { return isExperienceStaging ? <StagingUnavailableState /> : <JapaneseUnavailable />; }

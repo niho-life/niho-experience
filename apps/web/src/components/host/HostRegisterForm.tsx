@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 import { registerProvider } from "@/host/actions";
-import { FieldRow, FieldSection, INPUT, KindSegment, NARROW, TEXTAREA } from "./fields";
+import { FieldRow, FieldSection, INPUT, KindSegment, NARROW } from "./fields";
 import { consoleButtonClass } from "./host-ui";
 
 const field = (data: FormData, name: string) => {
@@ -11,8 +11,10 @@ const field = (data: FormData, name: string) => {
 };
 
 /**
- * Provider registration (#88): kind, listing name, introduction, seller page and NIHO's
- * provider terms. 登録する sends them to NIHO's provider API (registerProvider) and opens the
+ * Legacy provider registration preview (#88). The current Experience host contract does not
+ * support registration; the old NIHO bio field is intentionally not collected here because
+ * provider introductions are managed at /host/profile.
+ * 登録する sends the remaining fields to NIHO's provider API (registerProvider) and opens the
  * new provider's home; a refusal is said in one sentence above the button and nothing typed is
  * lost. In the preview the contract mock forgets the new provider after the request, so the
  * synthetic host signs in again with a provider in the state a new one starts in.
@@ -38,7 +40,8 @@ export function HostRegisterForm({ consent, preview }: { consent: { version: str
       const result = await registerProvider({
         kind: field(data, "kind"),
         displayName: field(data, "displayName"),
-        bio: field(data, "bio"),
+        // Keep the legacy preview contract shape without collecting a second provider intro.
+        bio: "",
         sellerDisclosureUrl: field(data, "sellerDisclosureUrl"),
         consentVersion: consent.version,
       });
@@ -73,9 +76,6 @@ export function HostRegisterForm({ consent, preview }: { consent: { version: str
           <p id="register-display-name-help" className="mt-1 text-xs text-muted">
             体験ページに「提供者」として表示する名前です。
           </p>
-        </FieldRow>
-        <FieldRow label="紹介" htmlFor="register-bio">
-          <textarea id="register-bio" name="bio" rows={4} maxLength={4000} className={TEXTAREA} />
         </FieldRow>
         <FieldRow label="特商法表示 URL" htmlFor="register-seller-url">
           <input
