@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { HOST_ACCOUNT_LIMITS } from "@niho-experience/experience-store";
 import { hostButtonClass, HOST_HEADING } from "@/components/host/host-ui";
@@ -18,7 +19,7 @@ const ERRORS = {
 
 function SignInHelpLinks() {
   return <ul className="mt-6 grid gap-3 text-sm text-ink-soft">
-    <li>はじめての方は <a href="/ja/host" className="font-bold underline underline-offset-4">ホストになるには</a></li>
+    <li>はじめての方は <Link href="/ja/host" className="font-bold underline underline-offset-4">ホストになるには</Link></li>
     <li>旅行者の方は <a href={bookingLookupHref("ja")} className="font-bold underline underline-offset-4">ご予約の確認はログイン不要です</a></li>
   </ul>;
 }
