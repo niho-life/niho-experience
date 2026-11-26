@@ -5,20 +5,20 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import { hostBackLink, isHostNavActive, providerSwitchPath } from "@/host/nav";
 import { hasOwnerMembership, nihoIdOrNull, providerRoleLabel, selectProvider, type HostConsoleChoice, type HostProviderRole } from "@/lib/host/providers";
-import { hostSupportPath, HOST_ACCOUNT_PATH, HOST_DAILY_NAV, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_MEMBERS_PATH, HOST_NAV, withProvider } from "@/lib/host/routes";
+import { hostSupportPath, HOST_ACCOUNT_PATH, HOST_DAILY_NAV, HOST_HOME_PATH, HOST_LOGOUT_PATH, HOST_MESSAGES_PATH, HOST_NAV, withProvider } from "@/lib/host/routes";
 import { HostIcon, type HostIconName } from "./HostIcon";
 import { AccountAvatar, InitialAvatar, type HostAccount } from "./ui";
 
 /** The sidebar (PC) and the bottom tabs (phones) share one name; only the one for the screen width is shown. */
 const NAV_LABEL = "ホストのメニュー";
 
-const NAV_ICONS: Record<(typeof HOST_NAV)[number]["href"], HostIconName> = {
+const NAV_ICONS: Record<(typeof HOST_NAV)[number]["href"] | typeof HOST_HOME_PATH, HostIconName> = {
   "/host/home": "home",
   "/host/experiences": "experiences",
   "/host/calendar": "calendar",
   "/host/bookings": "bookings",
+  [HOST_MESSAGES_PATH]: "messages",
   "/host/sales": "sales",
-  "/host/members": "members",
   "/host/settings": "settings",
 };
 
@@ -58,23 +58,26 @@ const TAB_COLUMNS: Readonly<Record<number, string>> = { 1: "grid-cols-1", 2: "gr
 
 export function hostNavForRole(role: HostProviderRole | null | undefined) {
   if (role === "OWNER") return HOST_NAV;
-  if (role === "EDITOR") return HOST_NAV.filter((item) => item.href !== "/host/sales" && item.href !== "/host/bookings" && item.href !== HOST_MEMBERS_PATH);
-  return HOST_NAV.filter((item) => item.href !== "/host/sales" && item.href !== HOST_MEMBERS_PATH);
+  if (role === "COHOST") return HOST_NAV.filter((item) => item.href !== "/host/sales");
+  if (role === "EDITOR") return HOST_NAV.filter((item) => item.href !== "/host/sales" && item.href !== "/host/bookings" && item.href !== HOST_MESSAGES_PATH);
+  return HOST_NAV.filter((item) => item.href !== "/host/sales" && item.href !== HOST_MESSAGES_PATH);
 }
 
 export function hostNavForChoice(choice: HostConsoleChoice | null | undefined) {
   if (choice?.kind === "OPERATOR") {
     // A product operator's screens (docs/product-operators.md): カレンダー, 予約 for the OTA bookings of their products and
-    // 設定 for their own email address (#194). They never see メンバー.
+    // 設定 for their own email address (#194). They never see provider messages.
     const screens = choice.screens ?? ["/host/calendar"];
-    return HOST_NAV.filter((item) => item.href !== HOST_MEMBERS_PATH && (item.href === "/host/calendar" || screens.includes(item.href)));
+    return HOST_NAV.filter((item) => item.href !== HOST_MESSAGES_PATH && (item.href === "/host/calendar" || screens.includes(item.href)));
   }
   return hostNavForRole(choice?.memberRole);
 }
 
-/** The bottom tabs: the daily sections only (no メンバー or 設定), within the permissioned set above. */
+/** Phone tabs add ホーム for provider members; operators keep only the screens explicitly given to them. */
 export function hostDailyNavForChoice(choice: HostConsoleChoice | null | undefined) {
-  return hostNavForChoice(choice).filter((item) => HOST_DAILY_NAV.some((daily) => daily.href === item.href));
+  const allowed = hostNavForChoice(choice);
+  if (choice?.kind === "OPERATOR") return HOST_DAILY_NAV.filter((daily) => allowed.some((item) => item.href === daily.href));
+  return HOST_DAILY_NAV.filter((daily) => daily.href === HOST_HOME_PATH || allowed.some((item) => item.href === daily.href));
 }
 
 export function hostWriterNavAllowed(choice: HostConsoleChoice | null | undefined, writePath?: string, articleOnly = false) {
@@ -204,7 +207,7 @@ function SidebarProviderSwitcher({ providers, providerIdOverride, basePath }: { 
 
 /**
  * PC (md and up): the 232px sidebar with the brand, the provider (and the role in it), the sections the role may open
- * (メンバー and 設定 included) and, at its foot, the traveler site and the person's own account menu.
+ * (the provider's sections and 設定) and, at its foot, the traveler site and the person's own account menu.
  */
 export function HostSidebar({ account, providers, nihoAppUrl, writePath, writerNavigation, providerIdOverride }: HostChromeProps & { readonly writerNavigation?: HostWriterNavigation; readonly providerIdOverride?: string }) {
   const pathname = usePathname();
@@ -342,7 +345,7 @@ function AccountMenu({ account, providers, nihoAppUrl, writePath, variant = "mob
   );
 }
 
-/** Phones: the provider chip. Opens the provider's own places (メンバー・設定), the traveler site and, with several providers, the switcher. */
+/** Phones: the provider chip. Opens places outside the tabs (OWNER's 売上・設定), the traveler site and the switcher. */
 function MobileProviderMenu({ providers, providerId, basePath }: { providers: readonly HostConsoleChoice[]; providerId: string | null; basePath?: string }) {
   const { menu, close } = useDetailsMenu(true);
   const pathname = usePathname();
@@ -407,7 +410,7 @@ export function HostMobileHeader(props: HostChromeProps) {
   );
 }
 
-/** Phones: the same role-appropriate daily sections as the desktop sidebar. */
+/** Phones: the role-appropriate daily sections and ホーム. */
 export function HostTabBar({ providers }: { providers: readonly HostConsoleChoice[] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();

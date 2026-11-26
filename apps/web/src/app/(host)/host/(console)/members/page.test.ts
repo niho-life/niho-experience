@@ -18,6 +18,7 @@ vi.mock("@/lib/config", () => ({ config: { get hostTeamEnabled() { return state.
 
 import { HostOperatingTeamPanel } from "@/components/host/HostOperatingTeamPanel";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
+import { HostSubHeader } from "@/components/host/HostSubHeader";
 import HostMembersPage from "./page";
 
 function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
@@ -39,6 +40,7 @@ describe("host members page", () => {
     state.hostTeamEnabled = true;
     const tree = elements(await HostMembersPage({ searchParams: Promise.resolve({ providerId: "provider-one" }) }));
     expect(tree.find((element) => element.type === HostOperatingTeamPanel)?.props).toMatchObject({ providerId: "provider-one", role: "OWNER", mode: "native" });
+    expect(tree.find((element) => element.type === HostSubHeader)?.props).toMatchObject({ backHref: "/host/settings?providerId=provider-one", backLabel: "設定" });
   });
 
   it("tells the panel whether the owner invites by email (#636): off unless the flag is on", async () => {

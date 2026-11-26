@@ -25,7 +25,7 @@ describe("host settings navigation", () => {
     expect(rows("OWNER")).toEqual([
       ["掲載", ["提供者情報", "ホスト紹介"]],
       ["販売", ["販売者表示", "受取口座", "NIHOサポート"]],
-      ["運営", ["カレンダー連携", "集合案内", "通知の種類", "記事連携"]],
+      ["運営", ["カレンダー連携", "集合案内", "通知の種類", "メンバー", "記事連携"]],
     ]);
     expect(rows("EDITOR")).toEqual([
       ["掲載", ["提供者情報"]],
@@ -39,6 +39,8 @@ describe("host settings navigation", () => {
     // The person's own settings and the team are not in the provider's list.
     const all = hostSettingsIndexGroups({ ...options, role: "OWNER" }).flatMap((group) => group.items.map((item) => item.label));
     for (const gone of ["ログイン情報", "この端末", "チーム", "通知"]) expect(all).not.toContain(gone);
+    const members = hostSettingsIndexGroups({ ...options, role: "OWNER" }).flatMap((group) => group.items).find((item) => item.label === "メンバー");
+    expect(members).toMatchObject({ href: "/host/members?providerId=provider-one" });
   });
 
   it("forwards the old account, device and team sections to their new screens", () => {

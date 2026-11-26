@@ -8,7 +8,7 @@ import { HostPageBody, PageHead } from "@/components/host/ui";
 import { hostPageContext } from "@/host/data";
 import { GUEST_QUESTION_LOAD_FAILED_TEXT, loadGuestQuestions, type HostGuestQuestionsLoad } from "@/host/guest-questions-server";
 import type { HostProvider } from "@/lib/host/providers";
-import { HOST_HOME_PATH, withProvider } from "@/lib/host/routes";
+import { HOST_MESSAGES_PATH, withProvider } from "@/lib/host/routes";
 
 export const metadata: Metadata = { title: "メッセージ" };
 
@@ -20,10 +20,10 @@ const UNAVAILABLE = {
 };
 
 /** HTTP rollout gate while the provider booking conversation contract is disabled; also the questions' read failure. */
-function MessagesUnavailable({ homeHref, title = UNAVAILABLE.title, body = UNAVAILABLE.body }: { homeHref: string; title?: string; body?: string }) {
+function MessagesUnavailable({ isThread, messagesHref, title = UNAVAILABLE.title, body = UNAVAILABLE.body }: { isThread: boolean; messagesHref: string; title?: string; body?: string }) {
   return (
     <>
-      <HostSubHeader backHref={homeHref} backLabel="ホーム" title="" />
+      {isThread ? <HostSubHeader backHref={messagesHref} backLabel="メッセージ" title="" /> : null}
       <HostPageBody>
         <PageHead title="メッセージ" />
         <section className={`${HOST_SURFACE} px-5 py-8 md:px-6 md:py-10`}>
@@ -56,8 +56,8 @@ function SiteThreads({ questions, provider, linkProviderId }: { questions: Extra
 
 /**
  * メッセージ (#106): every thread with the provider's guests, and one of them (`?thread=`, or a
- * booking's: `?booking=`, an empty one to start when it has none). A screen under ホーム: the
- * menu keeps ホーム selected, phones go back with "‹ ホーム". The client screen reads the thread
+ * booking's: `?booking=`, an empty one to start when it has none). The list is a top-level section;
+ * phones use the provider header and tabs, while a thread has "‹ メッセージ". The client screen reads the thread
  * from the query and moves between threads without loading this page again.
  *
  * Bookings made on this site (#285 slice 6b) have their threads among the questions (`?booking=` opens one from 予約
@@ -74,9 +74,10 @@ export default async function HostMessagesPage({ searchParams }: { searchParams:
   // The first `?thread=` (or `?booking=`), as the screen reads it.
   const thread = [query.thread].flat()[0] || null;
   const booking = [query.booking].flat()[0] || null;
-  const homeHref = withProvider(HOST_HOME_PATH, linkProviderId);
+  const messagesHref = withProvider(HOST_MESSAGES_PATH, linkProviderId);
+  const isThread = Boolean(thread || booking);
   const questions = await loadGuestQuestions(provider, thread, booking);
-  if (questions.status === "error") return <MessagesUnavailable homeHref={homeHref} title="メッセージを読み込めませんでした" body={GUEST_QUESTION_LOAD_FAILED_TEXT} />;
-  if (questions.status === "closed") return <MessagesUnavailable homeHref={homeHref} />;
+  if (questions.status === "error") return <MessagesUnavailable isThread={isThread} messagesHref={messagesHref} title="メッセージを読み込めませんでした" body={GUEST_QUESTION_LOAD_FAILED_TEXT} />;
+  if (questions.status === "closed") return <MessagesUnavailable isThread={isThread} messagesHref={messagesHref} />;
   return <SiteThreads questions={questions} provider={provider} linkProviderId={linkProviderId} />;
 }

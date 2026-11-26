@@ -22,11 +22,10 @@ import { loadNotificationAddress } from "@/host/notification-address-server";
 import { config } from "@/lib/config";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
 import { nihoAccount } from "@/lib/host/niho-account-row-server";
-import { HOST_ACCOUNT_PATH, HOST_MEMBERS_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
+import { HOST_ACCOUNT_PATH, HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
 import { HOST_SETTINGS_SECTION_TITLES, hostSettingsForwardPath, hostSettingsSectionOrNull } from "@/lib/host/settings-navigation";
 import type { HostSession } from "@/lib/host/session";
 import { isHostMock } from "@/lib/host/server";
-import { hostTeamMode } from "@/lib/host/team-mode-server";
 
 export const metadata: Metadata = { title: "設定" };
 
@@ -130,8 +129,6 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   const payoutPanel = accountPayout
     ? <HostPayoutAccountPanel providerId={provider.id} load={accountPayout.experience} notice={payoutOutcome ? PAYOUT_CONSENT_OUTCOMES[payoutOutcome] : null} />
     : undefined;
-  const teamMode = hostTeamMode(session);
-
   // Provider-wide only: the person's own settings (login, device, address) are at /host/account, the team at /host/members.
   const showAccountSection = (part: HostSettingsSection) => section === "all" || section === part;
   const accountContent = <div className="grid gap-3.5">
@@ -142,9 +139,7 @@ export default async function HostSettingsPage({ searchParams }: { searchParams:
   return (
     <HostPageBody>
       <PageHead title={HOST_SETTINGS_SECTION_TITLES[section]}>
-        {section === "all"
-          ? provider.memberRole === "OWNER" && teamMode !== "off" ? <Link href={withProvider(HOST_MEMBERS_PATH, provider.id)} className={consoleButtonClass("secondary")}>共同ホストを管理</Link> : null
-          : <Link href={withProvider(HOST_SETTINGS_PATH, provider.id)} className={consoleButtonClass("secondary")}>設定へ戻る</Link>}
+        {section !== "all" ? <Link href={withProvider(HOST_SETTINGS_PATH, provider.id)} className={consoleButtonClass("secondary")}>設定へ戻る</Link> : null}
       </PageHead>
       {/* A confirmed departure starts from that provider and section's saved values. */}
       <HostSettingsForm

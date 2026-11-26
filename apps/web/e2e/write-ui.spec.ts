@@ -361,9 +361,8 @@ test("secondary list failures keep the authorized article body mounted and prese
   await expect(page.getByText("まだ記事はありません")).toHaveCount(0);
 
   await page.goto(`/write/write-e2e-fixture/edit-multi-provider/${ID}`);
-  const navigation = page.getByRole("navigation", { name: "ホストのメニュー" });
   await expect(page.locator(".write-workspace > header > details > summary")).toContainText("Second Owner");
-  await expect(navigation.getByRole("link", { name: "ホーム" })).toHaveAttribute("href", /providerId=provider-two/);
+  await expect(page.getByRole("banner").getByRole("link", { name: "NIHO Travel" })).toHaveAttribute("href", /providerId=provider-two/);
 });
 
 test("publish checks open a closed settings section and focus the field to fix", async ({ page }, testInfo) => {

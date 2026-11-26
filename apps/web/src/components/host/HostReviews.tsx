@@ -347,8 +347,8 @@ const MORE_FAILED = "レビューを読み込めませんでした。時間を�
 /**
  * レビュー (#108, the journey mock's H4): every review of the provider's experiences, the newest
  * first, with the published ones' average on top; one experience's with `?experience=` (a select
- * from two experiences). A screen under ホーム (PC: ホーム selected; phones: "‹ ホーム", no bottom
- * tabs). `#review-{id}` (ホーム's rows) scrolls to one review and focuses its name.
+ * from two experiences). A screen under ホーム (phones: "‹ ホーム", no bottom tabs).
+ * `#review-{id}` (ホーム's rows) scrolls to one review and focuses its name.
  *
  * Mock mode: a reply and a report change this screen only (the preview note says nothing is kept).
  * Reviews kept in the experience DB (`live`, #108) send them to the store and show the review it

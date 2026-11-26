@@ -125,6 +125,7 @@ export function hostSettingsIndexGroups(input: {
   }
   // Every signed-in provider role gets the notification switches; the panel keeps provider-wide ones permissioned.
   operations.push({ label: "通知の種類", description: "この提供者で受け取る通知", href: section("notifications") });
+  if (role === "OWNER") operations.push({ label: "メンバー", description: "この提供者を一緒に運営する人", href: withProvider(HOST_MEMBERS_PATH, providerId) });
   if (role === "OWNER" && input.articlesEnabled) operations.push({ label: "記事連携", description: "記事ライターとのつながり", href: section("articles") });
 
   return [
