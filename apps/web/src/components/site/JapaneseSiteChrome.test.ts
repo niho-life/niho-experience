@@ -44,7 +44,7 @@ describe("日本語サイトの共通ヘッダーとフッター（#672）", () 
   it("メニューは5つの見出しと日英切替があり、ホスト登録とログインを並べる", () => {
     const html = menu(render({ guides: true }));
     expect(headings(html)).toEqual(["体験をさがす", "ご利用ガイド", "団体・ご相談", "ホストの方", "言語"]);
-    for (const href of ["/ja/experiences", "/ja/experiences?category=walk", "/ja/help#find-booking", "/ja/guides", "/ja/business", "/ja/inquiry", "/ja/host", "/host/auth/sign-in", "/experiences?category=walk"]) {
+    for (const href of ["/ja/experiences", "/ja/experiences?category=walk", "/ja/help#find-booking", "/ja/guides", "/ja/business", "/ja/inquiry", "/ja/host", "/host/auth/login", "/experiences?category=walk"]) {
       expect(html).toContain(`href="${href}"`);
     }
     expect(html).toContain("日本語");

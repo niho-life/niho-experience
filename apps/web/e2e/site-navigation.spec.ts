@@ -38,7 +38,7 @@ test.describe("phone menu", () => {
     for (const name of ["All experiences", "Kamakura Journal", "About", "Booking help", "Manage your booking", "Host an experience", "Log in"]) {
       await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
     }
-    await expect(menu.getByRole("link", { name: "Log in", exact: true })).toHaveAttribute("href", "/host/auth/sign-in");
+    await expect(menu.getByRole("link", { name: "Log in", exact: true })).toHaveAttribute("href", "/host/auth/login");
     await menu.getByRole("link", { name: "About" }).click();
     await expect(page).toHaveURL(/\/about$/);
     await expect(page.getByRole("navigation", { name: "Menu" })).toBeHidden();

@@ -82,7 +82,7 @@ describe("HomePageView（#658）：日英で1つの部品", () => {
       expect(html.indexOf(category)).toBeLessThan(html.indexOf('id="home-cards-v1"'));
       expect(html).not.toContain("category=sea");
       expect(html).not.toMatch(/Your experience here|あなたの体験も、ここに/);
-      expect(html.slice(html.indexOf('id="host-band-heading-v1"'))).toContain('href="/host/auth/sign-in"');
+      expect(html.slice(html.indexOf('id="host-band-heading-v1"'))).toContain('href="/host/auth/login"');
     }
   });
 

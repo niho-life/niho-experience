@@ -16,7 +16,7 @@ describe("SiteMenu (#672)", () => {
     expect(html).toContain('role="button" aria-label="Menu" aria-expanded="false" aria-controls="site-menu-panel"');
     expect([...html.matchAll(/<h2[^>]*>([^<]*)<\/h2>/g)].map((m) => m[1])).toEqual(["Explore", "Plan your visit", "For hosts", "Language"]);
     expect([...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1])).toEqual([
-      "/experiences", "/experiences?category=food", "/about", "/help", "/help#find-booking", "/guides", "/host", "/host/auth/sign-in", "/ja",
+      "/experiences", "/experiences?category=food", "/about", "/help", "/help#find-booking", "/guides", "/host", "/host/auth/login", "/ja",
     ]);
   });
 
