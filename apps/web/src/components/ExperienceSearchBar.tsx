@@ -51,7 +51,7 @@ function Stepper({ locale, guests, onChange }: { locale: "en" | "ja"; guests: nu
 
 export function ExperienceSearchBar({
   locale, mode, placement = "list", initialQuery = "", category = null, date: dateProp = null, guests: guestsProp = null,
-  onDateChange, onGuestsChange, windowStart, windowEnd, cards = [], availability = null, onNeedAvailability, resultCount, themeFilter,
+  onDateChange, onGuestsChange, onClearFilters, windowStart, windowEnd, cards = [], availability = null, onNeedAvailability, resultCount, themeFilter,
 }: {
   locale: "en" | "ja";
   mode: "navigate" | "filter";
@@ -64,6 +64,8 @@ export function ExperienceSearchBar({
   guests?: number | null;
   onDateChange?: (date: string | null) => void;
   onGuestsChange?: (guests: number | null) => void;
+  /** `filter` mode: 「すべてクリア」 clears the day and the party together. */
+  onClearFilters?: () => void;
   /** The days the calendar offers (JST, `YYYY-MM-DD`, inclusive). */
   windowStart: string;
   windowEnd: string;
@@ -152,8 +154,10 @@ export function ExperienceSearchBar({
   }
   function clearAll() {
     setQuery("");
-    chooseDate(null);
-    chooseGuests(null);
+    // The list clears the day and the party in one update and one address change: two separate calls would each write the
+    // address from the same render, and the second would put the first one back.
+    if (mode === "filter") onClearFilters?.();
+    else { setLocalDate(null); setLocalGuests(null); }
   }
 
   const dateValue = date ? chosenDayLabel(date, locale) : words.anyDay;

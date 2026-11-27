@@ -47,6 +47,20 @@ test("the phone sheet opens from one button, applies the choice and closes with 
   await expect(pill).toBeFocused();
 });
 
+test("the phone sheet's 「Clear all」 removes the day and the party from the address together", async ({ page }) => {
+  test.skip(!isPhone(page), "the sheet is the phone's");
+  await page.goto("/experiences?guests=2");
+  const sheet = await openSheet(page);
+  const day = sheet!.locator('button[aria-pressed][aria-label$="something on"]').first();
+  await expect(day).toBeVisible();
+  await day.click();
+  await expect(page).toHaveURL(/date=\d{4}-\d{2}-\d{2}/);
+  await sheet!.getByRole("button", { name: "Clear all" }).click();
+  await expect(page).not.toHaveURL(/date=/);
+  await expect(page).not.toHaveURL(/guests=/);
+  await expect(sheet!.locator('button[aria-pressed="true"]')).toHaveCount(0);
+});
+
 test("no sideways scroll at 320px, with the sheet open as well", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 });
   for (const path of ["/", "/experiences", "/experiences?guests=2"]) {

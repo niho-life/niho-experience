@@ -118,6 +118,11 @@ export function ExperienceList({
     setGuests(next);
     syncUrl(date, next);
   }
+  function clearFilters() {
+    setDate(null);
+    setGuests(null);
+    syncUrl(null, null);
+  }
 
   const bar = (
     <div className="sticky top-16 z-20 mt-[22px] border-b border-line bg-white/95 py-3 backdrop-blur">
@@ -131,6 +136,7 @@ export function ExperienceList({
           guests={guests}
           onDateChange={chooseDate}
           onGuestsChange={chooseGuests}
+          onClearFilters={clearFilters}
           windowStart={windowStart}
           windowEnd={windowEnd}
           cards={cards}
