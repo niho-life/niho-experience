@@ -94,7 +94,7 @@ NIHO の user ID は、`provider_memberships.niho_user_id`、販売者 profile �
 2. 本番は新しい認証で公開を始める。niho-app #19917・#19864 は不要になる。
 3. 受入の後、NIHO の app-connect・Host v1・旧ホスト API を呼ぶコードと設定を撤去する。
 
-操作者を記録する `*_niho_user_id` 列は、当面は名前を変えずに Experience のホスト ID（`hst_` で始まる）を入れる。NIHO の user ID と形が違うので混ざらない。列名は撤去の段階で `*_actor_id` に揃える。staging の合成データは作り直す。
+操作者を記録する一部の `*_niho_user_id` 列には、NIHO user ID ではなく Experience のホスト ID（`hst_` で始まる）が入っている。値と過去の履歴は変更しない。列名の整理は NIHO ログインの切替とは分け、列ごとの意味と実データを棚卸ししてから行う（[#689](https://github.com/niho-life/niho-experience/issues/689)）。操作者の記録は `*_actor_id`、ホストプロフィールの参照は `*_host_account_id`、本当に NIHO user ID を持つ列は `*_niho_user_id` とし、実際の意味に合う名前を選ぶ。一括改名や ID 値の置換はしない。staging の合成データは migration に合わせて作り直す。
 
 push の購読は NIHO の connection ID ではなく、Experience のセッションに結び付け直す。
 

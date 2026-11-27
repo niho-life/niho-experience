@@ -1,6 +1,6 @@
-# ホストのアカウント（メールのログインリンク）
+# ホストのアカウント（NIHO アカウント）
 
-> 2026-11-14: ホストのログインは NIHO アカウントへ揃える（[ADR 0004](adr/0004-niho-account-login.md)、Epic [#591](https://github.com/niho-life/niho-experience/issues/591)）。`hst_` のホストアカウントは残し、NIHO user ID を結び付ける。この文書のメールのリンクは、移行が終わるまでのフォールバック（画面には出さない）で、移行後の扱いは [#598](https://github.com/niho-life/niho-experience/issues/598) で決める。
+> 2026-11-27: NIHO user ID を人の共通 ID とし、LINE・メールなどのログイン方法は NIHO が管理する（[ADR 0004](adr/0004-niho-account-login.md)、Epic [#591](https://github.com/niho-life/niho-experience/issues/591)）。Experience の `hst_` ホストアカウント・権限・セッションはそのまま保つ。この文書の Experience 独自メールリンクは移行中だけの経路で、画面には出さない。#594〜#597 の本番受入と既存ホストの移行が済んだら #598 で撤去する。NIHO アカウントのメールログインは撤去しない。
 
 [ADR 0003](adr/0003-experience-independence.md) の 2・3 段目（[#456](https://github.com/niho-life/niho-experience/issues/456)）。`/host` に、NIHO アカウントの代わりに Experience 自前のホストアカウントでログインし（2 段目）、受取口座の判定を Stripe への直接照会と Experience での利用同意で行う（3 段目）。フラグ `EXPERIENCE_HOST_ACCOUNTS_ENABLED`（既定 OFF）。OFF の間は今までの「NIHO でログイン」と NIHO の Connect projection のまま変わらない。Store は migration `0064`（`HostAccounts`）と `0065`（ホストアカウントの販売者・`ProviderPayoutAccountConsents`）。
 
@@ -34,8 +34,8 @@ preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock
 ホストアカウントの自分のセッションだけ（`EXPERIENCE_HOST_NIHO_LOGIN_ENABLED` が ON のとき）。「NIHO アカウント」の行に、結び付けの状態（結び付け済み／結び付けていません）、結び付けた日と最後のログインの日（NIHO user ID は出さない）、「NIHO アカウントを結び付ける」、「結び付けを解除する」（開いて確かめてから「解除する」）が出る。フォームは JavaScript なしの POST（`/host/api/niho-identity`、同一 origin だけ）で、結果は 303 で `設定 › ログイン情報` へ戻り、`?niho=` が結果を言葉で出す（`niho-identity.ts`）。
 
 - **結び付け**：30 分以内にログインしたセッションが要る（古いと、メールのリンクで入り直して設定へ戻る。まだ何も結び付いていないので NIHO では入り直せない）。そのうえで NIHO へ送り（PKCE・`audience=host`・`max_age=300`）、戻ったら、開いているセッションのホストアカウントに、いま確かめた NIHO アカウントを結び付ける（`linkNihoIdentity`、証明は「セッションの直近のログイン」と「NIHO の直近のログイン」）。新しいセッションは開かない。NIHO アカウントがほかのホストアカウントに結び付いている（`identity-in-use`）、このホストアカウントに別の NIHO アカウントが付いている（`account-has-identity`）ときは断り、監査に残す。
-- **解除**：30 分以内のログインが要る。メールのリンクが残る間は許す（`EMAIL_SIGN_IN_AVAILABLE`、#598 で撤去を決めるとき false にする。false の間は `last-sign-in-method` で断り、理由を出す）。いまのセッションはそのまま続く。
-- **再ログイン**：受取口座の同意・取り消し、Stripe ダッシュボードを開く、結び付けと解除は、`HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes`（30 分）以内のログインを見る（意味は変えない）。古いとき、結び付いた NIHO アカウントで入るホストは NIHO で入り直す（`/host/auth/login?reauth=1&returnTo=…`、`max_age=300`。戻ると新しいセッションの `authenticated_at` は戻った時刻で、前のセッションは失効する）。結び付けていないホストは、これまでどおりメールのリンク（受取口座）か Stripe 自身のログイン（ダッシュボード）。`max_age` は NIHO の接続 URL の再認証の指定（niho-coliving/niho-app#20305）で、NIHO に再ログインを促すためだけに使う。**「直近か」の判定は Experience が、`exchange` の `authTime` から自分で行う**（URL の値はブラウザの持ち主が書き換えられるため）。結び付けも、NIHO の `authTime` が 30 分以内であることを Store が確かめる。
+- **解除**：30 分以内のログインが要る。移行中は Experience のメールログインが有効な場合に限り、解除後もその方法で再ログインできる（`EMAIL_SIGN_IN_AVAILABLE`）。#598 でメール経路を止めた後は、他の NIHO ログイン済み方法が無くなる解除を拒み、理由を出す。いまのセッションはそのまま続く。
+- **再ログイン**：受取口座の同意・取り消し、Stripe ダッシュボードを開く、結び付けと解除は、`HOST_ACCOUNT_LIMITS.recentAuthenticationMinutes`（30 分）以内のログインを見る（意味は変えない）。古いとき、結び付いた NIHO アカウントで入るホストは NIHO で入り直す（`/host/auth/login?reauth=1&returnTo=…`、`max_age=300`。戻ると新しいセッションの `authenticated_at` は戻った時刻で、前のセッションは失効する）。結び付けていないホストは、移行中に限りメールのリンク（受取口座）を使える。Stripe ダッシュボードには Stripe 自身のログインを使う。`max_age` は NIHO の接続 URL の再認証の指定（niho-coliving/niho-app#20305）で、NIHO に再ログインを促すためだけに使う。**「直近か」の判定は Experience が、`exchange` の `authTime` から自分で行う**（URL の値はブラウザの持ち主が書き換えられるため）。結び付けも、NIHO の `authTime` が 30 分以内であることを Store が確かめる。
 - 公開の直近ログイン（ADR 0004 §6）は、いまの公開 API にはまだ 30 分の検査が無い。入れるときは同じ判定（`recentlyAuthenticated`）と再ログイン（`reauthenticationHref`）を使う。
 
 ### 招待リンク（#596）
@@ -50,7 +50,7 @@ preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock
 4. `/host/auth/login?invite=1`：招待の cookie があるブラウザだけ、NIHO へ進む（再認証の指定なし）。戻ったら `acceptInvitation`（招待を持つブラウザの cookie が戻ってくること、NIHO user ID）が、**同じ transaction で** NIHO アカウントをその `hst_` に結び付け（経路 `INVITATION`）、招待を使い済みにする。続けて `startSessionForNihoIdentity` でセッションを開き、NIHO の接続をすぐ解除する。ほかの `hst_` に付いている NIHO アカウント（`invite-in-use`）、すでに別の NIHO アカウントが付いている招待先（`invite-has-identity`）は断って記録し、**招待は使えるまま**（正しい NIHO アカウントでやり直せる）。結び付け後にセッションだけ開けなかったときは、結び付けは残り、ホストは「NIHO アカウントでログイン」で入れる。
 - 招待は 1 つの `hst_` に 1 つだけ開く（新しく作ると前の未使用の招待は置き換わり、前のリンクは `invite-expired`）。NIHO アカウントがすでに結び付いている `hst_` には作れない（先に解除する）。有効期限は 7 日。行は消さない。
 - メールで作った記事・写真・公開版・同意・販売者は、`hst_` を変えないので変わらない（統合テストで、結び付けの前後で membership・アカウントの行・提供者一覧が同じことを確かめている）。URL・公開履歴も変わらない。
-- 既存の OWNER の移行：`invite` で招待し、OWNER が招待のメールからログインする。移行したあとも、メールのリンクは `?method=email` に残る（#598 で扱いを決める）。
+- 既存の OWNER の移行：`invite` で招待し、OWNER が招待のメールから NIHO にログインする。移行後の通常ログインは NIHO アカウントを使う。#598 で Experience 独自のメール経路を撤去した後の復旧は、運営が招待を再発行する。
 
 結び付けの Store（`HostAccountIdentities`、migration `0083`）は `packages/experience-store/README.md`。1 つの `hst_` に有効な NIHO user ID は 1 つ、同じ NIHO user ID は 1 つの `hst_` だけ。結び付け・解除・拒否は `host_account_identity_events` に残る。設定での結び付け・解除と再ログインは #595、招待リンクと既存 OWNER の移行は #596。
 

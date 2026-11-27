@@ -97,10 +97,17 @@ NIHO Login の本人確認プロファイルは [niho-app#20991](https://github.
     - Apple は、NIHO の web が Apple のログインに対応するまで出さない。
 - 旅行者のログインは Experience のサーバー経由で NIHO の `exchange` を呼ぶ。今の IP 単位の上限（`exchange` は 10 分で 20 回、niho-app の `experience-site-integration.md` §16.4）では足りなくなるので、旅行者のログインを開く前に、Experience のサーバーを識別して上限を分ける。
 
-### 9. メールのリンク
+### 9. Experience 独自のメールログイン（オーナー決定 2026-11-27）
 
-- メールのリンクのログインは、移行が終わるまでのフォールバックとして route を残し、画面には出さない。
-- 移行後に撤去するか、運営の救済手段として残すかは #598 で決める。
+- NIHO user ID を人の共通 ID とする。LINE・メールなどは NIHO アカウントに入る方法で、Experience が別々のアカウントとして扱わない。
+- Experience が発行するメールのログインリンクは移行中だけの経路とし、ログイン画面には出さない。NIHO ログインを本番で受け入れ、既存のホストアカウントの移行が済むまで、既存アカウントの移行・復旧用に限って維持する。
+- #594〜#597 の本番受入と既存ホストの移行後、Experience 独自のメールログイン route・job・request table を撤去する。復旧が必要な場合は運営が NIHO ログイン用の招待を再発行する。NIHO アカウント自身のメールログインはこの撤去の対象にしない。
+- 旧 NIHO app-connect / Host v1 の token 方式も、NIHO アカウントログインの本番受入後に撤去する。Experience のプロフィール・権限・セッションは Experience 側で持ち続ける。
+
+### 10. ID 列名の整理（長期）
+
+- `*_niho_user_id` という名前でも、値が `hst_` の列は NIHO user ID ではなく、過去の Experience 操作者 ID を記録している。NIHO user ID との結び付けを理由に、保存済みの操作者 ID を置き換えない。
+- 列名の変更は #598 のログイン切替から分ける（[#689](https://github.com/niho-life/niho-experience/issues/689)）。列ごとの参照先・意味・制約・trigger を調べ、操作者なら `*_actor_id`、ホストプロフィールなら `*_host_account_id`、NIHO 本人なら `*_niho_user_id` と整理する。一括置換はしない。
 
 ## 保存の約束（履歴を変えない）
 
@@ -141,5 +148,3 @@ NIHO Login の本人確認プロファイルは [niho-app#20991](https://github.
 | Experience の利用規約に、NIHO のアカウント基盤を使う旨をどう書くか（本番で旅行者のアカウントを開く前） | オーナー判断（法務の確認） |
 | 旅行者の予約・メッセージとアカウントの結び付け（予約の一覧・履歴） | Epic #591（オーナー判断） |
 | LINE を出した後の、日本語サイトの旅行者の並び（LINE を先頭にするか）。サイト名「NIHO Experience」の扱い | オーナー判断 |
-| メールのリンクを撤去するか、運営の救済手段として残すか | #598 |
-| `*_niho_user_id` 列を `*_actor_id` へ改名するか | #598 |
