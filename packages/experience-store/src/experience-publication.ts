@@ -2959,7 +2959,8 @@ export class ExperiencePublicationRepository {
         [actor.providerId, productId],
       );
       const stopped = stateFromRow(result.rows[0]);
-      await recordBookingEvent(client, stopped, before.bookingPublicationId, "STOPPED", "OWNER_STOPPED", actor.nihoUserId);
+      // A product already closed by a self-stop or an operations suspension recorded its STOPPED then: no second one.
+      if (isSelling(before)) await recordBookingEvent(client, stopped, before.bookingPublicationId, "STOPPED", "OWNER_STOPPED", actor.nihoUserId);
       // Close the external channel slots too: the DRAFT product is no longer reconciled as open (see ChannelRepository).
       await requestChannelReconciliation(client, actor.providerId, "booking_stopped");
       return stopped;

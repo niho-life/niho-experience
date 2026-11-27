@@ -319,6 +319,10 @@ describe("page and bookings are separate states (#705)", { skip }, () => {
       await publications.suspendByOperations({ nihoUserId: "ops-synthetic" }, PROVIDER, draft.id, "POLICY_REVIEW", await version());
       await publications.clearOperationsSuspension({ nihoUserId: "ops-synthetic" }, PROVIDER, draft.id, await version());
       await publications.openBooking(owner, draft.id, input(await version()));
+      // Stopping bookings of a listing a self-stop already closed writes no second STOPPED, then it opens again.
+      await publications.stop(owner, draft.id, await version());
+      await publications.stopBooking(owner, draft.id, await version());
+      await publications.openBooking(owner, draft.id, input(await version()));
       // Consent withdrawal.
       const consents = new ProviderPayoutAccountConsents(pool);
       await consents.record(owner, { stripeConnectAccountRef: ACCOUNT, consentVersion: "payout-account-consent-v1", nowUtc: new Date().toISOString() });
@@ -327,6 +331,7 @@ describe("page and bookings are separate states (#705)", { skip }, () => {
         "OPENED:OWNER_OPENED", "OPENED:OWNER_REPUBLISHED",
         "STOPPED:OWNER_SELF_STOPPED", "OPENED:OWNER_RESUMED",
         "STOPPED:OPERATIONS_SUSPENDED", "OPENED:OWNER_RESUMED",
+        "STOPPED:OWNER_SELF_STOPPED", "OPENED:OWNER_RESUMED",
         "STOPPED:OWNER_SELF_STOPPED", "OPENED:OWNER_RESUMED",
         "STOPPED:CONSENT_REVOKED",
       ]);
