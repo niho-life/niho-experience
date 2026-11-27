@@ -198,9 +198,9 @@ function sameProduct(product: ProductRecord, input: RegisterProductInput): boole
     && product.currency === "JPY"
     && product.unitAmount === input.unitAmount
     && product.cancellationTermsRef === input.cancellationTermsRef
-    && product.sellerNihoAccountRef === input.sellerNihoAccountRef
-    && product.stripeConnectAccountRef === input.stripeConnectAccountRef
-    && product.sellerDisplayName === input.sellerDisplayName;
+    && product.seller?.sellerNihoAccountRef === input.sellerNihoAccountRef
+    && product.seller?.stripeConnectAccountRef === input.stripeConnectAccountRef
+    && product.seller?.sellerDisplayName === input.sellerDisplayName;
 }
 
 /** The same terms: the questions compare by their fingerprint (their canonical JSON). */
@@ -254,6 +254,25 @@ function isUniqueViolation(error: unknown): boolean {
 async function requireProvider(client: PoolClient, providerId: string): Promise<void> {
   const provider = await client.query("SELECT 1 FROM experience_providers WHERE id=$1 FOR SHARE", [providerId]);
   if (provider.rows[0] === undefined) throw new StoreNotFoundError("provider");
+}
+
+/**
+ * Copies the provider's registered seller onto its products that have none (#704: drafts made before the provider had a
+ * seller profile). Called in the transaction that registers (or confirms) the profile, after the provider inventory lock
+ * that creating a draft takes too, so a draft is never created sellerless after the profile exists. The copy comes from
+ * the stored profile, never from a client, and leaves the draft's version alone (its content did not change; an open
+ * editor keeps its CAS token). A product that already has a seller keeps it (a different profile is SELLER_MISMATCH).
+ */
+export async function attachSellerToSellerlessProducts(client: PoolClient, providerId: string): Promise<number> {
+  const result = await client.query(
+    `UPDATE experience_products p
+        SET seller_niho_account_ref=s.seller_niho_account_ref,stripe_connect_account_ref=s.stripe_connect_account_ref,
+            seller_display_name=s.seller_display_name,updated_at=clock_timestamp()
+       FROM experience_host_seller_profiles s
+      WHERE p.provider_id=$1 AND s.provider_id=p.provider_id AND p.seller_niho_account_ref IS NULL`,
+    [providerId],
+  );
+  return result.rowCount ?? 0;
 }
 
 export class SiteSaleRegistration {
@@ -345,6 +364,7 @@ export class SiteSaleRegistration {
     validHostAccountSeller(input);
     try {
       return await withTransaction(this.#pool, async (client) => {
+        await lockProviderInventory(client, input.providerId);
         const created = await client.query("INSERT INTO experience_providers (id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING id", [input.providerId]);
         await client.query("SELECT id FROM experience_providers WHERE id=$1 FOR UPDATE", [input.providerId]);
         const provider = created.rows[0] === undefined ? "UNCHANGED" as const : "CREATED" as const;
@@ -362,6 +382,7 @@ export class SiteSaleRegistration {
             && String(row.seller_display_name) === input.sellerDisplayName
             && String(row.stripe_connect_account_ref) === input.stripeConnectAccountRef;
           if (!same) throw new StoreConflictError("An existing seller profile differs; use the reviewed seller-change process.");
+          await attachSellerToSellerlessProducts(client, input.providerId);
           return { provider, sellerProfile: "UNCHANGED" as const };
         }
         await client.query(
@@ -370,6 +391,7 @@ export class SiteSaleRegistration {
            VALUES ($1,NULL,$2,$3,$4,$5)`,
           [input.providerId, input.providerDisplayName, `sel_${randomBytes(16).toString("hex")}`, input.stripeConnectAccountRef, input.sellerDisplayName],
         );
+        await attachSellerToSellerlessProducts(client, input.providerId);
         return { provider, sellerProfile: "CREATED" as const };
       });
     } catch (error) {
@@ -501,6 +523,7 @@ export class SiteSaleRegistration {
     assertNonEmptyText(input.sellerDisplayName, "sellerProfile.sellerDisplayName", 300);
     try {
       return await withTransaction(this.#pool, async (client) => {
+        await lockProviderInventory(client, input.providerId);
         const providerResult = await client.query(
           "INSERT INTO experience_providers (id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING id",
           [input.providerId],
@@ -533,6 +556,7 @@ export class SiteSaleRegistration {
           if (!matches) throw new StoreConflictError("An existing seller mapping differs; use the reviewed seller-mapping change process.");
           profileOutcome = "UNCHANGED";
         }
+        await attachSellerToSellerlessProducts(client, input.providerId);
 
         const existingSettings = await client.query<DbRow>(
           `SELECT ${SALE_SETTINGS_COLUMNS} FROM provider_sale_settings WHERE provider_id=$1 FOR UPDATE`, [input.providerId]);
@@ -638,6 +662,7 @@ export class SiteSaleRegistration {
     assertNonEmptyText(input.sellerDisplayName, "sellerProfile.sellerDisplayName", 300);
     try {
       return await withTransaction(this.#pool, async (client) => {
+        await lockProviderInventory(client, input.providerId);
         await requireProvider(client, input.providerId);
         const current = await client.query<DbRow>(
           `SELECT legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name
@@ -649,6 +674,7 @@ export class SiteSaleRegistration {
                (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)
              VALUES ($1,$2,$3,$4,$5,$6)`,
             [input.providerId, input.legacyProviderId, input.providerDisplayName, input.sellerNihoAccountRef, input.stripeConnectAccountRef, input.sellerDisplayName]);
+          await attachSellerToSellerlessProducts(client, input.providerId);
           return "CREATED";
         }
         const same = String(row.legacy_provider_id) === input.legacyProviderId
@@ -656,13 +682,17 @@ export class SiteSaleRegistration {
           && String(row.seller_niho_account_ref) === input.sellerNihoAccountRef
           && String(row.stripe_connect_account_ref) === input.stripeConnectAccountRef
           && String(row.seller_display_name) === input.sellerDisplayName;
-        if (same) return "UNCHANGED";
+        if (same) {
+          await attachSellerToSellerlessProducts(client, input.providerId);
+          return "UNCHANGED";
+        }
         await client.query(
           `UPDATE experience_host_seller_profiles
               SET legacy_provider_id=$2,provider_display_name=$3,seller_niho_account_ref=$4,
                   stripe_connect_account_ref=$5,seller_display_name=$6,updated_at=clock_timestamp()
             WHERE provider_id=$1`,
           [input.providerId, input.legacyProviderId, input.providerDisplayName, input.sellerNihoAccountRef, input.stripeConnectAccountRef, input.sellerDisplayName]);
+        await attachSellerToSellerlessProducts(client, input.providerId);
         return "UPDATED";
       });
     } catch (error) {

@@ -64,15 +64,15 @@ ExperienceはNIHO v1選別client、本人／local OWNER／exact Connect boundary
   - 画面はまだ `providerId` を送らない（複数ホストの画面は段階2c）。
 - **販売の文脈**（販売者と readiness）：販売者 profile と、受取口座の Stripe 照会・利用同意をまとめた snapshot。必要な操作だけが解く。Stripe を呼ぶのはここだけ。
 
-必要な判定は3段階。**メンバーだけ**（ホストの文脈のみ。Stripe 照会なし、snapshot の書き込みなし）、**販売者**（メンバー＋登録済みの販売者。無ければ 409 `SELLER_SETUP_REQUIRED`。Stripe は呼ばない）、**販売者と readiness**（販売者＋Stripe＋同意の snapshot を作り、ストアへ記録する）。
+必要な判定は4段階。**メンバーだけ**（ホストの文脈のみ。Stripe 照会なし、snapshot の書き込みなし）、**販売者**（メンバー＋登録済みの販売者。無ければ 409 `SELLER_SETUP_REQUIRED`。Stripe は呼ばない）、**販売者と readiness**（販売者＋Stripe＋同意の snapshot を作り、ストアへ記録する）、**任意**（`sales: "optional"`。そのホストに販売者 profile があれば「販売者と readiness」と同じ（Stripe 障害のときの閉じた snapshot と 502 も同じ）。無ければ販売者も readiness も無いまま進み、Stripe も snapshot の書き込みも `SELLER_SETUP_REQUIRED` も無い。#704）。
 
 | 操作 | OWNER | EDITOR | COHOST | VIEWER | ホストの範囲 | 必要な判定 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 商品の一覧・詳細・販売条件の読み取り | 可 | 不可 | 不可 | 不可 | 1ホスト（`providerId` 指定、または唯一のオーナーのホスト） | 販売者と readiness（画面が返す「公開できない理由」をストアが snapshot から読むため） |
-| 商品の作成（下書き） | 可 | 不可 | 不可 | 不可 | 同上 | 販売者と readiness（ストアが現在のオーナー・販売者を snapshot で要求する） |
-| 原稿の保存・販売条件の保存 | 可 | 不可 | 不可 | 不可 | 同上 | 販売者と readiness（公開中の版を更新できるかをストアが snapshot で判定する） |
+| 商品の一覧・詳細・販売条件の読み取り | 可 | 不可 | 不可 | 不可 | 1ホスト（`providerId` 指定、または唯一のオーナーのホスト） | 任意（販売者があれば readiness まで。画面が返す「公開できない理由」をストアが snapshot から読むため。販売者が無ければ `SELLER_REQUIRED` を返す） |
+| 商品の作成（下書き） | 可 | 不可 | 不可 | 不可 | 同上 | 任意（販売者があれば、ストアが現在のオーナー・販売者を snapshot で要求しコピーする。無ければ販売者の無い下書きを作る。販売者の値は常にサーバーが決め、ブラウザーからは受け取らない） |
+| 原稿の保存・販売条件の保存 | 可 | 不可 | 不可 | 不可 | 同上 | 任意（販売者があれば readiness まで。公開中の版を更新できるかをストアが snapshot で判定する） |
 | 公開・再開・停止 | 可 | 不可 | 不可 | 不可 | 同上 | 販売者と readiness（公開は Stripe の Connect 状態と同意版が要る） |
-| 体験写真の追加・並べ替え・削除 | 可 | 不可 | 不可 | 不可 | 同上 | 販売者と readiness（応答の商品に「公開できない理由」を含む） |
+| 体験写真の追加・並べ替え・削除 | 可 | 不可 | 不可 | 不可 | 同上 | 任意（応答の商品に「公開できない理由」を含む） |
 | 体験写真の表示 | 可 | 不可 | 不可 | 不可 | 同上 | メンバーだけ |
 | ホストのロゴ・写真（一覧・追加・並べ替え・削除・表示） | 可 | 不可 | 不可 | 不可 | 同上 | メンバーだけ |
 | 英訳・和訳の下書き生成 | 可 | 不可 | 不可 | 不可 | 同上 | メンバーだけ |
@@ -84,7 +84,16 @@ ExperienceはNIHO v1選別client、本人／local OWNER／exact Connect boundary
 | 販売プランの切替 | 可 | 不可 | 不可 | 不可 | 同上 | 販売者と readiness（受取口座の確認が要る） |
 | 受取口座・同意（ホスト画面の「受取口座」） | 可 | 不可 | 不可 | 不可 | 画面が選んだ1ホスト | 販売者と Stripe（この API の境界は通らず、`readHostPayoutAccount` が直接照会する） |
 
-旧 NIHO 経路（`session.kind !== "experience"`）は、操作に関わらず従来どおり販売の文脈まで解く。段階1以降でこの表を広げる（販売者を持たないホスト、オーナー以外の役割）。
+旧 NIHO 経路（`session.kind !== "experience"`）は、操作に関わらず従来どおり販売の文脈まで解く。段階1以降でこの表を広げる（オーナー以外の役割）。
+
+### 販売者の無いホストの下書き（#704、エピック #700 の段階1a）
+
+受取口座（販売者 profile）の無いホストの OWNER も、体験の下書きを作って編集できる（商品・原稿・写真・販売条件・開催枠）。公開と販売には進めない（ページだけの公開は段階1b、#705）。
+
+- **保存**：`experience_products` の販売者 3 列は、まとめて「全部 NULL か、全部入っている」（migration `0091` の CHECK）。ストアの `ProductRecord.seller` は `{ sellerNihoAccountRef, stripeConnectAccountRef, sellerDisplayName } | null`。ホストの画面向けの DTO は今までどおり参照を持たず、`sellerDisplayName` だけが販売者の無い商品で `null` になる。
+- **公開の検査**：販売者の無い商品は `SELLER_REQUIRED` だけを返す（手数料設定・readiness・受取口座の理由は出さない）。公開・再開・停止・販売プランの切替・受取口座・販売者表示は、これまでどおり販売者を要る（`409 SELLER_SETUP_REQUIRED`）。
+- **販売者が後から付くとき**：運営が販売者を登録する transaction（`provisionHostAccountSeller`・`provisionHostSeller`・`registerHostSellerProfile`）の中で、そのホストの販売者の無い商品へ profile の値を写す。写すのは profile からで、ブラウザーの値は使わない。商品の `version` は変えない（開いている編集画面の版が無効にならない）。写したあとは、販売者の有るホストと同じ検査になる（readiness と一致しなければ `SELLER_MISMATCH`）。
+- **お金の道を閉じる**：公開版（`experience_product_publications`）と販売プランの販売者列は NOT NULL のまま。さらに、販売者の無い商品は `DRAFT` のまま（CHECK）なので、`status='PUBLISHED'` だけを読む予約・checkout・返金・精算・OTA/チャネル・メール・口コミ・記事連携は入口で外れる。Admin の代理公開は事務局が作った下書き（監査行つき）だけを対象にし、販売者の無い商品を除く。
 
 ## 英語原稿の確認（保存＝確認、オーナー決定 2026-11-25、#640）
 

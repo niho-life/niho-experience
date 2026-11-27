@@ -54,9 +54,9 @@ describe("Experience owner publication is the only Experience checkout source", 
       });
       assert.equal(product.status, "DRAFT");
       assert.match(product.id, /^[0-9a-f-]{36}$/i, "the store generates the product ID");
-      assert.equal(product.sellerNihoAccountRef, sellerReadiness.sellerNihoAccountRef);
-      assert.equal(product.stripeConnectAccountRef, sellerReadiness.stripeConnectAccountRef);
-      assert.equal(product.sellerDisplayName, sellerReadiness.sellerDisplayName);
+      assert.equal(product.seller?.sellerNihoAccountRef, sellerReadiness.sellerNihoAccountRef);
+      assert.equal(product.seller?.stripeConnectAccountRef, sellerReadiness.stripeConnectAccountRef);
+      assert.equal(product.seller?.sellerDisplayName, sellerReadiness.sellerDisplayName);
       await pool.query(
         `INSERT INTO experience_product_media_assets
            (id,provider_id,product_id,source_position,object_key,source_ref_hash,width,height,byte_size,alt_text,

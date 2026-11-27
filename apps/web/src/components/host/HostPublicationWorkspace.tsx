@@ -63,7 +63,7 @@ type Product = {
     englishFingerprint: string | null;
   };
   draft: { slug: string; publicTitle: string; content: Record<string, unknown>; currency: "JPY"; unitAmount: number };
-  sellerDisplayName: string;
+  sellerDisplayName: string | null;
   saleTerms: SaleTerms | null;
   salesPlan: {
     current: { revision: number; plan: "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10"; feeBasisPoints: 1000 | 1500 | 2000; agreementVersion: string };
@@ -137,6 +137,7 @@ const BLOCKER_COPY: Record<string, string> = {
   READINESS_MISSING: "販売者の最新状態を確認できません。販売者本人がHost画面で最新状態を確認した後、再度読み込んでください。",
   SCHEDULE_REQUIRED: "販売できる開催枠をカレンダーに追加してください。",
   SELLER_MISMATCH: "販売者情報と受取口座が、登録されている販売者と一致しません。",
+  SELLER_REQUIRED: "予約を受けるには、受取口座の登録が必要です。",
   SLUG_IN_USE: "この公開URLはすでに使われています。別のURLを入力してください。",
 };
 

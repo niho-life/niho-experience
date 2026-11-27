@@ -26,9 +26,12 @@ const OPERATION_ROLES: Readonly<Record<Operation, readonly ProviderRole[]>> = {
  * What an operation needs beyond membership (docs/host-publication.md):
  * - `none`: the provider and role only. No seller, no Stripe, no readiness snapshot.
  * - `seller`: also the provider's registered seller (SELLER_SETUP_REQUIRED without one). No Stripe.
+ * - `optional`: the `readiness` side when the provider has a seller profile (today's behaviour, Stripe included), and
+ *   none of it when it has no seller profile yet (`provider: null, readiness: null`, no Stripe, no snapshot write, no
+ *   SELLER_SETUP_REQUIRED). Drafting does not need a seller (#704); the product has none until one is registered.
  * - `readiness`: also 受取口座 from Stripe and the payment consent, as a fresh readiness snapshot (the SalesContext).
  */
-export type SalesNeed = "none" | "seller" | "readiness";
+export type SalesNeed = "none" | "optional" | "seller" | "readiness";
 
 type SellerProfile = ExperienceHostSellerProfile;
 type Readiness = ProviderPublicationReadinessInput;
@@ -49,6 +52,7 @@ export type PublicationHostContext<N extends SalesNeed = "readiness"> = HostBoun
   & (N extends "readiness" ? SalesContext
     : N extends "seller" ? { readonly provider: SellerProfile; readonly readiness: Readiness | null }
       : { readonly provider: SellerProfile | null; readonly readiness: Readiness | null });
+// `optional` has the same shape as `none`: a context whose sale side may be absent.
 
 export type PublicationHostBoundaryResult<N extends SalesNeed = "readiness"> =
   | { readonly ok: true; readonly value: PublicationHostContext<N> }
@@ -78,7 +82,7 @@ type Repository = NonNullable<ReturnType<typeof experiencePublicationRepository>
  */
 async function experienceAccountBoundary(
   session: ExperienceHostSession,
-  repository: Pick<Repository, "refreshReadiness" | "currentHostAccountSellerProfile">,
+  repository: Pick<Repository, "refreshReadiness" | "currentHostAccountSellerProfile" | "providerHasSellerProfile">,
   operation: Operation,
   sales: SalesNeed,
   requestedProviderId: string | null,
@@ -87,6 +91,13 @@ async function experienceAccountBoundary(
   if (!resolved.ok) return resolved;
   const { actor, role } = resolved.value;
   if (sales === "none") return { ok: true, value: { actor, role, provider: null, readiness: null } };
+  if (sales === "optional") {
+    // No seller profile yet: a draft can be made and edited, and nothing about payouts is read or written.
+    let hasSeller: boolean;
+    try { hasSeller = await repository.providerHasSellerProfile(actor.providerId); }
+    catch { return { ok: false, response: error("READINESS_UNAVAILABLE", 502) }; }
+    if (!hasSeller) return { ok: true, value: { actor, role, provider: null, readiness: null } };
+  }
 
   if (sales === "seller") {
     let found: Awaited<ReturnType<typeof repository.currentHostAccountSellerProfile>>;
@@ -142,7 +153,7 @@ async function experienceAccountBoundary(
  */
 export function publicationHostBoundary(operation: Operation, options?: PublicationHostBoundaryOptions & { readonly sales?: "readiness" }): Promise<PublicationHostBoundaryResult<"readiness">>;
 export function publicationHostBoundary(operation: Operation, options: PublicationHostBoundaryOptions & { readonly sales: "seller" }): Promise<PublicationHostBoundaryResult<"seller">>;
-export function publicationHostBoundary(operation: Operation, options: PublicationHostBoundaryOptions & { readonly sales: "none" }): Promise<PublicationHostBoundaryResult<"none">>;
+export function publicationHostBoundary(operation: Operation, options: PublicationHostBoundaryOptions & { readonly sales: "none" | "optional" }): Promise<PublicationHostBoundaryResult<"none">>;
 export async function publicationHostBoundary(
   operation: Operation,
   options: PublicationHostBoundaryOptions & { readonly sales?: SalesNeed } = {},

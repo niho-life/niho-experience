@@ -74,7 +74,7 @@ export async function listCalendarProductsForActor(client: Queryable, actor: Hos
     [actor.providerId, actor.nihoUserId, actor.calendarScope !== "OPERATOR", includeArchived],
   );
   return result.rows.map((row) => ({
-    id: String(row.id), publicTitle: String(row.public_title), sellerDisplayName: String(row.seller_display_name),
+    id: String(row.id), publicTitle: String(row.public_title), sellerDisplayName: String(row.seller_display_name ?? ""),
     access: row.role ? { basis: "MEMBER", role: effectiveCalendarRole(actor, String(row.role) as MembershipRole)! }
       : { basis: "OPERATOR", version: Number(row.grant_version), assignmentLabel: String(row.assignment_label) },
   }));

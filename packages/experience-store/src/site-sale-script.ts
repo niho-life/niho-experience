@@ -263,9 +263,9 @@ export function productChanges(current: ProductRecord, input: SiteSaleInput): st
   plain("currency", current.currency, "JPY");
   if (current.unitAmount !== next.unitAmount) changes.push(`price ${yen(current.unitAmount)} → ${yen(next.unitAmount)}`);
   plain("cancellationTermsRef", current.cancellationTermsRef, next.cancellationTermsRef);
-  hidden("sellerNihoAccountRef", current.sellerNihoAccountRef, next.sellerNihoAccountRef);
-  hidden("stripeConnectAccountRef", current.stripeConnectAccountRef, next.stripeConnectAccountRef);
-  plain("sellerDisplayName", JSON.stringify(current.sellerDisplayName), JSON.stringify(next.sellerDisplayName));
+  hidden("sellerNihoAccountRef", current.seller?.sellerNihoAccountRef ?? "", next.sellerNihoAccountRef);
+  hidden("stripeConnectAccountRef", current.seller?.stripeConnectAccountRef ?? "", next.stripeConnectAccountRef);
+  plain("sellerDisplayName", JSON.stringify(current.seller?.sellerDisplayName ?? null), JSON.stringify(next.sellerDisplayName));
   return changes;
 }
 

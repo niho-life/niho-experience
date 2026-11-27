@@ -56,8 +56,10 @@ function readiness(failing: readonly SaleReadinessKey[], selling = false): SaleR
 }
 
 function storedProduct(overrides: Partial<ProductRecord> = {}): ProductRecord {
+  const { sellerNihoAccountRef, stripeConnectAccountRef, sellerDisplayName, ...rest } = registerProductInput(INPUT);
   return {
-    ...registerProductInput(INPUT), id: INPUT.product.id, content: {}, currency: "JPY",
+    ...rest, id: INPUT.product.id, content: {}, currency: "JPY",
+    seller: { sellerNihoAccountRef, stripeConnectAccountRef, sellerDisplayName },
     version: 3, createdAtUtc: "2026-10-31T00:00:00.000Z", updatedAtUtc: "2026-10-31T00:00:00.000Z", ...overrides,
   };
 }
@@ -188,7 +190,7 @@ describe("register-site-sale input (#285 slice 9)", () => {
 
 describe("register-site-sale flow (#285 slice 9)", () => {
   it("plan reads only, shows the changes and the readiness with references masked", async () => {
-    const h = harness({ state: { ...REGISTERED, product: storedProduct({ unitAmount: 3500, stripeConnectAccountRef: "acct_SampleSellerOld9" }), otherProductsWithSaleTerms: ["sample-walk"] } });
+    const h = harness({ state: { ...REGISTERED, product: storedProduct({ unitAmount: 3500, seller: { ...storedProduct().seller!, stripeConnectAccountRef: "acct_SampleSellerOld9" } }), otherProductsWithSaleTerms: ["sample-walk"] } });
     assert.equal(await h.run("plan"), SITE_SALE_EXIT.ok);
     assert.deepEqual(h.writes, []);
     assert.deepEqual(h.stripeCalls, []);
