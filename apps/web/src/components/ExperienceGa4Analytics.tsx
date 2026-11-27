@@ -230,8 +230,7 @@ function AnalyticsConsentAndPageMeasurement({ measurementId }: { measurementId: 
 
   if (!measurementId || !ready) return null;
 
-  const allowPrompt = !dnt && !isGa4ExcludedPath(pathname);
-  const showPanel = preferencesOpen || (choice === null && allowPrompt);
+  const showPanel = preferencesOpen;
   if (!showPanel) return null;
 
   const choose = (next: Ga4ConsentChoice) => {
