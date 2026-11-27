@@ -163,7 +163,7 @@ export class GoogleChannelDeliveryRepository {
         ? (row.action !== "SET_OPEN" && row.action !== "SET_CLOSED")
         : observe ? !["SET_OPEN", "SET_CLOSED", "OBSERVE"].includes(String(row.action)) : row.action !== "OBSERVE")
       || row.account_active !== true || row.listing_active !== true || row.revoked_at !== null
-      || row.product_status !== "PUBLISHED"
+      || (row.product_status !== "PUBLISHED" && row.action !== "SET_CLOSED")
       || (observe ? row.can_observe : row.action === "SET_OPEN" ? row.can_open : row.action === "SET_CLOSED" ? row.can_close : row.can_observe) !== true
       || ((dispatch || observe) && row.quarantined_at !== null)
       || (row.delegated_until !== null && new Date(String(row.delegated_until)).toISOString() <= now)

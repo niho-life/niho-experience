@@ -107,9 +107,9 @@ ExperienceはNIHO v1選別client、本人／local OWNER／exact Connect boundary
 | `booking_publication_id`（NULL 可） | **販売版**。販売者・同意版・販売条件 snapshot を持つ不変の版。予約・checkout・OTA・返金・メールなど「売る」側は、この列だけを読む。 |
 
 - 予約が開いている間は、2 本は**同じ行**を指す（CHECK）。ページと、それを売る条件がずれない。
-- `experience_products.status='PUBLISHED'` ⇔ 予約が開いている（状態を持つ商品について）。ページだけの商品は `DRAFT` のまま。「売る」側が `status='PUBLISHED'` で絞っている読み取りは、変更なしでページだけの商品を締め出す。1a の CHECK（販売者なしは `DRAFT`）もそのまま成り立つ。この対応は store の transaction（`publish`・`openBooking`・`publishPage`・`stopBooking`・`saveDraft`・`saveSaleTerms`・Admin の代理公開）が保ち、`booking-publication.integration.test.ts` が検査する。DB の CHECK／trigger は「販売版は販売者と販売条件を持つ」「販売版＝ページ版」を守る。
+- `experience_products.status='PUBLISHED'` ⇔ 予約が開いている（状態を持つ商品について）。ページだけの商品は `DRAFT` のまま。「売る」側が `status='PUBLISHED'` で絞っている読み取りは、変更なしでページだけの商品を締め出す。1a の CHECK（販売者なしは `DRAFT`）もそのまま成り立つ。この対応は store の transaction（`publish`・`openBooking`・`publishPage`・`stopBooking`・`saveDraft`・`saveSaleTerms`・Admin の代理公開）が保つ。さらに DB が commit 時に確かめる（`DEFERRABLE INITIALLY DEFERRED` の constraint trigger `require_status_matches_booking_publication`。公開済みの状態を持つ商品は `status='PUBLISHED'` ⇔ `booking_publication_id IS NOT NULL`。`ARCHIVED` は自由）。`status` を直接書く `updateProduct`・運営の `registerProduct` も、状態のある商品では `StoreConflictError`（または commit での `check_violation`）になる。DB の CHECK／trigger は「販売版は販売者と販売条件を持つ」「販売版＝ページ版」も守る。migration は今 `PUBLISHED` の商品だけを販売版にし（それ以外は NULL）、`BACKFILL` イベントもその商品だけに書く。
 - 公開版 `experience_product_publications`：販売者 3 列と同意版は「全部 NULL（ページ版）か、全部入っている（販売版）」（CHECK）。ページ版は `sale_terms_version=0`・snapshot `{}`、新しい販売版は販売条件つき（`NOT VALID` の CHECK。0043 より前の行は版 0 の sentinel のまま残るため）。ページ版は下書きの版ごとに 1 行（部分 UNIQUE）。不変 trigger はそのまま。
-- 追記だけのイベント表 `experience_product_booking_events`（`OPENED`／`STOPPED`、理由コード、actor、状態の版）。真実は状態行（版の CAS）で、イベントはその記録。実行時の権限は INSERT のみ。
+- 追記だけのイベント表 `experience_product_booking_events`（`OPENED`／`STOPPED`、理由コード、actor、状態の版）。真実は状態行（版の CAS）で、イベントはその記録。実行時の権限は INSERT のみ。**販売が止まる・（再）開始するすべての遷移**を記録する：`OPENED`＝`OWNER_OPENED`（初回）・`OWNER_REPUBLISHED`（開いたまま版を替えた・同じ版でもう一度開いた）・`OWNER_RESUMED`（自主停止・運営停止の後の再開）・`ADMIN_PROXY_OPENED`・`BACKFILL`。`STOPPED`＝`OWNER_STOPPED`（`stopBooking`）・`OWNER_SELF_STOPPED`（`stop`）・`OPERATIONS_SUSPENDED`・`CONSENT_REVOKED`。すでに閉じている商品への停止（自主停止中の運営停止など）は 2 つ目の `STOPPED` を書かない。運営停止の解除は、オーナーの再開まで閉じたままなので書かない。
 - **既存データ**：migration が、今の公開版を販売版にも入れる（`booking_publication_id = current_publication_id`、`status` は変えない）。理由 `BACKFILL` の `OPENED` を 1 行ずつ足す。既存の公開中の体験は、移行後もそのまま予約を受けられる。
 
 **store の操作（OWNER）**
@@ -145,7 +145,7 @@ ExperienceはNIHO v1選別client、本人／local OWNER／exact Connect boundary
 | 予約メールの商品名 | `guest-mail-outbox.ts:1016` | PAGE | 変更なし（既存の予約の表示。ページ版を読む） |
 | 販売者の移し替えの確認 | `site-sale-registration.ts:454` | PAGE（ポインタ） | 変更なし（販売者列が NULL のページ版は一致しない） |
 | 旧サイトの販売登録の検査 | `site-sale-registration.ts:608,933` | SALE | 変更なし（旧サイト販売の `status`） |
-| OTA／チャネルの出力・同期・監視 | `channels.ts:1027,1091,1116,1153,1408,1833,1911,2324,3418,3454`、`channel-runtime-monitor.ts:249` | SALE | 変更なし。`status='PUBLISHED'`（予約が開いている）の掲載だけが対象。予約を止めると掲載の同期も止まる（従来の自主停止は `PUBLISHED` のままだったので、この点だけ強くなる） |
+| OTA／チャネルの出力・同期・監視 | `channels.ts`（`#liveAvailability`・`#reconcile`・`claim`・`preflight`・`submitResult`）、`google-channel-delivery.ts` | SALE | **変更あり。** 予約を取っていない商品（`DRAFT`、自主停止・運営停止・再開待ち）は、掲載の枠をすべて CLOSED にする（`#liveAvailability` が `bookable=false`）。止める遷移（`stopBooking`・`stop`・運営停止・同意の取り消し）は同じ transaction で calendar outbox に再計算を積む。再計算は、すでに OPEN にした枠だけを CLOSED にし、開いたことのない枠には何も作らない。`SET_CLOSED` は `DRAFT` の商品でも claim・preflight・結果受理を通る。`SET_OPEN`・`ENSURE_OCCURRENCE` は通らない（claim せず、リース済みでも preflight で競合。アカウントは隔離しない）。予約の読み取り（`OBSERVE`）は従来どおり `PUBLISHED` だけ |
 | 返金・精算・予約メール・ホストの予約一覧など既存予約の読み手 | `booking-cancellations.ts`・`host-sales.ts`・`guest-mail-outbox.ts` ほか（`status` で絞らない） | SALE（既存予約） | 変更なし。予約を止めても既存の予約の取消・返金・メールは続く |
 | 旧予約の入口 | `repository.ts:437,1248` | SALE | 変更なし（`status='PUBLISHED'`） |
 | 記事の体験リンク | `article-authority.ts:68,112,164,170,200` | SALE | 変更なし。ページだけの体験は記事から結べない（後続） |

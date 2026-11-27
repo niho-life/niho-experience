@@ -10,8 +10,9 @@ export const VISIBLE_PUBLICATION_COLUMNS = `
   p.id AS publication_id,p.provider_id,p.product_id,p.draft_version,p.publisher_kind,
   p.slug,p.public_title,p.content,p.currency,p.unit_amount,
   -- The legal seller is shown only while bookings are open on this very version (#705); a page without bookings has none.
-  CASE WHEN s.booking_publication_id=p.id THEN p.seller_display_name END AS seller_display_name,
-  (s.booking_publication_id=p.id) AS booking_available,
+  CASE WHEN s.booking_publication_id=p.id AND product.status='PUBLISHED' THEN p.seller_display_name END AS seller_display_name,
+  -- Actually taking bookings: this CTE already excludes a stopped, suspended or restart-required listing.
+  (s.booking_publication_id=p.id AND product.status='PUBLISHED') AS booking_available,
   p.published_at,s.first_published_at,
   (SELECT jsonb_build_object(
       'contentFingerprint',audit.content_fingerprint,

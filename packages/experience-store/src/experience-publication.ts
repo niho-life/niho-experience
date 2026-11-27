@@ -31,6 +31,7 @@ import {
 import { productFromRow, type DbRow } from "./rows.ts";
 import { PRODUCT_COLUMNS, requireMembership } from "./repository.ts";
 import { lockProviderInventory } from "./inventory.ts";
+import { recordBookingEvent, requestChannelReconciliation } from "./booking-status.ts";
 import { CLAIMED_PUBLICATION_SLUGS_CTE, VISIBLE_PUBLICATIONS_CTE } from "./public-publication-scope.ts";
 import { withTransaction } from "./transaction.ts";
 import {
@@ -493,6 +494,12 @@ function stateFromRow(row: DbRow): ExperiencePublicationState {
     version: safeInteger(row.version, "version"),
     updatedAtUtc: iso(row.updated_at, "updated_at"),
   };
+}
+
+/** Bookings are actually being taken: a booking version, and the listing is neither stopped, suspended nor awaiting restart. */
+export function isSelling(state: ExperiencePublicationState | null): boolean {
+  return state !== null && state.bookingPublicationId !== null && state.currentPublicationId !== null
+    && state.selfStoppedAtUtc === null && state.operationsSuspendedAtUtc === null && !state.ownerResumeRequired;
 }
 
 function readinessFromRow(row: DbRow): ProviderPublicationReadiness {
@@ -1185,23 +1192,6 @@ async function insertOrFindPagePublication(client: PoolClient, product: ProductR
   const publicationId = safeInteger(inserted.rows[0]?.id, "publication id");
   await copyPublicationMedia(client, product, publicationId);
   return publicationId;
-}
-
-/** Appends to the booking event log (#705). The state row, moved by CAS on its version, is the truth. */
-async function recordBookingEvent(
-  client: PoolClient,
-  state: { readonly providerId: string; readonly productId: string; readonly version: number },
-  publicationId: number,
-  kind: "OPENED" | "STOPPED",
-  reason: string,
-  actorNihoUserId: string | null,
-): Promise<void> {
-  await client.query(
-    `INSERT INTO experience_product_booking_events
-       (provider_id,product_id,publication_id,kind,reason,actor_niho_user_id,state_version)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [state.providerId, state.productId, publicationId, kind, reason, actorNihoUserId, state.version],
-  );
 }
 
 /** The caller holds the provider inventory and product locks and has checked OWNER/Admin authority. */
@@ -2930,8 +2920,12 @@ export class ExperiencePublicationRepository {
           [actor.providerId, productId, publicationId, state.version, withBooking]);
       if (!result.rows[0]) throw new StoreConflictError("Publication state changed while publishing.");
       const published = stateFromRow(result.rows[0]);
-      if (withBooking && state?.bookingPublicationId !== publicationId) {
-        await recordBookingEvent(client, published, publicationId, "OPENED", bookingWasOpen ? "OWNER_REPUBLISHED" : "OWNER_OPENED", actor.nihoUserId);
+      if (withBooking) {
+        // Written even when the sale version is the same row: re-opening after a stop or a suspension is a (re)start of selling.
+        const resumed = state !== null && (state.selfStoppedAtUtc !== null || state.ownerResumeRequired);
+        await recordBookingEvent(client, published, publicationId, "OPENED",
+          resumed ? "OWNER_RESUMED" : bookingWasOpen ? "OWNER_REPUBLISHED" : "OWNER_OPENED", actor.nihoUserId);
+        await requestChannelReconciliation(client, actor.providerId, "booking_opened");
       }
       return published;
     });
@@ -2966,6 +2960,8 @@ export class ExperiencePublicationRepository {
       );
       const stopped = stateFromRow(result.rows[0]);
       await recordBookingEvent(client, stopped, before.bookingPublicationId, "STOPPED", "OWNER_STOPPED", actor.nihoUserId);
+      // Close the external channel slots too: the DRAFT product is no longer reconciled as open (see ChannelRepository).
+      await requestChannelReconciliation(client, actor.providerId, "booking_stopped");
       return stopped;
     });
   }
@@ -2976,6 +2972,7 @@ export class ExperiencePublicationRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER"]);
+      const before = await lockedState(client, actor.providerId, productId);
       const result = await client.query<DbRow>(
         `UPDATE experience_product_publication_states
             SET self_stopped_at=COALESCE(self_stopped_at,clock_timestamp()),version=version+1,updated_at=clock_timestamp()
@@ -2985,7 +2982,12 @@ export class ExperiencePublicationRepository {
         [actor.providerId, productId, expectedStateVersion],
       );
       if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or publication not found.");
-      return stateFromRow(result.rows[0]);
+      const stopped = stateFromRow(result.rows[0]);
+      if (before?.bookingPublicationId != null) {
+        if (isSelling(before)) await recordBookingEvent(client, stopped, before.bookingPublicationId, "STOPPED", "OWNER_SELF_STOPPED", actor.nihoUserId);
+        await requestChannelReconciliation(client, actor.providerId, "listing_stopped");
+      }
+      return stopped;
     });
   }
 
@@ -3019,6 +3021,7 @@ export class ExperiencePublicationRepository {
         "SELECT operations_suspended_at IS NOT NULL AS suspended FROM experience_product_publication_states WHERE provider_id=$1 AND product_id=$2",
         [providerId, productId],
       );
+      const beforeState = await lockedState(client, providerId, productId);
       const result = await client.query<DbRow>(
         `UPDATE experience_product_publication_states
             SET operations_suspended_at=clock_timestamp(),operations_suspension_code=$4,
@@ -3031,7 +3034,12 @@ export class ExperiencePublicationRepository {
       );
       if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or publication not found.");
       if (before.rows[0]?.suspended !== true) await notifyListingSuspension(client, result.rows[0], "SUSPENDED");
-      return stateFromRow(result.rows[0]);
+      const suspended = stateFromRow(result.rows[0]);
+      if (beforeState?.bookingPublicationId != null) {
+        if (isSelling(beforeState)) await recordBookingEvent(client, suspended, beforeState.bookingPublicationId, "STOPPED", "OPERATIONS_SUSPENDED", actor.nihoUserId);
+        await requestChannelReconciliation(client, providerId, "operations_suspended");
+      }
+      return suspended;
     });
   }
 

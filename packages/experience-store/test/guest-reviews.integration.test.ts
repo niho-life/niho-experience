@@ -545,9 +545,18 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       await pool.query("UPDATE experience_product_publication_states SET owner_resume_required=false WHERE provider_id=$1 AND product_id=$2", [native.providerId, native.productId]);
       assert.equal((await reviews.listPublishedReviews("native-live"))?.summary.count, 2);
       // Reviews belong to the PAGE (#705): a page whose bookings were stopped (status DRAFT) keeps showing them.
-      await pool.query("UPDATE experience_products SET status='DRAFT' WHERE provider_id=$1 AND id=$2", [native.providerId, native.productId]);
+      const toggle = async (open: boolean) => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("UPDATE experience_product_publication_states SET booking_publication_id=CASE WHEN $3::boolean THEN current_publication_id ELSE NULL END WHERE provider_id=$1 AND product_id=$2", [native.providerId, native.productId, open]);
+          await client.query("UPDATE experience_products SET status=$3 WHERE provider_id=$1 AND id=$2", [native.providerId, native.productId, open ? "PUBLISHED" : "DRAFT"]);
+          await client.query("COMMIT");
+        } finally { client.release(); }
+      };
+      await toggle(false);
       assert.equal((await reviews.listPublishedReviews("native-live"))?.summary.count, 2);
-      await pool.query("UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2", [native.providerId, native.productId]);
+      await toggle(true);
 
       // A historical native slug is reserved too, even if an unclaimed legacy row has that slug.
       await pool.query(

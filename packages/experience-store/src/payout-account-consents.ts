@@ -1,3 +1,4 @@
+import { recordBookingEvent, requestChannelReconciliation } from "./booking-status.ts";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "./errors.ts";
@@ -238,12 +239,22 @@ export class ProviderPayoutAccountConsents {
         [actor.providerId, at, actor.nihoUserId],
       );
       if ((revoked.rowCount ?? 0) === 0) return { outcome: "NONE", stoppedPublications: 0 };
-      const stopped = await client.query(
+      const stopped = await client.query<{ product_id: string; booking_publication_id: string | number; version: string | number; selling: boolean }>(
         `UPDATE experience_product_publication_states
             SET self_stopped_at=COALESCE(self_stopped_at,clock_timestamp()),version=version+1,updated_at=clock_timestamp()
-          WHERE provider_id=$1 AND booking_publication_id IS NOT NULL AND self_stopped_at IS NULL`,
+          WHERE provider_id=$1 AND booking_publication_id IS NOT NULL AND self_stopped_at IS NULL
+          RETURNING product_id,booking_publication_id,version,
+                    (operations_suspended_at IS NULL AND owner_resume_required=false) AS selling`,
         [actor.providerId],
       );
+      for (const row of stopped.rows) {
+        if (row.selling) {
+          await recordBookingEvent(client, { providerId: actor.providerId, productId: row.product_id, version: Number(row.version) },
+            Number(row.booking_publication_id), "STOPPED", "CONSENT_REVOKED", actor.nihoUserId);
+        }
+      }
+      // The external channel slots of the stopped products close too.
+      if ((stopped.rowCount ?? 0) > 0) await requestChannelReconciliation(client, actor.providerId, "payout_consent_revoked");
       await client.query(
         `UPDATE provider_publication_readiness
             SET payment_reuse_consent_accepted=false,payment_reuse_consent_version=NULL,payment_reuse_consented_at=NULL,

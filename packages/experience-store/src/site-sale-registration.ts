@@ -33,6 +33,7 @@ import { productFromRow, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { MembershipRole, ProductRecord, ProductStatus } from "./types.ts";
 import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier } from "./validation.ts";
+import { assertStatusFollowsBooking } from "./booking-status.ts";
 
 /*
  * Operator registration for legacy site-sale cutover and seller bootstrap. Every method here is called only by
@@ -796,6 +797,7 @@ export class SiteSaleRegistration {
           [...values, expectedVersion],
         );
         if (updated.rows[0] === undefined) throw new StoreConflictError("Product version mismatch: read the product again.");
+        await assertStatusFollowsBooking(client, input.providerId, input.productId, input.status);
         return { product: productFromRow(updated.rows[0]), outcome: "UPDATED" as const };
       });
     } catch (error) {

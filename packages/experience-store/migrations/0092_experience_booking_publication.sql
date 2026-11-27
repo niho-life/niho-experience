@@ -79,11 +79,60 @@ CREATE TRIGGER experience_product_publication_states_booking_is_sale
 BEFORE INSERT OR UPDATE OF booking_publication_id ON experience_product_publication_states
 FOR EACH ROW EXECUTE FUNCTION require_booking_publication_is_sale_version();
 
--- Every publication until now was a sale version (seller and terms were mandatory) and its product is sellable today:
--- the standing page version becomes the standing sale version, status unchanged.
-UPDATE experience_product_publication_states
-   SET booking_publication_id = current_publication_id
- WHERE current_publication_id IS NOT NULL;
+-- Every publication until now was a sale version (seller and terms were mandatory). A product that is PUBLISHED today is
+-- sellable today, so its standing page version becomes its booking version too, status unchanged. A state whose product
+-- is not PUBLISHED (never sold, or not sold any more) keeps no booking version, so "status PUBLISHED <=> booking open"
+-- holds for the existing rows from the first moment.
+-- Size: these are tiny tables in production (one state row per published experience, tens of rows). The migration runs in
+-- one transaction and holds its locks until commit; it is deliberately not split into batches.
+UPDATE experience_product_publication_states s
+   SET booking_publication_id = s.current_publication_id
+  FROM experience_products p
+ WHERE p.provider_id = s.provider_id AND p.id = s.product_id
+   AND p.status = 'PUBLISHED' AND s.current_publication_id IS NOT NULL;
+
+-- One truth for "bookings are open", checked at commit: for a product that has a (published) state row,
+-- status='PUBLISHED' <=> booking_publication_id IS NOT NULL, with ARCHIVED free (archiving a product need not first drop its
+-- pointer; every sale reader filters on status, so an archived product is closed). Legacy products with no state row, and
+-- states that were never published, are not covered.
+CREATE FUNCTION require_status_matches_booking_publication() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  checked_provider text;
+  checked_product text;
+  product_status text;
+  booking_open boolean;
+  published boolean;
+BEGIN
+  IF TG_TABLE_NAME = 'experience_products' THEN
+    checked_provider := NEW.provider_id;
+    checked_product := NEW.id;
+  ELSE
+    checked_provider := NEW.provider_id;
+    checked_product := NEW.product_id;
+  END IF;
+  SELECT p.status, s.booking_publication_id IS NOT NULL, s.current_publication_id IS NOT NULL
+    INTO product_status, booking_open, published
+    FROM experience_product_publication_states s
+    JOIN experience_products p ON p.provider_id = s.provider_id AND p.id = s.product_id
+   WHERE s.provider_id = checked_provider AND s.product_id = checked_product;
+  IF FOUND AND published AND product_status <> 'ARCHIVED' AND ((product_status = 'PUBLISHED') <> booking_open) THEN
+    RAISE EXCEPTION 'product status and booking publication disagree for %/%', checked_provider, checked_product
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER experience_product_publication_states_status_matches_booking
+AFTER INSERT OR UPDATE ON experience_product_publication_states
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION require_status_matches_booking_publication();
+
+CREATE CONSTRAINT TRIGGER experience_products_status_matches_booking
+AFTER UPDATE OF status ON experience_products
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION require_status_matches_booking_publication();
 
 -- Append-only record of when bookings opened and stopped. The state row (CAS on its version) is the truth; this is the log.
 CREATE TABLE experience_product_booking_events (

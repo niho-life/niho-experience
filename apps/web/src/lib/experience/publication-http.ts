@@ -1,6 +1,7 @@
 import "server-only";
 import {
   ExperiencePublicationBlockedError,
+  isSelling,
   StoreAccessDeniedError,
   StoreConflictError,
   StoreNotFoundError,
@@ -241,7 +242,8 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
     // The same reasons split in two (#705): what stops the public page, and what only stops bookings from opening.
     pageBlockers,
     bookingBlockers: publicationBlockers.filter((blocker) => !pageBlockers.includes(blocker)),
-    bookingOpen: state?.bookingPublicationId != null && state.currentPublicationId !== null,
+    // Actually taking bookings: a booking version and the listing is not stopped, suspended or awaiting restart.
+    bookingOpen: isSelling(state),
     draft: {
       slug: product.slug,
       publicTitle: product.publicTitle,

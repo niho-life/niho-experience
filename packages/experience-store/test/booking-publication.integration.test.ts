@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { Pool } from "pg";
 import type { ScheduleRule } from "@niho-experience/experience-domain";
 import { StoreConflictError, StoreNotFoundError } from "../src/errors.ts";
-import { ExperiencePublicationBlockedError, ExperiencePublicationRepository } from "../src/experience-publication.ts";
+import { ExperiencePublicationBlockedError, ExperiencePublicationRepository, isSelling } from "../src/experience-publication.ts";
+import { ProviderPayoutAccountConsents } from "../src/payout-account-consents.ts";
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
 import { HostAccounts } from "../src/host-accounts.ts";
 import { ProviderHostBioRepository } from "../src/provider-host-bios.ts";
@@ -274,7 +274,8 @@ describe("page and bookings are separate states (#705)", { skip }, () => {
       await assert.rejects(setBooking(pageRow), { code: "23514" }, "a page version (no seller, no terms) can never be a booking version");
       await assert.rejects(setBooking(saleId), { code: "23514" }, "the booking version must equal the page version");
       await pool.query("UPDATE experience_product_publication_states SET current_publication_id=$3 WHERE provider_id=$1 AND product_id=$2", [PROVIDER, draft.id, saleId]);
-      await setBooking(saleId);
+      // Even a valid booking version cannot be set under a DRAFT product: the status/booking constraint trigger refuses at commit.
+      await assert.rejects(setBooking(saleId), { code: "23514" });
 
       // Publication rows: the seller group is all-or-none, a page row has no terms, a new sale row has terms.
       const insert = (columns: string, values: string) => pool.query(
@@ -291,26 +292,84 @@ describe("page and bookings are separate states (#705)", { skip }, () => {
     });
   });
 
-  it("migration 0092 makes every standing publication the booking version too, with a BACKFILL event", async () => {
+  it("records every transition that stops or (re)starts selling, even a re-opening of the same sale version", async () => {
     await withDb(async (pool) => {
       const owner = await sellerlessOwner(pool);
-      const { publications, draft: first } = await pageReadyDraft(pool, owner, "backfill");
+      const { publications, draft: first } = await pageReadyDraft(pool, owner, "ledger");
       const pageState = await publications.publishPage(owner, first.id, { expectedDraftVersion: first.version, expectedStateVersion: null, checks: CHECKS });
       await becomeSeller(pool, owner, first.id);
       const draft = await publications.getProduct(owner, first.id);
-      await publications.openBooking(owner, draft.id, { expectedDraftVersion: draft.version, expectedStateVersion: pageState.version, consentVersion: CONSENT, checks: CHECKS });
-      // Put the data back as it was before 0092 (a published product with only the page pointer) and run its data steps.
-      await pool.query("UPDATE experience_product_publication_states SET booking_publication_id=NULL WHERE provider_id=$1", [PROVIDER]);
-      const sql = await readFile(new URL("../migrations/0092_experience_booking_publication.sql", import.meta.url), "utf8");
-      const update = sql.match(/UPDATE experience_product_publication_states[\s\S]*?;/)![0];
-      const backfill = sql.match(/INSERT INTO experience_product_booking_events[\s\S]*?;/)![0];
-      await pool.query(update);
-      await pool.query(backfill);
-      const state = await stateOf(pool, draft.id);
-      assert.equal(state.booking, state.page);
-      assert.equal(await statusOf(pool, draft.id), "PUBLISHED", "status is unchanged, so the product stays sellable");
-      assert.deepEqual(await eventsOf(pool, draft.id), ["OPENED:OWNER_OPENED", "OPENED:BACKFILL"]);
-      assert.deepEqual(await new GuestBookingRepository(pool).sellableSlugs([draft.slug]), [draft.slug]);
+      const input = (version: number) => ({ expectedDraftVersion: draft.version, expectedStateVersion: version, consentVersion: CONSENT, checks: CHECKS });
+      const version = async () => (await publications.getState(owner, draft.id))!.version;
+      await publications.openBooking(owner, draft.id, input(pageState.version));
+      // The same sale version again (nothing changed): still an OPENED row.
+      await publications.openBooking(owner, draft.id, input(await version()));
+      // Self-stop and the restart that follows.
+      await publications.stop(owner, draft.id, await version());
+      assert.equal(isSelling(await publications.getState(owner, draft.id)), false);
+      await publications.openBooking(owner, draft.id, input(await version()));
+      assert.equal(isSelling(await publications.getState(owner, draft.id)), true);
+      // Operations suspension, its lifting (selling stays closed until the owner restarts) and the restart.
+      await publications.suspendByOperations({ nihoUserId: "ops-synthetic" }, PROVIDER, draft.id, "POLICY_REVIEW", await version());
+      await publications.clearOperationsSuspension({ nihoUserId: "ops-synthetic" }, PROVIDER, draft.id, await version());
+      assert.equal(isSelling(await publications.getState(owner, draft.id)), false, "owner_resume_required keeps it closed");
+      await publications.openBooking(owner, draft.id, input(await version()));
+      // Closing what is already closed writes no second STOPPED: a suspension of a self-stopped listing is not a new stop.
+      await publications.stop(owner, draft.id, await version());
+      await publications.suspendByOperations({ nihoUserId: "ops-synthetic" }, PROVIDER, draft.id, "POLICY_REVIEW", await version());
+      await publications.clearOperationsSuspension({ nihoUserId: "ops-synthetic" }, PROVIDER, draft.id, await version());
+      await publications.openBooking(owner, draft.id, input(await version()));
+      // Consent withdrawal.
+      const consents = new ProviderPayoutAccountConsents(pool);
+      await consents.record(owner, { stripeConnectAccountRef: ACCOUNT, consentVersion: "payout-account-consent-v1", nowUtc: new Date().toISOString() });
+      await consents.revoke(owner, { nowUtc: new Date().toISOString() });
+      assert.deepEqual(await eventsOf(pool, draft.id), [
+        "OPENED:OWNER_OPENED", "OPENED:OWNER_REPUBLISHED",
+        "STOPPED:OWNER_SELF_STOPPED", "OPENED:OWNER_RESUMED",
+        "STOPPED:OPERATIONS_SUSPENDED", "OPENED:OWNER_RESUMED",
+        "STOPPED:OWNER_SELF_STOPPED", "OPENED:OWNER_RESUMED",
+        "STOPPED:CONSENT_REVOKED",
+      ]);
+    });
+  });
+
+  it("keeps the status writers from breaking 'status PUBLISHED <=> bookings open', and says 'taking bookings' only when it is", async () => {
+    await withDb(async (pool) => {
+      const owner = await sellerlessOwner(pool);
+      const { publications, draft: first } = await pageReadyDraft(pool, owner, "writers");
+      const pageState = await publications.publishPage(owner, first.id, { expectedDraftVersion: first.version, expectedStateVersion: null, checks: CHECKS });
+      await becomeSeller(pool, owner, first.id);
+      const draft = await publications.getProduct(owner, first.id);
+      const status = (value: string) => ({
+        id: draft.id, slug: draft.slug, status: value as "DRAFT", publicTitle: draft.publicTitle, content: draft.content, currency: draft.currency,
+        unitAmount: draft.unitAmount, cancellationTermsRef: draft.cancellationTermsRef,
+        sellerNihoAccountRef: draft.seller!.sellerNihoAccountRef, stripeConnectAccountRef: draft.seller!.stripeConnectAccountRef,
+        sellerDisplayName: draft.seller!.sellerDisplayName,
+      });
+      const store = new ExperienceStore(pool);
+      // A page-only product cannot be written PUBLISHED, by the store or by SQL.
+      await assert.rejects(store.updateProduct(owner, status("PUBLISHED"), draft.version), StoreConflictError);
+      await assert.rejects(pool.query("UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2", [PROVIDER, draft.id]), { code: "23514" });
+      const open = await publications.openBooking(owner, draft.id, { expectedDraftVersion: draft.version, expectedStateVersion: pageState.version, consentVersion: CONSENT, checks: CHECKS });
+      // An open product cannot be written DRAFT, nor its booking version dropped under a PUBLISHED status.
+      const current = await publications.getProduct(owner, draft.id);
+      await assert.rejects(store.updateProduct(owner, status("DRAFT"), current.version), StoreConflictError);
+      await assert.rejects(pool.query("UPDATE experience_products SET status='DRAFT' WHERE provider_id=$1 AND id=$2", [PROVIDER, draft.id]), { code: "23514" });
+      await assert.rejects(pool.query("UPDATE experience_product_publication_states SET booking_publication_id=NULL WHERE provider_id=$1 AND product_id=$2", [PROVIDER, draft.id]), { code: "23514" });
+      // Both together in one transaction are fine (that is what stopBooking does); archiving is free.
+      assert.equal(isSelling(open), true);
+      await pool.query("UPDATE experience_products SET status='ARCHIVED' WHERE provider_id=$1 AND id=$2", [PROVIDER, draft.id]);
+      await pool.query("UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2", [PROVIDER, draft.id]);
+      // isSelling: a booking version alone is not enough.
+      for (const change of [{ selfStoppedAtUtc: "2026-11-28T00:00:00.000Z" }, { operationsSuspendedAtUtc: "2026-11-28T00:00:00.000Z" }, { ownerResumeRequired: true }, { bookingPublicationId: null }]) {
+        assert.equal(isSelling({ ...open, ...change }), false, JSON.stringify(change));
+      }
+      assert.equal(isSelling(null), false);
+      // The public flag follows: not public at all while stopped; public with bookingAvailable=true only while selling.
+      assert.equal((await publications.getPublicBySlug(draft.slug))?.bookingAvailable, true);
+      const stopped = await publications.stop(owner, draft.id, open.version);
+      assert.equal(await publications.getPublicBySlug(draft.slug), null);
+      assert.equal(isSelling(stopped), false);
     });
   });
 });
