@@ -15,7 +15,7 @@ import { SitePublicationPage, sitePublicationMetadata } from "./SitePublicationP
 import { SitePublicationBooking } from "./SitePublicationBooking";
 
 const item = {
-  sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Seller", externalUrl: "https://seller.example.test/legal" },
+  sellerDisclosure: { method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Seller", representativeName: "Rep", publicAddress: "Addr", publicPhone: "0300000000", publicEmail: "a@example.test" },
   publication: {
     slug: "synthetic-tea",
     publicTitle: "Synthetic English title",
@@ -50,7 +50,8 @@ describe("Experience publication Japanese sale presentation", () => {
     }
     expect(nodes[0].inLanguage).toBe("ja");
     expect(html).toContain("Thank you.");
-    expect(html).toContain("https://seller.example.test/legal");
+    expect(html).toContain("/ja/experiences/synthetic-tea/seller");
+    expect(html).toContain("特定商取引法に基づく表記");
     expect(html).not.toContain("English lead");
   });
   it("renders only confirmed Japanese prose and alt text with a paired canonical", async () => {

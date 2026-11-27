@@ -14,7 +14,7 @@ describe("provider seller disclosure validation", () => {
     assert.doesNotMatch(receiptTable, /result_json|public_address|public_phone|public_email|external_url/);
   });
 
-  it("accepts explicit native person/business fields and canonical https external pages", () => {
+  it("accepts explicit native person/business fields and rejects the retired EXTERNAL method", () => {
     assert.deepEqual(validateSellerDisclosureInput({
       method: "NATIVE", sellerKind: "PERSON", sellerDisplayName: "Synthetic Seller", representativeName: null,
       publicAddress: "1-2 Synthetic, Kamakura", publicPhone: "+81 46 000 0000", publicEmail: "public@example.test",
@@ -29,14 +29,10 @@ describe("provider seller disclosure validation", () => {
       publicAddress: "1-2 Synthetic, Kamakura", publicPhone: "046-000-0000", publicEmail: "public@example.test",
       consentVersion: "seller-public-disclosure-v1", accepted: true,
     }).sellerKind, "BUSINESS");
-    assert.equal(validateSellerDisclosureInput({
+    assert.throws(() => validateSellerDisclosureInput({
       method: "EXTERNAL", sellerKind: "PERSON", sellerDisplayName: "Synthetic Seller",
       externalUrl: "https://seller.example.test/legal", consentVersion: "seller-public-disclosure-v1", accepted: true,
-    }).method, "EXTERNAL");
-    assert.equal((validateSellerDisclosureInput({
-      method: "EXTERNAL", sellerKind: "PERSON", sellerDisplayName: "Synthetic Seller",
-      externalUrl: "https://seller.example.test", consentVersion: "seller-public-disclosure-v1", accepted: true,
-    }) as { externalUrl: string }).externalUrl, "https://seller.example.test/");
+    } as never), StoreValidationError);
   });
 
   it("preserves address lines while normalizing CRLF and rejects other control characters", () => {
@@ -51,15 +47,11 @@ describe("provider seller disclosure validation", () => {
     assert.throws(() => validateSellerDisclosureInput({ ...native, publicPhone: "046\n0000000" }), StoreValidationError);
   });
 
-  it("does not complete missing public facts or accept non-https pages", () => {
+  it("does not complete missing public facts", () => {
     assert.throws(() => validateSellerDisclosureInput({
       method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Seller", representativeName: null,
       publicAddress: "Synthetic address", publicPhone: "046-000-0000", publicEmail: "public@example.test",
       consentVersion: "seller-public-disclosure-v1", accepted: true,
-    }), StoreValidationError);
-    assert.throws(() => validateSellerDisclosureInput({
-      method: "EXTERNAL", sellerKind: "PERSON", sellerDisplayName: "Synthetic Seller",
-      externalUrl: "http://seller.example.test/legal", consentVersion: "seller-public-disclosure-v1", accepted: true,
     }), StoreValidationError);
   });
 });

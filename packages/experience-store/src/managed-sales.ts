@@ -300,7 +300,7 @@ export class ManagedExperienceSalesRepository {
            FROM provider_seller_disclosures d
           WHERE d.provider_id=$1 AND d.withdrawn_at IS NULL
             AND d.seller_display_name=$6
-            AND (d.method='NATIVE' OR (d.method='EXTERNAL' AND d.external_url=$12))`,
+            AND d.method='NATIVE'`,
         [actor.providerId, productId, next, input.plan, profile.rows[0].version, seller.rows[0].seller_display_name,
           seller.rows[0].stripe_connect_account_ref, fee, input.agreementVersion, actor.nihoUserId, input.agreementConfirmedAtUtc,
           input.sellerDisclosureUrl, seller.rows[0].seller_niho_account_ref, input.commandId],
@@ -370,11 +370,11 @@ export class ManagedExperienceSalesRepository {
            JOIN provider_payout_account_consents c ON c.provider_id=p.provider_id
             AND c.stripe_connect_account_ref=p.stripe_connect_account_ref AND c.revoked_at IS NULL
            JOIN provider_seller_disclosures d ON d.provider_id=p.provider_id AND d.withdrawn_at IS NULL
-            AND d.seller_display_name=p.seller_display_name AND (d.method='NATIVE' OR (d.method='EXTERNAL' AND d.external_url=$6))
+            AND d.seller_display_name=p.seller_display_name AND d.method='NATIVE'
           WHERE p.provider_id=$1 AND p.seller_niho_account_ref=$2 AND p.stripe_connect_account_ref=$3
             AND p.seller_display_name=$4 AND c.consented_by_niho_user_id=$5 FOR SHARE OF p,c,d`,
         [actor.providerId, state.pending.sellerNihoAccountRef, state.pending.stripeAccountRef,
-          state.pending.sellerDisplayName, actor.nihoUserId, state.pending.sellerDisclosureUrl],
+          state.pending.sellerDisplayName, actor.nihoUserId],
       );
       if (!ready.rows[0]) throw new StoreConflictError("The registered payout account, consent or seller disclosure changed during the switch.");
       const unresolved = await client.query<DbRow>(

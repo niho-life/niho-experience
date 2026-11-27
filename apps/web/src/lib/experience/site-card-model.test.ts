@@ -17,7 +17,7 @@ function item(providerKind: "PERSON" | "BUSINESS" | null, media: { providerPhoto
     },
     saleTerms: null,
     sellerDisclosure: {
-      method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Legal Seller", externalUrl: "https://seller.example.test/legal",
+      method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Legal Seller", representativeName: "Rep", publicAddress: "Addr", publicPhone: "0300000000", publicEmail: "a@example.test",
     },
   } as unknown as SitePublicExperience;
 }

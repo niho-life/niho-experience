@@ -70,8 +70,8 @@ export function beginSellerCommand(
   if (existing) return { command: existing, created: false };
   const expectedDisclosureMethod = method === "DELETE"
     ? "WITHDRAWN"
-    : isObject(bodyWithoutCommandId.disclosure) && (bodyWithoutCommandId.disclosure.method === "NATIVE" || bodyWithoutCommandId.disclosure.method === "EXTERNAL")
-      ? bodyWithoutCommandId.disclosure.method
+    : isObject(bodyWithoutCommandId.disclosure) && bodyWithoutCommandId.disclosure.method === "NATIVE"
+      ? "NATIVE" as const
       : null;
   if (!expectedDisclosureMethod) throw new TypeError("Seller save command requires a known disclosure method.");
   return {

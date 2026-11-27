@@ -8,7 +8,7 @@ import type { ExperienceHostApiFailure, ExperienceHostErrorReason } from "@niho-
 export const HOST_ERROR_REASON_TEXT = {
   PROVIDER_CONSENT_OUTDATED: "提供者規約が新しくなりました。ページを読み込み直して、新しい規約に同意してください。",
   PROVIDER_EMAIL_REQUIRED: "NIHO アカウントにメールアドレスがありません。NIHO アプリでメールアドレスを登録してから、もう一度お試しください。",
-  PROVIDER_REVIEW_STATE_CONFLICT: "いまは審査を申請できません。特商法表示 URL（https）と提供者規約の同意を確かめてください。",
+  PROVIDER_REVIEW_STATE_CONFLICT: "いまは審査を申請できません。提供者規約の同意を確かめてください。",
   PROVIDER_PAYMENT_SOURCE_FORBIDDEN: "選んだ拠点の口座は使えません。あなたがオーナーで、口座のある拠点を選んでください。",
   PROVIDER_PAYMENT_LOCKED: "申込があるため口座は変更できません。",
   PROVIDER_PAYMENT_CONSENT_OUTDATED: "口座の共有の同意文が新しくなりました。ページを読み込み直して、もう一度同意してください。",

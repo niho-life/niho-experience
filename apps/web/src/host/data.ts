@@ -21,7 +21,7 @@ import {
 import { loadNotificationSettings } from "./notification-settings-server";
 import { mockExperienceBookings, mockExperienceThreads } from "./mock/experience-reservations";
 import { siteBooking } from "./site-bookings";
-import { isSellerPageUrl, type HostNotice, type HostPayoutLoad } from "./payout";
+import { type HostNotice, type HostPayoutLoad } from "./payout";
 import { hostPayoutLoadOf } from "./payout-account";
 import { loadExperiencePayout } from "./payout-account-server";
 import type { HostExperience, HostGoogleConnection, HostMeetingDefaults, HostPublicationReadiness, HostSettings } from "./types";
@@ -125,7 +125,6 @@ export async function loadHostConsoleData(provider: HostProvider, options: { not
       displayName: displayProvider?.displayName ?? provider.displayName,
       kind: displayProvider?.kind ?? provider.kind ?? null,
       bio: displayProvider?.bio ?? provider.bio ?? "",
-      sellerDisclosureUrl: displayProvider ? displayProvider.sellerDisclosureUrl ?? "" : provider.sellerDisclosureUrl ?? "",
       reviewStatus: displayProvider?.reviewStatus ?? provider.reviewStatus ?? null,
       // Host v1 has no provider-terms endpoint. Only the synthetic preview checks its mock consent.
       consentCurrent: displayProvider && legacyDetail ? displayProvider.consentVersion === legacyDetail.consent.version : null,
@@ -160,7 +159,6 @@ export async function loadHostExperienceEditor(provider: HostProvider, id: strin
     publication: {
       role: provider.memberRole,
       payoutReason: payout?.load.status === "owner" ? payout.load.payout.reason : null,
-      sellerDisclosureReady: isSellerPageUrl(data.settings.sellerDisclosureUrl),
       consentCurrent: data.settings.consentCurrent,
       providerStatus: reviewStatus === null ? "unknown" : reviewStatus === "SUSPENDED" ? "suspended" : "available",
     },

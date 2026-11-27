@@ -26,7 +26,7 @@ import { cancellationLines, scheduleDescription } from "@/lib/experience/site-ca
 import { providerNameFor } from "@/lib/experience/provider-name";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import { relatedSiteExperienceCards } from "@/lib/experience/site-related";
-import { siteSellerDisplayName, siteSellerInformationHref } from "@/lib/experience/site-seller-information";
+import { siteSellerInformationHref } from "@/lib/experience/site-seller-information";
 import { getLiveReviews } from "@/lib/journey";
 import { reviewDisplay, reviewHeadline } from "@/lib/reviews-ui";
 import { reviewsForJsonLd, sitePublicationJsonLd } from "@/lib/structured-data";
@@ -65,7 +65,6 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   const headline = reviewHeadline(reviewDisplay(reviews), locale);
   const structured = sitePublicationJsonLd(item, config.siteUrl, config.bookingsEnabled && config.guestBookingEnabled, reviewsForJsonLd(reviews), locale);
   const offers = saleTerms?.offers ?? [];
-  const sellerName = siteSellerDisplayName(item, locale);
   const durationValues = [...new Set(offers.map((offer) => offer.durationMinutes))].sort((a, b) => a - b);
   const durations = durationValues.length === 1
     ? formatDuration(durationValues[0]!, locale)
@@ -100,6 +99,9 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
     ? (ja ? "ホストについて" : "About your host")
     : (ja ? "提供者について" : "About the provider");
   const showHostSection = hasHostIdentity;
+  const sellerLink = sellerInformationHref
+    ? <p id="seller" className="mt-5 text-sm"><a href={sellerInformationHref} rel="noopener noreferrer" className="font-bold text-ink underline underline-offset-4">{ja ? "特定商取引法に基づく表記" : "Seller information"}</a></p>
+    : null;
   const category = classification?.category ?? null;
   const area = classification?.area ?? null;
   const peopleLinks = ja && config.peoplePagesEnabled;
@@ -232,6 +234,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
                 </ul>
                 {isBusiness ? <p className="mt-4 text-sm text-ink-soft">{ja ? "当日の担当は、日によって変わることがあります。" : "The person leading your experience may vary by date."}</p> : null}
               </div> : null}
+              {sellerLink}
             </section> : null}
             {publication.meetingOverview || publication.meetingPointDisclosure === "PUBLIC" || publication.meetingPointDisclosure === "AFTER_BOOKING" ? <section id="place" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 className="text-2xl">{ja ? "場所" : "Getting there"}</h2>
@@ -282,12 +285,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
               {hostStoryGuide ? <p className="mb-5"><Link href={`/guides/${hostStoryGuide.slug}`} className="link-leaf">Read the host story</Link></p> : null}
               <GuideTeasers guides={relatedGuides.guides} draftSlugs={relatedGuides.draftSlugs} columns="three" variant="detail" locale={locale} />
             </section> : null}
-            {config.groupInquiryEnabled ? <section id="inquiry" className="scroll-mt-24 border-b border-line py-6 text-ink-soft">
-              <p>{ja ? "学校・会社・グループでの参加は、予約の前に相談できます。" : "Ask us before booking if you’re planning a visit for a school, company or group."} <a href={askHref} className="font-extrabold text-moss underline underline-offset-4">{ja ? "相談する" : "Get in touch"}</a></p>
-            </section> : null}
-            <section id="seller" className="border-b border-line py-6 text-sm text-ink-soft">
-              <p>{ja ? "販売者：" : "Sold by "}<b className="text-ink">{sellerName}</b>{sellerInformationHref ? <>{ja ? "・" : " · "}<a href={sellerInformationHref} rel="noopener noreferrer" className="font-bold text-ink underline underline-offset-4">{ja ? "特定商取引法に基づく表記" : "Seller information"}</a></> : null}</p>
-            </section>
+            {!showHostSection && sellerLink ? <section className="border-b border-line py-6">{sellerLink}</section> : null}
           </main>
         </div>
         {relatedCards.length ? <section aria-labelledby="related-experiences-heading" className="pt-14">

@@ -79,12 +79,12 @@ describe("掲載の状態", () => {
     expect(publishListing(live, TODAY)).toBe(live);
   });
 
-  it("口座・販売者表示・規約同意・運営状態が不明または不足なら公開を開けない", () => {
-    expect(publicationRequirements({ role: "OWNER", payoutReason: null, sellerDisclosureReady: false, consentCurrent: null, providerStatus: "unknown" })).toEqual([
-      "売上受取口座", "販売者表示", "提供者規約への同意", "提供者状態の確認",
+  it("口座・規約同意・運営状態が不明または不足なら公開を開けない", () => {
+    expect(publicationRequirements({ role: "OWNER", payoutReason: null, consentCurrent: null, providerStatus: "unknown" })).toEqual([
+      "売上受取口座", "提供者規約への同意", "提供者状態の確認",
     ]);
-    expect(publicationRequirements({ role: "OWNER", payoutReason: "READY", sellerDisclosureReady: true, consentCurrent: true, providerStatus: "suspended" })).toEqual(["運営停止の解除"]);
-    expect(publicationRequirements({ role: "OWNER", payoutReason: "READY", sellerDisclosureReady: true, consentCurrent: true, providerStatus: "available" })).toEqual([]);
+    expect(publicationRequirements({ role: "OWNER", payoutReason: "READY", consentCurrent: true, providerStatus: "suspended" })).toEqual(["運営停止の解除"]);
+    expect(publicationRequirements({ role: "OWNER", payoutReason: "READY", consentCurrent: true, providerStatus: "available" })).toEqual([]);
   });
 });
 

@@ -256,7 +256,6 @@ export interface HostPublicationReadiness {
   role: HostProviderRole | null;
   /** Null means that the payout state could not be read, and publication stays closed. */
   payoutReason: PaymentReadinessReason | null;
-  sellerDisclosureReady: boolean;
   /** Null means that the current provider consent could not be verified. */
   consentCurrent: boolean | null;
   /** Legacy provider review does not gate self-publication; only an operational suspension does. */
@@ -737,7 +736,6 @@ export interface HostSettings {
   displayName: string;
   kind: HostProviderKind | null;
   bio: string;
-  sellerDisclosureUrl: string;
   reviewStatus: HostProviderReviewStatus | null;
   /** The provider agreed to the current NIHO provider terms; null when the state could not be read. */
   consentCurrent: boolean | null;

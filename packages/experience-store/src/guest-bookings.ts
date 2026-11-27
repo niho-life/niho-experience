@@ -1769,7 +1769,8 @@ export class GuestBookingRepository {
       title: sellable.product.publicTitle,
       currency: "JPY",
       sellerDisplayName: sellable.product.sellerDisplayName,
-      ...(sellable.product.sellerDisclosureUrl ? { sellerDisclosureUrl: sellable.product.sellerDisclosureUrl } : {}),
+      // 外部URLは廃止。保存済み版に旧URLが残っていても、NIHO運営(PLATFORM)の商品以外では出さない。
+      ...(sellable.product.chargeMode === "PLATFORM" && sellable.product.sellerDisclosureUrl ? { sellerDisclosureUrl: sellable.product.sellerDisclosureUrl } : {}),
       offers: rules.map((stored) => offerFor(sellable, stored)),
       conditionsVersion: sellable.terms.conditionsVersion,
       ...(sellable.product.salesPlanRevision === undefined ? {} : { salesPlanRevision: sellable.product.salesPlanRevision }),

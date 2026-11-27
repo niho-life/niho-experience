@@ -147,15 +147,7 @@ test("a new provider: registered through NIHO, led from 売上 to its payout acc
   await page.getByRole("radio", { name: "店舗・事業者" }).check();
   await page.getByRole("textbox", { name: "掲載名" }).fill("合成スタジオ");
   await page.getByRole("checkbox", { name: /提供者規約に同意します/ }).check();
-  // NIHO (the contract mock) refuses a seller page with a user name in it: the form says so and keeps what was typed.
-  const sellerUrl = page.getByRole("textbox", { name: "特商法表示 URL" });
-  await sellerUrl.fill("https://user:secret@example.com/legal");
-  await page.getByRole("button", { name: "登録する" }).click();
-  await expect(page.locator("main").getByRole("alert")).toHaveText("入力を確かめてください。");
-  await expect(page).toHaveURL(/\/host\/register$/);
-  await expect(page.getByRole("textbox", { name: "掲載名" })).toHaveValue("合成スタジオ");
-
-  await sellerUrl.fill("https://example.com/legal");
+  await expect(page.getByRole("textbox", { name: "特商法表示 URL" })).toHaveCount(0);
   await page.getByRole("button", { name: "登録する" }).click();
   // The preview forgets the new provider after the request: the synthetic host comes back with
   // a provider in the state a new one starts in (未申請, no payout account).
@@ -281,12 +273,8 @@ test("sales, payout and registration screens have no WCAG 2.2 AA violations", as
 
   await signIn(page, "?mock=empty");
   await page.goto("/host/register");
-  await page.getByRole("textbox", { name: "掲載名" }).fill("合成スタジオ");
-  await page.getByRole("textbox", { name: "特商法表示 URL" }).fill("https://user:secret@example.com/legal");
-  await page.getByRole("checkbox", { name: /提供者規約に同意します/ }).check();
-  await page.getByRole("button", { name: "登録する" }).click();
-  await expect(page.locator("main").getByRole("alert")).toBeVisible();
-  await audit(page, "/host/register (refused)");
+  await expect(page.getByRole("textbox", { name: "掲載名" })).toBeVisible();
+  await audit(page, "/host/register");
 });
 
 test.describe("320px narrow phone", () => {

@@ -70,7 +70,7 @@ describe("HostLiveCalendarPanel", () => {
 
 describe("HostSettingsForm's カレンダー", () => {
   const settings = {
-    displayName: "Synthetic provider", kind: null, bio: "", sellerDisclosureUrl: "", reviewStatus: null, consentCurrent: true, meetingPoint: null,
+    displayName: "Synthetic provider", kind: null, bio: "", reviewStatus: null, consentCurrent: true, meetingPoint: null,
     calendar: { google: GOOGLE_NOT_CONNECTED, icsUrl: null }, notifications: null, notificationSource: "preparing",
   } as const;
   const form = (liveCalendar: HostCalendarLoad | null) => renderToStaticMarkup(createElement(HostSettingsForm, {
@@ -92,7 +92,7 @@ describe("HostSettingsForm's カレンダー", () => {
     const html = renderToStaticMarkup(createElement(HostSettingsForm, {
       providerId: "sample-provider",
       role: "OWNER",
-      settings: { ...settings, sellerDisclosureUrl: "https://example.test/legal", reviewStatus: "APPROVED", consentCurrent: true },
+      settings: { ...settings, reviewStatus: "APPROVED", consentCurrent: true },
       payout: { status: "owner", payout: { reason: "READY", sharedFrom: null, candidates: [], reuseConsent: null } },
       connectNotice: null,
       googleConnection: null,

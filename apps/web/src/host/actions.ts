@@ -62,7 +62,7 @@ function text(value: unknown, max: number): string | null {
 }
 
 /** NIHO's limits (the contract), with room for the spaces NIHO trims. */
-const LIMITS = { displayName: 200, bio: 4200, sellerDisclosureUrl: 2048, version: 100, spotId: 200, threadId: 200, reviewId: 200, experienceId: 200, cursor: 200 } as const;
+const LIMITS = { displayName: 200, bio: 4200, version: 100, spotId: 200, threadId: 200, reviewId: 200, experienceId: 200, cursor: 200 } as const;
 
 /** 提供者の登録 (#88): NIHO makes the host the provider's OWNER. `next` is the new provider's home. */
 type Registered = { next: string };
@@ -70,11 +70,10 @@ export async function registerProvider(input: RegisterProviderInput): Promise<Ho
   const kind = input?.kind === "INDIVIDUAL" || input?.kind === "BUSINESS" ? input.kind : null;
   const displayName = text(input?.displayName, LIMITS.displayName);
   const bio = text(input?.bio, LIMITS.bio);
-  const sellerDisclosureUrl = text(input?.sellerDisclosureUrl, LIMITS.sellerDisclosureUrl);
   const consentVersion = text(input?.consentVersion, LIMITS.version);
-  if (!kind || displayName === null || bio === null || sellerDisclosureUrl === null || consentVersion === null) return invalid;
+  if (!kind || displayName === null || bio === null || consentVersion === null) return invalid;
   return withLegacyHostMock<Registered>(async (client) => {
-    const result = await client.registerExperienceProvider({ kind, displayName, bio, sellerDisclosureUrl: sellerDisclosureUrl.trim() || null, consentVersion });
+    const result = await client.registerExperienceProvider({ kind, displayName, bio, sellerDisclosureUrl: null, consentVersion });
     if (!result.ok) return refused(result);
     return { ok: true, message: "登録しました。", next: PREVIEW_AFTER_REGISTRATION };
   });
@@ -89,8 +88,8 @@ export async function saveProviderProfile(input: ProviderProfileChange): Promise
   const providerId = nihoIdOrNull(input?.providerId);
   const changed = (field: keyof ProviderProfile) => input?.[field] !== undefined;
   // Seller disclosure has its own Experience command/CAS contract. The legacy profile action must not bypass it.
-  if (changed("sellerDisclosureUrl")) return invalid;
-  for (const field of ["displayName", "bio", "sellerDisclosureUrl"] as const) {
+  if ((input as { sellerDisclosureUrl?: unknown } | undefined)?.sellerDisclosureUrl !== undefined) return invalid;
+  for (const field of ["displayName", "bio"] as const) {
     if (changed(field) && text(input[field], LIMITS[field]) === null) return invalid;
   }
   if (!providerId || !Object.keys(input ?? {}).some((key) => ["displayName", "bio"].includes(key))) return invalid;
@@ -101,8 +100,8 @@ export async function saveProviderProfile(input: ProviderProfileChange): Promise
     const result = await client.updateExperienceProvider(providerId, body);
     if (!result.ok) return refused(result);
     refreshConsole();
-    const { displayName, bio, sellerDisclosureUrl, reviewStatus } = result.data.provider;
-    return { ok: true, message: "保存しました", profile: { displayName, bio, sellerDisclosureUrl: sellerDisclosureUrl ?? "" }, reviewStatus };
+    const { displayName, bio, reviewStatus } = result.data.provider;
+    return { ok: true, message: "保存しました", profile: { displayName, bio }, reviewStatus };
   });
 }
 

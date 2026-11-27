@@ -45,7 +45,7 @@ Issue #532（受付の一覧の最小は #533 の一部）。親は #527。オ�
 | --- | --- | --- |
 | 法人・団体の方へ | `/ja/business`（日本語のみ） | 「相談する」→ `/ja/inquiry?type=corporate&from=corporate` |
 | 学校の方へ | `/ja/schools`（日本語のみ） | 「資料と見積を相談する」→ `/ja/inquiry?type=school&from=school` |
-| 体験ページ | 「相談してみる」の節（`SitePublicationPage`、日英） | 体験の slug・タイトル・ホスト名つき（`from=experience`） |
+| 体験ページ | 予約カードの「ほかの日・グループの相談」（`SitePublicationDatePicker`、日英）。本文末尾の「学校・会社・グループでの参加は、予約の前に相談できます」の節は 2026-11-28 に廃止（企業・学校はフッターの「企業・学校の方へ」「体験のご相談」から） | 体験の slug・タイトル・ホスト名つき（`from=experience`） |
 | 人物（提供者）のページ | 日本語は `/ja/people/<slug>` の「◯◯さんにメッセージを送る」（**この相談フォームではなく**、本人あてのメッセージ。[guest-questions.md](guest-questions.md)「人物ページから本人へ」、#589）。英語は体験ページの「ホストについて」にある「Ask ◯◯ about a group visit」 | 英語：ホスト名つき（`from=provider`）。日本語：古いリンクの `from=provider`・`host=`（体験なし）は文脈なしで開く |
 | `/ja` のトップ | 下部の帯（`InquiryBand`） | `/ja/inquiry`、法人・学校のページへ |
 | `/ja` のフッター | 「相談する」「法人・団体の方へ」「学校の方へ」（`inquiryFooterLinks()`） | 同上 |
@@ -91,7 +91,7 @@ Issue #532（受付の一覧の最小は #533 の一部）。親は #527。オ�
 
 ## flag と配備
 
-- `EXPERIENCE_GROUP_INQUIRY_ENABLED`（http mode だけ、既定 `false`）。`true` で、公開フォーム・`POST /api/public/group-inquiries`・`/admin/inquiries`・メール job の1段・体験ページの「相談してみる」が開く。`false` の間は公開 route と Admin の route が 404、体験ページにリンクも出さない。
+- `EXPERIENCE_GROUP_INQUIRY_ENABLED`（http mode だけ、既定 `false`）。`true` で、公開フォーム・`POST /api/public/group-inquiries`・`/admin/inquiries`・メール job の1段・体験ページの予約カードの「ほかの日・グループの相談」が開く。`false` の間は公開 route と Admin の route が 404、体験ページにリンクも出さない。
 - 前提：`EXPERIENCE_DATABASE_URL`（migration `0074` を適用済み）、メールを送るには `EXPERIENCE_GUEST_MAIL_ENABLED`（メール job。事務局宛先は `EXPERIENCE_MAIL_REPLY_TO`）、Admin の一覧には Admin ログイン（`ADMIN_SUPPORT_CONSOLE_ENABLED`＋ http mode。Google ログインでも NIHO ログインでも同じ）。デプロイの flag 表は [production-deploy.md](production-deploy.md)。
 - runtime role には `group_inquiries` の SELECT・INSERT・UPDATE、`group_inquiry_mails` の SELECT・INSERT・UPDATE が要る。保持の手動削除には、運用担当の別ロールで `group_inquiries` の DELETE を使う。
 - `EXPERIENCE_GROUP_INQUIRY_PREVIEW_ENABLED`（mock mode だけ。ブラウザテスト用にフォームだけ出す。何も保存せず route も開かない）。

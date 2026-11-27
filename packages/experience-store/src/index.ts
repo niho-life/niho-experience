@@ -40,7 +40,6 @@ export type { HostBioInput, HostBioTextIssue } from "./host-bio-rules.ts";
 export { ProviderMediaCleanupRepository } from "./public-media-cleanup.ts";
 export type { ClaimedProviderMediaCleanup } from "./public-media-cleanup.ts";
 export type {
-  ExternalSellerDisclosureInput,
   HostSellerDisclosure,
   NativeSellerDisclosureInput,
   PublicSellerDisclosure,

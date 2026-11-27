@@ -65,6 +65,20 @@ describe("host seller disclosure HTTP boundary", () => {
     expect(mocks.repository.save).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a new EXTERNAL disclosure with the validation error, while GET still returns an existing EXTERNAL row", async () => {
+    const commandId = "11111111-1111-4111-8111-111111111111";
+    const external = { method: "EXTERNAL", sellerKind: "PERSON", sellerDisplayName: "Synthetic Legal Seller", externalUrl: "https://seller.example.test/legal", consentVersion: "seller-public-disclosure-v1", accepted: true };
+    const rejected = await putSellerDisclosure(request("PUT", { commandId, expectedVersion: 1, disclosure: external }));
+    expect(rejected.status).toBe(400);
+    expect(mocks.repository.save).not.toHaveBeenCalled();
+
+    const old = { ...state, method: "EXTERNAL", representativeName: null, publicAddress: null, publicPhone: null, publicEmail: null, externalUrl: "https://seller.example.test/legal" };
+    mocks.repository.getForOwner.mockResolvedValue({ sellerDisplayName: "Synthetic Legal Seller", disclosure: old });
+    const read = await getSellerDisclosure(request("GET"));
+    expect(read.status).toBe(200);
+    expect((await read.json()).seller.disclosure.method).toBe("EXTERNAL");
+  });
+
   it("requires same-origin writes and passes withdrawal through current OWNER resolution", async () => {
     mocks.mutationAllowed.mockReturnValueOnce(false);
     expect((await deleteSellerDisclosure(request("DELETE", { commandId: "22222222-2222-4222-8222-222222222222", expectedVersion: 1 }))).status).toBe(403);

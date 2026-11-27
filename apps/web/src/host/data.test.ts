@@ -95,7 +95,6 @@ describe("loadHostConsoleData", () => {
       displayName: "サンプルの台所",
       kind: "INDIVIDUAL",
       bio: "家庭料理を一緒に作る体験の、合成データの提供者です（sample）。",
-      sellerDisclosureUrl: "https://example.com/sample-kitchen/legal",
       reviewStatus: "APPROVED",
       consentCurrent: true,
       meetingPoint: expect.objectContaining({ overview: "Near Kamakura Station, 5-minute walk", mapUrl: "https://maps.example.com/sample-kitchen" }),
@@ -136,7 +135,7 @@ describe("loadHostConsoleData", () => {
     const data = await loadHostConsoleData(KITCHEN, { meetingPoint: true });
     expect(calls).toEqual([]);
     expect(data.settings).toMatchObject({
-      displayName: "サンプルの台所", kind: "INDIVIDUAL", bio: "", sellerDisclosureUrl: "",
+      displayName: "サンプルの台所", kind: "INDIVIDUAL", bio: "",
       reviewStatus: "APPROVED", consentCurrent: null, meetingPoint: null,
     });
     expect(data.settings.calendar).toEqual({ google: GOOGLE_NOT_CONNECTED, icsUrl: null });
@@ -181,7 +180,7 @@ describe("loadHostConsoleData", () => {
     state.config.apiMode = "http";
     const calls = stubNiho(() => { throw new Error("legacy provider API must not be called"); });
     expect((await loadHostConsoleData(KITCHEN)).settings).toMatchObject({
-      displayName: "サンプルの台所", kind: "INDIVIDUAL", bio: "", sellerDisclosureUrl: "", reviewStatus: "APPROVED",
+      displayName: "サンプルの台所", kind: "INDIVIDUAL", bio: "", reviewStatus: "APPROVED",
       consentCurrent: null, meetingPoint: null,
     });
     expect(calls).toEqual([]);
@@ -201,10 +200,10 @@ describe("loadHostConsoleData", () => {
 describe("loadHostExperienceEditor", () => {
   it("passes verified mock publication facts, and keeps non-owner or unreadable facts closed", async () => {
     expect((await loadHostExperienceEditor(KITCHEN, "coffee")).publication).toEqual({
-      role: "OWNER", payoutReason: "READY", sellerDisclosureReady: true, consentCurrent: true, providerStatus: "available",
+      role: "OWNER", payoutReason: "READY", consentCurrent: true, providerStatus: "available",
     });
     expect((await loadHostExperienceEditor(STUDIO, "calligraphy")).publication).toEqual({
-      role: "EDITOR", payoutReason: null, sellerDisclosureReady: false, consentCurrent: true, providerStatus: "available",
+      role: "EDITOR", payoutReason: null, consentCurrent: true, providerStatus: "available",
     });
   });
 

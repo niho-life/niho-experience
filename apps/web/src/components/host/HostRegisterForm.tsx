@@ -42,7 +42,6 @@ export function HostRegisterForm({ consent, preview }: { consent: { version: str
         displayName: field(data, "displayName"),
         // Keep the legacy preview contract shape without collecting a second provider intro.
         bio: "",
-        sellerDisclosureUrl: field(data, "sellerDisclosureUrl"),
         consentVersion: consent.version,
       });
       if (!result.ok) {
@@ -75,23 +74,6 @@ export function HostRegisterForm({ consent, preview }: { consent: { version: str
           />
           <p id="register-display-name-help" className="mt-1 text-xs text-muted">
             体験ページに「提供者」として表示する名前です。
-          </p>
-        </FieldRow>
-        <FieldRow label="特商法表示 URL" htmlFor="register-seller-url">
-          <input
-            id="register-seller-url"
-            name="sellerDisclosureUrl"
-            type="url"
-            inputMode="url"
-            placeholder="https://"
-            pattern="https://.+"
-            title="https:// で始まる URL を入力してください"
-            maxLength={2048}
-            aria-describedby="register-seller-url-help"
-            className={`${INPUT} ${NARROW}`}
-          />
-          <p id="register-seller-url-help" className="mt-1 text-xs text-muted">
-            掲載の審査までに https のページを用意してください。
           </p>
         </FieldRow>
       </FieldSection>

@@ -30,13 +30,12 @@ async function bodyOf(request: Request): Promise<JsonObject | Response> {
 }
 
 function disclosureOf(value: unknown): SellerDisclosureInput | null {
-  if (!isObject(value) || (value.method !== "NATIVE" && value.method !== "EXTERNAL")) return null;
+  // EXTERNAL (外部の販売者表示URL) は新規保存できない。既存行の読み取りだけが残る。
+  if (!isObject(value) || value.method !== "NATIVE") return null;
   const nativeKeys = ["method", "sellerKind", "sellerDisplayName", "representativeName", "publicAddress", "publicPhone", "publicEmail", "consentVersion", "accepted"];
-  const externalKeys = ["method", "sellerKind", "sellerDisplayName", "externalUrl", "consentVersion", "accepted"];
-  if (!exactKeys(value, value.method === "NATIVE" ? nativeKeys : externalKeys)) return null;
+  if (!exactKeys(value, nativeKeys)) return null;
   if ((value.sellerKind !== "PERSON" && value.sellerKind !== "BUSINESS") || typeof value.sellerDisplayName !== "string"
     || value.consentVersion !== SELLER_DISCLOSURE_CONSENT_VERSION || value.accepted !== true) return null;
-  if (value.method === "EXTERNAL") return typeof value.externalUrl === "string" ? value as SellerDisclosureInput : null;
   return (value.representativeName === null || typeof value.representativeName === "string")
     && typeof value.publicAddress === "string" && typeof value.publicPhone === "string" && typeof value.publicEmail === "string"
     ? value as SellerDisclosureInput : null;
