@@ -394,6 +394,8 @@ const PUBLIC_READER_COLUMNS = `
     WHERE profile.provider_id=visible_publications.provider_id) AS provider_public_name_en,
   (SELECT profile.provider_kind FROM experience_provider_public_profiles profile
     WHERE profile.provider_id=visible_publications.provider_id) AS provider_kind,
+  (SELECT seller.provider_display_name FROM experience_host_seller_profiles seller
+    WHERE seller.provider_id=visible_publications.provider_id) AS provider_registered_name,
   COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
       'asset_id',media.asset_id::text,'alt_text',media.alt_text,'alt_text_ja',media.alt_text_ja,

@@ -68,7 +68,7 @@ describe("experience publication public projection", () => {
     assert.deepEqual(Object.keys(projected ?? {}), [
       "slug", "publicTitle", "content", "meetingOverview", "meetingPointDisclosure", "meetingPoint",
       "publicMapPoint", "publicMapArea",
-      "currency", "unitAmount", "sellerDisplayName", "providerPublicName", "providerPublicNameEn", "providerKind",
+      "currency", "unitAmount", "sellerDisplayName", "providerPublicName", "providerPublicNameEn", "providerKind", "providerRegisteredName",
       "photos", "providerPhoto", "businessLogo", "japanese", "japaneseOnly", "publishedAtUtc",
     ]);
     assert.deepEqual(projected?.meetingPoint, { name: "Synthetic meeting area", exteriorPhotoIndex: 0 });
@@ -137,6 +137,13 @@ describe("experience publication public projection", () => {
     assert.equal(projectPublicExperiencePublication({ ...row("AFTER_BOOKING"), provider_public_name: "Synthetic Actual Host", provider_kind: "PERSON", provider_public_name_en: "Synthetic Host" })?.providerPublicNameEn, "Synthetic Host");
     assert.equal(consented?.sellerDisplayName, "Synthetic Legal Seller");
     assert.equal(projectPublicExperiencePublication({ ...row("AFTER_BOOKING"), provider_kind: "UNKNOWN" }), null);
+  });
+
+  it("projects the host's registered seller-profile name separately from the legal seller name", () => {
+    assert.equal(projectPublicExperiencePublication(row("AFTER_BOOKING"))?.providerRegisteredName, null);
+    const registered = projectPublicExperiencePublication({ ...row("AFTER_BOOKING"), provider_registered_name: "Synthetic Registered Host" });
+    assert.equal(registered?.providerRegisteredName, "Synthetic Registered Host");
+    assert.equal(registered?.sellerDisplayName, "Synthetic Legal Seller");
   });
 
   it("fails closed when an approved content field has the wrong shape", () => {

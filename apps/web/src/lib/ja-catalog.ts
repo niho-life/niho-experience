@@ -2,6 +2,7 @@ import {
   EXPERIENCE_CATEGORIES, EMPTY_EXPERIENCE_CLASSIFICATION,
   type ExperienceCategoryId, type ExperienceClassification,
 } from "@niho-experience/experience-domain";
+import { providerKindFor, providerNameFor } from "./experience/provider-name";
 import type { SitePublicExperience } from "./experience/site-publications";
 
 /*
@@ -44,8 +45,8 @@ export function jaCardOf(item: SitePublicExperience, classification: ExperienceC
   const japanese = item.publication.japanese;
   const offers = item.saleTerms?.offers ?? [];
   if (!japanese || offers.length === 0) return null;
-  const name = item.publication.providerPublicName?.trim();
-  const person = item.publication.providerKind === "PERSON";
+  const name = providerNameFor(item.publication, "ja");
+  const kind = providerKindFor(item.publication, item.sellerDisclosure?.sellerKind);
   const photo = item.publication.photos[0];
   const face = item.publication.providerPhoto;
   const durations = offers.map((offer) => offer.durationMinutes);
@@ -54,7 +55,7 @@ export function jaCardOf(item: SitePublicExperience, classification: ExperienceC
     title: japanese.title,
     lead: japanese.lead,
     cover: photo ? { url: photo.src, alt: photo.altJa || `${japanese.title}の写真` } : null,
-    withLine: jaGuideLine(people.map((entry) => entry.name)) ?? (name ? (person ? `${name}さんと` : `${name}が案内`) : null),
+    withLine: jaGuideLine(people.map((entry) => entry.name)) ?? (name ? (kind === "PERSON" ? `${name}さんと` : kind === "BUSINESS" ? `${name}が案内` : `ホスト：${name}`) : null),
     // The face on the card is the first person it is met through (the name beside it is theirs); the provider's own photo only when nobody is linked.
     face: people[0]?.photo ? { url: people[0].photo.src, alt: "" } : face ? { url: face.src, alt: "" } : null,
     durationMinutes: Math.min(...durations),
