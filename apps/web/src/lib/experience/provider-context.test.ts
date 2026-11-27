@@ -35,6 +35,13 @@ describe("resolveProviderContext", () => {
     const suspended = { listHostAccountMemberships: vi.fn(async () => [{ providerId: "a", role: "OWNER" as const, accountActive: false }]) };
     const result = await resolveProviderContext(session, "a", ["OWNER"], suspended);
     expect(!result.ok && result.response.status).toBe(403);
+    // Before the two-provider question: a suspended account never gets PROVIDER_REQUIRED.
+    const two = { listHostAccountMemberships: vi.fn(async () => [
+      { providerId: "a", role: "OWNER" as const, accountActive: false },
+      { providerId: "b", role: "OWNER" as const, accountActive: false },
+    ]) };
+    const both = await resolveProviderContext(session, null, ["OWNER"], two);
+    expect(!both.ok && both.response.status).toBe(403);
   });
 
   it("refuses without a store", async () => {

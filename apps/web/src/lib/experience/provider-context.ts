@@ -54,14 +54,14 @@ export async function resolveProviderContext(
       ? await repository.listHostAccountMemberships(session.hostAccountId)
       : await repository.listHostAccountMemberships(session.hostAccountId, requestedProviderId);
   } catch { return { ok: false, response: error("READINESS_UNAVAILABLE", 502) }; }
+  // A suspended account normally never gets here (its session ends: 401). If a suspension lands between the session read
+  // and this one, refuse before anything else, so no other answer (409 included) depends on a suspended account.
+  if (memberships.some((membership) => !membership.accountActive)) return { ok: false, response: error("FORBIDDEN", 403) };
   const eligible = memberships.filter((membership) => roles.includes(membership.role)
     && (requestedProviderId === null || membership.providerId === requestedProviderId));
   if (eligible.length === 0) return { ok: false, response: error("FORBIDDEN", 403) };
   if (eligible.length > 1) return { ok: false, response: error("PROVIDER_REQUIRED", 409) };
   const membership = eligible[0]!;
-  // A suspended account loses its sessions when it is suspended; refuse here too, since operations without the sale
-  // no longer pass through the readiness snapshot that carried the account's status.
-  if (!membership.accountActive) return { ok: false, response: error("FORBIDDEN", 403) };
   return {
     ok: true,
     value: {
