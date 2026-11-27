@@ -170,16 +170,18 @@ function mapStoreError(error: unknown): Response {
 /**
  * `sales` says what the operation needs beyond membership (docs/host-publication.md). "readiness": the product screens
  * return the publication blockers the store reads from the readiness snapshot (getPublicationBlockers, saveDraft,
- * saveSaleTerms, publish, createDraft), so they refresh it first, as before. "none": membership only, no Stripe call
- * and no snapshot write. (The NIHO path resolves the whole sale side regardless, and so still refreshes.)
+ * saveSaleTerms, publish, createDraft), so they refresh it first, as before. "optional" does the same when the provider
+ * has a seller profile and nothing at all when it has none (a draft needs no seller, #704; publish and stop stay on
+ * "readiness"). "none": membership only, no Stripe call and no snapshot write. (The NIHO path resolves the whole sale
+ * side regardless, and so still refreshes.)
  */
-async function prepareHost(operation: "READ" | "EDIT" | "OWNER", providerId: string | null, sales: "readiness" | "none"): Promise<
+async function prepareHost(operation: "READ" | "EDIT" | "OWNER", providerId: string | null, sales: "readiness" | "optional" | "none"): Promise<
   { readonly ok: true; readonly context: PublicationHostContext<"none">; readonly repository: NonNullable<ReturnType<typeof experiencePublicationRepository>> }
   | { readonly ok: false; readonly response: Response }
 > {
-  const boundary = sales === "none"
-    ? await publicationHostBoundary(operation, { providerId, sales: "none" })
-    : await publicationHostBoundary(operation, { providerId });
+  const boundary = sales === "readiness"
+    ? await publicationHostBoundary(operation, { providerId })
+    : await publicationHostBoundary(operation, { providerId, sales });
   if (!boundary.ok) return boundary;
   const repository = experiencePublicationRepository();
   if (!repository) return { ok: false, response: responseError("UNAVAILABLE", 503) };
@@ -236,7 +238,7 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
       currency: product.currency,
       unitAmount: product.unitAmount,
     },
-    sellerDisplayName: product.sellerDisplayName,
+    sellerDisplayName: product.seller?.sellerDisplayName ?? null,
     saleTerms: termsState.saleTerms,
     salesPlan: salesPlan ? {
       current: { revision: salesPlan.current.revision, plan: salesPlan.current.plan,
@@ -272,9 +274,14 @@ function checksFor(content: Readonly<Record<string, unknown>>, photosReady: bool
   return { manuscriptReady: review.publicContentReady && review.ownerConfirmed, photosReady };
 }
 
-/** Product screens read publication blockers from the readiness snapshot; classification and the booking guide do not. */
-function actionNeedsSales(action: Action): boolean {
-  return action !== "readClassification" && action !== "saveClassification" && action !== "readBookingGuide" && action !== "saveBookingGuide";
+/**
+ * Publish and stop need the seller and the readiness snapshot. The other product screens read publication blockers
+ * (from the snapshot when the provider has a seller; "SELLER_REQUIRED" when it has none, #704); classification and the
+ * booking guide do not need the sale side at all.
+ */
+function actionSales(action: Action): "readiness" | "optional" | "none" {
+  if (action === "readClassification" || action === "saveClassification" || action === "readBookingGuide" || action === "saveBookingGuide") return "none";
+  return action === "publish" || action === "stop" ? "readiness" : "optional";
 }
 
 function actionOperation(action: Action): "READ" | "EDIT" | "OWNER" {
@@ -315,7 +322,7 @@ export async function publicationCollectionRequest(request: Request, action: "li
     body = parsed;
     if (!validDraft(body)) return responseError("INVALID_INPUT", 400);
   }
-  const prepared = await prepareHost(action === "create" ? "OWNER" : "READ", requested.providerId, "readiness");
+  const prepared = await prepareHost(action === "create" ? "OWNER" : "READ", requested.providerId, "optional");
   if (!prepared.ok) return prepared.response;
   try {
     if (action === "list") {
@@ -323,7 +330,9 @@ export async function publicationCollectionRequest(request: Request, action: "li
       const items = await Promise.all(products.map((product) => productDto(prepared.repository, prepared.context.actor, product.id)));
       return noStoreJson({ products: items, publicationConsentVersion: config.experiencePublicationConsentVersion });
     }
-    if (!prepared.context.readiness || !prepared.context.readiness.accountUsable || !prepared.context.readiness.sellerDisplayReady) {
+    // A provider with a seller must have a usable one; a provider with none drafts a product that has no seller.
+    if (prepared.context.provider !== null
+      && (!prepared.context.readiness || !prepared.context.readiness.accountUsable || !prepared.context.readiness.sellerDisplayReady)) {
       return responseError("SELLER_SETUP_REQUIRED", 409);
     }
     const product = await prepared.repository.createDraft(prepared.context.actor, body as ExperiencePublicationDraftCreateInput);
@@ -365,7 +374,7 @@ export async function publicationRequest(request: Request, context: PublicationP
     }
   }
 
-  const prepared = await prepareHost(actionOperation(action), requested.providerId, actionNeedsSales(action) ? "readiness" : "none");
+  const prepared = await prepareHost(actionOperation(action), requested.providerId, actionSales(action));
   if (!prepared.ok) return prepared.response;
   const { repository } = prepared;
   const actor = prepared.context.actor;
@@ -464,10 +473,10 @@ export async function publicationMediaRequest(request: Request, context: Publica
   }
   const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (mediaType !== "image/jpeg" && mediaType !== "image/png") return responseError("UNSUPPORTED_FORMAT", 415);
-  const prepared = await prepareHost("OWNER", requested.providerId, "readiness");
+  const prepared = await prepareHost("OWNER", requested.providerId, "optional");
   if (!prepared.ok) return prepared.response;
   const storage = experiencePublicMediaStorage();
-  if (!storage || !prepared.context.readiness) return responseError("SELLER_SETUP_REQUIRED", 409);
+  if (!storage) return responseError("SELLER_SETUP_REQUIRED", 409);
 
   let original: Buffer;
   let processed: Awaited<ReturnType<typeof processGuideCoverImage>>;
@@ -528,7 +537,7 @@ export async function publicationMediaSelectionRequest(request: Request, context
       || (item.publicCredit !== null && typeof item.publicCredit !== "string")) return responseError("INVALID_INPUT", 400);
     media.push({ id: item.id, altText: item.altText, altTextJa: item.altTextJa, publicCredit: item.publicCredit as string | null });
   }
-  const prepared = await prepareHost("OWNER", requested.providerId, "readiness");
+  const prepared = await prepareHost("OWNER", requested.providerId, "optional");
   if (!prepared.ok) return prepared.response;
   try {
     await prepared.repository.saveMediaSelection(prepared.context.actor, productId, revision.draft, media);

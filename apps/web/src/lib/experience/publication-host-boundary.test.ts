@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   ownerProfile: vi.fn(),
   ensureOwner: vi.fn(),
   hostAccountProfile: vi.fn(),
+  hasSeller: vi.fn(),
   memberships: vi.fn(),
   refreshReadiness: vi.fn(),
   currentConsent: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("@/lib/experience/store-server", () => ({
     currentOwnerSellerProfile: mocks.ownerProfile,
     ensureMappedOwnerMembership: mocks.ensureOwner,
     currentHostAccountSellerProfile: mocks.hostAccountProfile,
+    providerHasSellerProfile: mocks.hasSeller,
     listHostAccountMemberships: mocks.memberships,
     refreshReadiness: mocks.refreshReadiness,
   }),
@@ -337,6 +339,39 @@ describe("Experience publication NIHO contract v1 boundary", () => {
         expect(mocks.hostAccountProfile).toHaveBeenCalledWith(hostAccountId, other);
         expect(ready.ok && ready.value.provider.providerId).toBe(other);
         expect(mocks.retrieve).toHaveBeenCalledTimes(1);
+      });
+
+      it("resolves the sale side when the provider has a seller and goes on without it when it has none (#704)", async () => {
+        members([profile.providerId, "OWNER"]);
+        // No seller profile: no seller, no readiness, and no Stripe, consent or snapshot call, for every operation.
+        mocks.hasSeller.mockResolvedValue(false);
+        for (const operation of ["READ", "EDIT", "OWNER"] as const) {
+          const none = await publicationHostBoundary(operation, { sales: "optional" });
+          expect(none.ok && none.value).toMatchObject({ actor: { providerId: profile.providerId, nihoUserId: hostAccountId }, role: "OWNER", provider: null, readiness: null });
+        }
+        expect(mocks.hasSeller).toHaveBeenCalledWith(profile.providerId);
+        for (const mock of [mocks.hostAccountProfile, mocks.retrieve, mocks.currentConsent, mocks.refreshReadiness]) expect(mock).not.toHaveBeenCalled();
+        // Publishing and the like still name the seller where it is needed.
+        mocks.hostAccountProfile.mockResolvedValueOnce({ kind: "setup-required", providerId: profile.providerId });
+        expect(await failure(await publicationHostBoundary("OWNER", { sales: "seller" }))).toEqual({ status: 409, body: { error: { code: "SELLER_SETUP_REQUIRED" } } });
+        // With a seller profile: today's behaviour, Stripe and the readiness snapshot included.
+        mocks.hasSeller.mockResolvedValue(true);
+        const full = await publicationHostBoundary("OWNER", { sales: "optional" });
+        expect(full.ok && full.value).toMatchObject({ provider: hostProfile, readiness: { connectReady: true, accountUsable: true } });
+        expect(mocks.retrieve).toHaveBeenCalledTimes(1);
+        expect(mocks.currentConsent).toHaveBeenCalledTimes(1);
+        // A Stripe failure with a seller is still READINESS_UNAVAILABLE after the closed snapshot, as for "readiness".
+        mocks.retrieve.mockRejectedValueOnce(new Error("stripe down"));
+        expect((await failure(await publicationHostBoundary("OWNER", { sales: "optional" }))).body).toEqual({ error: { code: "READINESS_UNAVAILABLE" } });
+        expect(mocks.refreshReadiness).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ connectReady: false, paymentReuseConsentAccepted: false }));
+        // The store cannot answer: unavailable, never a silent sellerless context.
+        mocks.hasSeller.mockRejectedValueOnce(new Error("db down"));
+        expect(await failure(await publicationHostBoundary("OWNER", { sales: "optional" }))).toEqual({ status: 502, body: { error: { code: "READINESS_UNAVAILABLE" } } });
+        // The membership is checked first: a provider the account does not belong to never reaches the seller question.
+        mocks.hasSeller.mockClear();
+        mocks.memberships.mockResolvedValueOnce([]);
+        expect((await failure(await publicationHostBoundary("OWNER", { providerId: other, sales: "optional" }))).status).toBe(403);
+        expect(mocks.hasSeller).not.toHaveBeenCalled();
       });
 
       it("makes no Stripe or consent call for a membership-only operation, and none for the seller alone", async () => {

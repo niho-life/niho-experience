@@ -88,9 +88,7 @@ const product = {
   currency: "JPY",
   unitAmount: 30000,
   cancellationTermsRef: "private-cancellation-ref",
-  sellerNihoAccountRef: "private-niho-account",
-  stripeConnectAccountRef: "acct_PRIVATE",
-  sellerDisplayName: "Panasonic",
+  seller: { sellerNihoAccountRef: "private-niho-account", stripeConnectAccountRef: "acct_PRIVATE", sellerDisplayName: "Panasonic" },
   createdAtUtc: "2026-11-04T00:00:00.000Z",
   updatedAtUtc: "2026-11-04T00:00:00.000Z",
 };
@@ -202,20 +200,87 @@ describe("Experience owner product API", () => {
       ["provider media save", () => saveProviderMedia(request("/host/api/provider-media", "PUT", { version: 5, media: [] })), ["OWNER", membershipOnly]],
       ["booking guide", () => readBookingGuide(request(`/host/api/products/${product.id}/booking-guide`), context), ["OWNER", membershipOnly]],
       // Product screens return the publication blockers the store reads from the snapshot, so they keep the sale side.
-      ["product list", () => listProducts(request("/host/api/products")), ["READ", { providerId: null }]],
-      ["product read", () => readProduct(request(`/host/api/products/${product.id}`), context), ["READ", { providerId: null }]],
-      ["product list with hint", () => listProducts(request("/host/api/products?providerId=provider-private")), ["READ", { providerId: "provider-private" }]],
+      // They ask for it "optionally": resolved when the provider has a seller, absent (no Stripe) when it has none (#704).
+      ["product list", () => listProducts(request("/host/api/products")), ["READ", { providerId: null, sales: "optional" }]],
+      ["product read", () => readProduct(request(`/host/api/products/${product.id}`), context), ["READ", { providerId: null, sales: "optional" }]],
+      ["product list with hint", () => listProducts(request("/host/api/products?providerId=provider-private")), ["READ", { providerId: "provider-private", sales: "optional" }]],
     ];
     for (const [name, call, args] of cases) {
       mocks.boundary.mockClear();
       mocks.repository.refreshReadiness.mockClear();
-      const sales = args.length === 2 && (args[1] as { sales?: string }).sales === undefined;
+      const sales = args.length === 2 && ((args[1] as { sales?: string }).sales === undefined || (args[1] as { sales?: string }).sales === "optional");
       mocks.boundary.mockResolvedValue({ ok: true, value: sales ? hostContext : withoutSales });
       await call();
       expect(mocks.boundary, name).toHaveBeenCalledWith(...args);
       // The snapshot is written only when the boundary resolved one: a membership-only request writes nothing.
       expect(mocks.repository.refreshReadiness.mock.calls.length > 0, name).toBe(sales);
     }
+  });
+
+  describe("a provider with no seller (#704)", () => {
+    const sellerless = { ...product, status: "DRAFT", seller: null };
+    const sellerlessContext = { actor, role: "OWNER", provider: null, readiness: null };
+
+    it("lists, reads, creates and edits drafts with no seller or readiness, and reports SELLER_REQUIRED", async () => {
+      mocks.boundary.mockResolvedValue({ ok: true, value: sellerlessContext });
+      mocks.repository.listProducts.mockResolvedValue([sellerless]);
+      mocks.repository.getProduct.mockResolvedValue(sellerless);
+      mocks.repository.getState.mockResolvedValue(null);
+      mocks.repository.createDraft.mockResolvedValue(sellerless);
+      mocks.repository.getPublicationBlockers.mockResolvedValue(["SELLER_REQUIRED"]);
+      mocks.repository.saveDraft.mockResolvedValue({ draft: sellerless, publicationUpdated: false, blockers: ["SELLER_REQUIRED"] });
+
+      const listed = await listProducts(request("/host/api/products"));
+      expect(listed.status).toBe(200);
+      const listedBody = await listed.json();
+      expect(listedBody.products).toHaveLength(1);
+      expect(listedBody.products[0]).toMatchObject({ status: "DRAFT", sellerDisplayName: null, publicationBlockers: ["SELLER_REQUIRED"] });
+
+      const created = await createProduct(request("/host/api/products", "POST", draft));
+      expect(created.status).toBe(201);
+      // The seller is never taken from the request: createDraft gets the actor and the draft only.
+      expect(mocks.repository.createDraft).toHaveBeenCalledWith(actor, draft);
+      const createdBody = await created.json();
+      expect(createdBody.product).toMatchObject({ status: "DRAFT", sellerDisplayName: null });
+      for (const key of ["providerId", "sellerNihoAccountRef", "stripeConnectAccountRef", "cancellationTermsRef", "seller"]) {
+        expect(createdBody.product).not.toHaveProperty(key);
+      }
+
+      const read = await readProduct(request(`/host/api/products/${product.id}`), context);
+      expect(read.status).toBe(200);
+      const version = (await read.json()).product.version;
+      const saved = await saveProduct(request(`/host/api/products/${product.id}`, "PATCH", { version, draft }), context);
+      expect(saved.status).toBe(200);
+      expect((await saved.json()).blockers).toEqual(["SELLER_REQUIRED"]);
+      const terms = await saveTerms(request(`/host/api/products/${product.id}/sale-terms`, "PUT", { version, saleTerms }), context);
+      expect(terms.status).toBe(200);
+
+      // No Stripe-derived snapshot is written for a provider with no seller.
+      expect(mocks.repository.refreshReadiness).not.toHaveBeenCalled();
+      for (const call of mocks.boundary.mock.calls) {
+        expect(call[1], String(call[0])).toMatchObject({ sales: "optional" });
+      }
+    });
+
+    it("still needs the seller (SELLER_SETUP_REQUIRED) to publish or stop", async () => {
+      const body = { consentVersion: "listing-v1", accepted: true };
+      mocks.boundary.mockResolvedValueOnce({ ok: true, value: sellerlessContext });
+      const version = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.version;
+      mocks.boundary.mockImplementation(async () => ({ ok: false, response: Response.json({ error: { code: "SELLER_SETUP_REQUIRED" } }, { status: 409 }) }));
+      mocks.boundary.mockClear();
+      for (const [name, call] of [
+        ["publish", () => publishProduct(request(`/host/api/products/${product.id}/publish`, "POST", { ...body, version }), context)],
+        ["stop", () => stopProduct(request(`/host/api/products/${product.id}/stop`, "POST", { version }), context)],
+      ] as const) {
+        const response = await call();
+        expect(response.status, name).toBe(409);
+        expect(await response.json(), name).toEqual({ error: { code: "SELLER_SETUP_REQUIRED" } });
+      }
+      // Both ask for the whole sale side (no `sales` option means readiness).
+      for (const call of mocks.boundary.mock.calls) expect(call[1]).not.toHaveProperty("sales");
+      expect(mocks.repository.publish).not.toHaveBeenCalled();
+      expect(mocks.repository.stop).not.toHaveBeenCalled();
+    });
   });
 
   it("uses one opaque version for edit, sale terms, publish, stop and restart", async () => {

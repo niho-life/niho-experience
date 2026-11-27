@@ -538,7 +538,7 @@ export class ExperienceStore {
     if (!provider.rows[0]) throw new StoreNotFoundError("provider");
     const [productsResult, resources, settingsResult, assignmentsResult] = await Promise.all([
       client.query<DbRow>(
-        `SELECT id,public_title,seller_display_name,status FROM experience_products
+        `SELECT id,public_title,COALESCE(seller_display_name,'') AS seller_display_name,status FROM experience_products
           WHERE provider_id=$1 AND status<>'ARCHIVED'
           ORDER BY public_title COLLATE "C",id COLLATE "C" LIMIT 500`, [providerId],
       ),
@@ -1750,6 +1750,8 @@ export async function placeBookingHold(
   input: { readonly seats: number; readonly idempotencyKey: string; readonly holdSeconds: number; readonly guest?: GuestPricingInput },
 ): Promise<{ readonly booking: BookingRecord; readonly bookingRowId: number }> {
   const providerId = product.providerId;
+  // A product with no seller (a draft of a provider with no seller profile, #704) is never booked.
+  if (product.seller === null) throw new StoreConflictError("The product has no seller and cannot be booked.");
   const nowResult = await client.query<DbRow>("SELECT clock_timestamp() AS now");
   const nowUtc = isoValue(oneRow(nowResult.rows, "database time"), "now");
   const inventory = await evaluateStoredInventory(client, providerId, product.id, occurrence, nowUtc, input.seats);
@@ -1757,7 +1759,7 @@ export async function placeBookingHold(
     throw new BookingUnavailableError(inventory.availability.reason, inventory.availability.availableSeats);
   }
 
-  const snapshots = buildSnapshots(occurrence, input.seats, nowUtc, product, input.guest);
+  const snapshots = buildSnapshots(occurrence, input.seats, nowUtc, { ...product, ...product.seller }, input.guest);
   const publicBookingId = randomUUID();
   const inserted = await client.query<DbRow>(
     `INSERT INTO bookings (

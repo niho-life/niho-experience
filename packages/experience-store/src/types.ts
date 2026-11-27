@@ -175,7 +175,19 @@ export interface ProductInput {
   readonly acceptanceMode?: BookingAcceptanceMode;
 }
 
-export interface ProductRecord extends ProductInput {
+/** The seller a product is sold under. A product of a provider without a seller profile has none (`seller: null`). */
+export interface ProductSeller {
+  readonly sellerNihoAccountRef: string;
+  readonly stripeConnectAccountRef: string;
+  readonly sellerDisplayName: string;
+}
+
+export interface ProductRecord extends Omit<ProductInput, "sellerNihoAccountRef" | "stripeConnectAccountRef" | "sellerDisplayName"> {
+  /**
+   * null is a valid product (a draft of a provider with no seller profile, #704): it can be edited but never sold or
+   * published with sales. The three seller columns are all NULL or all set (a CHECK).
+   */
+  readonly seller: ProductSeller | null;
   readonly providerId: string;
   readonly version: number;
   readonly createdAtUtc: string;

@@ -63,6 +63,8 @@ export type ExperiencePublicationBlocker =
   | "READINESS_MISSING"
   | "SCHEDULE_REQUIRED"
   | "SELLER_MISMATCH"
+  /** The product has no seller (its provider has no seller profile yet, #704): it can be edited, not sold. */
+  | "SELLER_REQUIRED"
   | "SLUG_IN_USE";
 
 export class ExperiencePublicationBlockedError extends StoreValidationError {
@@ -682,7 +684,7 @@ async function requireNeverPublishedAdminDraft(
   assertStoreIdentifier(productId, "productId");
   const result = await client.query<DbRow>(
     `SELECT ${PRODUCT_COLUMNS} FROM experience_products p
-      WHERE p.provider_id=$1 AND p.id=$2 AND p.status='DRAFT'
+      WHERE p.provider_id=$1 AND p.id=$2 AND p.status='DRAFT' AND p.seller_niho_account_ref IS NOT NULL
         AND EXISTS (
           SELECT 1 FROM admin_product_draft_audit_events draft_audit
            WHERE draft_audit.provider_id=p.provider_id AND draft_audit.product_id=p.id
@@ -967,8 +969,11 @@ async function blockers(
     [product.providerId, product.id],
   );
   const managed = managedPlan.rows[0]?.plan === "MANAGED_20" && managedPlan.rows[0]?.charge_mode === "PLATFORM";
-  if (!managed && !feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
-  else if (!managed && (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
+  // A product with no seller gets SELLER_REQUIRED in place of the fee setting, readiness and payout reasons. Its content
+  // reasons (manuscript, photos, terms, schedule, price, slug) stay, since the host still has to finish them (#704).
+  const seller = product.seller;
+  if (!managed && seller !== null && !feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
+  else if (!managed && seller !== null && (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
     || feeSettings.rows[0].support_agreement_revision === null)) result.push("SUPPORT_CONSENT_REQUIRED");
   if (facts.rows[0]?.sale_terms !== true || product.cancellationTermsRef.trim() === "") result.push("CANCELLATION_TERMS_REQUIRED");
   if (facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
@@ -981,11 +986,16 @@ async function blockers(
   if (facts.rows[0]?.slug_in_use === true) result.push("SLUG_IN_USE");
   if (state?.operationsSuspendedAtUtc !== null && state?.operationsSuspendedAtUtc !== undefined) result.push("OPERATIONS_SUSPENDED");
 
+  if (seller === null) {
+    result.push("SELLER_REQUIRED");
+    return result;
+  }
+
   if (managed) {
     if (managedPlan.rows[0]?.phase !== "ACTIVE" || managedPlan.rows[0]?.pilot_approved !== true
-      || managedPlan.rows[0]?.seller_display_name !== product.sellerDisplayName
-      || managedPlan.rows[0]?.seller_niho_account_ref !== product.sellerNihoAccountRef
-      || managedPlan.rows[0]?.stripe_account_ref !== product.stripeConnectAccountRef) result.push("SELLER_MISMATCH");
+      || managedPlan.rows[0]?.seller_display_name !== seller.sellerDisplayName
+      || managedPlan.rows[0]?.seller_niho_account_ref !== seller.sellerNihoAccountRef
+      || managedPlan.rows[0]?.stripe_account_ref !== seller.stripeConnectAccountRef) result.push("SELLER_MISMATCH");
     if (adminPayout?.accountCheck !== undefined) {
       const checkedAt = adminPayout.accountCheck ? Date.parse(adminPayout.accountCheck.checkedAtUtc) : NaN;
       const now = Date.parse(await databaseNow(client));
@@ -996,17 +1006,17 @@ async function blockers(
   }
 
   if (adminPayout && isExperienceSeller(adminPayout.seller)) {
-    const { seller, payoutConsentVersion, accountCheck } = adminPayout;
-    if (seller.sellerNihoAccountRef !== product.sellerNihoAccountRef
-        || seller.stripeConnectAccountRef !== product.stripeConnectAccountRef
-        || seller.sellerDisplayName !== product.sellerDisplayName) result.push("SELLER_MISMATCH");
-    if (!await adminPayoutConsentIsCurrent(client, product.providerId, seller.stripeConnectAccountRef, payoutConsentVersion, accountCheck !== undefined)) {
+    const { seller: adminSeller, payoutConsentVersion, accountCheck } = adminPayout;
+    if (adminSeller.sellerNihoAccountRef !== seller.sellerNihoAccountRef
+        || adminSeller.stripeConnectAccountRef !== seller.stripeConnectAccountRef
+        || adminSeller.sellerDisplayName !== seller.sellerDisplayName) result.push("SELLER_MISMATCH");
+    if (!await adminPayoutConsentIsCurrent(client, product.providerId, adminSeller.stripeConnectAccountRef, payoutConsentVersion, accountCheck !== undefined)) {
       result.push("PAYMENT_REUSE_CONSENT_REQUIRED");
     }
     if (accountCheck !== undefined) {
       const now = Date.parse(await databaseNow(client));
       const checkedAt = accountCheck ? Date.parse(accountCheck.checkedAtUtc) : NaN;
-      if (accountCheck?.stripeConnectAccountRef !== seller.stripeConnectAccountRef
+      if (accountCheck?.stripeConnectAccountRef !== adminSeller.stripeConnectAccountRef
           || !Number.isFinite(checkedAt) || checkedAt > now || now - checkedAt >= 5 * 60_000) result.push("CONNECT_NOT_READY");
     }
     return result;
@@ -1028,9 +1038,9 @@ async function blockers(
   if (!readiness.connectReady) result.push("CONNECT_NOT_READY");
   if (!readiness.paymentReuseConsentAccepted) result.push("PAYMENT_REUSE_CONSENT_REQUIRED");
   if (!readiness.sellerDisplayReady
-      || readiness.sellerNihoAccountRef !== product.sellerNihoAccountRef
-      || readiness.stripeConnectAccountRef !== product.stripeConnectAccountRef
-      || readiness.sellerDisplayName !== product.sellerDisplayName) result.push("SELLER_MISMATCH");
+      || readiness.sellerNihoAccountRef !== seller.sellerNihoAccountRef
+      || readiness.stripeConnectAccountRef !== seller.stripeConnectAccountRef
+      || readiness.sellerDisplayName !== seller.sellerDisplayName) result.push("SELLER_MISMATCH");
   if (consentVersion === null || consentVersion !== readiness.requiredConsentVersion) result.push("CONSENT_OUTDATED");
   return result;
 }
@@ -1042,6 +1052,9 @@ async function insertOrFindPublication(
   publishedBy: string,
   publisherKind: "OWNER" | "ADMIN_PROXY" = "OWNER",
 ): Promise<number> {
+  // A publication is an immutable copy of a seller's offer: a product with no seller is never published (blockers).
+  if (product.seller === null) throw new StoreConflictError("A product with no seller cannot be published.");
+  const seller = product.seller;
   const terms = await readSaleTerms(client, product.providerId, product.id, true);
   if (!terms) throw new StoreConflictError("Sale terms changed while preparing the immutable publication.");
   const saleTermsVersion = terms.version;
@@ -1075,7 +1088,7 @@ async function insertOrFindPublication(
      RETURNING id`,
     [product.providerId, product.id, product.version, saleTermsVersion, product.slug, product.publicTitle,
       JSON.stringify(product.content), product.currency, product.unitAmount, product.cancellationTermsRef,
-      product.sellerNihoAccountRef, product.stripeConnectAccountRef, product.sellerDisplayName, consentVersion,
+      seller.sellerNihoAccountRef, seller.stripeConnectAccountRef, seller.sellerDisplayName, consentVersion,
       publisherKind === "OWNER" ? publishedBy : null,
       publisherKind === "ADMIN_PROXY" ? publishedBy : null,
       publisherKind, JSON.stringify(saleTermsSnapshot)],
@@ -1274,7 +1287,7 @@ export class ExperiencePublicationRepository {
       if (!provider.rows[0]) throw new StoreNotFoundError("consented provider");
       const result = await client.query<DbRow>(
         `SELECT ${PRODUCT_COLUMNS} FROM experience_products p
-          WHERE p.provider_id=$1 AND p.status='DRAFT'
+          WHERE p.provider_id=$1 AND p.status='DRAFT' AND p.seller_niho_account_ref IS NOT NULL
             AND EXISTS (
               SELECT 1 FROM admin_product_draft_audit_events draft_audit
                WHERE draft_audit.provider_id=p.provider_id AND draft_audit.product_id=p.id
@@ -1931,6 +1944,17 @@ export class ExperiencePublicationRepository {
   }
 
   /**
+   * Whether the provider has a seller profile of any kind (#704). A provider with none can still draft: its products
+   * have no seller until one is registered. Reads the experience DB only. The host boundary asks this only after the
+   * membership is checked.
+   */
+  async providerHasSellerProfile(providerId: string): Promise<boolean> {
+    assertStoreIdentifier(providerId, "providerId");
+    const result = await this.#pool.query("SELECT 1 FROM experience_host_seller_profiles WHERE provider_id=$1", [providerId]);
+    return result.rows[0] !== undefined;
+  }
+
+  /**
    * The active memberships of an Experience host account (all roles), or just the one in `providerId`. The host
    * boundary checks the provider the request names against this on every request; it carries no seller and no
    * Stripe data. Reads the experience DB only.
@@ -2420,6 +2444,10 @@ export class ExperiencePublicationRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       const membership = await requireMembership(client, actor, ["OWNER"]);
+      // A provider with no seller profile and no readiness (not yet registered for payouts) can still draft: the product has no seller
+      // (#704) and the seller is copied in when the profile is registered (attachSellerToSellerlessProducts), under this
+      // same provider lock. A provider that has a profile needs a current readiness, as before. Never from the client.
+      const profile = await client.query("SELECT 1 FROM experience_host_seller_profiles WHERE provider_id=$1 FOR SHARE", [actor.providerId]);
       const readinessResult = await client.query<DbRow>(
         `SELECT owner_niho_user_id,account_usable,seller_display_ready,seller_niho_account_ref,
                 stripe_connect_account_ref,seller_display_name,
@@ -2429,17 +2457,22 @@ export class ExperiencePublicationRepository {
         [actor.providerId],
       );
       const readiness = readinessResult.rows[0];
-      if (!readiness || String(readiness.owner_niho_user_id) !== membership.nihoUserId
-          || readiness.account_usable !== true || readiness.seller_display_ready !== true
-          || readiness.currently_valid !== true) {
-        throw new StoreValidationError("A current OWNER and seller profile are required to create a product.");
+      let seller: { readonly sellerNihoAccountRef: string; readonly stripeConnectAccountRef: string; readonly sellerDisplayName: string } | null = null;
+      if (profile.rows[0] || readiness) {
+        if (!readiness || String(readiness.owner_niho_user_id) !== membership.nihoUserId
+            || readiness.account_usable !== true || readiness.seller_display_ready !== true
+            || readiness.currently_valid !== true) {
+          throw new StoreValidationError("A current OWNER and seller profile are required to create a product.");
+        }
+        seller = {
+          sellerNihoAccountRef: String(readiness.seller_niho_account_ref),
+          stripeConnectAccountRef: String(readiness.stripe_connect_account_ref),
+          sellerDisplayName: String(readiness.seller_display_name),
+        };
+        assertNonEmptyText(seller.sellerNihoAccountRef, "readiness.sellerNihoAccountRef", 256);
+        assertNonEmptyText(seller.stripeConnectAccountRef, "readiness.stripeConnectAccountRef", 256);
+        assertNonEmptyText(seller.sellerDisplayName, "readiness.sellerDisplayName", 300);
       }
-      const sellerNihoAccountRef = String(readiness.seller_niho_account_ref);
-      const stripeConnectAccountRef = String(readiness.stripe_connect_account_ref);
-      const sellerDisplayName = String(readiness.seller_display_name);
-      assertNonEmptyText(sellerNihoAccountRef, "readiness.sellerNihoAccountRef", 256);
-      assertNonEmptyText(stripeConnectAccountRef, "readiness.stripeConnectAccountRef", 256);
-      assertNonEmptyText(sellerDisplayName, "readiness.sellerDisplayName", 300);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 8))", [`${actor.providerId}:${id}`]);
       const result = await client.query<DbRow>(
         `INSERT INTO experience_products
@@ -2449,7 +2482,8 @@ export class ExperiencePublicationRepository {
          ON CONFLICT DO NOTHING
          RETURNING ${PRODUCT_COLUMNS}`,
         [actor.providerId, id, input.slug, input.publicTitle, JSON.stringify(input.content), input.currency,
-          input.unitAmount, input.cancellationTermsRef, sellerNihoAccountRef, stripeConnectAccountRef, sellerDisplayName],
+          input.unitAmount, input.cancellationTermsRef, seller?.sellerNihoAccountRef ?? null,
+          seller?.stripeConnectAccountRef ?? null, seller?.sellerDisplayName ?? null],
       );
       if (!result.rows[0]) throw new StoreConflictError("A product with this slug already exists for the seller.");
       return productFromRow(result.rows[0]);

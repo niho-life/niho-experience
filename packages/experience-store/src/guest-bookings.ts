@@ -72,7 +72,7 @@ import {
 } from "./repository.ts";
 import { bookingFromRow, isoValue, overrideFromRow, productFromRow, salesStateFromRow, scheduleRuleFromRow, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
-import type { BookingRecord, BookingStatus, GuestCancellationPolicy, HostActor, ProductRecord, StoredScheduleRule } from "./types.ts";
+import type { BookingRecord, BookingStatus, GuestCancellationPolicy, HostActor, ProductRecord, ProductSeller, StoredScheduleRule } from "./types.ts";
 import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier, chargeablePlatformFee } from "./validation.ts";
 
 /**
@@ -774,8 +774,11 @@ export function saleSettingsFromRow(row: DbRow): ProviderSaleSettings {
 
 /* ---------- what is for sale ---------- */
 
+/** A product that is sold: it always has a seller (a sellerless draft is never sellable, #704). */
+type SoldProduct = ProductRecord & { readonly seller: ProductSeller };
+
 interface Sellable {
-  readonly product: ProductRecord;
+  readonly product: SoldProduct;
   readonly terms: ProductSaleTerms;
   readonly settings: {
     readonly supportEnabled: boolean;
@@ -829,16 +832,20 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
        LEFT JOIN experience_product_sales_plan_versions plan
          ON plan.provider_id=plan_state.provider_id AND plan.product_id=plan_state.product_id
         AND plan.revision=plan_state.current_revision
-      WHERE p.status='PUBLISHED' AND pub.slug=$1 AND s.self_stopped_at IS NULL AND s.operations_suspended_at IS NULL
+      WHERE p.status='PUBLISHED' AND p.seller_niho_account_ref IS NOT NULL
+          AND pub.slug=$1 AND s.self_stopped_at IS NULL AND s.operations_suspended_at IS NULL
           AND s.owner_resume_required=false AND (plan_state.phase IS NULL OR plan_state.phase='ACTIVE')
       ORDER BY p.provider_id,p.id LIMIT 2${lock ? " FOR SHARE OF p" : ""}`,
     [slug],
   );
   if (products.rows.length !== 1) return null;
   const row = products.rows[0]!;
-  const currentProduct = productFromRow(row);
+  const current = productFromRow(row);
+  // Fail closed: a product with no seller is never sold (#704). The query already excludes it.
+  if (current.seller === null) return null;
+  const currentProduct: SoldProduct = { ...current, seller: current.seller };
   const isPublication = row.active_publication_id !== null && row.active_publication_id !== undefined;
-  let product: ProductRecord = isPublication ? {
+  let product: SoldProduct = isPublication ? {
     ...currentProduct,
     slug: String(row.publication_slug),
     publicTitle: String(row.publication_title),
@@ -846,9 +853,11 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
     currency: String(row.publication_currency),
     unitAmount: Number(row.publication_unit_amount),
     cancellationTermsRef: String(row.publication_cancellation_terms_ref),
-    sellerNihoAccountRef: String(row.publication_seller_niho_account_ref),
-    stripeConnectAccountRef: String(row.publication_stripe_connect_account_ref),
-    sellerDisplayName: String(row.publication_seller_display_name),
+    seller: {
+      sellerNihoAccountRef: String(row.publication_seller_niho_account_ref),
+      stripeConnectAccountRef: String(row.publication_stripe_connect_account_ref),
+      sellerDisplayName: String(row.publication_seller_display_name),
+    },
   } : currentProduct;
   if (row.sales_plan_revision !== null && row.sales_plan_revision !== undefined) {
     product = {
@@ -856,10 +865,12 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
       chargeMode: String(row.charge_mode) as "PLATFORM" | "CONNECT_DIRECT",
       salesPlan: String(row.sales_plan) as "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10",
       salesPlanRevision: Number(row.sales_plan_revision),
-      sellerDisplayName: String(row.plan_seller_display_name),
+      seller: {
+        sellerDisplayName: String(row.plan_seller_display_name),
+        stripeConnectAccountRef: String(row.plan_stripe_account_ref),
+        sellerNihoAccountRef: String(row.plan_seller_niho_account_ref),
+      },
       sellerDisclosureUrl: String(row.seller_disclosure_url),
-      stripeConnectAccountRef: String(row.plan_stripe_account_ref),
-      sellerNihoAccountRef: String(row.plan_seller_niho_account_ref),
       salesAgreementVersion: String(row.plan_agreement_version),
       paymentDueDays: row.payment_due_days === null ? null : Number(row.payment_due_days),
       ...(row.payment_due_policy === "NEXT_MONTH_END" ? { paymentDuePolicy: row.payment_due_policy } : {}),
@@ -1768,7 +1779,7 @@ export class GuestBookingRepository {
       productId: sellable.product.id,
       title: sellable.product.publicTitle,
       currency: "JPY",
-      sellerDisplayName: sellable.product.sellerDisplayName,
+      sellerDisplayName: sellable.product.seller.sellerDisplayName,
       // 外部URLは廃止。保存済み版に旧URLが残っていても、NIHO運営(PLATFORM)の商品以外では出さない。
       ...(sellable.product.chargeMode === "PLATFORM" && sellable.product.sellerDisclosureUrl ? { sellerDisclosureUrl: sellable.product.sellerDisclosureUrl } : {}),
       offers: rules.map((stored) => offerFor(sellable, stored)),

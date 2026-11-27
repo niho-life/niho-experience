@@ -67,7 +67,7 @@ function secureTokenMatch(stored: unknown, token: string): boolean {
 function invitation(row: DbRow): ProductOperatorInvitationRecord {
   return {
     id: String(row.id), providerId: String(row.provider_id), productId: String(row.product_id),
-    productTitle: String(row.public_title), sellerDisplayName: String(row.seller_display_name),
+    productTitle: String(row.public_title), sellerDisplayName: String(row.seller_display_name ?? ""),
     assignmentLabel: String(row.assignment_label), state: String(row.state) as ProductOperatorInvitationState,
     expiresAtUtc: isoValue(row, "expires_at"),
     ...(row.accepted_niho_user_id ? { acceptedNihoUserId: String(row.accepted_niho_user_id) } : {}),
@@ -80,7 +80,7 @@ function invitation(row: DbRow): ProductOperatorInvitationRecord {
 function grant(row: DbRow): ProductOperatorGrantRecord {
   return {
     providerId: String(row.provider_id), productId: String(row.product_id), productTitle: String(row.public_title),
-    sellerDisplayName: String(row.seller_display_name), nihoUserId: String(row.niho_user_id),
+    sellerDisplayName: String(row.seller_display_name ?? ""), nihoUserId: String(row.niho_user_id),
     assignmentLabel: String(row.assignment_label), active: row.active === true,
     ...(row.expires_at ? { expiresAtUtc: isoValue(row, "expires_at") } : {}), version: Number(row.version),
     grantedAtUtc: isoValue(row, "granted_at"), ...(row.revoked_at ? { revokedAtUtc: isoValue(row, "revoked_at") } : {}),
@@ -176,7 +176,7 @@ export class ProductOperatorRepository {
     );
     return result.rows.map((row) => ({
       providerId: String(row.provider_id), productId: String(row.product_id), productTitle: String(row.public_title),
-      sellerDisplayName: String(row.seller_display_name), assignmentLabel: String(row.assignment_label),
+      sellerDisplayName: String(row.seller_display_name ?? ""), assignmentLabel: String(row.assignment_label),
       grantVersion: Number(row.version), ...(row.expires_at ? { grantExpiresAtUtc: isoValue(row, "expires_at") } : {}),
     }));
   }
@@ -191,7 +191,7 @@ export class ProductOperatorRepository {
     const invitations = await this.#pool.query<DbRow>(`${INVITATION_SELECT} ORDER BY i.created_at DESC LIMIT 200`);
     const grants = await this.#pool.query<DbRow>(`${GRANT_SELECT} ORDER BY g.updated_at DESC LIMIT 200`);
     return {
-      products: products.rows.map((row) => ({ providerId: String(row.provider_id), productId: String(row.id), productTitle: String(row.public_title), sellerDisplayName: String(row.seller_display_name) })),
+      products: products.rows.map((row) => ({ providerId: String(row.provider_id), productId: String(row.id), productTitle: String(row.public_title), sellerDisplayName: String(row.seller_display_name ?? "") })),
       invitations: invitations.rows.map(invitation), grants: grants.rows.map(grant),
     };
   }

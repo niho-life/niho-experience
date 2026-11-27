@@ -53,6 +53,17 @@ export function isoValue(row: DbRow, key: string): string {
   throw new StoreError(`Database returned an invalid ${key}.`);
 }
 
+/** All three seller columns set, or all NULL (a sellerless draft, #704). A partial row is malformed (the DB CHECK forbids it). */
+function sellerFromRow(row: DbRow): ProductRecord["seller"] {
+  const keys = ["seller_niho_account_ref", "stripe_connect_account_ref", "seller_display_name"] as const;
+  if (keys.every((key) => row[key] === null)) return null;
+  return {
+    sellerNihoAccountRef: stringValue(row, keys[0]),
+    stripeConnectAccountRef: stringValue(row, keys[1]),
+    sellerDisplayName: stringValue(row, keys[2]),
+  };
+}
+
 export function productFromRow(row: DbRow): ProductRecord {
   return {
     providerId: stringValue(row, "provider_id"),
@@ -64,9 +75,7 @@ export function productFromRow(row: DbRow): ProductRecord {
     currency: stringValue(row, "currency"),
     unitAmount: numberValue(row, "unit_amount"),
     cancellationTermsRef: stringValue(row, "cancellation_terms_ref"),
-    sellerNihoAccountRef: stringValue(row, "seller_niho_account_ref"),
-    stripeConnectAccountRef: stringValue(row, "stripe_connect_account_ref"),
-    sellerDisplayName: stringValue(row, "seller_display_name"),
+    seller: sellerFromRow(row),
     version: numberValue(row, "version"),
     createdAtUtc: isoValue(row, "created_at"),
     updatedAtUtc: isoValue(row, "updated_at"),
