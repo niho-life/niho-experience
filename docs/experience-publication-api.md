@@ -174,4 +174,4 @@ Responses never include exception text, credentials, private IDs, or personal da
 
 `ACCOUNT_NOT_USABLE`, `CANCELLATION_TERMS_REQUIRED`, `CONNECT_NOT_READY`, `CONSENT_OUTDATED`, `FEE_SETTINGS_REQUIRED`, `SUPPORT_CONSENT_REQUIRED`, `MANUSCRIPT_REQUIRED`, `OPERATIONS_SUSPENDED`, `OWNER_NOT_CURRENT`, `PAYMENT_REUSE_CONSENT_REQUIRED`, `PHOTOS_REQUIRED`, `PRICE_REQUIRED`, `PUBLIC_CONTENT_INVALID`, `READINESS_EXPIRED`, `READINESS_MISSING`, `SCHEDULE_REQUIRED`, `SELLER_MISMATCH`, `SELLER_REQUIRED`, `SLUG_IN_USE`.
 
-`SELLER_REQUIRED`（#704）：商品に販売者が無い（そのホストに受取口座が未登録）。この理由だけを返し、手数料設定・readiness の理由は付けない。
+`SELLER_REQUIRED`（#704）：商品に販売者が無い（そのホストに受取口座が未登録）。手数料設定・readiness・受取口座の理由の代わりに返す。原稿・写真・料金・取消条件・開催枠などの理由は、これまでどおり並ぶ。

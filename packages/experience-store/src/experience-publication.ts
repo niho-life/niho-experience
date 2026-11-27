@@ -969,7 +969,8 @@ async function blockers(
     [product.providerId, product.id],
   );
   const managed = managedPlan.rows[0]?.plan === "MANAGED_20" && managedPlan.rows[0]?.charge_mode === "PLATFORM";
-  // A product with no seller is reported by SELLER_REQUIRED alone: no fee setting, readiness or payout noise.
+  // A product with no seller gets SELLER_REQUIRED in place of the fee setting, readiness and payout reasons. Its content
+  // reasons (manuscript, photos, terms, schedule, price, slug) stay, since the host still has to finish them (#704).
   const seller = product.seller;
   if (!managed && seller !== null && !feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
   else if (!managed && seller !== null && (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION

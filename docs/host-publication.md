@@ -91,7 +91,7 @@ ExperienceはNIHO v1選別client、本人／local OWNER／exact Connect boundary
 受取口座（販売者 profile）の無いホストの OWNER も、体験の下書きを作って編集できる（商品・原稿・写真・販売条件・開催枠）。公開と販売には進めない（ページだけの公開は段階1b、#705）。
 
 - **保存**：`experience_products` の販売者 3 列は、まとめて「全部 NULL か、全部入っている」（migration `0091` の CHECK）。ストアの `ProductRecord.seller` は `{ sellerNihoAccountRef, stripeConnectAccountRef, sellerDisplayName } | null`。ホストの画面向けの DTO は今までどおり参照を持たず、`sellerDisplayName` だけが販売者の無い商品で `null` になる。
-- **公開の検査**：販売者の無い商品は `SELLER_REQUIRED` だけを返す（手数料設定・readiness・受取口座の理由は出さない）。公開・再開・停止・販売プランの切替・受取口座・販売者表示は、これまでどおり販売者を要る（`409 SELLER_SETUP_REQUIRED`）。
+- **公開の検査**：販売者の無い商品は、手数料設定・readiness・受取口座の理由の代わりに `SELLER_REQUIRED` を返す。原稿・写真・料金・取消条件・開催枠などの理由は、これまでどおり並ぶ。公開・再開・停止・販売プランの切替・受取口座・販売者表示は、これまでどおり販売者を要る（`409 SELLER_SETUP_REQUIRED`）。
 - **販売者が後から付くとき**：運営が販売者を登録する transaction（`provisionHostAccountSeller`・`provisionHostSeller`・`registerHostSellerProfile`）の中で、そのホストの販売者の無い商品へ profile の値を写す。写すのは profile からで、ブラウザーの値は使わない。商品の `version` は変えない（開いている編集画面の版が無効にならない）。写したあとは、販売者の有るホストと同じ検査になる（readiness と一致しなければ `SELLER_MISMATCH`）。
 - **お金の道を閉じる**：公開版（`experience_product_publications`）と販売プランの販売者列は NOT NULL のまま。さらに、販売者の無い商品は `DRAFT` のまま（CHECK）なので、`status='PUBLISHED'` だけを読む予約・checkout・返金・精算・OTA/チャネル・メール・口コミ・記事連携は入口で外れる。Admin の代理公開は事務局が作った下書き（監査行つき）だけを対象にし、販売者の無い商品を除く。
 

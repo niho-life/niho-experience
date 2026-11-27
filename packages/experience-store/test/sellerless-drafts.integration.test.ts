@@ -93,7 +93,14 @@ describe("drafts of a provider with no seller (#704)", { skip }, () => {
       });
       assert.deepEqual(terms.blockers, ["SELLER_REQUIRED"], "no readiness, fee or payout noise");
 
-      // Publication is blocked by exactly SELLER_REQUIRED, in the blockers read and at publish.
+      // An unfinished sellerless draft keeps its content reasons and gets SELLER_REQUIRED instead of readiness/fee/payout ones.
+      const unfinished = await publications.getPublicationBlockers(owner, draft.id, { manuscriptReady: false, photosReady: false }, CONSENT);
+      assert.ok(unfinished.includes("MANUSCRIPT_REQUIRED") && unfinished.includes("PHOTOS_REQUIRED") && unfinished.at(-1) === "SELLER_REQUIRED", String(unfinished));
+      for (const noise of ["FEE_SETTINGS_REQUIRED", "SUPPORT_CONSENT_REQUIRED", "READINESS_MISSING", "READINESS_EXPIRED", "CONNECT_NOT_READY", "PAYMENT_REUSE_CONSENT_REQUIRED"]) {
+        assert.ok(!unfinished.includes(noise as never), noise);
+      }
+
+      // A finished sellerless draft is blocked by exactly SELLER_REQUIRED, in the blockers read and at publish.
       assert.deepEqual(await publications.getPublicationBlockers(owner, draft.id, CHECKS, CONSENT), ["SELLER_REQUIRED"]);
       const current = await publications.getProduct(owner, draft.id);
       await assert.rejects(
