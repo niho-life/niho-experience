@@ -1,0 +1,550 @@
+<!doctype html>
+<!--
+  mock: 事務局を通さずにホスト登録する流れ v2（2026-11-28）。Epic #700。
+  v1 からの変更（2026-11-28 オーナー）:
+    - 「まず話してみる」のボタンを外した（入口は「NIHO アカウントで始める」だけ。登録済みの人の「ホスト画面にログイン」は残す）。
+    - NIHO アプリのログインの流れと見た目をそろえた。NIHO の画面は niho-app の /auth/login（接続から来たログイン）と
+      /connect/[app]（接続の確認）の作り（ロゴの角丸タイル・見出し・「〜に戻ります」の札・角の丸いカード・丸いボタン・
+      「渡す内容：名前とプロフィール写真」）を写した。Experience の登録画面も同じ並び（中央の 1 列・タイル・見出し・段階の行・
+      角の丸いカード）にして、NIHO の画面から続けて見えるようにした。主ボタンは NIHO のホスト画面と同じ「明るい緑＋墨の文字」。
+    - 掲載名の初期値に、NIHO の表示名とプロフィール写真を使う（論点 D を解消）。いまの接続（app-connect の exchange）は
+      displayName と iconImage を返していて、NIHO の確認画面も「渡す内容：名前とプロフィール写真」と本人に示している。
+      会社・お店として載せるときは、表示名と写真を「オーナー（あなた）」の紹介の初期値に回し、掲載名は空欄から。
+  オーナー決定（2026-11-28）:
+    - Stripe の受取口座が無くても、ホスト登録から体験ページの公開まで進める。口座が要るのは「予約の受付を始める」ときだけ。
+    - ほかの論点は推奨のとおり（Stripe が損失を負う設定を確かめる／おまかせは事務局の承認を残す／公開前の審査なし／
+      1 つの NIHO アカウントでホスト 3 つまで／連絡用メールの確認をページ公開の条件にする／英語の /host にも登録の入口）。
+  見せたいこと:
+    1. 入口は「NIHO アカウントで始める」。NIHO アカウントが無い人も、NIHO の画面でそのまま作れる（上の「NIHO アカウント」で切替）。
+    2. 登録は 1 画面。「個人として」「会社・お店・団体として」を選び、掲載名・連絡用メール・規約。個人の NIHO アカウントで会社を載せられる（上の「載せ方」で切替）。
+    3. ホームのチェックリストを 2 段に分ける。①体験のページを公開する（口座なし）→ ②予約の受付を始める（口座・販売者情報・開催枠）。
+    4. 口座が無いあいだの公開ページは「予約の受付は準備中」。料金・内容・ホストは見せ、ホストへの相談だけ受ける。販売者の行は出さない。
+    5. 受取口座は Stripe の画面で本人が登録する（Express ＋ Account Links）。おまかせ（20%）は NIHO が販売者なので事務局の承認を待つ。
+  論点（このモックで見てほしいところ）:
+    A. 受付準備中のページを一覧にも出すか。モックは「出す・受付準備中の印・予約できるものの後ろに並べる」。
+    B. ページ公開の条件。モックは「題・紹介・説明／写真 1 枚以上（説明つき）／料金／取消条件／連絡用メールの確認」。開催枠・販売者・口座・手数料の同意は予約の受付の条件。
+    C. 受付準備中のページの主ボタン。モックは「ホストに相談する」（今の相談フォーム）。「受付が始まったら知らせる」は作っていない。
+    D. （v2 で解消）掲載名の初期値は NIHO の表示名。新しい本人確認の方式（niho-login v1、未配備）の ID トークンには名前が無いので、
+       そちらへ移る前に NIHO へ `profile`（name・picture）を足してもらう。
+  作っていない: API・認証・保存・メール送信・Stripe/NIHO への実遷移・写真の保存・入力の検証の細部・英語の画面・メンバー招待・
+    ホスト紹介とロゴの編集画面・おまかせの事務局側の画面・停止中や失敗の表示。NIHO と Stripe の画面は流れを見せるための絵。
+  データ: 人名・ホスト名・会社名・体験・料金・メールアドレスはすべて合成。実在の人や会社ではない。
+  書体: ../home-list-neighborhoods-v1/assets/fonts/ を参照。
+  参照: docs/adr/0004-niho-account-login.md、docs/host-accounts.md、docs/experience-sales-plans.md、docs/design-system.md、#691（頭文字の印）、#696（招待メールの案内）。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>ホスト登録（事務局を通さない）モック v2</title>
+<style>
+@font-face{font-family:"Nunito";src:url(../home-list-neighborhoods-v1/assets/fonts/nunito-latin-wght-normal.woff2) format("woff2");font-weight:200 1000;font-display:swap}
+@font-face{font-family:"Caveat";src:url(../home-list-neighborhoods-v1/assets/fonts/caveat-latin-wght-normal.woff2) format("woff2");font-weight:400 700;font-display:swap}
+:root{
+  --bg:#fff;--sand:#f5f5f2;--ink:#1c1c1a;--ink2:#4b4b47;--muted:#6c6c67;--line:#e8e8e4;--line2:#d4d4cf;
+  --moss:#355e1f;--leaf:#b2d67c;--leaf-h:#a3c86b;--leaf-pale:#eef5e3;--warn:#7a4b00;--warn-pale:#fff3dc;--info:#1e4ea8;--info-pale:#eaf2ff;
+  --sans:"Nunito","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#ecebe6;color:var(--ink);font:15px/1.7 var(--sans)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:inherit}
+h1,h2,h3{margin:0;line-height:1.35}
+p{margin:0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+/* review bar (mock only) */
+.review{position:sticky;top:0;z-index:20;background:#1c1c1a;color:#fff;padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px}
+.review b{font-weight:800}
+.review .grp{display:flex;align-items:center;gap:6px}
+.review .seg{display:inline-flex;border:1px solid #555;border-radius:999px;overflow:hidden}
+.review .seg button{background:none;border:0;color:#ddd;padding:4px 11px;font-size:12.5px}
+.review .seg button[aria-pressed="true"]{background:var(--leaf);color:var(--ink);font-weight:800}
+.review select{background:#2b2b28;color:#fff;border:1px solid #555;border-radius:8px;padding:3px 6px;font-size:12.5px}
+.review .reset{background:none;border:1px solid #555;color:#ddd;border-radius:999px;padding:3px 11px;font-size:12.5px}
+.stage{display:grid;gap:18px;justify-content:center;padding:22px 16px 60px;grid-template-columns:minmax(0,var(--w,390px)) minmax(260px,330px);align-items:start}
+.stage.pc{--w:1080px;grid-template-columns:minmax(0,1080px)}
+.stage.pc .notes{max-width:1080px}
+@media(max-width:780px){.stage{grid-template-columns:minmax(0,390px)}}
+.device{background:var(--bg);border-radius:22px;overflow:hidden;box-shadow:0 1px 0 var(--line2),0 12px 40px rgba(0,0,0,.08);min-height:760px;display:flex;flex-direction:column}
+.urlbar{display:flex;align-items:center;gap:8px;padding:9px 14px;background:#f1f0ec;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}
+.urlbar .lock{width:10px;height:10px;border:1.5px solid var(--muted);border-radius:2px;display:inline-block}
+.urlbar strong{color:var(--ink);font-weight:700}
+.notes{background:#fff;border-radius:16px;padding:16px 18px;font-size:13.5px;line-height:1.7;border:1px solid var(--line2)}
+.notes h2{font-size:14px;margin-bottom:6px}
+.notes ul{margin:6px 0 0;padding-left:18px}
+.notes li+li{margin-top:4px}
+.notes .tag{display:inline-block;font-size:11px;font-weight:800;background:var(--leaf-pale);color:var(--moss);border-radius:999px;padding:1px 8px;margin-right:4px}
+/* shared UI */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line2);background:#fff;border-radius:999px;height:40px;padding:0 18px;font-weight:800;font-size:14px;white-space:nowrap;text-decoration:none}
+.btn:hover{background:var(--sand)}
+.btn.primary{background:var(--leaf);border-color:transparent}
+.btn.primary:hover{background:var(--leaf-h)}
+.btn.lg{height:50px;padding:0 26px;font-size:15.5px}
+.btn.sm{height:32px;padding:0 13px;font-size:13px}
+.btn.block{width:100%}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn.ghost{border-color:transparent;background:none;color:var(--ink2)}
+.link{background:none;border:0;padding:0;color:var(--moss);font-weight:800;text-decoration:underline;text-underline-offset:3px}
+.muted{color:var(--muted)}.soft{color:var(--ink2)}
+.small{font-size:13px}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:800;border-radius:999px;padding:2px 10px;background:var(--sand);color:var(--ink2);white-space:nowrap}
+.pill.ok{background:var(--leaf-pale);color:var(--moss)}
+.pill.wait{background:var(--warn-pale);color:var(--warn)}
+.pill.info{background:var(--info-pale);color:var(--info)}
+.surface{border:1px solid var(--line);border-radius:16px;background:#fff}
+.field{display:grid;gap:5px;margin-top:14px}
+.field>span{font-weight:800;font-size:14px}
+.field .help{font-size:12.5px;color:var(--muted)}
+.field input,.field select,.field textarea{border:1px solid var(--line2);border-radius:10px;padding:10px 12px;background:#fff;width:100%}
+.field input:focus,.field select:focus,.field textarea:focus,.btn:focus-visible,.choice:focus-within{outline:2px solid var(--moss);outline-offset:2px}
+.opt{font-weight:600;color:var(--muted);font-size:12px;margin-left:6px}
+.req{font-weight:700;color:var(--warn);font-size:12px;margin-left:6px}
+.check{display:flex;gap:10px;align-items:flex-start;margin-top:16px;font-size:14px}
+.check input{width:20px;height:20px;margin-top:2px;accent-color:var(--moss)}
+.mono{display:grid;place-items:center;background:var(--leaf-pale);color:var(--moss);font-weight:900;flex:none}
+.mono.round{border-radius:999px}.mono.square{border-radius:12px}
+.logo-img{flex:none;background:linear-gradient(135deg,#355e1f,#b2d67c);color:#fff;display:grid;place-items:center;font-weight:900;font-size:11px;letter-spacing:.04em}
+/* host console shell */
+.console{flex:1;display:grid;grid-template-columns:1fr}
+.stage.pc .console{grid-template-columns:220px minmax(0,1fr)}
+.side{display:none;border-right:1px solid var(--line);padding:18px 14px;background:#fcfcfa}
+.stage.pc .side{display:block}
+.brand{font-weight:900;font-size:17px;letter-spacing:.01em}
+.brand small{display:block;font-size:11px;color:var(--muted);font-weight:700}
+.hostchip{display:flex;align-items:center;gap:8px;margin:16px 0 12px;padding:8px;border:1px solid var(--line);border-radius:12px;font-weight:800;font-size:13.5px}
+.nav{display:grid;gap:2px}
+.nav button{display:flex;align-items:center;gap:8px;border:0;background:none;text-align:left;padding:8px 10px;border-radius:10px;font-weight:700;color:var(--ink2)}
+.nav button[aria-current="page"]{background:var(--leaf-pale);color:var(--ink)}
+.mhead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.stage.pc .mhead{display:none}
+.main{padding:22px 18px 110px;min-width:0}
+.stage.pc .main{padding:30px 36px 80px}
+.page-h{font-size:24px;font-weight:900;margin-bottom:4px}
+.lead{color:var(--ink2);margin-top:6px}
+.sec{margin-top:18px}
+.sec>h2{font-size:16px;font-weight:900;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.stage.pc .two{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start}
+/* choice cards */
+.choices{display:grid;gap:10px;margin-top:10px}
+.stage.pc .choices.row2{grid-template-columns:1fr 1fr}
+.stage.pc .choices.row3{grid-template-columns:repeat(3,1fr)}
+.choice{display:flex;gap:12px;align-items:flex-start;border:1.5px solid var(--line2);border-radius:14px;padding:14px;cursor:pointer;background:#fff}
+.choice input{margin-top:4px;accent-color:var(--moss);width:18px;height:18px}
+.choice.on{border-color:var(--moss);background:var(--leaf-pale)}
+.choice b{display:block}
+.choice .rate{font-size:20px;font-weight:900}
+/* checklist */
+.stage-card{border:1px solid var(--line);border-radius:18px;margin-top:16px;overflow:hidden;background:#fff}
+.stage-card.active{border-color:var(--moss);box-shadow:0 0 0 1px var(--moss) inset}
+.stage-head{display:flex;gap:12px;align-items:flex-start;padding:16px 16px 12px}
+.stage-num{width:30px;height:30px;border-radius:999px;display:grid;place-items:center;font-weight:900;background:var(--sand);flex:none}
+.stage-card.active .stage-num{background:var(--leaf)}
+.stage-card.done .stage-num{background:var(--moss);color:#fff}
+.stage-head h2{font-size:16.5px;font-weight:900}
+.task{display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--line);min-height:56px}
+.task .dot{width:22px;height:22px;border-radius:999px;border:2px solid var(--line2);flex:none;display:grid;place-items:center;font-size:12px;font-weight:900;color:#fff}
+.task.ok .dot{background:var(--moss);border-color:var(--moss)}
+.task .grow{flex:1;min-width:0}
+.task .t{font-weight:800}
+.task .d{font-size:12.5px;color:var(--muted)}
+.bar{height:6px;background:var(--sand);border-radius:999px;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;background:var(--moss)}
+/* editor */
+.edsec{border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-top:12px;background:#fff}
+.edsec h2{font-size:15.5px;font-weight:900;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.edsec .why{font-size:12.5px;color:var(--muted);margin-top:2px}
+.photos{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.ph{width:78px;height:58px;border-radius:10px;background:linear-gradient(135deg,#d9e7c6,#9fbf86);display:grid;place-items:center;font-size:11px;color:#2c3a22;font-weight:800}
+.actionbar{position:sticky;bottom:0;background:rgba(255,255,255,.96);border-top:1px solid var(--line);padding:12px 16px;display:grid;gap:8px;margin:18px -18px -110px}
+.stage.pc .actionbar{margin:24px -36px -80px;padding:14px 36px;grid-template-columns:auto auto 1fr;align-items:center}
+.reason{font-size:12.5px;color:var(--muted)}
+/* public page */
+.site-h{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.site-h .brand{font-size:16px}
+.hero{height:210px;background:linear-gradient(135deg,#cfe0b8,#7da261);display:grid;place-items:end start;padding:14px;color:#fff;font-weight:800;font-size:12px}
+.stage.pc .hero{height:330px}
+.pub{padding:18px 16px 40px}
+.stage.pc .pub{padding:28px 40px 60px;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:36px;align-items:start}
+.pub h1{font-size:24px;font-weight:900}
+.hostline{display:inline-flex;align-items:center;gap:8px;margin-top:10px;font-weight:800;color:var(--ink2);font-size:14px}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:10px;border-block:1px solid var(--line);padding:14px 0;margin-top:16px;font-size:14px}
+.facts b{display:block;font-size:12px;color:var(--muted)}
+.bookcard{border:1px solid var(--line2);border-radius:18px;padding:16px;margin-top:18px;background:#fff}
+.stage.pc .bookcard{margin-top:0;position:sticky;top:20px}
+.price{font-size:22px;font-weight:900}
+.price small{font-size:13px;color:var(--muted);font-weight:700}
+.prep{background:var(--sand);border-radius:12px;padding:12px;margin-top:12px;font-size:14px}
+.dates{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.date{border:1px solid var(--line2);border-radius:12px;padding:6px 10px;text-align:center;font-size:12px;min-width:64px;background:#fff}
+.date b{display:block;font-size:15px}
+.date.on{border-color:var(--moss);background:var(--leaf-pale)}
+.hostsec{border-top:1px solid var(--line);margin-top:22px;padding-top:18px}
+.seller{font-size:12.5px;color:var(--muted);margin-top:22px;border-top:1px solid var(--line);padding-top:12px}
+.listing{display:flex;gap:10px;margin-top:10px}
+.card{flex:1;border:1px solid var(--line);border-radius:14px;overflow:hidden;font-size:12.5px;background:#fff}
+.card .cimg{height:70px;background:linear-gradient(135deg,#d9e7c6,#9fbf86);position:relative}
+.card .cimg .pill{position:absolute;left:6px;top:6px}
+.card .cb{padding:8px}
+.card .cb b{display:block;font-size:13px;line-height:1.4}
+/* NIHO / Stripe screens */
+.ext{flex:1;display:grid;place-items:start center;padding:28px 18px;background:#f7f7f5}
+.ext .box{width:100%;max-width:400px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:22px}
+.ext .label{font-size:11.5px;font-weight:800;color:var(--muted);letter-spacing:.04em;margin-bottom:10px}
+.ext .logo{font-weight:900;font-size:20px;letter-spacing:.06em}
+.methods{display:grid;gap:8px;margin-top:16px}
+.method{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line2);border-radius:12px;padding:11px 14px;background:#fff;font-weight:800;width:100%;text-align:left}
+.acct{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:14px}
+.warnbox{background:var(--warn-pale);color:var(--warn);border-radius:12px;padding:10px 12px;font-size:13.5px;margin-top:12px}
+.infobox{background:var(--info-pale);color:var(--info);border-radius:12px;padding:10px 12px;font-size:13.5px;margin-top:12px}
+.okbox{background:var(--leaf-pale);color:var(--moss);border-radius:12px;padding:10px 12px;font-size:13.5px;margin-top:12px;font-weight:700}
+.stripe{background:#f6f9fc}
+.stripe .box{border-color:#e3e8ee}
+.stripe .logo{color:#635bff;letter-spacing:0;font-size:22px}
+.stripe .steps{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:8px}
+.stripe .steps li{display:flex;gap:10px;align-items:center;border:1px solid #e3e8ee;border-radius:10px;padding:10px 12px;font-size:14px}
+.stripe .btn.primary{background:#635bff;color:#fff}
+/* landing */
+.land{padding:26px 18px 40px}
+.stage.pc .land{padding:48px 56px;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:40px;align-items:start}
+.eyebrow{font-family:"Caveat",cursive;color:var(--moss);font-size:22px}
+.land h1{font-size:30px;font-weight:900;line-height:1.3;margin-top:2px}
+.stage.pc .land h1{font-size:40px}
+.cta{display:grid;gap:10px;margin-top:20px;max-width:360px}
+.steps3{display:grid;gap:12px;margin-top:22px;padding:0;list-style:none}
+.steps3 li{display:flex;gap:12px}
+.steps3 .n{width:28px;height:28px;border-radius:999px;background:var(--leaf-pale);color:var(--moss);font-weight:900;display:grid;place-items:center;flex:none}
+.dialog-back{position:fixed;inset:0;background:rgba(28,28,26,.45);display:grid;place-items:center;z-index:50;padding:16px}
+.dialog{background:#fff;border-radius:20px;max-width:440px;width:100%;padding:20px}
+.dialog h2{font-size:18px;font-weight:900}
+.dialog ul{padding-left:0;list-style:none;margin:12px 0 0;display:grid;gap:6px;font-size:14px}
+.dialog .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:999px;padding:9px 18px;font-size:13.5px;z-index:60}
+/* NIHO のログインの流れ（niho-app /auth/login・/connect/[app]）に合わせた見た目。Experience の登録画面も同じ並びにする */
+.auth{flex:1;background:#f6f5ef;display:flex;justify-content:center;padding:28px 16px 40px;font-family:"NIHO Sans","Hiragino Maru Gothic ProN","Hiragino Sans",var(--sans)}
+.auth .col{width:100%;max-width:448px}
+.auth .tile{width:72px;height:72px;border-radius:16px;background:#fff;box-shadow:0 4px 16px rgba(60,70,40,.14);display:grid;place-items:center;margin:0 auto 14px;font-weight:900;letter-spacing:.06em;font-size:15px}
+.auth .tile.travel{font-size:11px;line-height:1.15;text-align:center;letter-spacing:.02em}
+.auth h1{font-size:23px;font-weight:800;text-align:center;line-height:1.4}
+.auth .back-to{display:flex;justify-content:center;margin-top:10px}
+.auth .back-to span{border:1px solid #e2e2da;background:rgba(255,255,255,.8);border-radius:999px;padding:5px 12px;font-size:13px;color:var(--ink2)}
+.auth .card{background:rgba(255,255,255,.92);border:1px solid rgba(255,255,255,.85);border-radius:26px;box-shadow:0 -4px 32px rgba(0,0,0,.07),0 14px 34px rgba(60,70,40,.12);padding:20px;margin-top:22px}
+.auth .pillbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;border-radius:999px;border:1px solid #e2e2da;background:rgba(255,255,255,.92);box-shadow:0 2px 12px rgba(0,0,0,.06);padding:13px 20px;font-weight:800;font-size:15px;position:relative}
+.auth .pillbtn+.pillbtn{margin-top:10px}
+.auth .pillbtn.line{background:#06c755;border-color:#06c755;color:#fff}
+.auth .pillbtn.apple{background:#000;border-color:#000;color:#fff}
+.auth .pillbtn .last{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:11px;background:#fff;color:var(--moss);border-radius:999px;padding:1px 8px;font-weight:800}
+.auth .legal{font-size:12px;color:var(--muted);text-align:center;margin-top:14px}
+.auth .niho-primary{background:linear-gradient(140deg,#7dba3a,#63a109);color:#fff;border:0}
+.auth .share{margin-top:16px}
+.auth .share h2{font-size:13.5px;font-weight:800;color:#4b9e5e}
+.auth .share div{margin-top:6px;display:flex;gap:10px;align-items:center;background:#eef6e1;border-radius:16px;padding:11px 14px;color:#46811f;font-size:14px}
+.auth .acct{background:#fff}
+.stepsrow{display:flex;justify-content:center;gap:6px;margin-top:12px;font-size:12.5px;font-weight:800;color:var(--muted);flex-wrap:wrap}
+.stepsrow span{display:inline-flex;align-items:center;gap:5px}
+.stepsrow i{font-style:normal;width:20px;height:20px;border-radius:999px;display:grid;place-items:center;background:#e9e8e1;font-size:11px}
+.stepsrow .now{color:var(--ink)}.stepsrow .now i{background:var(--leaf)}
+.stepsrow .ok i{background:var(--moss);color:#fff}
+.stepsrow .sep{color:var(--line2)}
+.from-niho{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:800;color:#46811f;background:#eef6e1;border-radius:999px;padding:1px 8px;margin-left:6px}
+.avatar-photo{border-radius:999px;background:linear-gradient(135deg,#f3d9b1,#c98f5a);flex:none;display:grid;place-items:center;color:#fff;font-weight:900}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="review" role="region" aria-label="モックの切替">
+  <b>ホスト登録（事務局を通さない）· モック v2</b>
+  <div class="grp"><span>NIHO アカウント</span><div class="seg" data-seg="scen"><button type="button" data-v="existing">持っている</button><button type="button" data-v="new">新しく作る</button></div></div>
+  <div class="grp"><span>載せ方</span><div class="seg" data-seg="kind"><button type="button" data-v="person">個人として</button><button type="button" data-v="business">会社・お店として</button></div></div>
+  <div class="grp"><span>幅</span><div class="seg" data-seg="width"><button type="button" data-v="phone">スマホ</button><button type="button" data-v="pc">PC</button></div></div>
+  <div class="grp"><label for="jump">画面</label><select id="jump"></select></div>
+  <button type="button" class="reset" data-act="reset">最初から</button>
+</div>
+<div class="stage" id="stage">
+  <div class="device"><div class="urlbar"><span class="lock" aria-hidden="true"></span><span id="url"></span></div><div id="screen" style="flex:1;display:flex;flex-direction:column"></div></div>
+  <aside class="notes" id="notes" aria-label="この画面のポイント"></aside>
+</div>
+<div id="layer"></div>
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+const esc=(s)=>String(s??'').replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const SAMPLE={
+  person:{name:'森 ゆき',nameEn:'Yuki Mori',seller:'森 ゆき',sellerKind:'個人',title:'鎌倉の路地を、地元の写真家と歩く',lead:'観光地の裏の路地を、カメラを持って一緒に歩きます。',slug:'kamakura-photo-walk',price:6000,duration:'2時間'},
+  business:{name:'葉山クラフト',nameEn:'Hayama Craft',seller:'合同会社葉山クラフト',sellerKind:'法人・事業者',title:'葉山の工房で、自分の器をつくる',lead:'海の近くの工房で、ろくろを回して器をひとつ仕上げます。',slug:'hayama-pottery',price:8000,duration:'2時間30分'},
+};
+const SCREENS=[
+  ['landing','1. ホストになる（入口）'],['niho','2. NIHO にログイン'],['niho-confirm','3. NIHO の接続の確認'],['start','4. ホストとして登録'],
+  ['home','5. ホーム（チェックリスト）'],['editor','6. 体験のページを作る'],['public','7. 公開ページ'],['payout','8. 売上の受け取り'],
+  ['stripe','9. Stripe で口座を登録'],['seller','10. 販売者情報'],
+];
+const initial=()=>({scen:'existing',kind:'business',width:'phone',screen:'landing',nihoFixed:true,usePhoto:false,
+  name:'',nameEn:'',email:'',terms:false,registered:false,emailVerified:false,logo:false,
+  title:'',lead:'',description:'',photos:0,price:'',cancel:'',meeting:'',slots:false,
+  pagePublished:false,plan:null,planConsent:false,stripe:'none',payoutConsent:false,managed:'none',sellerSaved:false,bookingOpen:false});
+let state=initial();
+const S=()=>SAMPLE[state.kind];
+const yen=(n)=>'¥'+Number(n).toLocaleString('ja-JP');
+const initial1=(name)=>{const t=(name||'').trim();const c=Array.from(t)[0]||'?';return c.toLocaleUpperCase('en-US')};
+const hostName=()=>state.name||S().name;
+const isBiz=()=>state.kind==='business';
+function mono(size,name=hostName()){if(!isBiz()&&state.usePhoto&&!state.logo)return nihoAvatar(size);return state.logo?`<span class="logo-img ${isBiz()?'mono square':'mono round'}" style="width:${size}px;height:${size}px;font-size:${Math.max(10,size/5)}px">${isBiz()?'LOGO':'写真'}</span>`:`<span class="mono ${isBiz()?'square':'round'}" style="width:${size}px;height:${size}px;font-size:${size*.42}px" aria-hidden="true">${esc(initial1(name))}</span>`}
+function withLine(){return isBiz()?`${hostName()} が開催`:`${hostName()}さんと`}
+
+/* ---------- gates ---------- */
+const pageTasks=()=>[
+  ['題・紹介・説明',!!(state.title&&state.lead&&state.description)],
+  ['写真（1枚以上・説明つき）',state.photos>0],
+  ['料金',!!state.price],
+  ['取消条件',!!state.cancel],
+];
+const pageReady=()=>state.registered&&state.emailVerified&&pageTasks().every(([,ok])=>ok);
+const payoutReady=()=>state.plan==='managed'?state.managed==='approved':(state.planConsent&&state.stripe==='ready'&&state.payoutConsent);
+const sellerReady=()=>state.plan==='managed'||state.sellerSaved;
+const bookingBlockers=()=>{const b=[];
+  if(!state.pagePublished&&!pageReady())b.push('体験のページの準備');
+  if(!state.plan||(!state.planConsent&&state.plan!=='managed'))b.push('売上の受け取り方を選ぶ');
+  else if(state.plan==='managed'&&state.managed!=='approved')b.push('おまかせの承認（事務局）');
+  else if(state.plan!=='managed'&&state.stripe!=='ready')b.push('受取口座をつなぐ（Stripe）');
+  else if(state.plan!=='managed'&&!state.payoutConsent)b.push('受取口座の利用に同意する');
+  if(!sellerReady())b.push('販売者情報（特定商取引法の表示）');
+  if(!state.slots)b.push('開催枠');
+  return b};
+
+/* ---------- shells ---------- */
+function consoleShell(active,body){
+  const items=[['home','ホーム'],['editor','体験'],['payout','売上の受け取り'],['seller','販売者情報']];
+  return `<div class="console"><aside class="side"><div class="brand">NIHO Travel<small>ホスト</small></div>
+  <div class="hostchip">${mono(28)}<span>${esc(hostName())}</span></div>
+  <nav class="nav" aria-label="ホストのメニュー">${items.map(([k,t])=>`<button type="button" data-go="${k}" ${active===k?'aria-current="page"':''}>${t}</button>`).join('')}</nav></aside>
+  <div><header class="mhead"><span class="brand">NIHO Travel <span class="muted small">ホスト</span></span><span class="hostchip" style="margin:0">${mono(24)}<span class="small">${esc(hostName())}</span></span></header><main class="main">${body}</main></div></div>`}
+function siteHeader(){return `<header class="site-h"><span class="brand">NIHO Travel</span><span class="small soft">体験をさがす · ホストになる</span></header>`}
+
+/* ---------- screens ---------- */
+const view={};
+view.landing=()=>({url:'travel.niho.life/ja/host',html:`${siteHeader()}<div class="land"><div>
+  <p class="eyebrow">share your craft</p><h1>あなたの体験を、<br>街の外の人へ。</h1>
+  <p class="lead">仕事場を見せる。得意なことを教える。好きな道を一緒に歩く。鎌倉・逗子・葉山で続けていることを、会いに来たい人へ届けます。</p>
+  <div class="cta"><button type="button" class="btn primary lg" data-go="niho">NIHO アカウントで始める</button>
+  <p class="small muted">NIHO アカウントが無くても、次の画面で作れます（LINE・Google・Apple・メール）。登録と体験ページの公開は無料です。</p></div>
+  <h2 style="font-size:19px;font-weight:900;margin-top:30px">載せるまで</h2>
+  <ol class="steps3"><li><span class="n">1</span><span><b>ホストとして登録（5分）</b><br><span class="soft small">個人として、または会社・お店として。事務局の手続きはありません。</span></span></li>
+  <li><span class="n">2</span><span><b>体験のページを作って公開</b><br><span class="soft small">受取口座がなくても公開できます。まずは知ってもらうところから。</span></span></li>
+  <li><span class="n">3</span><span><b>受取口座をつないで、予約の受付を始める</b><br><span class="soft small">本人確認と口座の登録は Stripe の画面で。おまかせなら事務局が販売を引き受けます。</span></span></li></ol></div>
+  <section class="surface" style="padding:16px;margin-top:24px;background:var(--sand)"><b>登録済みのホストの方</b><p class="small soft">ログインして体験、予約、売上を確認できます。</p><button type="button" class="btn block" style="margin-top:10px" data-go="niho">ホスト画面にログイン</button></section></div>`,
+  notes:[['入口','ボタンは「NIHO アカウントで始める」だけ。「まず話してみる」は外した（v2）。自分で登録できるようになるまでは、今の本番の相談の入口を残す。'],['安心','「アカウントが無くても作れる」「無料」「口座はあとで」をボタンのすぐ下に書く。'],['英語','英語の /host も同じ構成（Start with your NIHO account）。ホスト画面は日本語だけと書き添える。']]});
+
+/* NIHO の表示名と写真（いまの接続の exchange が返す displayName・iconImage）。新しく作ったアカウントは各社の名前が入る */
+const nihoProfile=()=>state.scen==='new'?{name:'Yuki Mori',method:'Google',mail:'m***@example.com',initial:'Y'}:{name:'森 ゆき',method:'LINE',mail:'y***@example.com',initial:'森'};
+const nihoAvatar=(size)=>`<span class="avatar-photo" style="width:${size}px;height:${size}px;font-size:${size*.4}px" aria-hidden="true">${esc(nihoProfile().initial)}</span>`;
+
+view.niho=()=>{const isNew=state.scen==='new';return {url:'niho.life/auth/login?connect=niho-experience&audience=host',html:`<div class="auth"><div class="col">
+  <div class="tile">NIHO</div><h1>NIHOアカウントでログイン</h1><div class="back-to"><span>NIHO Travel ホスト に戻ります</span></div>
+  <div class="card">
+    <button type="button" class="pillbtn line" data-go="niho-confirm">LINE で続ける${!isNew?'<span class="last">前回</span>':''}</button>
+    <button type="button" class="pillbtn apple" data-go="niho-confirm">Apple で続ける</button>
+    <button type="button" class="pillbtn" data-go="niho-confirm">Google で続ける</button>
+    <button type="button" class="pillbtn" data-go="niho-confirm">メールアドレスで続ける</button>
+    ${isNew?'<p class="small soft" style="margin-top:14px;text-align:center">NIHO のアカウントが無い方は、選んだ方法でそのまま作れます。</p>':'<p class="small soft" style="margin-top:14px;text-align:center">NIHO のアカウントをお持ちの方は、登録した方法（LINE など）で入ってください。</p>'}
+    <p class="legal">続けると、NIHO の利用規約とプライバシーポリシーに同意したことになります。</p>
+  </div></div></div>`,
+  notes:[['NIHO の画面','niho-app の /auth/login（接続から来たログイン）の作りを写した：ロゴのタイル・「NIHOアカウントでログイン」・「〜に戻ります」の札・角の丸いカード・丸いボタン・「前回」の印。'],['新しく作る人',isNew?'選んだ方法でその場で NIHO アカウントができる。カードの下に、作れることを書く（NIHO の旅行者向けの案内と同じ場所）。':'上の「NIHO アカウント」を「新しく作る」にすると、作る人の流れを見られる。'],['送る値','Experience は audience=host と intent=register を付けて送る（intent は NIHO 側の対応が要る）。'],['LINE','LINE の同意画面は、2027-01 の切替まで「パナソニックホールディングス」と出る（ADR 0004 §8）。']]}};
+
+view['niho-confirm']=()=>{const isNew=state.scen==='new';const fixed=state.nihoFixed;const p=nihoProfile();
+  const acct=`<div class="acct">${nihoAvatar(44)}<div><b>${esc(p.name)}</b><p class="small muted">${p.method} · ${p.mail}</p></div></div>`;
+  const share=`<section class="share"><h2>渡す内容</h2><div><span aria-hidden="true">👤</span>名前とプロフィール写真</div></section>`;
+  let msg='',buttons;
+  if(isNew&&!fixed){msg=`<div class="warnbox"><b>この方法では、はじめてのログインです</b><br>新しい NIHO アカウントを作成しました。いつもと別の方法を選んでいませんか？</div>`;
+    buttons=`<button type="button" class="pillbtn niho-primary">別のアカウントで続ける</button><button type="button" class="pillbtn" data-go="start">このまま接続する</button>`}
+  else{msg=isNew?`<div class="okbox">NIHO アカウントを作成しました。このアカウントで NIHO Travel ホストを始めます。</div>`:'';
+    buttons=`<button type="button" class="pillbtn niho-primary" data-go="start">このまま接続する</button><button type="button" class="pillbtn">別のアカウントで続ける</button>`}
+  return {url:'niho.life/connect/niho-experience',html:`<div class="auth"><div class="col"><div class="tile travel">NIHO<br>Travel</div><h1>NIHO Travel ホスト と連携</h1>
+  <div class="card">${acct}${msg}${share}<div style="margin-top:18px">${buttons}</div>
+  <p class="legal">次回からは、この確認なしでログインします。</p>
+  ${isNew?`<p class="small" style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px;text-align:center">モック：NIHO 側の対応 <button type="button" class="link" data-act="toggle-niho">${fixed?'いまの画面を見る':'対応後の画面を見る'}</button></p>`:''}</div></div></div>`,
+  notes:isNew?[['いまの NIHO',"ホスト向けで新しく作ったアカウントは「取り違え」扱いになり、主ボタンが「別のアカウントで続ける」。初めての人は迷う。"],['対応後（推奨）','intent=register／invite のときは注意を出さず、「このまま接続する」を主ボタンに（niho-app の変更・flag の裏）。'],['渡す内容','NIHO は「名前とプロフィール写真」を渡すと本人に見せている。Experience はこれを登録画面の初期値に使う。']]:[['渡す内容','NIHO は「名前とプロフィール写真」を渡すと本人に見せている。Experience はこれを登録画面の初期値に使う（v2）。'],['取り違え','別の方法で入ると別のアカウントになる（NIHO はメールで統合しない）。表示名と方法を見せて気づけるようにする。']]}};
+
+view.start=()=>{const s=S();const biz=isBiz();const ok=state.name.trim()&&/.+@.+\..+/.test(state.email)&&state.terms;const p=nihoProfile();
+  const fromNiho=!biz&&state.name===p.name?'<span class="from-niho">NIHO のプロフィールから</span>':'';
+  const photoRow=biz?`<div style="display:flex;gap:10px;align-items:center">${mono(48)}<button type="button" class="btn sm" data-act="logo">${state.logo?'外す':'ロゴを選ぶ'}</button></div>`
+    :`<div style="display:flex;gap:10px;align-items:center">${state.usePhoto?nihoAvatar(48):mono(48)}<span class="small soft">${state.usePhoto?'NIHO のプロフィール写真':'頭文字の印'}</span><button type="button" class="btn sm" data-act="toggle-photo">${state.usePhoto?'使わない':'NIHO の写真を使う'}</button></div>${state.usePhoto?'':'<p class="help">押すと、NIHO のプロフィール写真を体験のページに載せる写真として登録します（掲載してよい写真かを確かめてください）。</p>'}`;
+  const preview=`<div id="preview" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px"><p class="small muted" style="font-weight:800">体験のページではこう見えます</p>
+    <p class="hostline" style="margin-top:8px">${!biz&&state.usePhoto?nihoAvatar(26):mono(26)}<span>${esc(withLine())}</span></p></div>`;
+  const form=`<div class="card" style="text-align:left">
+  <div class="acct" style="margin-top:0">${nihoAvatar(36)}<div style="flex:1"><b class="small">${esc(p.name)}</b><p class="small muted" style="font-size:12px">${p.method} でログイン中 · NIHO アカウント</p></div><button type="button" class="link small" data-go="niho">切り替える</button></div>
+  <div class="sec"><h2 style="font-size:15px">どの名前で載せますか</h2>
+  <div class="choices"><label class="choice ${!biz?'on':''}"><input type="radio" name="kind" value="person" ${!biz?'checked':''} data-kind="person"><span><b>個人として</b><span class="small soft">あなたの名前や活動名で載せます。</span></span></label>
+  <label class="choice ${biz?'on':''}"><input type="radio" name="kind" value="business" ${biz?'checked':''} data-kind="business"><span><b>会社・お店・団体として</b><span class="small soft">屋号や会社名で載せます。あなたはこのホストのオーナーになります。</span></span></label></div></div>
+  <label class="field"><span>掲載名<span class="req">必須</span>${fromNiho}</span><input data-f="name" value="${esc(state.name)}" placeholder="${biz?'例：葉山クラフト':'例：森 ゆき'}" maxlength="100"><span class="help">${biz?'お店や会社の、ふだん呼ばれている名前。法人の正式名は、予約の受付を始めるときに販売者情報で入れます。':'NIHO の表示名を入れています。活動名に変えてもかまいません。'}</span></label>
+  <label class="field"><span>英語の掲載名<span class="opt">任意</span></span><input data-f="nameEn" value="${esc(state.nameEn)}" placeholder="${esc(s.nameEn)}"><span class="help">空なら、英語のページにも上の名前を出します。</span></label>
+  <div class="field"><span>${biz?'ロゴ':'顔写真'}<span class="opt">任意・あとからでも</span></span>${photoRow}</div>
+  ${biz?`<div class="infobox small" style="display:flex;gap:10px;align-items:center">${nihoAvatar(32)}<span>オーナー：<b>${esc(p.name)}</b>（NIHO のプロフィール）。あなた自身の紹介を体験のページに出すかは、あとで選べます。</span></div>`:''}
+  <label class="field"><span>連絡用メールアドレス<span class="req">必須</span></span><input type="email" data-f="email" value="${esc(state.email)}" placeholder="you@example.com"><span class="help">予約とメッセージの知らせが届きます。登録のあと、確認のメールを送ります。</span></label>
+  <label class="check"><input type="checkbox" data-f="terms" ${state.terms?'checked':''}><span><button type="button" class="link">ホスト規約</button>と<button type="button" class="link">プライバシーポリシー</button>に同意します</span></label>
+  <button type="button" class="btn primary lg block" style="margin-top:18px" data-act="register" ${ok?'':'disabled'}>登録する</button>
+  <p class="small muted" style="margin-top:6px;text-align:center">${ok?'':'掲載名・連絡用メールアドレス・規約への同意が必要です。'} <button type="button" class="link small" data-act="fill-start">（モック）サンプルを入れる</button></p>
+  ${preview}</div>`;
+  return {url:'travel.niho.life/host/start',html:`<div class="auth"><div class="col"><div class="tile travel">NIHO<br>Travel</div><h1>ホストとして登録</h1>
+  <div class="stepsrow" aria-label="進み具合"><span class="ok"><i>✓</i>ログイン</span><span class="sep">―</span><span class="now"><i>2</i>ホストの登録</span><span class="sep">―</span><span><i>3</i>体験のページ</span></div>
+  <p class="small soft" style="text-align:center;margin-top:10px">登録も、体験のページの公開も無料です。受取口座は、予約の受付を始めるときにつなぎます。</p>${form}</div></div>`,
+  notes:[['見た目','NIHO のログイン・接続の確認と同じ並び（中央の 1 列・タイル・見出し・角の丸いカード）。段階の行で「いまどこか」を見せる（NIHO の参加登録の段階の行と同じ考え）。'],['初期値',biz?'会社・お店のときは掲載名は空欄から。NIHO の表示名と写真は「オーナー（あなた）」の紹介の初期値に回す。':'個人のときは、NIHO の表示名を掲載名の初期値に入れておく（本人が変えられる）。プロフィール写真は自動では使わず、「NIHO の写真を使う」を押したときだけ、掲載の確認つきで登録する（Codex レビュー）。'],['作るもの','登録で hst_（SELF_REGISTRATION で結び付け）・ホスト・公開名（本人の同意）・オーナー権限・規約の同意・連絡用アドレス（確認待ち）を 1 回で作る。'],['メール','NIHO はメールアドレスを渡さないので、連絡用は本人が入れる（確認のメールで確定）。']]}};
+
+view.home=()=>{const pt=pageTasks();const pDone=pt.filter(([,ok])=>ok).length;const b=bookingBlockers();
+  const st1=state.pagePublished?'done':'active';const st2=state.bookingOpen?'done':state.pagePublished?'active':'';
+  const task=(ok,t,d,btn)=>`<div class="task ${ok?'ok':''}"><span class="dot">${ok?'✓':''}</span><div class="grow"><div class="t">${t}</div>${d?`<div class="d">${d}</div>`:''}</div>${btn||''}</div>`;
+  const planLabel={independent:'自分で販売 10%',supported:'サポート 15%',managed:'おまかせ 20%'}[state.plan]||'';
+  const body=`<h1 class="page-h">ようこそ、${esc(hostName())}${isBiz()?'':'さん'}</h1><p class="lead">2つの段階で進めます。口座が無くても、体験のページは公開できます。</p>
+  <section class="stage-card ${st1}"><div class="stage-head"><span class="stage-num">${state.pagePublished?'✓':'1'}</span><div><h2>体験のページを公開する</h2><p class="small soft">受取口座はまだ要りません。公開すると、ページを見た人がホストに相談できます。</p></div></div>
+  ${task(true,'ホストの情報','名前・種別を登録しました',`<button type="button" class="btn sm ghost">変える</button>`)}
+  ${task(state.emailVerified,'連絡用メールアドレスの確認',state.emailVerified?esc(state.email):`${esc(state.email)} に確認のメールを送りました`,state.emailVerified?'':`<button type="button" class="btn sm" data-act="verify">（モック）確認した</button>`)}
+  ${task(pDone===pt.length,'体験のページを作る',`${pDone} / ${pt.length}（題と説明・写真・料金・取消条件）<div class="bar"><i style="width:${pDone/pt.length*100}%"></i></div>`,`<button type="button" class="btn sm ${!state.pagePublished&&state.emailVerified?'primary':''}" data-go="editor">${pDone?'続ける':'作る'}</button>`)}
+  ${task(state.pagePublished,'ページを公開する',state.pagePublished?`公開中 · 予約の受付は準備中`:pageReady()?'公開できます':'上の3つがそろうと公開できます',state.pagePublished?`<button type="button" class="btn sm" data-go="public">見る</button>`:`<button type="button" class="btn sm primary" data-act="publish-page" ${pageReady()?'':'disabled'}>公開する</button>`)}
+  </section>
+  <section class="stage-card ${st2}"><div class="stage-head"><span class="stage-num">${state.bookingOpen?'✓':'2'}</span><div><h2>予約の受付を始める</h2><p class="small soft">ここで受取口座をつなぎます。${state.pagePublished?'':'①と並行して進めてもかまいません。'}</p></div></div>
+  ${task(!!state.plan&&(state.plan==='managed'||state.planConsent),'売上の受け取り方を選ぶ',planLabel||'自分で販売 10%／サポート 15%／おまかせ 20%',`<button type="button" class="btn sm" data-go="payout">${state.plan?'見る':'選ぶ'}</button>`)}
+  ${state.plan==='managed'?task(state.managed==='approved','事務局の承認（おまかせ）',{none:'NIHO が販売者になるので、事務局が内容を確かめます',requested:'確認中（2営業日ほど）',approved:'承認されました'}[state.managed],`<button type="button" class="btn sm" data-go="payout">見る</button>`)
+   :task(state.stripe==='ready'&&state.payoutConsent,'受取口座をつなぐ（Stripe）',{none:'本人確認と口座の登録は Stripe の画面で（10分ほど）',pending:'Stripe が確認中です',ready:state.payoutConsent?'準備ができました · 末尾 4321':'準備ができました。利用への同意が残っています'}[state.stripe],`<button type="button" class="btn sm" data-go="payout">${state.stripe==='none'?'つなぐ':'見る'}</button>`)}
+  ${task(sellerReady(),'販売者情報（特定商取引法の表示）',state.plan==='managed'?'おまかせでは NIHO が販売者です':state.sellerSaved?'保存しました':'予約の画面とページの末尾に出る、販売者の情報',state.plan==='managed'?'':`<button type="button" class="btn sm" data-go="seller">${state.sellerSaved?'見る':'入れる'}</button>`)}
+  ${task(state.slots,'開催枠を入れる',state.slots?'毎週土曜 10:00（定員 6）':'予約を受ける日にちと時間',`<button type="button" class="btn sm" data-go="editor" data-anchor="slots">${state.slots?'見る':'入れる'}</button>`)}
+  ${task(state.bookingOpen,'予約の受付を始める',state.bookingOpen?'受付中':b.length?`残り：${b.join('・')}`:'始められます',state.bookingOpen?`<button type="button" class="btn sm" data-go="public">見る</button>`:`<button type="button" class="btn sm primary" data-act="open-booking" ${b.length?'disabled':''}>始める</button>`)}
+  </section>
+  <section class="stage-card"><div class="stage-head"><span class="stage-num">＋</span><div><h2>もっと伝わるページに（任意）</h2></div></div>
+  ${task(state.logo,isBiz()?'ロゴ':'顔写真',state.logo?'設定しました':'無いあいだは頭文字の印を出します',`<button type="button" class="btn sm" data-act="logo">${state.logo?'外す':'設定する'}</button>`)}
+  ${task(false,'ホスト紹介を書く','200字くらい。どんな人・お店かを伝えます','<button type="button" class="btn sm">書く</button>')}
+  ${isBiz()?task(false,'あなた自身の紹介を出す','オーナーやメンバーの顔と名前を、体験のページに添えられます','<button type="button" class="btn sm">選ぶ</button>'):''}
+  ${task(false,'メンバーを招く','一緒に運営する人に、開催枠や予約を任せられます','<button type="button" class="btn sm">招く</button>')}</section>`;
+  return {url:'travel.niho.life/host/home',html:consoleShell('home',body),
+  notes:[['2段','①ページ公開（口座なし）と②予約の受付（口座あり）を分けて見せる。口座が無いことで、作る手が止まらない。'],['①の条件','題・紹介・説明／写真1枚以上／料金／取消条件／連絡用メールの確認（論点 B）。'],['②の条件','受け取り方と手数料の同意・口座（または おまかせ の承認）・販売者情報・開催枠。'],['並行','②は①の前から進めてもよい。予約の受付を始めると、ページの公開も同時に行う。']]}};
+
+view.editor=()=>{const s=S();const pt=pageTasks();const b=bookingBlockers();
+  const mark=(ok,need)=>ok?'<span class="pill ok">✓ 入力済み</span>':need==='page'?'<span class="pill wait">ページ公開に必要</span>':need==='booking'?'<span class="pill info">予約の受付に必要</span>':'<span class="pill">任意</span>';
+  const status=state.bookingOpen?'<span class="pill ok">公開中 · 予約受付中</span>':state.pagePublished?'<span class="pill ok">公開中</span> <span class="pill">予約の受付は準備中</span>':'<span class="pill">下書き</span>';
+  const body=`<button type="button" class="link small" data-go="home">← ホーム</button><h1 class="page-h" style="margin-top:6px">${esc(state.title||'新しい体験')}</h1><p style="margin-top:4px">${status}</p>
+  <p class="small muted" style="margin-top:6px"><button type="button" class="link small" data-act="fill-editor">（モック）サンプルで埋める</button></p>
+  <section class="edsec"><h2>題と説明 ${mark(pt[0][1],'page')}</h2>
+   <label class="field"><span>体験の題</span><input data-f="title" value="${esc(state.title)}" placeholder="${esc(s.title)}"></label>
+   <label class="field"><span>ひとこと紹介</span><input data-f="lead" value="${esc(state.lead)}" placeholder="${esc(s.lead)}"></label>
+   <label class="field"><span>詳しい説明</span><textarea data-f="description" rows="3" placeholder="当日の流れや、どんな人に向いているか">${esc(state.description)}</textarea></label></section>
+  <section class="edsec"><h2>写真 ${mark(pt[1][1],'page')}</h2><p class="why">1枚以上。写真ごとに、写っているものの説明を入れます。</p><div class="photos">${Array.from({length:state.photos},(_,i)=>`<span class="ph">写真 ${i+1}</span>`).join('')}<button type="button" class="btn sm" data-act="photo">＋ 写真を追加</button></div></section>
+  <section class="edsec"><h2>料金 ${mark(pt[2][1],'page')}</h2><label class="field"><span>大人1人</span><input data-f="price" inputmode="numeric" value="${esc(state.price)}" placeholder="${s.price}"></label><p class="why">手数料は、売上の受け取り方で決まります（受付を始めるときに選びます）。</p></section>
+  <section class="edsec"><h2>取消条件 ${mark(pt[3][1],'page')}</h2><label class="field"><span>無料で取り消せる期限</span><select data-f="cancel"><option value="">選んでください</option>${['開始の24時間前まで','開始の3日前まで','開始の7日前まで'].map((o)=>`<option ${state.cancel===o?'selected':''}>${o}</option>`).join('')}</select></label></section>
+  <section class="edsec"><h2>集合場所 ${mark(!!state.meeting)}</h2><label class="field"><span>予約前に見せるエリア</span><input data-f="meeting" value="${esc(state.meeting)}" placeholder="${isBiz()?'葉山・一色海岸の近く':'鎌倉駅の東口から歩いて5分'}"></label></section>
+  <section class="edsec" id="slots"><h2>開催枠 ${mark(state.slots,'booking')}</h2><p class="why">ページの公開には要りません。予約の受付を始めるときに使います。</p>${state.slots?'<p style="margin-top:8px"><b>毎週土曜 10:00</b> · 定員 6 · 受付は前日まで</p>':'<button type="button" class="btn sm" style="margin-top:10px" data-act="slots">＋ 毎週の枠を追加</button>'}</section>
+  <div class="actionbar">
+   ${state.pagePublished?`<button type="button" class="btn" data-go="public">公開ページを見る</button>`:`<button type="button" class="btn primary" data-act="publish-page" ${pageReady()?'':'disabled'}>ページを公開する</button>`}
+   ${state.bookingOpen?'':`<button type="button" class="btn ${state.pagePublished&&!b.length?'primary':''}" data-act="open-booking" ${b.length?'disabled':''}>予約の受付を始める</button>`}
+   <p class="reason">${!state.pagePublished&&!pageReady()?`ページの公開に、${[!state.emailVerified&&'連絡用メールの確認',...pt.filter(([,ok])=>!ok).map(([t])=>t)].filter(Boolean).join('・')} が必要です。`:state.bookingOpen?'予約を受け付けています。':b.length?`予約の受付には：${b.join('・')}`:'予約の受付を始められます。'}</p></div>`;
+  return {url:'travel.niho.life/host/experiences/new',html:consoleShell('editor',body),
+  notes:[['印','各欄に「ページ公開に必要」「予約の受付に必要」「任意」を出し、何が足りないかを欄の横で分かるようにする。'],['ボタン2つ','「ページを公開する」と「予約の受付を始める」を分ける。押せない理由はボタンの下に言葉で。'],['データ','下書きは販売者なしで保存できる（今は販売者が無いと下書きも作れない。Epic #700 の段階1）。']]}};
+
+view.public=()=>{const s=S();const open=state.bookingOpen;const price=state.price||s.price;
+  const book=open?`<div class="bookcard"><p class="price">${yen(price)}〜 <small>/ 人</small></p><p class="small muted">次回 12月6日(土) 10:00</p>
+     <div class="dates"><span class="date on"><small>土</small><b>12/6</b>残り6</span><span class="date"><small>土</small><b>12/13</b>残り6</span><span class="date"><small>土</small><b>12/20</b>残り6</span></div>
+     <button type="button" class="btn primary block lg" style="margin-top:14px">日にちと人数を選ぶ</button><p class="small muted" style="margin-top:8px">無料で取り消せるのは${esc(state.cancel||'開始の24時間前まで')}</p></div>`
+   :`<div class="bookcard"><p class="price">${yen(price)}〜 <small>/ 人</small></p><div class="prep"><b>予約の受付は準備中です</b><br><span class="soft">日にちが決まりしだい、このページから予約できます。日にちや人数の相談は、いまでもホストに送れます。</span></div>
+     <button type="button" class="btn primary block lg" style="margin-top:14px">ホストに相談する</button></div>`;
+  return {url:`travel.niho.life/ja/experiences/${s.slug}`,html:`${siteHeader()}<div class="hero">写真（仮）</div><div class="pub"><div>
+   <h1>${esc(state.title||s.title)}</h1><p class="soft" style="margin-top:6px">${esc(state.lead||s.lead)}</p>
+   <a class="hostline" href="#host">${mono(26)}<span>${esc(withLine())}</span></a>
+   <div class="facts"><span><b>所要時間</b>${esc(s.duration)}</span><span><b>言語</b>日本語・英語</span><span><b>集合</b>${esc(state.meeting||(isBiz()?'葉山・一色海岸の近く':'鎌倉駅の東口'))}</span><span><b>取消</b>${esc(state.cancel||'開始の24時間前まで')}無料</span></div>
+   ${!document.getElementById('stage').classList.contains('pc')?book:''}
+   <section class="hostsec" id="host"><h2 style="font-size:18px;font-weight:900">ホストについて</h2><div style="display:flex;gap:14px;align-items:center;margin-top:12px">${mono(64)}<div><b>${esc(hostName())}</b><p class="small muted">${isBiz()?'葉山':'鎌倉'}</p></div></div><p class="small muted" style="margin-top:8px">（ホスト紹介を書くと、ここに出ます）</p></section>
+   <p class="seller">${open?`販売者：${esc(state.plan==='managed'?'NIHO':state.kind==='business'?S().seller:hostName())} · 特定商取引法に基づく表記`:'（販売者の行は、予約の受付を始めると出ます）'}</p>
+   <section class="hostsec"><h2 style="font-size:15px;font-weight:900">一覧での見え方</h2><div class="listing"><div class="card"><div class="cimg">${open?'':'<span class="pill">受付準備中</span>'}</div><div class="cb"><b>${esc(state.title||s.title)}</b>${esc(hostName())}${isBiz()?'が案内':'さんと'} · ${yen(price)}〜</div></div><div class="card"><div class="cimg"></div><div class="cb"><b>ほかの体験</b>予約できる体験が先に並びます</div></div></div></section>
+   </div>${document.getElementById('stage').classList.contains('pc')?book:''}</div>`,
+  notes:open?[['予約受付中','日にちと人数を選ぶボタンに変わり、ページの末尾に販売者の行が出る。'],['戻す','予約の受付を止めても、ページは公開のまま（受付準備中に戻る）。']]:[['受付準備中','料金・内容・ホストは見せる。予約の代わりに「ホストに相談する」（論点 C）。'],['販売者','口座も販売者も無いので、販売者の行は出さない。予約の受付を始めると出る。'],['一覧','論点 A：一覧にも「受付準備中」の印つきで出し、予約できる体験の後ろに並べる。検索にも出す。']]}};
+
+view.payout=()=>{const biz=isBiz();
+  const plans=[['independent','自分で販売','10%','あなたが販売者','予約・取消・返金をあなたが受け持ちます'],['supported','サポート','15%','あなたが販売者','問い合わせや日程の調整を事務局が手伝います'],['managed','おまかせ','20%','NIHO が販売者','販売・連絡・返金を事務局が受け持ちます。事務局の承認が要ります']];
+  let step2='';
+  if(state.plan==='managed'){step2=`<section class="edsec"><h2>事務局の承認 ${state.managed==='approved'?'<span class="pill ok">承認済み</span>':state.managed==='requested'?'<span class="pill wait">確認中</span>':''}</h2><p class="why">おまかせでは NIHO が販売者になるので、事務局が体験の内容を確かめます（2営業日ほど）。Stripe の受取口座はいりません。売上は月末締め・翌月末払いで、振込先は承認のときに事務局と確かめます。</p>
+    ${state.managed==='none'?'<button type="button" class="btn primary" style="margin-top:10px" data-act="managed-request">おまかせを申し込む</button>':state.managed==='requested'?'<button type="button" class="btn sm" style="margin-top:10px" data-act="managed-approve">（モック）事務局が承認した</button>':'<p class="okbox">承認されました。予約の受付を始められます。</p>'}</section>`}
+  else if(state.plan&&state.planConsent){const st=state.stripe;
+    step2=`<section class="edsec"><h2>受取口座（Stripe） ${st==='ready'?'<span class="pill ok">準備済み</span>':st==='pending'?'<span class="pill wait">確認中</span>':''}</h2>
+    ${st==='none'?`<p class="why">本人確認と口座の登録は、Stripe の画面で行います（10分ほど）。${biz?'<b>法人</b>として':'<b>個人事業主</b>として'}登録を始めます（Stripe の画面で変えられます）。口座の番号を NIHO Travel が預かることはありません。</p><button type="button" class="btn primary" style="margin-top:10px" data-go="stripe">Stripe で受取口座を登録する</button>`
+     :st==='pending'?`<p class="why">Stripe が入力を確かめています。数分〜1営業日ほどかかることがあります。終わったらメールで知らせます。</p><button type="button" class="btn sm" style="margin-top:10px" data-act="stripe-ready">（モック）Stripe の確認が終わった</button>`
+     :`<p class="okbox">売上を受け取る準備ができています · 口座 末尾 4321</p>
+       <div style="margin-top:12px;font-size:14px;background:var(--sand);border-radius:12px;padding:12px">${esc(hostName())} が NIHO Travel で販売する体験の売上は、Stripe の口座（末尾 4321）で受け取ります。売上からは、販売条件に示す Stripe の決済手数料と NIHO の手数料が差し引かれます。この同意を取り消すと、予約の受付は止まります（ページは公開のまま）。</div>
+       ${state.payoutConsent?'<p class="small muted" style="margin-top:8px">2026年11月28日に同意しました</p>':`<label class="check"><input type="checkbox" id="pc">上の内容を確認し、この口座で売上を受け取ることに同意します</label><button type="button" class="btn primary" style="margin-top:10px" data-act="payout-consent">同意する</button>`}`}</section>`}
+  const body=`<button type="button" class="link small" data-go="home">← ホーム</button><h1 class="page-h" style="margin-top:6px">売上の受け取り</h1><p class="lead">予約の受付を始める前に決めます。体験ごとにあとから変えられます。</p>
+   <section class="sec"><h2>1. 受け取り方を選ぶ</h2><div class="choices row3">${plans.map(([k,n,r,who,d])=>`<label class="choice ${state.plan===k?'on':''}"><input type="radio" name="plan" data-plan="${k}" ${state.plan===k?'checked':''}><span><b>${n}</b><span class="rate">${r}</span><span class="small muted"> 手数料（決済手数料こみ）</span><br><span class="pill ${k==='managed'?'info':'ok'}" style="margin-top:4px">${who}</span><span class="small soft" style="display:block;margin-top:6px">${d}</span></span></label>`).join('')}</div>
+   ${state.plan&&state.plan!=='managed'&&!state.planConsent?`<label class="check"><input type="checkbox" id="fc">手数料とサポートの条件（販売条件）に同意します</label><button type="button" class="btn primary" style="margin-top:10px" data-act="plan-consent">この受け取り方にする</button>`:''}</section>
+   ${step2?`<section class="sec"><h2>2. ${state.plan==='managed'?'承認を待つ':'受取口座をつなぐ'}</h2>${step2}</section>`:''}`;
+  return {url:'travel.niho.life/host/settings/payout',html:consoleShell('payout',body),
+  notes:[['3つの受け取り方','自分で販売・サポートは本人が販売者で、本人の Stripe 口座に直接入る（今の Direct 決済）。おまかせは NIHO が販売者。'],['Stripe','Experience が Express の口座を作り、Account Link で Stripe の画面へ。口座 ID はブラウザから受け取らない。'],['損失','返金・チャージバックの損失を Stripe が負う設定（controller.losses.payments=stripe）が使えるかを確かめる（推奨）。'],['おまかせ','事務局を通るのはここだけ（承認）。']]}};
+
+view.stripe=()=>({url:'connect.stripe.com/setup/e/acct_…',html:`<div class="ext stripe"><div class="box"><p class="label">STRIPE の画面（connect.stripe.com）</p><p class="logo">stripe</p>
+  <h1 style="font-size:18px;margin-top:10px;font-weight:800">NIHO Travel で売上を受け取る準備</h1><p class="small soft" style="margin-top:4px">${isBiz()?'法人':'個人事業主'}として登録します。</p>
+  <ul class="steps"><li>✓ 事業の形：${isBiz()?'法人（合同会社葉山クラフト）':'個人事業主'}</li><li>✓ ${isBiz()?'代表者':'本人'}の確認（本人確認書類）</li><li>✓ 売上を受け取る銀行口座</li><li>✓ 明細に出る名前：${esc(isBiz()?'HAYAMA CRAFT':'YUKI MORI')}</li></ul>
+  <button type="button" class="btn primary block lg" style="margin-top:16px" data-act="stripe-done">入力を終えて NIHO Travel に戻る</button><p class="small muted" style="margin-top:8px">モック：Stripe の入力はすべて済んだことにしています。</p></div></div>`,
+  notes:[['Stripe の画面','本人確認・口座・事業の情報は Stripe が集める。NIHO Travel は口座の番号を持たない。'],['戻ったら','Experience が口座を照会し、「確認中」→「準備済み」。account.updated の webhook でも更新して、追加の情報が要るときはホストに知らせる。']]});
+
+view.seller=()=>{const s=S();const biz=isBiz();
+  const body=`<button type="button" class="link small" data-go="home">← ホーム</button><h1 class="page-h" style="margin-top:6px">販売者情報</h1><p class="lead">特定商取引法に基づく表記です。予約の画面とページの末尾に出ます。予約の受付を始めるときに必要です。</p>
+  ${state.plan==='managed'?'<p class="infobox">おまかせでは NIHO が販売者になるので、ここは入れなくてかまいません。</p>':''}
+  <label class="field"><span>販売者名</span><input value="${esc(s.seller)}"><span class="help">${biz?'法人の正式名。掲載名（'+esc(hostName())+'）とは別に持てます。':'個人の場合は氏名です。'}</span></label>
+  <label class="field"><span>区分</span><select><option ${!biz?'selected':''}>個人</option><option ${biz?'selected':''}>法人・事業者</option></select></label>
+  ${biz?'<label class="field"><span>業務責任者</span><input value="森 ゆき"></label>':''}
+  <label class="field"><span>所在地・電話番号の表示</span><select><option>請求があれば、遅滞なく開示します</option><option>このページに表示します</option></select></label>
+  <button type="button" class="btn primary" style="margin-top:16px" data-act="seller-save">${state.sellerSaved?'保存しました':'保存する'}</button>`;
+  return {url:'travel.niho.life/host/seller',html:consoleShell('seller',body),
+  notes:[['会社の場合','掲載名（葉山クラフト）と販売者名（合同会社葉山クラフト）を分けて持つ。体験ページのホスト名は掲載名、販売者の行は販売者名。'],['今もある画面','/host/seller（本人が直せる）。予約の受付の条件に加える。']]}};
+
+/* ---------- render ---------- */
+function render(){
+  const st=$('#stage');st.classList.toggle('pc',state.width==='pc');
+  document.querySelectorAll('[data-seg]').forEach((g)=>g.querySelectorAll('button').forEach((b)=>b.setAttribute('aria-pressed',String(state[g.dataset.seg]===b.dataset.v))));
+  $('#jump').innerHTML=SCREENS.map(([k,t])=>`<option value="${k}" ${state.screen===k?'selected':''}>${t}</option>`).join('');
+  const v=view[state.screen]();
+  $('#url').innerHTML=`<strong>${esc(v.url.split('/')[0])}</strong>${esc(v.url.slice(v.url.indexOf('/')))}`;
+  $('#screen').innerHTML=v.html;
+  $('#notes').innerHTML=`<h2>${esc(SCREENS.find(([k])=>k===state.screen)[1])}</h2><ul>${v.notes.map(([t,d])=>`<li><span class="tag">${esc(t)}</span>${esc(d)}</li>`).join('')}</ul>
+   <p class="small muted" style="margin-top:12px">状態：${state.registered?'登録済み':'未登録'} · ページ${state.pagePublished?'公開中':'未公開'} · 予約${state.bookingOpen?'受付中':'準備中'}</p>`;
+}
+function go(screen,anchor){state.screen=screen;if(screen==='start'&&!state.registered)prefillFromNiho();render();window.scrollTo({top:0});if(anchor){const el=document.getElementById(anchor);if(el)el.scrollIntoView({block:'center'})}}
+/* NIHO の表示名を初期値に：個人なら掲載名へ。会社・お店なら掲載名は空欄（表示名はオーナーの紹介へ） */
+function prefillFromNiho(){const n=nihoProfile().name;if(!isBiz()&&!state.name)state.name=n;if(isBiz()&&state.name===n)state.name=''}
+function toast(msg){const t=document.createElement('div');t.className='toast';t.setAttribute('role','status');t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2200)}
+function dialog(title,html,acts){$('#layer').innerHTML=`<div class="dialog-back"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-h"><h2 id="dlg-h">${title}</h2>${html}<div class="acts"><button type="button" class="btn" data-act="close">やめる</button>${acts}</div></div></div>`;$('#layer .dialog button:last-child').focus()}
+function closeDialog(){$('#layer').innerHTML=''}
+function fillStart(){const s=S();state.name=isBiz()?s.name:nihoProfile().name;state.nameEn=isBiz()?s.nameEn:'';state.email=isBiz()?'hello@hayama-craft.example':'yuki@example.com';state.terms=true}
+function fillEditor(){const s=S();Object.assign(state,{title:s.title,lead:s.lead,description:'当日の流れや、どんな人に向いているかを書きます（サンプル）。',photos:Math.max(state.photos,3),price:String(s.price),cancel:state.cancel||'開始の24時間前まで',meeting:state.meeting||(isBiz()?'葉山・一色海岸の近く':'鎌倉駅の東口から歩いて5分')})}
+
+document.addEventListener('click',(e)=>{
+  const seg=e.target.closest('[data-seg] button');if(seg){const k=seg.parentElement.dataset.seg;state[k]=seg.dataset.v;if((k==='kind'||k==='scen')&&!state.registered){if(Object.values(SAMPLE).some((x)=>x.name===state.name)||['森 ゆき','Yuki Mori'].includes(state.name))state.name='';if(state.screen==='start')prefillFromNiho()}render();return}
+  const g=e.target.closest('[data-go]');if(g){e.preventDefault();go(g.dataset.go,g.dataset.anchor);return}
+  const kindR=e.target.closest('[data-kind]');if(kindR){state.kind=kindR.dataset.kind;if(Object.values(SAMPLE).some((x)=>x.name===state.name))state.name='';prefillFromNiho();render();return}
+  const planR=e.target.closest('[data-plan]');if(planR){state.plan=planR.dataset.plan;state.planConsent=state.plan==='managed';render();return}
+  const a=e.target.closest('[data-act]');if(!a)return;const act=a.dataset.act;
+  if(act==='reset'){const keep={scen:state.scen,kind:state.kind,width:state.width};state=Object.assign(initial(),keep);render();return}
+  if(act==='toggle-niho'){state.nihoFixed=!state.nihoFixed;render();return}
+  if(act==='fill-start'){fillStart();render();return}
+  if(act==='register'){state.registered=true;toast('登録しました。確認のメールを送りました');go('home');return}
+  if(act==='verify'){state.emailVerified=true;render();toast('メールアドレスを確認しました');return}
+  if(act==='logo'){state.logo=!state.logo;render();return}
+  if(act==='toggle-photo'){state.usePhoto=!state.usePhoto;render();return}
+  if(act==='fill-editor'){fillEditor();render();return}
+  if(act==='photo'){state.photos++;render();return}
+  if(act==='slots'){state.slots=true;render();toast('毎週土曜 10:00 の枠を追加しました');return}
+  if(act==='publish-page'){if(!pageReady())return;dialog('体験のページを公開しますか？',`<ul><li>✓ ページは検索や一覧に出て、だれでも見られます</li><li>✓ 見た人は、ホストに相談を送れます</li><li>・ 予約の受付は、受取口座などがそろってから始めます</li></ul>`,`<button type="button" class="btn primary" data-act="publish-page-ok">公開する</button>`);return}
+  if(act==='publish-page-ok'){state.pagePublished=true;closeDialog();toast('ページを公開しました');go('public');return}
+  if(act==='open-booking'){if(bookingBlockers().length)return;dialog('予約の受付を始めますか？',`<ul><li>✓ 体験のページ</li><li>✓ 売上の受け取り：${{independent:'自分で販売 10%',supported:'サポート 15%',managed:'おまかせ 20%'}[state.plan]}</li><li>✓ ${state.plan==='managed'?'事務局の承認':'受取口座 末尾 4321'}</li><li>✓ 販売者情報</li><li>✓ 開催枠：毎週土曜 10:00</li></ul><p class="small muted" style="margin-top:10px">始めると、公開ページに「日にちと人数を選ぶ」と販売者の行が出ます。</p>`,`<button type="button" class="btn primary" data-act="open-booking-ok">受付を始める</button>`);return}
+  if(act==='open-booking-ok'){state.bookingOpen=true;state.pagePublished=true;closeDialog();toast('予約の受付を始めました');go('public');return}
+  if(act==='plan-consent'){if(!$('#fc')?.checked){toast('条件への同意にチェックを入れてください');return}state.planConsent=true;render();return}
+  if(act==='stripe-done'){state.stripe='pending';go('payout');toast('Stripe から戻りました');return}
+  if(act==='stripe-ready'){state.stripe='ready';render();return}
+  if(act==='payout-consent'){if(!$('#pc')?.checked){toast('同意のチェックを入れてください');return}state.payoutConsent=true;render();toast('同意を記録しました');return}
+  if(act==='managed-request'){state.managed='requested';render();toast('おまかせを申し込みました');return}
+  if(act==='managed-approve'){state.managed='approved';render();return}
+  if(act==='seller-save'){state.sellerSaved=true;render();toast('販売者情報を保存しました');return}
+  if(act==='close'){closeDialog();return}
+});
+document.addEventListener('input',(e)=>{const f=e.target.dataset?.f;if(!f)return;state[f]=e.target.type==='checkbox'?e.target.checked:e.target.value;
+  if(state.screen==='start'){const btn=$('[data-act="register"]');const ok=state.name.trim()&&/.+@.+\..+/.test(state.email)&&state.terms;if(btn)btn.disabled=!ok;if(f==='name'){const pv=$('#preview');if(pv){const d=document.createElement('div');d.innerHTML=view.start().html;const np=d.querySelector('#preview');if(np)pv.innerHTML=np.innerHTML}}}
+  if(state.screen==='editor'&&e.target.tagName==='SELECT')render();});
+document.addEventListener('change',(e)=>{if(e.target.id==='jump'){go(e.target.value)}else if(e.target.dataset?.f&&state.screen==='editor'&&e.target.tagName!=='SELECT'){render()}});
+document.addEventListener('keydown',(e)=>{if(e.key==='Escape')closeDialog()});
+render();
+</script>
+</body>
+</html>
