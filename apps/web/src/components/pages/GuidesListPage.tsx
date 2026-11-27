@@ -25,7 +25,8 @@ export function GuidesListPage({ catalog, locale }: { catalog: GuideCatalog; loc
       <p className="mt-3 text-lg leading-relaxed text-ink-soft">{text.listDescription}</p>
     </header>
     {catalog.draftProblems.length ? <div className="mt-8 max-w-[46rem]"><GuideDraftProblems problems={catalog.draftProblems} /></div> : null}
-    <div className="mt-12 grid max-w-[46rem] gap-14">
+    {!catalog.guides.length && !catalog.draftProblems.length ? <p className="mt-8 max-w-[46rem] rounded-[18px] bg-sand px-5 py-8 text-center text-ink-soft">{text.listEmpty}</p> : null}
+    {catalog.guides.length ? <div className="mt-12 grid max-w-[46rem] gap-14">
       {catalog.source !== "static" ? categories.map((category) => {
         const guides = catalog.guides.filter((guide) => guide.category?.slug === category.slug);
         return <section key={category.slug} id={category.slug} aria-labelledby={`${category.slug}-heading`} className="scroll-mt-24">
@@ -44,7 +45,7 @@ export function GuidesListPage({ catalog, locale }: { catalog: GuideCatalog; loc
         <h2 id="unclassified-heading" className="mb-5 text-[2rem] sm:text-[2.375rem]">{text.unclassified}</h2>
         <GuideTeasers guides={unclassified} draftSlugs={catalog.draftSlugs} descriptions={false} locale={locale} />
       </section> : null}
-    </div>
+    </div> : null}
   </div>;
 }
 
