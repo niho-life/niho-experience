@@ -5,21 +5,59 @@ import { clearSessionCookie, noStoreJson, readHostSession, selectedHostApiClient
 import { accessTokenUsable, type ExperienceHostSession } from "@/lib/host/session";
 import { payoutConsentCurrent, readHostPayoutAccount } from "@/lib/experience/host-payout-account";
 import { experiencePublicationRepository } from "@/lib/experience/store-server";
+import { resolveProviderContext, type ProviderRole } from "@/lib/experience/provider-context";
 
 type Operation = "READ" | "EDIT" | "OWNER";
 const error = (code: string, status: number) => noStoreJson({ error: { code } }, status);
 /** How long a readiness snapshot stands (the store allows ten minutes at most). */
 const READINESS_VALIDITY_MS = 5 * 60 * 1000;
 
-export interface PublicationHostContext {
+/**
+ * Which roles each operation needs. Today every host experience API needs the OWNER (#703 changes no permission); the
+ * store checks the role again. The table is the one place a later stage widens an operation to EDITOR or COHOST.
+ */
+const OPERATION_ROLES: Readonly<Record<Operation, readonly ProviderRole[]>> = {
+  READ: ["OWNER"],
+  EDIT: ["OWNER"],
+  OWNER: ["OWNER"],
+};
+
+/**
+ * What an operation needs beyond membership (docs/host-publication.md):
+ * - `none`: the provider and role only. No seller, no Stripe, no readiness snapshot.
+ * - `seller`: also the provider's registered seller (SELLER_SETUP_REQUIRED without one). No Stripe.
+ * - `readiness`: also 受取口座 from Stripe and the payment consent, as a fresh readiness snapshot (the SalesContext).
+ */
+export type SalesNeed = "none" | "seller" | "readiness";
+
+type SellerProfile = ExperienceHostSellerProfile;
+type Readiness = ProviderPublicationReadinessInput;
+
+/** Provider and role: what every operation gets. */
+export interface HostBoundaryBase {
   readonly actor: HostActor;
-  readonly provider: ExperienceHostSellerProfile;
-  readonly readiness: ProviderPublicationReadinessInput;
+  readonly role: ProviderRole;
 }
 
-export type PublicationHostBoundaryResult =
-  | { readonly ok: true; readonly value: PublicationHostContext }
+/** The sale side of a provider: its seller and the current snapshot of 受取口座 and consent. */
+export interface SalesContext {
+  readonly provider: SellerProfile;
+  readonly readiness: Readiness;
+}
+
+export type PublicationHostContext<N extends SalesNeed = "readiness"> = HostBoundaryBase
+  & (N extends "readiness" ? SalesContext
+    : N extends "seller" ? { readonly provider: SellerProfile; readonly readiness: Readiness | null }
+      : { readonly provider: SellerProfile | null; readonly readiness: Readiness | null });
+
+export type PublicationHostBoundaryResult<N extends SalesNeed = "readiness"> =
+  | { readonly ok: true; readonly value: PublicationHostContext<N> }
   | { readonly ok: false; readonly response: Response };
+
+export interface PublicationHostBoundaryOptions {
+  /** The `?providerId=` hint of the request. Checked against the account's memberships, never trusted. */
+  readonly providerId?: string | null;
+}
 
 function endedSession(): Response {
   const response = error("SESSION_ENDED", 401);
@@ -31,20 +69,41 @@ type Repository = NonNullable<ReturnType<typeof experiencePublicationRepository>
 
 /**
  * An Experience host account (ADR 0003 slice 3): the person is the session's host account and NIHO is never called. The
- * seller is the one provider the account is the active OWNER of, with its seller registered for host accounts; the
- * payout account's readiness comes from Stripe directly and the payment consent from the OWNER's Experience consent at
- * the configured version. The snapshot stands five minutes, as on the NIHO path. A Stripe or consent read that fails
- * answers READINESS_UNAVAILABLE and first records a closed snapshot (Connect not ready, no consent), so an earlier
- * success is never used again, not even by an Admin proxy publication; an account Stripe does not show to the platform
- * is CONNECT_NOT_READY at publication.
+ * provider is resolved first, membership only (resolveProviderContext). Only an operation that needs the sale goes on:
+ * its seller is the one registered for host accounts, the payout account's readiness comes from Stripe directly and the
+ * payment consent from the OWNER's Experience consent at the configured version. The snapshot stands five minutes, as on
+ * the NIHO path. A Stripe or consent read that fails answers READINESS_UNAVAILABLE and first records a closed snapshot
+ * (Connect not ready, no consent), so an earlier success is never used again, not even by an Admin proxy publication;
+ * an account Stripe does not show to the platform is CONNECT_NOT_READY at publication.
  */
-async function experienceAccountBoundary(session: ExperienceHostSession, repository: Pick<Repository, "refreshReadiness">): Promise<PublicationHostBoundaryResult> {
-  const read = await readHostPayoutAccount(session.hostAccountId);
+async function experienceAccountBoundary(
+  session: ExperienceHostSession,
+  repository: Pick<Repository, "refreshReadiness" | "currentHostAccountSellerProfile">,
+  operation: Operation,
+  sales: SalesNeed,
+  requestedProviderId: string | null,
+): Promise<PublicationHostBoundaryResult<"none">> {
+  const resolved = await resolveProviderContext(session, requestedProviderId, OPERATION_ROLES[operation]);
+  if (!resolved.ok) return resolved;
+  const { actor, role } = resolved.value;
+  if (sales === "none") return { ok: true, value: { actor, role, provider: null, readiness: null } };
+
+  if (sales === "seller") {
+    let found: Awaited<ReturnType<typeof repository.currentHostAccountSellerProfile>>;
+    try { found = await repository.currentHostAccountSellerProfile(session.hostAccountId, actor.providerId); }
+    catch { return { ok: false, response: error("READINESS_UNAVAILABLE", 502) }; }
+    if (found.kind === "none") return { ok: false, response: error("FORBIDDEN", 403) };
+    if (found.kind === "ambiguous") return { ok: false, response: error("SELLER_PROFILE_AMBIGUOUS", 409) };
+    if (found.kind === "setup-required") return { ok: false, response: error("SELLER_SETUP_REQUIRED", 409) };
+    return { ok: true, value: { actor, role, provider: found.profile, readiness: null } };
+  }
+
+  const read = await readHostPayoutAccount(session.hostAccountId, undefined, actor.providerId);
   if (read.kind === "none") return { ok: false, response: error("FORBIDDEN", 403) };
   if (read.kind === "ambiguous") return { ok: false, response: error("SELLER_PROFILE_AMBIGUOUS", 409) };
   if (read.kind === "setup-required") return { ok: false, response: error("SELLER_SETUP_REQUIRED", 409) };
   if (read.kind === "unavailable") return { ok: false, response: error("READINESS_UNAVAILABLE", 502) };
-  const { actor, profile } = read;
+  const { profile } = read;
   const now = Date.now();
   const closed: ProviderPublicationReadinessInput = {
     accountUsable: read.hostAccountActive,
@@ -61,7 +120,7 @@ async function experienceAccountBoundary(session: ExperienceHostSession, reposit
     validUntilUtc: new Date(now + READINESS_VALIDITY_MS).toISOString(),
   };
   if (read.kind === "stripe-unavailable") {
-    try { await repository.refreshReadiness(actor, closed); } catch { /* The request fails closed either way. */ }
+    try { await repository.refreshReadiness(read.actor, closed); } catch { /* The request fails closed either way. */ }
     return { ok: false, response: error("READINESS_UNAVAILABLE", 502) };
   }
   const consent = payoutConsentCurrent(read.consent, profile, config.experiencePayoutAccountConsentVersion) ? read.consent : null;
@@ -72,7 +131,7 @@ async function experienceAccountBoundary(session: ExperienceHostSession, reposit
     paymentReuseConsentVersion: consent?.consentVersion ?? null,
     paymentReuseConsentedAtUtc: consent?.consentedAtUtc ?? null,
   };
-  return { ok: true, value: { actor, provider: profile, readiness } };
+  return { ok: true, value: { actor: read.actor, role, provider: profile, readiness } };
 }
 
 /**
@@ -81,7 +140,15 @@ async function experienceAccountBoundary(session: ExperienceHostSession, reposit
  * inferred from a legacy NIHO provider directory or its nihoUserId field. With Experience
  * host accounts the person comes from their session instead (experienceAccountBoundary).
  */
-export async function publicationHostBoundary(_operation: Operation): Promise<PublicationHostBoundaryResult> {
+export function publicationHostBoundary(operation: Operation, options?: PublicationHostBoundaryOptions & { readonly sales?: "readiness" }): Promise<PublicationHostBoundaryResult<"readiness">>;
+export function publicationHostBoundary(operation: Operation, options: PublicationHostBoundaryOptions & { readonly sales: "seller" }): Promise<PublicationHostBoundaryResult<"seller">>;
+export function publicationHostBoundary(operation: Operation, options: PublicationHostBoundaryOptions & { readonly sales: "none" }): Promise<PublicationHostBoundaryResult<"none">>;
+export async function publicationHostBoundary(
+  operation: Operation,
+  options: PublicationHostBoundaryOptions & { readonly sales?: SalesNeed } = {},
+): Promise<PublicationHostBoundaryResult<"none">> {
+  const sales: SalesNeed = options.sales ?? "readiness";
+  const requestedProviderId = options.providerId ?? null;
   if (!config.experienceHostPublicationApiEnabled) return { ok: false, response: error("NOT_FOUND", 404) };
   let session: Awaited<ReturnType<typeof readHostSession>>;
   try { session = await readHostSession(); }
@@ -91,7 +158,7 @@ export async function publicationHostBoundary(_operation: Operation): Promise<Pu
 
   const repository = experiencePublicationRepository();
   if (!repository) return { ok: false, response: error("READINESS_UNAVAILABLE", 502) };
-  if (session.kind === "experience") return experienceAccountBoundary(session, repository);
+  if (session.kind === "experience") return experienceAccountBoundary(session, repository, operation, sales, requestedProviderId);
 
   try {
     const client = await selectedHostApiClient(session);
@@ -120,6 +187,10 @@ export async function publicationHostBoundary(_operation: Operation): Promise<Pu
     if (resolved.kind === "ambiguous") return { ok: false, response: error("SELLER_PROFILE_AMBIGUOUS", 409) };
     if (resolved.kind === "setup-required") return { ok: false, response: error("SELLER_SETUP_REQUIRED", 409) };
     const provider = resolved.profile;
+    // The hint names this one provider or none (the NIHO person is the OWNER of exactly this seller).
+    if (requestedProviderId !== null && requestedProviderId !== provider.providerId && requestedProviderId !== provider.legacyProviderId) {
+      return { ok: false, response: error("FORBIDDEN", 403) };
+    }
 
     // The explicit NIHO account reference must agree with the authenticated person. A mapping
     // created for a different seller is never repaired by substituting another ID.
@@ -154,7 +225,8 @@ export async function publicationHostBoundary(_operation: Operation): Promise<Pu
       validUntilUtc: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     };
     const actor: HostActor = { providerId: provider.providerId, nihoUserId: identity.data.nihoUserId };
-    return { ok: true, value: { actor, provider, readiness } };
+    // The NIHO path always resolves the whole sale side, whatever the operation needs (behaviour unchanged).
+    return { ok: true, value: { actor, role: "OWNER", provider, readiness } };
   } catch {
     return { ok: false, response: error("READINESS_UNAVAILABLE", 502) };
   }

@@ -8,6 +8,9 @@ import {
 import { noStoreJson } from "@/lib/host/server";
 import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";
 import { publicationHostBoundary, publicationHostMutationAllowed } from "./publication-host-boundary";
+import { requestedProviderId } from "./provider-context";
+
+const INVALID_INPUT = { code: "INVALID_INPUT", status: 400 } as const;
 import { providerSellerDisclosureRepository } from "./store-server";
 
 export const SELLER_DISCLOSURE_CONSENT_VERSION = "seller-public-disclosure-v1";
@@ -48,16 +51,17 @@ function storeError(caught: unknown): Response {
   return error("UNAVAILABLE", 503);
 }
 
-async function prepared(operation: "READ" | "OWNER") {
-  const boundary = await publicationHostBoundary(operation);
+async function prepared(operation: "READ" | "OWNER", providerId: string | null) {
+  // The seller disclosure is the registered seller's: it needs the seller (SELLER_SETUP_REQUIRED without one) but no Stripe.
+  const boundary = await publicationHostBoundary(operation, { providerId, sales: "seller" });
   if (!boundary.ok) return boundary;
   const repository = providerSellerDisclosureRepository();
   return repository ? { ok: true as const, actor: boundary.value.actor, repository } : { ok: false as const, response: error("UNAVAILABLE", 503) };
 }
 
 export async function getSellerDisclosure(request: Request): Promise<Response> {
-  if (new URL(request.url).search) return error("INVALID_INPUT", 400);
-  const context = await prepared("READ");
+  const requested = requestedProviderId(request, INVALID_INPUT); if (!requested.ok) return requested.response;
+  const context = await prepared("READ", requested.providerId);
   if (!context.ok) return context.response;
   try {
     return noStoreJson({ seller: await context.repository.getForOwner(context.actor), consentVersion: SELLER_DISCLOSURE_CONSENT_VERSION });
@@ -66,7 +70,7 @@ export async function getSellerDisclosure(request: Request): Promise<Response> {
 
 export async function putSellerDisclosure(request: Request): Promise<Response> {
   if (!publicationHostMutationAllowed(request)) return error("FORBIDDEN", 403);
-  if (new URL(request.url).search) return error("INVALID_INPUT", 400);
+  const requested = requestedProviderId(request, INVALID_INPUT); if (!requested.ok) return requested.response;
   const body = await bodyOf(request);
   if (body instanceof Response) return body;
   if (!exactKeys(body, ["commandId", "expectedVersion", "disclosure"])) return error("INVALID_INPUT", 400);
@@ -74,7 +78,7 @@ export async function putSellerDisclosure(request: Request): Promise<Response> {
   if (body.expectedVersion !== null && (!Number.isSafeInteger(body.expectedVersion) || Number(body.expectedVersion) < 1)) return error("INVALID_INPUT", 400);
   const disclosure = disclosureOf(body.disclosure);
   if (!disclosure) return error("INVALID_INPUT", 400);
-  const context = await prepared("OWNER");
+  const context = await prepared("OWNER", requested.providerId);
   if (!context.ok) return context.response;
   try {
     const saved = await context.repository.save(context.actor, { commandId: body.commandId, expectedVersion: body.expectedVersion as number | null, disclosure });
@@ -84,13 +88,13 @@ export async function putSellerDisclosure(request: Request): Promise<Response> {
 
 export async function deleteSellerDisclosure(request: Request): Promise<Response> {
   if (!publicationHostMutationAllowed(request)) return error("FORBIDDEN", 403);
-  if (new URL(request.url).search) return error("INVALID_INPUT", 400);
+  const requested = requestedProviderId(request, INVALID_INPUT); if (!requested.ok) return requested.response;
   const body = await bodyOf(request);
   if (body instanceof Response) return body;
   if (!exactKeys(body, ["commandId", "expectedVersion"])) return error("INVALID_INPUT", 400);
   if (typeof body.commandId !== "string" || !UUID_V4.test(body.commandId)) return error("INVALID_INPUT", 400);
   if (!Number.isSafeInteger(body.expectedVersion) || Number(body.expectedVersion) < 1) return error("INVALID_INPUT", 400);
-  const context = await prepared("OWNER");
+  const context = await prepared("OWNER", requested.providerId);
   if (!context.ok) return context.response;
   try {
     const withdrawn = await context.repository.withdraw(context.actor, { commandId: body.commandId, expectedVersion: Number(body.expectedVersion) });

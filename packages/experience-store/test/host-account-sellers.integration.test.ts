@@ -292,6 +292,30 @@ describe("the seller a host account acts for", { skip }, () => {
       // OWNER of two providers (only by hand): ambiguous.
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-bare',$1,'OWNER')", [owner.nihoUserId]);
       assert.deepEqual(await publications.currentHostAccountSellerProfile(owner.nihoUserId), { kind: "ambiguous" });
+      // Naming the provider resolves exactly that OWNER provider, and a provider the account is not in is none.
+      assert.deepEqual(await publications.currentHostAccountSellerProfile(owner.nihoUserId, "provider-supper"), ready);
+      assert.deepEqual(await publications.currentHostAccountSellerProfile(owner.nihoUserId, "provider-niho"), { kind: "none" });
+    });
+  });
+
+  it("lists a host account's active memberships, all of them or the one named", async () => {
+    await withDb(async (pool) => {
+      const publications = new ExperiencePublicationRepository(pool);
+      const accounts = new HostAccounts(pool);
+      const { hostAccountId: nobody } = await accounts.provisionHostAccount({ email: "nobody-m@example.test", nowUtc: at() });
+      assert.deepEqual(await publications.listHostAccountMemberships(nobody), []);
+      await assert.rejects(() => publications.listHostAccountMemberships("niho-user-synthetic"), StoreValidationError);
+      await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-m1'),('provider-m2'),('provider-m3')");
+      const person = await hostOwner(pool, "provider-m1", "member@example.test");
+      await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ('provider-m2',$1,'EDITOR')", [person.nihoUserId]);
+      await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role,active) VALUES ('provider-m3',$1,'OWNER',false)", [person.nihoUserId]);
+      assert.deepEqual(await publications.listHostAccountMemberships(person.nihoUserId), [
+        { providerId: "provider-m1", role: "OWNER", accountActive: true },
+        { providerId: "provider-m2", role: "EDITOR", accountActive: true },
+      ]);
+      assert.deepEqual(await publications.listHostAccountMemberships(person.nihoUserId, "provider-m2"), [{ providerId: "provider-m2", role: "EDITOR", accountActive: true }]);
+      assert.deepEqual(await publications.listHostAccountMemberships(person.nihoUserId, "provider-m3"), []);
+      assert.deepEqual(await publications.listHostAccountMemberships(person.nihoUserId, "provider-nope"), []);
     });
   });
 });

@@ -11,6 +11,7 @@ import {
   providerSellerDisclosureRepository,
 } from "@/lib/experience/store-server";
 import { publicationHostBoundary, publicationHostMutationAllowed } from "@/lib/experience/publication-host-boundary";
+import { requestedProviderId } from "@/lib/experience/provider-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,7 @@ type Context = { params: Promise<{ productId: string }> };
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const VERSION = /^[\x21-\x7e]{1,160}$/;
 const BODY_LIMIT = 8 * 1024;
+const INVALID_INPUT = { code: "INVALID_INPUT", status: 400 } as const;
 
 function salesPlanDto(state: SalesPlanState | null) {
   if (!state) return null;
@@ -40,8 +42,9 @@ function failure(error: unknown): Response {
 }
 
 export async function GET(request: Request, context: Context): Promise<Response> {
-  if (new URL(request.url).search) return noStoreJson({ error: { code: "INVALID_INPUT" } }, 400);
-  const boundary = await publicationHostBoundary("OWNER"); if (!boundary.ok) return boundary.response;
+  const requested = requestedProviderId(request, INVALID_INPUT); if (!requested.ok) return requested.response;
+  // Reading the plan is the provider's own: membership only.
+  const boundary = await publicationHostBoundary("OWNER", { providerId: requested.providerId, sales: "none" }); if (!boundary.ok) return boundary.response;
   const repository = managedExperienceSalesRepository(); if (!repository) return noStoreJson({ error: { code: "UNAVAILABLE" } }, 503);
   try {
     const { productId } = await context.params;
@@ -51,8 +54,10 @@ export async function GET(request: Request, context: Context): Promise<Response>
 
 export async function POST(request: Request, context: Context): Promise<Response> {
   if (!publicationHostMutationAllowed(request)) return noStoreJson({ error: { code: "FORBIDDEN" } }, 403);
-  if (request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json" || new URL(request.url).search) return noStoreJson({ error: { code: "INVALID_INPUT" } }, 400);
-  const boundary = await publicationHostBoundary("OWNER"); if (!boundary.ok) return boundary.response;
+  if (request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") return noStoreJson({ error: { code: "INVALID_INPUT" } }, 400);
+  const requested = requestedProviderId(request, INVALID_INPUT); if (!requested.ok) return requested.response;
+  // Switching the plan is a sale: seller and a fresh 受取口座 readiness.
+  const boundary = await publicationHostBoundary("OWNER", { providerId: requested.providerId }); if (!boundary.ok) return boundary.response;
   if (!boundary.value.readiness.accountUsable || !boundary.value.readiness.connectReady
     || !boundary.value.readiness.paymentReuseConsentAccepted
     || boundary.value.readiness.stripeConnectAccountRef !== boundary.value.provider.stripeConnectAccountRef) {

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   read: vi.fn(), begin: vi.fn(), finalize: vi.fn(), disclosure: { method: "NATIVE" } as Record<string, unknown> | null,
 }));
 
+vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { siteUrl: "https://experience.example.test" } }));
 vi.mock("@/lib/host/server", () => ({ noStoreJson: (body: unknown, status = 200) => Response.json(body, { status }) }));
 vi.mock("@/lib/experience/publication-host-boundary", () => ({

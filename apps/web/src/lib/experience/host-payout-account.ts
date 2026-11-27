@@ -49,12 +49,12 @@ function defaultDeps(): HostPayoutAccountDeps {
   };
 }
 
-/** The payout account of the provider `hostAccountId` is the OWNER of. Throws only for a programming error. */
-export async function readHostPayoutAccount(hostAccountId: string, deps: HostPayoutAccountDeps = defaultDeps()): Promise<HostPayoutAccountRead> {
+/** The payout account of the provider `hostAccountId` is the OWNER of (`providerId`, or the only one). Throws only for a programming error. */
+export async function readHostPayoutAccount(hostAccountId: string, deps: HostPayoutAccountDeps = defaultDeps(), providerId?: string): Promise<HostPayoutAccountRead> {
   const { repository, consents, platformStripeKey } = deps;
   if (!repository || !consents || !platformStripeKey) return { kind: "unavailable" };
   let resolved: Awaited<ReturnType<typeof repository.currentHostAccountSellerProfile>>;
-  try { resolved = await repository.currentHostAccountSellerProfile(hostAccountId); }
+  try { resolved = providerId === undefined ? await repository.currentHostAccountSellerProfile(hostAccountId) : await repository.currentHostAccountSellerProfile(hostAccountId, providerId); }
   catch { return { kind: "unavailable" }; }
   if (resolved.kind !== "ready") return resolved;
   const { profile, hostAccountActive } = resolved;

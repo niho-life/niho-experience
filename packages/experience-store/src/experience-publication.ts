@@ -225,6 +225,14 @@ export interface ExperienceHostProviderMembership extends NihoMappedSellerProfil
   readonly memberRole: "OWNER" | "EDITOR";
 }
 
+/** One active membership of an Experience host account, as the host boundary needs it (no seller, no Stripe). */
+export interface HostAccountMembership {
+  readonly providerId: string;
+  readonly role: "OWNER" | "COHOST" | "EDITOR" | "VIEWER";
+  /** The account's status as read here. */
+  readonly accountActive: boolean;
+}
+
 export type HostAccountSellerProfileResolution =
   /** The host account is the active OWNER of no provider. */
   | { readonly kind: "none" }
@@ -1887,8 +1895,9 @@ export class ExperiencePublicationRepository {
    * with a seller mapped to NIHO instead, is setup-required: Admin/ops register it. `hostAccountActive` is the account's
    * status as read here. Reads the experience DB only: no NIHO and no Stripe.
    */
-  async currentHostAccountSellerProfile(hostAccountId: string): Promise<HostAccountSellerProfileResolution> {
+  async currentHostAccountSellerProfile(hostAccountId: string, onlyProviderId?: string): Promise<HostAccountSellerProfileResolution> {
     if (!isHostAccountId(hostAccountId)) throw new StoreValidationError("hostAccountId must be a host account ID.");
+    if (onlyProviderId !== undefined) assertStoreIdentifier(onlyProviderId, "providerId");
     const result = await this.#pool.query<DbRow>(
       `SELECT m.provider_id,a.status AS account_status,p.provider_id AS profile_provider_id,p.legacy_provider_id,
               p.provider_display_name,p.seller_niho_account_ref,p.stripe_connect_account_ref,p.seller_display_name
@@ -1896,8 +1905,9 @@ export class ExperiencePublicationRepository {
          JOIN host_accounts a ON a.id=m.niho_user_id
          LEFT JOIN experience_host_seller_profiles p ON p.provider_id=m.provider_id
         WHERE m.niho_user_id=$1 AND m.active=true AND m.role='OWNER'
+          AND ($2::text IS NULL OR m.provider_id=$2)
         ORDER BY m.provider_id COLLATE "C"`,
-      [hostAccountId],
+      [hostAccountId, onlyProviderId ?? null],
     );
     if (result.rows.length === 0) return { kind: "none" };
     if (result.rows.length !== 1) return { kind: "ambiguous" };
@@ -1918,6 +1928,29 @@ export class ExperiencePublicationRepository {
         sellerDisplayName: String(row.seller_display_name),
       },
     };
+  }
+
+  /**
+   * The active memberships of an Experience host account (all roles), or just the one in `providerId`. The host
+   * boundary checks the provider the request names against this on every request; it carries no seller and no
+   * Stripe data. Reads the experience DB only.
+   */
+  async listHostAccountMemberships(hostAccountId: string, providerId?: string): Promise<readonly HostAccountMembership[]> {
+    if (!isHostAccountId(hostAccountId)) throw new StoreValidationError("hostAccountId must be a host account ID.");
+    if (providerId !== undefined) assertStoreIdentifier(providerId, "providerId");
+    const result = await this.#pool.query<DbRow>(
+      `SELECT m.provider_id,m.role,a.status AS account_status
+         FROM provider_memberships m
+         JOIN host_accounts a ON a.id=m.niho_user_id
+        WHERE m.niho_user_id=$1 AND m.active=true AND ($2::text IS NULL OR m.provider_id=$2)
+        ORDER BY m.provider_id COLLATE "C"`,
+      [hostAccountId, providerId ?? null],
+    );
+    return result.rows.map((row) => ({
+      providerId: String(row.provider_id),
+      role: String(row.role) as HostAccountMembership["role"],
+      accountActive: row.account_status === "ACTIVE",
+    }));
   }
 
   /** Current owner-owned drafts; provider and payment references are never part of the host DTO. */
