@@ -12,7 +12,6 @@ export type HomeText = Readonly<{
   heroHeading?: ReactNode;
   heroHeadingClassName?: string;
   heroBody: ReactNode;
-  heroAction: Readonly<{ href: string; label: string }>;
   cardsEyebrow: string;
   cardsTitle: ReactNode;
   priceSuffix: string;
@@ -27,7 +26,6 @@ export type HomeText = Readonly<{
 export const HOME_TEXT: Readonly<Record<"en" | "ja", HomeText>> = {
   en: {
     heroBody: "Small experiences with people who live here, one hour from Tokyo.",
-    heroAction: { href: "/experiences", label: "See the experiences" },
     cardsEyebrow: "after the Great Buddha",
     cardsTitle: <>Spend a few hours with a <span className="squig">neighbor</span></>,
     priceSuffix: " / adult",
@@ -38,7 +36,6 @@ export const HOME_TEXT: Readonly<Record<"en" | "ja", HomeText>> = {
     heroHeadingClassName: "text-[2.375rem] leading-[1.2] [text-shadow:0_2px_18px_rgb(0_0_0/0.35)] lg:text-[4rem]",
     heroBody: <span className="[word-break:auto-phrase]">{JA_HOME_LEAD}</span>,
     heroAlt: "NIHOのリビングで、飲みものを手に話す街の人とゲスト",
-    heroAction: { href: "/ja/experiences", label: "体験をさがす" },
     cardsEyebrow: "our picks",
     cardsTitle: "おすすめの体験",
     // 日本語のカードの料金は `card.priceRich`（「/ 大人1名」つき）が描く。接尾辞を足すと二重になるので空にする。

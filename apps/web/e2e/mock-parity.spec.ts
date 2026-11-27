@@ -1,44 +1,21 @@
 import { expect, test } from "@playwright/test";
 
-// The owner-approved phone mock (2026-10-20): next dates on cards, the list's round search button,
-// and the booking page's two screens (date and party → details and checkout).
+// The owner-approved phone mock (2026-10-20): the booking page's two screens (date and party → details and checkout).
+// Its next dates on cards and its round search button were replaced by one card and the search bar (#698).
 
 const dinner = "/experiences/home-cooked-dinner-with-locals";
 
-test("cards show the next bookable dates once availability is read, on the home page and the list", async ({ page }) => {
+test("cards are the same on the home page and the list: no next dates, no weekday line, no 2-line lead", async ({ page }) => {
   for (const path of ["/", "/experiences"]) {
     await page.goto(path);
     const card = page.locator("main article").filter({ has: page.getByRole("link", { name: /Home-cooked dinner/ }) });
-    const dates = card.locator("[data-next-dates]");
-    await expect(dates, path).toContainText("Next");
-    const pills = dates.locator("span.rounded-full");
-    expect(await pills.count(), path).toBeGreaterThanOrEqual(1);
-    expect(await pills.count(), path).toBeLessThanOrEqual(3);
-    await expect(pills.first(), path).toHaveText(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}$/);
-    // Dates only: never the seats left.
+    await expect(card, path).toBeVisible();
+    await expect(card.locator("[data-next-dates]"), path).toHaveCount(0);
+    await expect(card, path).not.toContainText(/^Next|Next dates/);
+    await expect(card.locator(".line-clamp-2"), path).toHaveCount(0);
+    // Never the seats left.
     await expect(card, path).not.toContainText(/places? (currently )?(left|available)/);
   }
-});
-
-test("the list search opens from the round button, is a plain GET form, and stays open for a search word", async ({ page }) => {
-  await page.goto("/experiences");
-  const searchbox = page.getByRole("searchbox", { name: "Search experiences and hosts" });
-  await expect(searchbox).toBeHidden();
-  // A native <details>/<summary> with a GET form: it opens and submits without JavaScript.
-  const form = page.locator('form[role="search"]');
-  await expect(form).toHaveAttribute("method", "get");
-  await expect(form).toHaveAttribute("action", "/experiences");
-  await page.locator("summary").filter({ hasText: "Search" }).click();
-  await expect(searchbox).toBeVisible();
-  await searchbox.fill("pottery");
-  await searchbox.press("Enter");
-  await expect(page).toHaveURL(/\/experiences\?q=pottery/);
-  await expect(page.getByRole("link", { name: /evening pottery session/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: /home-cooked dinner/i })).toHaveCount(0);
-  // Arriving with a search word opens the search with the word in it.
-  await page.goto("/experiences?q=pottery");
-  await expect(page.getByRole("searchbox", { name: "Search experiences and hosts" })).toHaveValue("pottery");
-  await expect(page.getByRole("searchbox", { name: "Search experiences and hosts" })).toBeVisible();
 });
 
 test("the booking page keeps two screens: date and party first, then details and checkout", async ({ page }) => {

@@ -1,21 +1,22 @@
 import type { ReactNode } from "react";
+import type { ExperienceSiteTheme } from "@niho-experience/api-client";
 import type { ExperienceCategoryId } from "@niho-experience/experience-domain";
-import { CatalogueViewV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
+import type { StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
 import { BookingAssurance } from "@/components/BookingAssurance";
-import { CategoryChips } from "@/components/CategoryChips";
-import { ExperienceFiltersForm } from "@/components/ExperienceFiltersForm";
+import { CategoryTabs } from "@/components/CategoryTabs";
 import { ExperienceList } from "@/components/ExperienceList";
 import { EmptyResults } from "@/components/States";
 import type { BookingSources } from "@/lib/booking-source";
 import type { CardModel } from "@/lib/card-model";
 import type { DayOption } from "@/lib/date-filter";
-import { listHeading } from "@/lib/list-text";
+import { EXPERIENCE_SITE_THEMES, EXPERIENCE_THEME_LABELS } from "@/lib/filters";
+import { listHeading, listNote } from "@/lib/list-text";
 
 /**
  * The experience list, one component for both languages (#658): the English shape is the base; the words and the intended
- * differences come from `lib/list-text.tsx` and the nodes the page passes. Top to bottom: heading and description, the category
- * row (only when some category has an experience), the list with its date chips and search, how booking works, the reading
- * section (when there is one) and the consultation notice (Japanese only, when the inquiry is open).
+ * differences come from `lib/list-text.tsx` and the nodes the page passes (#698). Top to bottom: the search bar (sticky), the category
+ * tabs (only when some category has an experience), the heading row (a small h1 and the count), the cards, how booking works, the
+ * reading section (when there is one) and the consultation notice (Japanese only, when the inquiry is open).
  */
 export function ExperiencesPageView({
   locale, copy, cards, days, initialDate, initialGuests, searchQuery, category, categories, theme, themesEnabled = false,
@@ -32,8 +33,9 @@ export function ExperiencesPageView({
   category: ExperienceCategoryId | null;
   /** The categories to offer: the ones that have an experience on this list, plus the chosen one. */
   categories: readonly ExperienceCategoryId[];
-  /** The English mock's theme filter; the live lists have none. */
-  theme?: Parameters<typeof ExperienceFiltersForm>[0]["theme"];
+  /** The English mock's theme (the live lists have none): it only shapes the card links and the list's identity. */
+  theme?: ExperienceSiteTheme;
+  /** Offer the theme select beside the search bar (the mock API's 1.2 filter only). */
   themesEnabled?: boolean;
   catalogDateFiltered?: boolean;
   preview?: boolean;
@@ -43,29 +45,31 @@ export function ExperiencesPageView({
   readings?: ReactNode;
   consult?: ReactNode;
 }) {
-  const { heading, intro } = listHeading(locale, category);
+  const heading = listHeading(locale, category);
   const filtersActive = Boolean(searchQuery || theme || initialDate || initialGuests !== null || category);
-  const searchProps = { searchQuery, theme, date: initialDate ?? undefined, guests: initialGuests, category, filtersEnabled: themesEnabled, filtersActive };
+  const windowStart = days[0]?.key ?? "";
+  const windowEnd = days[days.length - 1]?.key ?? "";
   return <>
-    <CatalogueViewV1 copy={copy} heading={heading} intro={intro} content={<>
-      <CategoryChips locale={locale} categories={categories} selected={category} query={{ date: initialDate, guests: initialGuests, q: searchQuery }} />
-      <ExperienceList
-        key={JSON.stringify([searchQuery, theme, initialDate, initialGuests, category])}
-        cards={cards}
-        days={days}
-        initialDate={initialDate}
-        initialGuests={initialGuests}
-        browseContext={{ q: searchQuery || undefined, theme }}
-        catalogDateFiltered={catalogDateFiltered}
-        preview={preview}
-        bookingSources={bookingSources}
-        search={<ExperienceFiltersForm key="bar-search" {...searchProps} placement="bar" />}
-        inlineSearch={<ExperienceFiltersForm key="inline-search" {...searchProps} placement="inline" />}
-        columns="three"
-        dayChips="available"
-        empty={empty ?? <EmptyResults key="empty-results" clearHref={filtersActive ? (locale === "ja" ? "/ja/experiences" : "/experiences") : null} searchActive={Boolean(searchQuery)} />}
-      />
-    </>} />
+    <ExperienceList
+      key={JSON.stringify([searchQuery, theme, category])}
+      cards={cards}
+      initialDate={initialDate}
+      initialGuests={initialGuests}
+      initialQuery={searchQuery}
+      category={category}
+      heading={heading}
+      note={listNote(locale)}
+      themeFilter={themesEnabled ? { label: copy.text("catalogue.theme"), any: copy.text("catalogue.anyTheme"), selected: theme ?? "", options: EXPERIENCE_SITE_THEMES.map((value) => ({ value, label: EXPERIENCE_THEME_LABELS[value] })) } : undefined}
+      tabs={<CategoryTabs variant="list" locale={locale} categories={categories} selected={category} query={{ date: initialDate, guests: initialGuests, q: searchQuery }} />}
+      windowStart={windowStart}
+      windowEnd={windowEnd}
+      browseContext={{ q: searchQuery || undefined, theme }}
+      catalogDateFiltered={catalogDateFiltered}
+      preview={preview}
+      bookingSources={bookingSources}
+      columns="three"
+      empty={empty ?? <EmptyResults key="empty-results" clearHref={filtersActive ? (locale === "ja" ? "/ja/experiences" : "/experiences") : null} searchActive={Boolean(searchQuery)} />}
+    />
     <BookingAssurance locale={locale} />
     {readings}
     {consult}

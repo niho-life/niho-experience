@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { submitSearch } from "./support/search-bar";
 
 const dinner = "/experiences/home-cooked-dinner-with-locals";
 async function chooseFirstDate(page: Page) {
@@ -15,7 +16,7 @@ test("browse, review adult and child total, and reach browser-only mock checkout
   const requests: string[] = [];
   page.on("request", (request) => { if (request.method() === "POST") requests.push(request.url()); });
   await page.goto("/");
-  await page.getByRole("link", { name: "See the experiences" }).click();
+  await submitSearch(page);
   await expect(page).toHaveURL(/\/experiences$/);
   // The list's guest filter starts open; two adults carry on to the booking page.
   await page.goto("/experiences?guests=2");

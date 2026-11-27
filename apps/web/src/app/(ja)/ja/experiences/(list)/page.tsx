@@ -6,7 +6,7 @@ import { EmptyResults, StagingUnavailableState } from "@/components/States";
 import { JapaneseUnavailable } from "@/components/JapaneseUnavailable";
 import { config, isExperienceStaging } from "@/lib/config";
 import type { CardModel } from "@/lib/card-model";
-import { parseDateParam, parseGuestsParam, upcomingDays } from "@/lib/date-filter";
+import { parseDateParam, parseGuestsParam, SEARCH_DAYS, upcomingDays } from "@/lib/date-filter";
 import { categoryLabel, categoryLeadJa, filterByCategory, parseCategoryParam, resolveCategories } from "@/lib/experience-categories";
 import { japaneseListPublication } from "@/lib/experience-list-catalog";
 import { loadCategoryBySlug } from "@/lib/experience-categories-server";
@@ -19,9 +19,6 @@ import { getReviewSummaries } from "@/lib/journey";
 import { filterCardsByText } from "@/lib/list-text";
 import { getJapaneseCopy } from "@/lib/localized-content";
 import { withReviewLines } from "@/lib/reviews-ui";
-
-/** 日本語の一覧の日付のチップは英語と同じく2週間分（開催のある日だけが出る）。 */
-const FINDER_DAYS = 14;
 
 /**
  * 日本語の一覧の検索公開の方針 (#529, docs/product-classification.md): the list and a category's list are for search engines,
@@ -69,7 +66,7 @@ export default async function JapaneseExperiencesPage({ searchParams }: { search
   const cards = withReviewLines(plainCards, await getReviewSummaries(plainCards.map((card) => card.slug)), "ja");
   const bookingSources = await guestBookingSources(cards.map((card) => card.slug));
   const now = new Date();
-  const days = upcomingDays(now, FINDER_DAYS, "ja");
+  const days = upcomingDays(now, SEARCH_DAYS, "ja");
   const initialDate = parseDateParam(query.date, days);
   const initialGuests = parseGuestsParam(query.guests);
   const inquiryOpen = groupInquiryOpen();

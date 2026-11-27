@@ -4,11 +4,11 @@ import { PeopleBand } from "@/components/ja-home/JapaneseHomeSections";
 import { HomeJournal } from "@/components/HomeJournal";
 import { buttonClass } from "@/components/ui";
 import { HomePageView, type HomeRest } from "@/components/pages/HomePageView";
-import type { CardDatesSource } from "@/components/CardDates";
 import type { CardModel } from "@/lib/card-model";
 import { sitePublicationCard } from "@/lib/experience/site-card-model";
 import { listSitePublicExperiences } from "@/lib/experience/site-publications";
 import { guestBookingSources } from "@/lib/guest-booking-source";
+import { searchWindow } from "@/lib/date-filter";
 import { loadSiteCategories } from "@/lib/site-categories";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
 import { JA_HOME_FACES_LIMIT, pickFeaturedPerson } from "@/lib/ja-home";
@@ -40,7 +40,7 @@ const REST: HomeRest = {
 
 /**
  * 日本語のトップ（#563、#658）。英語のトップと同じ1つの部品で、文言と意図した差だけが違う（`lib/home-text.tsx`）。体験のカードは英語と同じ
- * `ExperienceCardV1`（次の開催日つき）。中身がまだ無いまとまり（載っている人が0人・公開中の記事が無い）は出さない。
+ * `ExperienceCardV1`（次の開催日はなし）。中身がまだ無いまとまり（載っている人が0人・公開中の記事が無い）は出さない。
  */
 export default async function JapaneseHome() {
   let copy: StaticCopyAccessorV1;
@@ -55,12 +55,13 @@ export default async function JapaneseHome() {
   } catch { return <JapaneseUnavailable />; }
   const [peopleOnPages, allGuides, categories] = await Promise.all([loadPeoplePages(), loadJapaneseGuides(), loadSiteCategories("ja")]);
   cards = withReviewLines(cards, await getReviewSummaries(cards.map((card) => card.slug)), "ja");
-  const cardDates: CardDatesSource = { kind: "read", preview: false, sources: await guestBookingSources(cards.map((card) => card.slug)) };
+  const searchDays = searchWindow(new Date());
+  const search = { windowStart: searchDays.start, windowEnd: searchDays.end, preview: false, bookingSources: await guestBookingSources(cards.map((card) => card.slug)) };
   const featured = pickFeaturedPerson(peopleOnPages);
   const journal = homeJournal(allGuides, { locale: "ja" });
   const journalNode = journal.items.length ? <HomeJournal journal={journal} locale="ja" allHref="/ja/guides" moreClassName={buttonClass("secondary")} /> : undefined;
   return <HomePageView
-    locale="ja" copy={copy} cards={cards} cardDates={cardDates} rest={REST}
+    locale="ja" copy={copy} cards={cards} search={search} rest={REST}
     people={featured ? <PeopleBand featured={featured} people={peopleOnPages} facesLimit={JA_HOME_FACES_LIMIT} /> : undefined}
     categories={categories} inquiry={groupInquiryOpen()}
     journal={journalNode}

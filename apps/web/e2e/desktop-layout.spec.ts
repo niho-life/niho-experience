@@ -29,12 +29,25 @@ async function expectAsideBar(page: Page, action: Locator) {
   expect(actionBox.width).toBeGreaterThan(barBox.width - 60);
 }
 
-test("list puts the guests pill and the day chips on one row", async ({ page }) => {
+test("list search is one pill: keyword, day, guests and the Search button on one row", async ({ page }) => {
   await page.goto("/experiences?guests=2");
-  const pill = await box(page.locator("label").filter({ has: page.locator("select", { has: page.locator("option", { hasText: "Any group size" }) }) }));
-  const chip = await box(page.getByRole("group", { name: "Date (Japan time)" }).getByRole("button").first());
-  expect(Math.abs(pill.y + pill.height / 2 - (chip.y + chip.height / 2))).toBeLessThanOrEqual(8);
-  expect(chip.x).toBeGreaterThan(pill.x + pill.width);
+  const search = page.getByRole("search", { name: "Find an experience" });
+  const keyword = await box(search.getByRole("searchbox"));
+  const when = await box(search.getByRole("button", { name: /^When/ }));
+  const guests = await box(search.getByRole("button", { name: /^Guests/ }));
+  const go = await box(search.getByRole("button", { name: "Search", exact: true }));
+  const centres = [keyword, when, guests, go].map((item) => item.y + item.height / 2);
+  expect(Math.max(...centres) - Math.min(...centres)).toBeLessThanOrEqual(8);
+  expect(when.x).toBeGreaterThan(keyword.x + keyword.width - 4);
+  expect(guests.x).toBeGreaterThan(when.x + when.width - 4);
+  expect(go.x).toBeGreaterThan(guests.x + guests.width - 4);
+  // Sticky under the 64px header, with the category tabs and a small heading below it.
+  await expect(search.locator("xpath=ancestor::div[contains(@class,'sticky')][1]")).toHaveCSS("top", "64px");
+  const barBox = await box(search);
+  const tabs = page.getByRole("navigation", { name: "Categories" });
+  // The mock catalog has no categories; where there are, the tabs sit under the bar and above the small heading.
+  if (await tabs.count()) expect((await box(tabs.first())).y).toBeGreaterThan(barBox.y + barBox.height);
+  expect((await box(page.getByRole("heading", { level: 1 }))).y).toBeGreaterThan(barBox.y + barBox.height);
 });
 
 test("detail shows the title before the photo mosaic", async ({ page }) => {

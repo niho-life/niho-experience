@@ -11,7 +11,7 @@ import { loadDetails } from "@/lib/catalog";
 import { getReviewSummaries } from "@/lib/journey";
 import { withReviewLines } from "@/lib/reviews-ui";
 import { config, isExperienceStaging, isPilotPreview, isPreview } from "@/lib/config";
-import { dayOption, parseDateParam, parseGuestsParam, upcomingDays } from "@/lib/date-filter";
+import { parseDateParam, parseGuestsParam, SEARCH_DAYS, upcomingDays } from "@/lib/date-filter";
 import { filterExperienceSummaries, matchesExperienceQuery, normalizeExperienceDate, normalizeExperienceQuery, normalizeExperienceTheme, type SearchParams } from "@/lib/filters";
 import { EXPERIENCE_LIST_DESCRIPTION, EXPERIENCE_LIST_TITLE, publicMetadata } from "@/lib/public-metadata";
 import { englishAlternates } from "@/lib/locale-metadata";
@@ -42,9 +42,6 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
  * is found only through its native card, so a search that found it before must still find it.
  */
 const NATIVE_REGION_NAME = "Kamakura";
-
-/** The home finder and the list's date chips both cover two weeks; the chips show only days with something on. A later date in the URL gets its own chip. */
-const FINDER_DAYS = 14;
 
 export default async function ExperiencesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = await searchParams;
@@ -80,13 +77,12 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   // Where each card's availability is read: NIHO, or this site for an experience sold here (#285).
   const bookingSources = await guestBookingSources(cards.map((card) => card.slug));
   const now = new Date();
-  const finderDays = upcomingDays(now, FINDER_DAYS);
+  // The search bar's calendar and the `date` query cover the same days (#698).
+  const days = upcomingDays(now, SEARCH_DAYS);
   const catalogDate = config.publicApiVersion === "1.2" ? normalizeExperienceDate(query.date) : undefined;
-  const initialDate = catalogDate ?? parseDateParam(query.date, finderDays);
+  const initialDate = catalogDate ?? parseDateParam(query.date, days);
   const date = config.publicApiVersion === "1.2" ? normalizeExperienceDate(query.date) : undefined;
   const initialGuests = parseGuestsParam(query.guests);
-  const days = upcomingDays(now, FINDER_DAYS);
-  if (initialDate && !days.some((day) => day.key === initialDate)) days.push(dayOption(initialDate));
 
   const readings = guideCatalogResult.guides.length ? (
     <section className="container-page pt-16 lg:pt-[88px]" aria-labelledby="catalogue-guides-heading">

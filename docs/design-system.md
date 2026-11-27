@@ -12,7 +12,7 @@
 - NIHO の自前の写真（`niho-*.jpg`）とホストの顔（`host-*.jpg`）を仮に使う（§6）。
 - 詳細の「Your host(s)」の切手の写真は photos[1]（無ければ表紙）。
 
-モックと意図して違えた点：カードの開催日・一覧の件数・予約の日程は実データ（ブラウザで読んだ availability）で示す。予約入力は既存の2画面（日時・人数 → 入力・確認）を保ち、日付と人数を自動で選ばない。
+モックと意図して違えた点：一覧の件数・予約の日程・検索バーの開催日の印は実データ（ブラウザで読んだ availability）で示す。予約入力は既存の2画面（日時・人数 → 入力・確認）を保ち、日付と人数を自動で選ばない。
 
 2026-10-21 に PC 版のデザインを足した（オーナー依頼「PC 版のデザインも対応して欲しい」。モック v3：<https://niho-experience-mock.pages.dev/>、v2 の 440px の枠を外したレスポンシブ版）。スマホの見た目は v2 のまま変えず、PC で組み替える（§2.3）。
 
@@ -79,7 +79,7 @@
 
 - スマホの組み方が基本。PC は Tailwind の `lg`（64rem = 1024px）から組み替える（モック v3 の 900px に当たる）。`sm`（40rem）〜`lg` 未満のタブレットは、余白と一部の列数だけ広げたスマホの組み方。
 - 予約入力の2画面だけは、画面幅ではなく部品自身の幅（container query `@4xl` = 56rem）で2列にする。公開文書の枠の中など狭い所に置かれたときは1列のまま。
-- PC の組み替え：ヘッダーに About と Help、トップの検索は1行のピル、一覧の人数と日付チップは1行、詳細はパンくず → タイトル → ページ幅の中のモザイク → 本文と右の予約カード、予約入力は左に step・右に要約カードと追従する合計のカード、提供者入口の流れは4列（§4）。
+- PC の組み替え：ヘッダーに About と Help、トップと一覧の検索バーは1行のピル（スマホは1本のボタン＋下からのシート）、詳細はパンくず → タイトル → ページ幅の中のモザイク → 本文と右の予約カード、予約入力は左に step・右に要約カードと追従する合計のカード、提供者入口の流れは4列（§4）。
 - 実装の注意：presentation の CSS（`@niho/experience-presentation/v1/styles.css`）は全規則が `@scope (.nexp-v1)` で包まれていて、同じ詳細度なら scope の近さで Web 側の規則に勝つ。`.nexp-v1` の中に置く Web 側の部品（トップの検索欄など）で、presentation の CSS にもある基本クラス（`relative`・`grid-cols-2`・`rounded-2xl` など）を `lg:` で上書きすると、PC の指定が負ける（2026-10-21、トップの検索欄が PC でも2段のままだった）。画面幅で変える値は `max-lg:` と `lg:` に分けて書き、基本クラスを持たせない。
 
 ## 3. 部品
@@ -95,7 +95,7 @@
 | 写真 | `Photo.tsx` | 比率固定でレイアウトのずれを防ぐ。`sizes` 指定。仮の写真にもタグを付けない（プレビューであることはフッターの1行で伝える） |
 | プレビュー表記 | `SiteChrome.tsx` `PreviewNote` | プレビュー（mock）だけ、フッター最下部に小さな1行（`role="note"`）。pilot は「schedules and prices are for review; availability is simulated · no real bookings」、合成は「hosts, dates and prices are invented · nothing can be booked」、どちらも契約版を添える。公開文書の共通枠（chrome）を使うときも同じ |
 | 顔 | `Face.tsx` | ホストの顔写真。無ければ頭文字の丸（leaf-pale 地＋moss 文字）。名前は必ず隣に書くので `aria-hidden` |
-| 体験カード | `ExperienceCard.tsx` `CardDates.tsx` | 表紙（4:5。一覧のスマホは 4:3）→ 左上に定員チップ（"Up to 8 guests" / 全商品が 2 人以上なら "Private · 2–4 guests"）→ 右下にはみ出すホストの顔（写真、無ければ頭文字）→ "with ホスト名"（いなければ提供者名。`lib/themes.ts` の上書きがあればその語）→ 題名 →（一覧だけ）2行のリード → 所要時間・言語の略記（レビューがあれば同じ行の末尾に "★ 4.9 · 12"。3 件未満は "2 reviews"。無ければ何も出さない）→ "Next" と次の開催日3つのピル（"Thu 22"）→ "¥X / adult"。開催日はブラウザで読んだ availability から作る（一覧は一覧の読み取り結果を共有、トップはカードが読む）。読めるまで・読めないときは開催曜日と時刻（JST）の要約を同じ1行の高さで出し、レイアウトを跳ねさせない。日付を選んだ一覧では "Sat 24 Oct · 6:00 PM" を強調。カード全体が1つのリンク。人気・残りわずか・レビュー・残席は出さない |
+| 体験カード | `ExperienceCard.tsx` | トップと一覧で同じ1種類（#698）。表紙（4:5。スマホも）→ 左上に定員チップ（"Up to 8 guests" / 全商品が 2 人以上なら "Private · 2–4 guests"）→ 右下にはみ出すホストの顔（写真、無ければ頭文字）→ "with ホスト名"（いなければ提供者名。`lib/themes.ts` の上書きがあればその語）→ 題名 → 所要時間・言語の略記（見た目用と読み上げ用が同じ文言なら1回だけ）（レビューがあれば同じ行の末尾に "★ 4.9 · 12"。3 件未満は "2 reviews"。無ければ何も出さない）→ "¥X / adult"。説明文・「次の日程」・開催曜日の行は出さない。日付を選んだ一覧だけ、その日の開始時刻を緑のピル（"Sat 24 Oct · 6:00 PM"）で出す。カード全体が1つのリンク。人気・残りわずか・レビュー・残席は出さない |
 | 動画 | `AmbientVideo.tsx` | muted・loop・playsInline・poster・`preload="metadata"`、`aria-hidden`。画面に入っている間だけ再生し、`prefers-reduced-motion: reduce` では再生しない（poster のまま）。LCP はヒーローの画像で、動画に依存しない |
 | 日時・人数選択 | `SlotPicker.tsx` | 画面1。サマリーカード → （商品が複数のときだけ）商品の選択 → 手書き "step 1" と "Choose a date"：2列の日付カード（ラジオは見えないが focus・読み上げ・キーボードで操作できる。満席・締切は理由付きで無効化。最初の6件＋"Show N more dates"）→ "step 2" と "Who's coming"：大人・子どもの行に −/+（中身は数値入力なので直接入力もできる）→ 下端の固定バーに合計・日付と Continue。詳細ページから渡された日付（`?date=&offer=`）は予約可能なときだけ選択済みにする |
 | 予約フォーム | `BookingForm.tsx` | 画面2。同じサマリーカード → "step 3" と "Your details"（`.fld` の見た目の入力欄、申込時の質問）→ "step 4" と "Check and pay"（承認制は "Check and send"）：日付・人数・内訳・合計の行カード、取消・受付方式・Stripe と販売者の注記（アイコン付き）、規約リンクと同意 → 下端の固定バーに合計と送信ボタン。ラベル・説明・エラーを近接。失敗しても入力を保持 |
@@ -124,14 +124,14 @@
 
 2026-10-29 にオーナー承認のモック A（<https://niho-experience-top-mock.pages.dev/a-journal-grid.html>）の構成に変えた（オーナー判断「体験が最優先。体験を先に出して、その下に記事も。記事は今後たくさん増えるので、サムネイル画像とセットで一覧できるように」）。presentation の `HomeViewModelV1.layout: "journal"` で組む。
 
-上から：ヘッダー → ヒーロー（検索とテーマの行は置かない。検索が下端に重ならないので、高さは 560px / PC 680px、文字は下寄せ、PC の見出しは2行、#646）→ 掲載中カテゴリのチップと「すべての体験」→ 体験カード（ホスト募集カードは混ぜない）→ 予約の流れ（カードの直下）→ 街のリビング（相談受付中の日本語トップは団体・相談カードと横並び）→ 街の人 → 記事（Kamakura Journal）→ ホスト募集の帯と登録済みホストのログイン → フッター。
+上から：ヘッダー → ヒーロー（下端に検索バーが重なる。#698。ヒーローのボタンは置かない。高さは 460px / PC 560px）→ 掲載中カテゴリのアイコンの行（「すべて」＋各カテゴリー、中央揃え。リンク）→ 体験カード（ホスト募集カードは混ぜない）→ 予約の流れ（カードの直下）→ 街のリビング（相談受付中の日本語トップは団体・相談カードと横並び）→ 街の人 → 記事（Kamakura Journal）→ ホスト募集の帯と登録済みホストのログイン → フッター。
 
 特集・動画の帯・ホスト紹介・数字・絵はがきは `HomeViewV1` の classic 構成向けに残る。公開中の英語・日本語トップはどちらも `HomePageView` から `layout: "journal"` を渡す。
 
 | 節 | 内容 |
 | --- | --- |
 | ヘッダー | 白。ロゴ。md（48rem）以上は Experiences · Journal（記事のページがあるときだけ）· About · Help と For hosts の行（現在のページは淡い面と `aria-current="page"`）、右端に言語ボタン。ログイン中は For hosts が Host dashboard になる。md 未満は行に Experiences だけ、言語ボタン、丸いメニューボタン（`SiteMenu.tsx`。`<details>` なので JS なしで開閉し、JS があればページ移動・Escape・外側クリックで閉じる）。メニューは全幅のパネルで、見出しつきの4〜5グループに分ける |
-| ヒーロー（#646） | 写真が主役。NIHO 自前の写真3枚（`lib/site-media.ts` の `HERO_PHOTO` ＝リビングの交流が下地・priority、`HOME_HERO_SLIDES` ＝一緒に料理する様子とテーブル。後の2枚は lazy・装飾）が21秒周期で重なりを入れ替える（`HomeHeroSlides.tsx`、`globals.css` の `hero-fade-2/3`）。**動きは不透明度のクロスフェードだけ**（拡大・移動は使わない。コマ単位のがたつきが見えるため）。`prefers-reduced-motion: reduce` では動かず下地の1枚だけ。見出し・リード・ボタンは `HOME_TEXT` の locale 別文言。日本語も同じ `HomeViewV1` と写真の切替を使い、`/ja/experiences` へ進む。検索（日付・人数）とテーマの行は両方に置かない（presentation は `finder: null`・`themes: []`、`heroMedia` / `heroBody` / `heroAction` で差し込む）。 |
+| ヒーロー（#646） | 写真が主役。NIHO 自前の写真3枚（`lib/site-media.ts` の `HERO_PHOTO` ＝リビングの交流が下地・priority、`HOME_HERO_SLIDES` ＝一緒に料理する様子とテーブル。後の2枚は lazy・装飾）が21秒周期で重なりを入れ替える（`HomeHeroSlides.tsx`、`globals.css` の `hero-fade-2/3`）。**動きは不透明度のクロスフェードだけ**（拡大・移動は使わない。コマ単位のがたつきが見えるため）。`prefers-reduced-motion: reduce` では動かず下地の1枚だけ。見出し・リードは `HOME_TEXT` の locale 別文言。日本語も同じ `HomeViewV1` と写真の切替を使う。写真の下端に重ねる検索バー（`HomeSearchBar.tsx`＝一覧と同じ `ExperienceSearchBar` の navigate モード。presentation の `finder` に差し込み、PC は下端 -38px の中央のピル、スマホは1本のボタン）で日にち・人数・キーワードを選び、「さがす」で `/experiences`（日本語は `/ja/experiences`）へ `q`・`date`・`guests` を付けて移る。日にちの印は、日付の選択（またはスマホのシート）を初めて開いたときに、ページの全カードの availability を読んで付ける（開くまで何も読まない）。カテゴリーの行は `afterHero`、テーマの行は置かない（`themes: []`）。 |
 | テーマ（classic 構成のみ） | 英語トップ（journal）には出さない。classic 構成では掲載中の体験から作る（空のテーマを作らない）。slug を明示した編集用の表でアイコンと短いラベルを決める（`lib/themes.ts`：Cook & eat / Roast coffee / Sit zazen / Mend a bowl / Write kanji）。題名からは推測しない（#36）。各テーマはその体験の詳細へ |
 | カード | 手書き "after the Great Buddha"、h2 "Spend a few hours with a *neighbor*"（neighbor に波線。`cardsTitle`。classic 構成は従来の "N to choose from" / "Experiences hosted by neighbors"）、See all。スマホは横スクロールの snap、PC は3列。最後に "Your experience here?"（`/host` へ） |
 | 特集 | コミュニティディナーの slug が掲載中なら編集用の内容（`lib/themes.ts` の `FEATURED_STORY`）：データの曜日・時刻の手書き（"Tue, Thu & Sat · 6 PM"）、h2 "One long table, eight guests and a few neighbors"、本文、"See the dinner"、NIHO の自前の写真5枚のモザイク。掲載されていなければ写真が5枚以上ある最初の体験（題名、リード、"See details"、その写真） |
@@ -149,13 +149,16 @@
 
 ### 一覧（`/experiences`）
 
-- 手書き "small groups · local hosts"、h1 "Experiences in Kamakura"、円・税込・JST の補足。
-- ヘッダーの下に固定する絞り込み：上の行に人数のピル（Any group size／1〜8）、下の行に Any day と、今日から14日のうち開催のある日だけの日付チップ（曜日＋日、JST。人数を変えると出る日も変わる。読み込み中は Any day だけ（選択中の日があればそれも）。選択中の日は件数0でも残し、サーバーが日付で絞った場合は Any day と選択中の日だけ。無効のチップは作らない。15日目以降の日付が来たらそのチップを足す）。チップの行の右端に小さな丸い検索ボタン（虫眼鏡）。PC は人数のピルと日付チップを1行に並べ、間を細い線で区切る。
-- 検索（`q`。API 1.2 ではテーマも）は `<details>/<summary>` の中の GET フォームで、押すと入力欄がチップの下に開く。JS なしでも開閉・送信できる。`q`（やテーマ）が URL にあるときは開いた状態で語を表示する。0件や日程を読めないときは同じ検索を独立した行に出す。
-- 日付・人数の絞り込みはブラウザから各体験の availability を1回ずつ読み、その日に予約可能で残席 ≥ 人数、かつ商品の1組の上限 ≥ 人数の開催回がある体験だけを出す（`lib/date-filter.ts`）。残席数そのものは表示しない。読込後はチップの下に件数（英語版の日付チップは開催のある日だけ。日本語版は従来どおり全日を出し、0件の日は無効）。読込中は控えめな文言、失敗したら絞り込みを出さず全件と短い案内。
+- 上から：検索バー（ヘッダーの下に固定。`ExperienceSearchBar.tsx`）→ カテゴリーのタブ（`CategoryTabs.tsx`）→ 見出しの行 → カード → 予約の安心 → 読みもの。手書きの小見出し・eyebrow・説明文は置かない（#698。日英とも同じ構成）。
+- 検索バー（#698）：PC は1本のピル「キーワード｜日にち｜人数｜さがす」（英語は What / When / Guests / Search）。各区画は小さなラベルと現在の値（「いつでも」「指定なし」。選んだ値は苔色で、小さな丸い × で外せる）。日にちは押すと月のカレンダー（体験詳細の `BookingCalendar` と同じ見た目。`ExperienceSearchCalendar.tsx`）、人数は −／＋ の 1〜8名と「指定なし」。ポップオーバーは `aria-expanded`/`aria-controls` を持ち、Esc と外側のクリックで閉じて trigger に focus が戻る。スマホ幅（`sm` 未満）は1本のボタン（「体験をさがす」＋「いつでも · 人数指定なし」）で、押すと下から `<dialog>`（`showModal()`）のシートが開く。中はキーワード・カレンダー・人数、足元に「すべてクリア」と「n件の体験を見る」。本物の GET フォーム（`q`・`date`・`guests`・選択中の `category`）で、JS が無くても一覧へ移れる。
+- カレンダー：今日から60日（`SEARCH_DAYS`。URL の `date` も同じ範囲）。開催のある日は淡い緑・太字、選んだ日は緑＋苔色の枠（黒は使わない）、ほかの日は薄く押せない。日ごとの件数は出さない。「いつでも」で外す。開催日を読めないときは窓の中のどの日も選べて印は付かない（fail open）。体験詳細・予約の `BookingCalendar` の選んだ日も同じ緑にした（選択中の色に黒は使わない）。
+- 日にち・人数は選んだ時点で絞り込んで URL に反映（`router.push`、スクロールなし）。キーワードは「さがす」（送信）で反映する。API 1.2（mock）ではテーマの select を検索バーの下に出し、選ぶと反映する。
+- カテゴリーのタブ：手描きの線のアイコンの下に文字（`CategoryIcon`。「すべて」は4つの四角）。リンクだけで JS なしでも動き、`date`・`guests`・`q` を保つ。選択中は苔色の文字・苔色の下線・淡い緑のアイコン面（`aria-current="page"`）。スマホは横にスクロール。
+- 見出しの行：小さな h1（「すべての体験」／"All experiences"、カテゴリーを選ぶとその名前）と右に件数（`role="status"`。日にちを選ぶと「12月5日（土）：4件（2名）」／"4 experiences on Sat 5 Dec for 2 guests"。開催を確認している間はその旨）。英語だけ件数の横に小さく "Prices in yen, tax included · Times in Japan time"（英語の読者向けの意図した差。`lib/list-text.tsx`）。0件と開催日を読めなかった案内（「もう一度」ボタン付き）は見出しの下に出し、検索バーは上に残る。
+- 日付・人数の絞り込みはブラウザから各体験の availability を1回ずつ読み（`lib/use-card-availability.ts`）、その日に予約可能で残席 ≥ 人数、かつ商品の1組の上限 ≥ 人数の開催回がある体験だけを出す（`lib/date-filter.ts`）。残席数そのものは表示しない。読込中は控えめな文言、失敗したら絞り込みを出さず全件と短い案内。
 - URL の `date`・`guests` を読み、変更は `router.push`（スクロールなし）で同期する。`date` 付きの URL は noindex（canonical は `/experiences`）。
 - 0件と通信失敗はそれぞれ行動できる表示にする（検索を消す、Any day に戻す、人数を減らす、再試行）。
-- リード文は "Hosted by people who live here, one hour from Tokyo."。カードの下に1行の安心表示（`BookingAssurance.tsx`。"Book as a guest"・"Pay by card in yen"・"Confirmation by email" をアイコン付きで、右端（md から）に "Questions before you book" → `/help`）。その下のガイド枠は手書き "plan your day"、h2 "From the Journal"、リンク "See all"（`/guides`）。
+- カードの下に1行の安心表示（`BookingAssurance.tsx`。"Book as a guest"・"Pay by card in yen"・"Confirmation by email" をアイコン付きで、右端（md から）に "Questions before you book" → `/help`）。その下のガイド枠は手書き "plan your day"、h2 "From the Journal"、リンク "See all"（`/guides`）。
 
 ### 詳細（`/experiences/[slug]`）
 
@@ -300,7 +303,7 @@
 
 ## 7. アクセシビリティ
 
-- 360px・320px で横スクロールなし、主操作が画面内（E2E で検証）。PC の組み替え（検索の1行・詳細の順・予約の2列・一覧の1行・提供者の4列）はデスクトップ（1280px）の E2E で検証する。横スクロールの列（カード・動画・絵はがき・ギャラリー・日付チップ）は列の中だけで動く。
+- 360px・320px で横スクロールなし、主操作が画面内（E2E で検証）。PC の組み替え（検索バーの1行・詳細の順・予約の2列・提供者の4列）はデスクトップ（1280px）の E2E で検証する。横スクロールの列（カード・動画・絵はがき・ギャラリー・カテゴリーのタブ）は列の中だけで動く。
 - キーボード：Skip link、全操作に focus 表示（moss の 3px 枠）。スクロールする列は focus できる。写真の一覧は `<dialog>` で Esc で閉じる。
 - 状態は色だけでなくアイコンと文言で伝える。エラーは `role="alert"` と focus 移動。
 - 画像はすべて代替文。装飾（手描きアイコン、スタンプ、動画、モザイク、顔）は `aria-hidden` か空の代替文で、意味は隣の文字が持つ。言語の略記（"EN · JA"）は読み上げ用に元の表記を持つ。

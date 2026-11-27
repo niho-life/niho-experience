@@ -1,27 +1,28 @@
 import type { ExperienceCategoryId } from "@niho-experience/experience-domain";
-import { categoryLabel, categoryLeadJa, type SiteLocale } from "./experience-categories";
+import { categoryLabel, type SiteLocale } from "./experience-categories";
 
 /**
- * The list's words and the few intended differences between the English and the Japanese list (#658, owner decision
- * 2026-11-25: one component for both languages; the English shape is the base). The heading and the description follow the
- * chosen category; everything the shared `ExperiencesPageView` does not read from the interface copy is here.
+ * The list's words and the one intended difference between the English and the Japanese list (#658, owner decision
+ * 2026-11-25: one component for both languages; #698: the eyebrow and the intro sentence are gone). The h1 is small: 「すべての体験」 /
+ * "All experiences", or the chosen category's name. Everything the shared `ExperiencesPageView` does not read from the interface
+ * copy is here.
  */
 const TEXT = {
-  en: {
-    heading: "Kamakura experiences with local hosts",
-    intro: "Hosted by people who live here, one hour from Tokyo.",
-  },
-  ja: {
-    heading: "すべての体験",
-    intro: "鎌倉・逗子・葉山の人と活動に、会いにいく。料金は日本円、時刻は日本時間です。",
-  },
+  en: { heading: "All experiences", note: "Prices in yen, tax included · Times in Japan time" },
+  // Japanese readers are told the yen and Japan time in the cards and the booking steps; the list keeps only the count.
+  ja: { heading: "すべての体験", note: null },
 } as const;
 
-export function listHeading(locale: SiteLocale, category: ExperienceCategoryId | null): { heading: string; intro: string } {
-  const base = TEXT[locale];
-  if (!category) return { heading: base.heading, intro: base.intro };
-  // English: the category's name as the heading, the same description. Japanese: its name and its own one-line description.
-  return { heading: categoryLabel(category, locale), intro: locale === "ja" ? categoryLeadJa(category) : base.intro };
+export function listHeading(locale: SiteLocale, category: ExperienceCategoryId | null): string {
+  return category ? categoryLabel(category, locale) : TEXT[locale].heading;
+}
+
+/**
+ * A small note beside the count. The one intended en/ja difference of the list (#698): English readers are told once that prices
+ * are in yen with tax and times are Japan time; the Japanese page says only the count.
+ */
+export function listNote(locale: SiteLocale): string | null {
+  return TEXT[locale].note;
 }
 
 /** Search over the Japanese card's own text: the title, the lead and who it is with. Every word must match. */

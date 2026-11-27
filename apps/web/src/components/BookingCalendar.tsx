@@ -78,7 +78,7 @@ export function BookingCalendar({ occurrences, value, offerId, onChange, noteOf,
           if (!day) return <span key={`blank-${position}`} aria-hidden="true" />;
           const pressed = day.state === "bookable" && day.date === value;
           const look = pressed
-            ? "bg-ink font-extrabold text-white"
+            ? "bg-leaf font-extrabold text-ink ring-2 ring-inset ring-moss"
             : day.state === "bookable"
               ? "cursor-pointer bg-leaf-pale font-extrabold text-ink hover:bg-leaf"
               : day.state === "unavailable" ? "text-muted line-through" : "text-muted opacity-50";

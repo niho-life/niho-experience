@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/image", () => ({ default: () => null }));
-vi.mock("next/navigation", () => ({ usePathname: () => "/", useSearchParams: () => new URLSearchParams() }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/", useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: () => undefined }) }));
 
 import { EN_STATIC_COPY_V1 } from "@niho/experience-presentation/v1";
 import type { CardModel } from "@/lib/card-model";
@@ -19,15 +19,15 @@ const card = (slug: string, title: string): CardModel => ({
   durationLabel: "2 hr", language: null, scheduleLabel: "Sat · 10:00 AM", priceLabel: "¥3,000", priceIsFrom: false, offers: [],
 });
 const marker = (id: string) => createElement("section", { id }, id);
-const cardDates = { kind: "read" as const, preview: false, sources: { nihoWebOrigin: "https://niho.example.test", siteOrigin: null, siteSlugs: [], closedSlugs: [] } };
+const search = { windowStart: "2026-11-28", windowEnd: "2027-01-26", preview: false, bookingSources: { nihoWebOrigin: "https://niho.example.test", siteOrigin: null, siteSlugs: [], closedSlugs: [] } };
 
 function en(cards: CardModel[], extra: Record<string, unknown> = {}) {
-  return renderToStaticMarkup(createElement(HomePageView, { locale: "en", copy: EN_STATIC_COPY_V1, cards, cardDates, rest, ...extra }));
+  return renderToStaticMarkup(createElement(HomePageView, { locale: "en", copy: EN_STATIC_COPY_V1, cards, search, rest, ...extra }));
 }
 function ja(cards: CardModel[], extra: Record<string, unknown> = {}) {
   const copy = localJapaneseCopy();
   const { values } = copy;
-  return renderToStaticMarkup(createElement(SiteLocaleProvider, { locale: "ja", values } as never, createElement(HomePageView, { locale: "ja", copy, cards, cardDates, rest, ...extra })));
+  return renderToStaticMarkup(createElement(SiteLocaleProvider, { locale: "ja", values } as never, createElement(HomePageView, { locale: "ja", copy, cards, search, rest, ...extra })));
 }
 
 const ORDER = ["<h1", 'id="home-cards-v1"', "home-booking-steps", 'id="home-living-room"', 'id="people-x"', 'id="journal-x"', 'id="host-band-heading-v1"'];
@@ -47,8 +47,14 @@ describe("HomePageView（#658）：日英で1つの部品", () => {
     const html = ja(cards, slots);
     expect(html).toMatch(/<h1 class="text-\[2\.375rem\][^"]*">鎌倉の人に、<br\/>会いにいく。<span class="hand mt-1 block[^"]*text-leaf[^"]*">meet the town<\/span><\/h1>/);
     expect(html).toContain("書家と筆をとる。寺で坐る。");
-    expect(html).toContain('href="/ja/experiences"');
+    // The hero button is gone: the search bar (a real GET form to the list) overlaps the hero instead (#698).
+    expect(html).toContain('role="search"');
+    expect(html).toContain('action="/ja/experiences"');
     expect(html).toContain("体験をさがす");
+    expect(html).toContain("キーワード");
+    expect(html).toContain("いつでも");
+    expect(html).toContain("人数指定なし");
+    expect(html).toContain("さがす</button>");
     expect(html).toContain("our picks");
     expect(html).toContain("おすすめの体験");
     expect(html).toContain("街のリビング、NIHO");
@@ -60,8 +66,9 @@ describe("HomePageView（#658）：日英で1つの部品", () => {
     // 料金の「/ 大人1名」は二重にならない
     expect(html.match(/大人1名/g)).toHaveLength(2);
     expect(html).toContain("<article");
-    expect(html.match(/data-next-dates|class="mt-3 h-7 overflow-hidden"/g)).toHaveLength(2);
-    for (const gone of ["See the experiences", "Spend a few hours", "NIHO, the town", "role=\"search\"", "なにをする", "シーンからさがす", "aria-label=\"カテゴリー\"", "take a walk", "pick your day"]) expect(html).not.toContain(gone);
+    // No "next dates" and no weekday line on the card (#698); the card is the same one the list uses.
+    expect(html).not.toMatch(/data-next-dates|class="mt-3 h-7 overflow-hidden"|Sat · 10:00 AM/);
+    for (const gone of ["See the experiences", "Spend a few hours", "NIHO, the town", "なにをする", "シーンからさがす", "aria-label=\"カテゴリー\"", "take a walk", "pick your day"]) expect(html).not.toContain(gone);
   });
 
   it("相談のカードは日本語で相談受付中のときに街のリビングと並び、企業・学校と体験相談に進める", () => {
@@ -86,12 +93,44 @@ describe("HomePageView（#658）：日英で1つの部品", () => {
     }
   });
 
+  it("検索バーはヒーローの下端に重なり、日英で同じ部品（言葉だけが違う）", () => {
+    const e = en(cards);
+    const j = ja(cards);
+    for (const html of [e, j]) {
+      expect(html.match(/role="search"/g)).toHaveLength(1);
+      expect(html.indexOf('role="search"')).toBeGreaterThan(html.indexOf("</h1>"));
+      expect(html.indexOf('role="search"')).toBeLessThan(html.indexOf('id="home-cards-v1"'));
+      expect(html).toContain("lg:bottom-[-38px]");
+      expect(html).toContain('name="q"');
+      expect(html).not.toContain('name="date"');
+    }
+    expect(e).toContain(">What<");
+    expect(e).toContain(">Guests<");
+    expect(j).toContain(">日にち<");
+    expect(j).toContain(">人数<");
+  });
+
+  it("カテゴリーの行は手描きアイコンの付いたリンク（すべて＋掲載中のカテゴリー）で、カテゴリーが無ければ出ない", () => {
+    for (const [render, prefix, all] of [[en, "", "All"], [ja, "/ja", "すべて"]] as const) {
+      const html = render(cards, { categories: ["food", "walk"] });
+      expect(html).toContain(`href="${prefix}/experiences"`);
+      expect(html).toMatch(new RegExp(`href="${prefix}/experiences\\?category=walk"[^>]*><span[^>]*><svg`));
+      expect(html).toContain(`>${all}</a>`);
+      expect(html).not.toContain("rounded-full border border-line-strong px-4");
+      expect(render(cards, { categories: [] })).not.toContain("aria-label=\"Categories\"");
+    }
+  });
+
   it("英語：いままでの文言のまま", () => {
     const html = en(cards);
     expect(html).toContain("after the Great Buddha");
     expect(html).toContain('Spend a few hours with a <span class="squig">neighbor</span>');
     expect(html).toContain("Small experiences with people who live here, one hour from Tokyo.");
-    expect(html).toContain("See the experiences");
+    expect(html).not.toContain("See the experiences");
+    expect(html).toContain('role="search"');
+    expect(html).toContain('action="/experiences"');
+    expect(html).toContain("Find an experience");
+    expect(html).toContain("Any day · Any group");
     expect(html).toContain('href="/experiences/a"');
     expect(html).toContain("NIHO, the town’s living room");
     expect(html).not.toContain("meet the town");

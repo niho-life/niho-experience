@@ -4,24 +4,22 @@ import { ExperienceCardV1, InviteCardV1, type ExperienceCardModelV1 } from "@nih
 import type { CardModel } from "@/lib/card-model";
 import { browseHref, type BrowseContext } from "@/lib/browse-context";
 import { imageAlt } from "@/lib/experience-copy";
-import { CardDates, type CardDatesSource } from "./CardDates";
 import { PRESENTATION_PRIMITIVES_V1 } from "./PresentationV1";
 import { localeHref, useSiteCopy, useSiteLocale } from "./SiteLocale";
 
 export type CardOptions = {
-  /** List page: 2-line lead and a 4:3 cover on phones. */
-  variant?: "home" | "list";
   priority?: boolean;
-  /** Where the next dates come from (the list's own read, or a read by the card). Without it the weekday summary shows. */
-  dates?: CardDatesSource;
   /** "Sat 24 Oct · 6:00 PM" when a date is chosen on the list. */
   highlight?: string | null;
   browseContext?: Partial<BrowseContext>;
   offerId?: string;
 };
 
-/** One whole-card link (the title's link covers the card). No popularity, scarcity or review claims. */
-export function ExperienceCard({ card, variant = "home", priority = false, dates = { kind: "given", occurrences: null }, highlight = null, browseContext = {}, offerId }: { card: CardModel } & CardOptions) {
+/**
+ * One whole-card link (the title's link covers the card), the same card on the home and the list (#698): no lead, no "next dates".
+ * No popularity, scarcity or review claims. `dates` is an empty fragment on purpose: the package falls back to the weekday line when it is nullish.
+ */
+export function ExperienceCard({ card, priority = false, highlight = null, browseContext = {}, offerId }: { card: CardModel } & CardOptions) {
   const { copy, locale } = useSiteLocale();
   const model: ExperienceCardModelV1 = {
     ...card,
@@ -30,7 +28,7 @@ export function ExperienceCard({ card, variant = "home", priority = false, dates
     face: { ...card.face, image: card.face.image ? { src: card.face.image.url, alt: "" } : null },
     priceSuffix: ` ${copy.text("common.perAdult")}`,
   };
-  return <ExperienceCardV1 card={model} variant={variant} priority={priority} highlight={highlight} dates={<CardDates slug={card.slug} scheduleLabel={card.scheduleLabel} source={dates} />} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} />;
+  return <ExperienceCardV1 card={model} priority={priority} highlight={highlight} dates={<></>} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} />;
 }
 
 /** Closing card on the home carousel: an invitation to host, not a listing. */

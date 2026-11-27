@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { EN_STATIC_COPY_V1, type AssetBindingsV1, type DisplayImageV1, type DisplayVideoV1, type HomeViewModelV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
 import { ErrorState } from "@/components/States";
 import { HomePageView, type HomeRest } from "@/components/pages/HomePageView";
-import type { CardDatesSource } from "@/components/CardDates";
 import { guestBookingSources } from "@/lib/guest-booking-source";
 import { getApi, listExperiencesForSite } from "@/lib/api";
 import { buildCardModels, cardFaceOf, type CardModel, type Face } from "@/lib/card-model";
@@ -27,6 +26,7 @@ import { englishAlternates } from "@/lib/locale-metadata";
 import { getPublicSiteAnalyticsSettings } from "@/lib/public-site-analytics";
 import { listSitePublicExperiences } from "@/lib/experience/site-publications";
 import { sitePublicationCard } from "@/lib/experience/site-card-model";
+import { searchWindow } from "@/lib/date-filter";
 import { loadSiteCategories } from "@/lib/site-categories";
 import { withoutNativeSlugs } from "@/lib/experience/dedupe-slugs";
 
@@ -120,11 +120,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<Sea
   const mergedCards = [...withoutNativeSlugs(legacyCards, nativeCards.map((card) => card.slug)), ...nativeCards];
   const cards = withReviewLines(mergedCards, await getReviewSummaries(mergedCards.map((card) => card.slug)));
   const listed = summaries.map((summary) => details.get(summary.slug)).filter((detail): detail is ExperienceDetailForSite => Boolean(detail));
-  const cardDates: CardDatesSource = { kind: "read", preview: isPreview, sources: await guestBookingSources(cards.map((card) => card.slug)) };
+  const searchDays = searchWindow(new Date());
+  const search = { windowStart: searchDays.start, windowEnd: searchDays.end, preview: isPreview, bookingSources: await guestBookingSources(cards.map((card) => card.slug)) };
   const journal = homeJournal(guideCatalogResult.guides, { draftSlugs: guideCatalogResult.draftSlugs });
   const guideEntry = journal.items.length ? <HomeJournal journal={journal} allHref={hasGuidesPage(guideCatalogResult) ? "/guides" : null} moreClassName={buttonClass("secondary")} /> : undefined;
   return <>
     <JsonLd data={siteJsonLd(config.siteUrl, SITE_NAME, LISTING_NAME)} />
-    <HomePageView locale="en" copy={EN_STATIC_COPY_V1} cards={cards} cardDates={cardDates} rest={homeRest(summaries, cards, listed, EN_STATIC_COPY_V1, null)} journal={guideEntry} categories={await loadSiteCategories("en")} />
+    <HomePageView locale="en" copy={EN_STATIC_COPY_V1} cards={cards} search={search} rest={homeRest(summaries, cards, listed, EN_STATIC_COPY_V1, null)} journal={guideEntry} categories={await loadSiteCategories("en")} />
   </>;
 }
