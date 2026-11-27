@@ -104,21 +104,42 @@ export function nextBookableDays(occurrences: readonly Occurrence[], limit: numb
   return selected;
 }
 
+/** The search bar's calendar offers this many days, today included (JST); the list's `date` query accepts the same range. */
+export const SEARCH_DAYS = 60;
+
+/** First and last day (JST) of the search window, as `YYYY-MM-DD`. */
+export function searchWindow(now: Date, days = SEARCH_DAYS): { start: string; end: string } {
+  const window = upcomingDays(now, days);
+  return { start: window[0]!.key, end: window[window.length - 1]!.key };
+}
+
+/** Every day of the search window, from `start` to `end` inclusive. */
+export function windowDayKeys(start: string, end: string): string[] {
+  const keys: string[] = [];
+  const [y, m, d] = start.split("-").map(Number) as [number, number, number];
+  for (let offset = 0; offset < 400; offset += 1) {
+    const date = new Date(Date.UTC(y, m - 1, d + offset));
+    const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+    if (key > end) break;
+    keys.push(key);
+  }
+  return keys;
+}
+
 /**
- * Which day chips the list shows. "all" keeps every day (empty days are disabled by the caller).
- * "available" shows only days with something on: while loading or when the server already
- * filtered by date, just the selected day; otherwise days with a count above 0 plus the selected day.
+ * The days of the window with something on for this party: at least one experience has a bookable session that fits.
+ * Returns null while availability is unknown (not read yet, or failed), so every day stays selectable and unmarked.
  */
-export function visibleDayChips({ mode, days, counts, selected, failed, catalogDateFiltered }: {
-  mode: "all" | "available";
-  days: readonly DayOption[];
-  /** Per-day counts once availability has loaded; null while loading. */
-  counts: ReadonlyMap<string, number> | null;
-  selected: string | null;
-  failed: boolean;
-  catalogDateFiltered: boolean;
-}): DayOption[] {
-  if (mode === "all" || failed) return [...days];
-  if (catalogDateFiltered || !counts) return days.filter((day) => day.key === selected);
-  return days.filter((day) => day.key === selected || (counts.get(day.key) ?? 0) > 0);
+export function availableDays(
+  cards: readonly { readonly slug: string; readonly offers: readonly CardOffer[] }[],
+  bySlug: ReadonlyMap<string, readonly Occurrence[]> | null,
+  days: readonly string[],
+  guests: number | null,
+): Set<string> | null {
+  if (!bySlug) return null;
+  const found = new Set<string>();
+  for (const day of days) {
+    if (cards.some((card) => matchingOccurrence(bySlug.get(card.slug) ?? [], card.offers, day, guests))) found.add(day);
+  }
+  return found;
 }

@@ -1,15 +1,18 @@
 import { expect, test } from "@playwright/test";
+import { bar, chooseFirstMarkedDay, isPhone } from "./support/search-bar";
 
 const dinner = "/experiences/home-cooked-dinner-with-locals";
 
-test("search conditions survive applying filters, detail, booking and the way back", async ({ page }) => {
+test("search conditions survive the search bar, detail, booking and the way back", async ({ page }) => {
   await page.goto("/experiences?q=dinner&theme=FOOD&guests=1");
-  const days = page.getByRole("group", { name: "Date (Japan time)" });
-  await days.getByRole("button", { name: /, 1 experience$/ }).first().click();
+  // A day with something on for this search and party, chosen in the search bar's calendar (#698).
+  await chooseFirstMarkedDay(page);
   await expect(page).toHaveURL(/[?&]date=\d{4}-\d{2}-\d{2}/);
   const date = new URL(page.url()).searchParams.get("date")!;
-  await page.getByRole("button", { name: "Apply filters" }).click();
-  await expect(page.getByRole("combobox", { name: /Guests/ })).toHaveValue("1");
+  await expect(page).toHaveURL(/[?&]q=dinner/);
+  await expect(page).toHaveURL(/[?&]theme=FOOD/);
+  await expect(page).toHaveURL(/[?&]guests=1/);
+  await expect(bar(page)).toContainText("1 guest");
   await page.getByRole("link", { name: /home-cooked dinner/i }).click();
   expect(new URL(page.url()).searchParams.get("date")).toBe(date);
   expect(new URL(page.url()).searchParams.get("guests")).toBe("1");
@@ -18,9 +21,11 @@ test("search conditions survive applying filters, detail, booking and the way ba
   await expect(page.locator(`input[name="occurrence"][value="${date}"]`)).toBeChecked();
   await page.goBack();
   await page.locator('a[aria-label="All experiences"]:visible, nav[aria-label="Breadcrumb"] a:visible').click();
-  await expect(page.getByRole("searchbox", { name: "Search experiences and hosts" })).toHaveValue("dinner");
+  // The keyword field is the pill's on a wide screen; on a phone it is in the sheet, so read the address there.
+  if (isPhone(page)) expect(new URL(page.url()).searchParams.get("q")).toBe("dinner");
+  else await expect(bar(page).getByRole("searchbox")).toHaveValue("dinner");
   await expect(page.getByLabel("Theme")).toHaveValue("FOOD");
-  await expect(page.getByRole("combobox", { name: /Guests/ })).toHaveValue("1");
+  await expect(bar(page)).toContainText("1 guest");
   expect(new URL(page.url()).searchParams.get("date")).toBe(date);
 });
 

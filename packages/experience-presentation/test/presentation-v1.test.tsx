@@ -325,7 +325,10 @@ describe("v1 portable presentation", () => {
       "apps/web/src/app/(site)/page.tsx": ["HomePageView"],
       "apps/web/src/components/pages/HomePageView.tsx": ["HomeViewV1"],
       "apps/web/src/app/(site)/experiences/(list)/page.tsx": ["ExperiencesPageView"],
-      "apps/web/src/components/pages/ExperiencesPageView.tsx": ["CatalogueViewV1"],
+      // #698: the list's frame (search bar, tabs, small heading) is the site's own; its cards stay on v1.
+      "apps/web/src/components/pages/ExperiencesPageView.tsx": ["ExperienceList"],
+      "apps/web/src/components/ExperienceList.tsx": ["ExperienceCard"],
+      "apps/web/src/components/ExperienceCard.tsx": ["ExperienceCardV1"],
       "apps/web/src/app/(site)/experiences/[slug]/page.tsx": ['ExperiencePageContent({ ...props, locale: "en" })'],
       "apps/web/src/components/pages/ExperiencePageContent.tsx": ["DetailViewV1"],
       "apps/web/src/app/(site)/experiences/[slug]/book/page.tsx": ['BookingPageContent({ ...props, locale: "en" })'],

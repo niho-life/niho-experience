@@ -1,9 +1,10 @@
 import type { ExperienceCategoryId } from "@niho-experience/experience-domain";
 import type { ReactNode } from "react";
 import { HomeViewV1, type DisplayImageV1, type ExperienceCardModelV1, type HomeViewModelV1, type StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
-import { CardDates, type CardDatesSource } from "@/components/CardDates";
+import { CategoryTabs } from "@/components/CategoryTabs";
 import { HomeHeroSlides } from "@/components/HomeHeroSlides";
 import { HomeLivingRoom } from "@/components/HomeLivingRoom";
+import { HomeSearchBar } from "@/components/HomeSearchBar";
 import { PRESENTATION_PRIMITIVES_V1 } from "@/components/PresentationV1";
 import { EmptyResults } from "@/components/States";
 import { LocalizedLink } from "@/components/LocalizedLink";
@@ -12,7 +13,8 @@ import type { CardModel, Face } from "@/lib/card-model";
 import type { PublicImageForSite } from "@/lib/experience-types";
 import { imageAlt } from "@/lib/experience-copy";
 import { HOME_TEXT } from "@/lib/home-text";
-import { experienceNavLinks, siteNavigation } from "@/lib/site-nav";
+import type { BookingSources } from "@/lib/booking-source";
+import { siteNavigation } from "@/lib/site-nav";
 import { pickHomeExperiences } from "@/lib/home";
 
 /** What the English and the Japanese home both pass that this view does not own (the journal layout draws none of it, but the model type needs it). */
@@ -27,14 +29,15 @@ function cardModel(card: CardModel, locale: "en" | "ja", priceSuffix: string): E
 
 /**
  * The home, one component for both languages (#658): the English shape is the base; the words and the intended differences come from
- * `HOME_TEXT`. Sections, top to bottom: hero, the experience cards (at most six, in the order picked), the three booking steps,
+ * `HOME_TEXT`. Sections, top to bottom: hero with the search bar over its bottom edge (#698), the category row, the experience cards (at most six, in the order picked), the three booking steps,
  * the living room (next to group inquiries when open), 街の人 (when there are people), the journal (when there are guides), the host band.
  */
-export function HomePageView({ locale, copy, cards, cardDates, rest, journal, people, categories = [], inquiry = false }: {
+export function HomePageView({ locale, copy, cards, search, rest, journal, people, categories = [], inquiry = false }: {
   locale: "en" | "ja";
   copy: StaticCopyAccessorV1;
   cards: readonly CardModel[];
-  cardDates: CardDatesSource;
+  /** What the search bar needs: the days its calendar offers and where each card's availability is read (only once the day picker opens). */
+  search: { windowStart: string; windowEnd: string; preview: boolean; bookingSources: BookingSources };
   rest: HomeRest;
   journal?: ReactNode;
   people?: ReactNode;
@@ -43,7 +46,6 @@ export function HomePageView({ locale, copy, cards, cardDates, rest, journal, pe
 }) {
   const text = HOME_TEXT[locale];
   const { groups, hostLogin } = siteNavigation(locale, { inquiry });
-  const explore = experienceNavLinks(locale, categories);
   const groupCard = groups && text.groupCard;
   const shown = pickHomeExperiences(cards);
   const model: HomeViewModelV1 = {
@@ -53,19 +55,16 @@ export function HomePageView({ locale, copy, cards, cardDates, rest, journal, pe
     heroHeading: text.heroHeading,
     heroHeadingClassName: text.heroHeadingClassName,
     heroBody: text.heroBody,
-    heroAction: <ButtonLink href={text.heroAction.href}>{text.heroAction.label}</ButtonLink>,
-    finder: null,
-    afterHero: <nav aria-label={explore.label} className="container-page pt-5 lg:pt-8">
-      <ul className="flex flex-wrap gap-2">
-        {explore.links.map((link) => <li key={link.href}><LocalizedLink href={link.href} className="inline-flex min-h-10 items-center rounded-full border border-line-strong px-4 text-sm hover:bg-sand">{link.label}</LocalizedLink></li>)}
-      </ul>
-    </nav>,
+    // The search bar overlaps the hero's bottom edge (the package then keeps the hero at the height meant for an overlapping finder); the old hero button is gone.
+    finder: <HomeSearchBar locale={locale} cards={cards.map((card) => ({ slug: card.slug, offers: card.offers }))} {...search} />,
+    afterHero: <CategoryTabs variant="home" locale={locale} categories={categories} />,
     hideHostInvite: true,
     hostBandExtraAction: <p className="text-sm text-ink-soft">{text.registeredHost} <LocalizedLink href={hostLogin.href} className="font-bold underline underline-offset-4">{hostLogin.label}</LocalizedLink></p>,
     themes: [],
     cardsEyebrow: shown.length ? text.cardsEyebrow : undefined,
     cardsTitle: text.cardsTitle,
-    cards: shown.map((card) => ({ model: cardModel(card, locale, text.priceSuffix), dates: <CardDates slug={card.slug} scheduleLabel={card.scheduleLabel} source={cardDates} /> })),
+    // `dates` is an empty fragment on purpose: the package falls back to the weekday line when it is nullish, and the home shows no "next dates" (#698).
+    cards: shown.map((card) => ({ model: cardModel(card, locale, text.priceSuffix), dates: <></> })),
     empty: <EmptyResults clearHref={null} />,
     afterCards: <>
       {groups && groupCard ? <div className="container-page mt-14 grid gap-4 md:grid-cols-2 lg:mt-[88px]">

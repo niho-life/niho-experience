@@ -1,4 +1,4 @@
-import { createElement, isValidElement, type ReactElement } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -6,10 +6,9 @@ const state = vi.hoisted(() => ({ isExperienceStaging: false, siteCatalogUnavail
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { apiMode: "http", publicApiVersion: "1.2", siteUrl: "https://experience.example.test" }, isPreview: false, isPilotPreview: false, get isExperienceStaging() { return state.isExperienceStaging; } }));
-vi.mock("@niho/experience-presentation/v1", () => ({ EN_STATIC_COPY_V1: { text: (key: string) => key }, CatalogueViewV1: ({ content }: { content: ReactElement }) => createElement("div", null, content) }));
+vi.mock("@niho/experience-presentation/v1", () => ({ EN_STATIC_COPY_V1: { text: (key: string) => key } }));
 vi.mock("@/components/Analytics", () => ({ TrackView: () => null }));
 vi.mock("@/components/ExperienceList", () => ({ ExperienceList: vi.fn(() => null) }));
-vi.mock("@/components/ExperienceFiltersForm", () => ({ ExperienceFiltersForm: () => null }));
 vi.mock("@/components/States", () => ({ EmptyResults: () => null, ErrorState: () => null, StagingUnavailableState: () => createElement("div", null, "stg unavailable notice") }));
 vi.mock("@/components/GuideBlocks", () => ({ GuideTeasers: () => null }));
 vi.mock("@/components/BookingAssurance", () => ({ BookingAssurance: () => createElement("p", null, "booking assurance") }));
@@ -28,6 +27,7 @@ vi.mock("@/lib/experience/site-publications", () => ({ listSitePublicExperiences
 vi.mock("@/lib/experience/site-card-model", () => ({ sitePublicationCard: (item: { publication: { slug: string; publicTitle: string } }) => ({ slug: item.publication.slug, title: item.publication.publicTitle }) }));
 
 import { ExperienceList } from "@/components/ExperienceList";
+import { SEARCH_DAYS, windowDayKeys } from "@/lib/date-filter";
 import ExperiencesPage from "./page";
 
 beforeEach(() => {
@@ -41,14 +41,12 @@ it("keeps native products visible for a former theme URL and does not offer an u
   const props = vi.mocked(ExperienceList).mock.calls[0]?.[0];
   expect(props?.cards.map((card) => card.slug)).toEqual(["native-card"]);
   expect(props?.browseContext?.theme).toBeUndefined();
-  expect(isValidElement(props?.search)).toBe(true);
-  const search = props?.search as ReactElement<Record<string, unknown>>;
-  expect(search.props.filtersEnabled).toBe(false);
   // Native catalogs are not filtered by date server-side; keep the existing availability check active.
   expect(props?.catalogDateFiltered).toBe(false);
-  expect(props?.dayChips).toBe("available");
-  // Two weeks of days, as the home finder offers, plus a chip for the URL date outside that window.
-  expect(props?.days).toHaveLength(15);
+  // The search bar offers the same SEARCH_DAYS days that the `date` query accepts, and there is no theme filter any more.
+  expect(windowDayKeys(props!.windowStart, props!.windowEnd)).toHaveLength(SEARCH_DAYS);
+  expect(props?.heading).toBe("All experiences");
+  expect(props?.note).toBe("Prices in yen, tax included · Times in Japan time");
 });
 
 it("shows the staging pause notice when the public catalog database is unavailable", async () => {

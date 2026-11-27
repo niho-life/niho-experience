@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Occurrence } from "@niho-experience/api-client";
-import { dayOption, fitsPartySize, jstToday, matchingOccurrence, nextBookable, parseDateParam, parseGuestsParam, upcomingDays, visibleDayChips } from "./date-filter";
+import { dayOption, fitsPartySize, jstToday, matchingOccurrence, nextBookable, parseDateParam, parseGuestsParam, upcomingDays, SEARCH_DAYS, searchWindow, windowDayKeys, availableDays } from "./date-filter";
 
 const occurrence = (overrides: Partial<Occurrence>): Occurrence => ({
   offerId: "offer_a",
@@ -93,28 +93,29 @@ describe("matching a party to a day", () => {
   });
 });
 
-describe("visibleDayChips", () => {
-  const days = upcomingDays(new Date("2026-10-24T00:00:00Z"), 4);
-  const [d0, d1, d2, d3] = days.map((day) => day.key) as [string, string, string, string];
-  const base = { days, selected: null, failed: false, catalogDateFiltered: false } as const;
-  const counts = new Map([[d0, 0], [d1, 2], [d2, 0], [d3, 1]]);
-  const keys = (list: { key: string }[]) => list.map((day) => day.key);
+describe("the search window (#698)", () => {
+  it("offers SEARCH_DAYS days from today in Japan, and the date query accepts the same range", () => {
+    const now = new Date("2026-11-28T15:30:00Z"); // already the 29th in Japan
+    const { start, end } = searchWindow(now);
+    expect(start).toBe("2026-11-29");
+    expect(end).toBe("2027-01-27");
+    const days = upcomingDays(now, SEARCH_DAYS);
+    expect(days).toHaveLength(60);
+    expect(windowDayKeys(start, end)).toEqual(days.map((day) => day.key));
+    expect(parseDateParam("2027-01-27", days)).toBe("2027-01-27");
+    expect(parseDateParam("2027-01-28", days)).toBeNull();
+  });
 
-  it('"all" mode returns every day', () => {
-    expect(keys(visibleDayChips({ ...base, mode: "all", counts }))).toEqual([d0, d1, d2, d3]);
-    expect(keys(visibleDayChips({ ...base, mode: "all", counts: null }))).toEqual([d0, d1, d2, d3]);
-  });
-  it("shows no days while loading, only the selected one", () => {
-    expect(visibleDayChips({ ...base, mode: "available", counts: null })).toEqual([]);
-    expect(keys(visibleDayChips({ ...base, mode: "available", counts: null, selected: d2 }))).toEqual([d2]);
-  });
-  it("shows only days with something on once loaded, in order", () => {
-    expect(keys(visibleDayChips({ ...base, mode: "available", counts }))).toEqual([d1, d3]);
-  });
-  it("keeps a selected day whose count is 0", () => {
-    expect(keys(visibleDayChips({ ...base, mode: "available", counts, selected: d2 }))).toEqual([d1, d2, d3]);
-  });
-  it("shows only the selected day when the server filtered by date", () => {
-    expect(keys(visibleDayChips({ ...base, mode: "available", counts, selected: d1, catalogDateFiltered: true }))).toEqual([d1]);
+  it("marks only the days with something on for this party, and nothing while availability is unknown", () => {
+    const offers = [{ id: "offer_a", minimumParticipants: 1, maxPartySize: 4 }];
+    const cards = [{ slug: "a", offers }, { slug: "b", offers }];
+    const keys = ["2026-10-23", "2026-10-24", "2026-10-25"];
+    const bySlug = new Map([
+      ["a", [occurrence({ date: "2026-10-24", seatsLeft: 2 })]],
+      ["b", [occurrence({ date: "2026-10-25", bookable: false, reason: "FULL", seatsLeft: 0 })]],
+    ]);
+    expect([...availableDays(cards, bySlug, keys, null)!]).toEqual(["2026-10-24"]);
+    expect(availableDays(cards, bySlug, keys, 3)!.size).toBe(0);
+    expect(availableDays(cards, null, keys, null)).toBeNull();
   });
 });
