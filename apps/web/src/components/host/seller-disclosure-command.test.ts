@@ -19,13 +19,19 @@ const disclosure = {
 describe("seller disclosure client command", () => {
   it("reuses the exact command id and wire payload after an unknown result", () => {
     const first = beginSellerCommand(null, "PUT", { expectedVersion: null, disclosure: { method: "NATIVE", publicAddress: "Synthetic address" } }, () => "11111111-1111-4111-8111-111111111111");
-    const retry = beginSellerCommand(first.command, "PUT", { expectedVersion: null, disclosure: { method: "EXTERNAL", publicAddress: "Changed address" } }, () => "22222222-2222-4222-8222-222222222222");
+    const retry = beginSellerCommand(first.command, "PUT", { expectedVersion: null, disclosure: { method: "NATIVE", publicAddress: "Changed address" } }, () => "22222222-2222-4222-8222-222222222222");
     expect(first.created).toBe(true);
     expect(retry.created).toBe(false);
     expect(retry.command).toBe(first.command);
     expect(retry.command.serializedBody).toBe(first.command.serializedBody);
     expect(retry.command.serializedBody).toContain("11111111-1111-4111-8111-111111111111");
     expect(retry.command.serializedBody).not.toContain("Changed address");
+  });
+
+  it("still reads an existing EXTERNAL row, but never builds an EXTERNAL request", () => {
+    const old = { ...disclosure, method: "EXTERNAL", representativeName: null, publicAddress: null, publicPhone: null, publicEmail: null, externalUrl: "https://seller.example.test/legal" };
+    expect(sellerCommandOutcome(200, { disclosure: old })).toEqual({ kind: "CONFIRMED", disclosure: old });
+    expect(() => beginSellerCommand(null, "PUT", { expectedVersion: 1, disclosure: { method: "EXTERNAL", externalUrl: "https://seller.example.test/legal" } }, () => "11111111-1111-4111-8111-111111111111")).toThrow(TypeError);
   });
 
   it("blocks a withdrawal from replacing an unresolved save command", () => {

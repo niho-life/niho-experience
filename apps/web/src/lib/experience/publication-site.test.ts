@@ -146,11 +146,15 @@ describe("Experience public site DTO", () => {
     expect(await getPublicationDetail(publication.slug, "ja")).toMatchObject({ booking: { checkoutAvailable: false }, offers: [] });
   });
 
-  it("keeps an external https seller page and fails closed on a sale-term seller mismatch", async () => {
-    state.disclosures.getPublicBySlug.mockResolvedValue({ method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Panasonic", externalUrl: "https://seller.example.test/legal" });
+  it("points a native disclosure at this site's seller page (keeping /ja for Japanese) and fails closed on a sale-term seller mismatch", async () => {
+    state.disclosures.getPublicBySlug.mockResolvedValue({ method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Panasonic", representativeName: "Rep", publicAddress: "Addr", publicPhone: "0300000000", publicEmail: "a@example.test" });
+    const sellerUrl = `${state.config.siteUrl}/experiences/${publication.slug}/seller`;
     expect(await getPublicationDetail(publication.slug, "en")).toMatchObject({
-      seller: { legalNoticeUrl: "https://seller.example.test/legal" },
-      booking: { legalDocuments: [{ kind: "COMMERCIAL_TRANSACTIONS", url: "https://seller.example.test/legal" }] },
+      seller: { legalNoticeUrl: sellerUrl },
+      booking: { legalDocuments: [{ kind: "COMMERCIAL_TRANSACTIONS", url: sellerUrl }] },
+    });
+    expect(await getPublicationDetail(publication.slug, "ja")).toMatchObject({
+      seller: { legalNoticeUrl: `${state.config.siteUrl}/ja/experiences/${publication.slug}/seller` },
     });
     state.bookings.publicBookingTerms.mockResolvedValue({ ...SAMPLE_TERMS, sellerDisplayName: "Different Seller" });
     expect(await getPublicationDetail(publication.slug, "en")).toMatchObject({ seller: { legalNoticeUrl: "" }, booking: { legalDocuments: [] } });

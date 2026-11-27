@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostLandingPath } from "@/lib/host/routes";
 import {
-  isSellerPageUrl,
   PAYOUT_OWNER_ONLY_TEXT,
   PAYOUT_UNREADABLE_TEXT,
   payoutPanelView,
@@ -65,9 +64,9 @@ describe("the note on 売上", () => {
 });
 
 describe("審査を申請", () => {
-  const ready: ReviewState = { reviewStatus: "DRAFT", role: "OWNER", savedSellerUrl: "https://example.com/legal", unsaved: false, payoutReady: true, consentCurrent: true };
+  const ready: ReviewState = { reviewStatus: "DRAFT", role: "OWNER", unsaved: false, payoutReady: true, consentCurrent: true };
 
-  it("can be pressed by the owner of a provider not submitted yet, once the https seller page and the payout account are ready", () => {
+  it("can be pressed by the owner of a provider not submitted yet, once the payout account is ready", () => {
     expect(reviewRow(ready)).toEqual({ kind: "submit", blocker: null });
   });
 
@@ -76,9 +75,7 @@ describe("審査を申請", () => {
       const row = reviewRow({ ...ready, ...state });
       return row?.kind === "submit" ? row.blocker : row;
     };
-    expect(blocker({ unsaved: true, savedSellerUrl: "" })).toBe("変更を保存すると申請できます。");
-    expect(blocker({ savedSellerUrl: "" })).toBe("特商法表示 URL（https）を保存すると申請できます。");
-    expect(blocker({ savedSellerUrl: "http://example.com/legal" })).toBe("特商法表示 URL（https）を保存すると申請できます。");
+    expect(blocker({ unsaved: true })).toBe("変更を保存すると申請できます。");
     expect(blocker({ payoutReady: false })).toBe("売上受取口座の準備ができると申請できます。");
     expect(blocker({ consentCurrent: false })).toBe("提供者規約への同意が古いため申請できません。NIHO にお問い合わせください。");
   });
@@ -90,11 +87,6 @@ describe("審査を申請", () => {
     expect(reviewRow({ ...ready, reviewStatus: "SUSPENDED" })).toMatchObject({ kind: "note" });
     expect(reviewRow({ ...ready, reviewStatus: "APPROVED" })).toBeNull();
     expect(reviewRow({ ...ready, reviewStatus: null })).toBeNull();
-  });
-
-  it("takes only an https page without credentials as the seller page", () => {
-    expect(["https://example.com/legal", " https://example.com/ "].map(isSellerPageUrl)).toEqual([true, true]);
-    expect(["", "example.com", "http://example.com", "https://user:pass@example.com", "javascript:alert(1)"].map(isSellerPageUrl)).toEqual([false, false, false, false, false]);
   });
 
   it("asks before saving a reviewed provider, which NIHO sends back to review", () => {

@@ -88,13 +88,12 @@ export function pauseListing(listing: HostListing): HostListing {
   return listing.status === "live" ? { ...listing, status: "paused" } : listing;
 }
 
-export type PublicationRequirement = "売上受取口座" | "販売者表示" | "提供者規約への同意" | "提供者状態の確認" | "運営停止の解除";
+export type PublicationRequirement = "売上受取口座" | "提供者規約への同意" | "提供者状態の確認" | "運営停止の解除";
 
 /** Provider/account blockers for self-publication. Unknown facts stay closed instead of being guessed ready. */
 export function publicationRequirements(readiness: HostPublicationReadiness): PublicationRequirement[] {
   const missing: PublicationRequirement[] = [];
   if (readiness.payoutReason !== "READY") missing.push("売上受取口座");
-  if (!readiness.sellerDisclosureReady) missing.push("販売者表示");
   if (readiness.consentCurrent !== true) missing.push("提供者規約への同意");
   if (readiness.providerStatus === "unknown") missing.push("提供者状態の確認");
   if (readiness.providerStatus === "suspended") missing.push("運営停止の解除");

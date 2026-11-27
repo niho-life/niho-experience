@@ -6,11 +6,12 @@ Experienceの現在OWNERが、公開されることを確認した情報だけ�
 
 公開用住所は建物名等の改行を保持できる。CRLF/CRはLFへ揃え、住所以外の改行と、それ以外の制御文字は従来どおり拒否する。DB制約も住所だけ改行を許可する。
 
-方式は次の3状態である。
+方式は次の2状態である。
 
 - `NATIVE`: 個人/法人・事業者の区分、氏名・名称、法人等の業務責任者、公開用住所・電話・emailを明示入力する。
-- `EXTERNAL`: 同じ販売者の既存の`https`販売者表示URLを登録する。
 - `WITHDRAWN`: 表示を撤回し、公開情報とリンクをfail closedにする。未設定は行がなく`null`で表す。
+
+**外部URL方式（`EXTERNAL`）は廃止した（オーナー決定 2026-11-28）。** ホストが自分の既存の販売者表示ページへ案内すると、別事業（施設利用など）の表記が体験の表記として出るおそれがあり、体験ごとの料金・取消条件も載らないため。ホスト画面は入力（NATIVE）だけを出し、`PUT /host/api/seller` は `EXTERNAL` を400で拒む。DBの列・制約（`0059`）は移行まで残し、既存の `EXTERNAL` 行は公開側で使わない（販売者表示なしと同じ）。ホスト画面はその行を未入力として開き、入力し直しを案内する。行の整理と制約の締め直しは、本番の件数を確かめてから別のmigrationで行う。
 
 保存時は公開同意版、DB時刻、現在のNIHO actor、versionを表示本体へ保存する。command receiptはUUID、request fingerprint、actor、操作種別、適用version、作成時刻だけを保持し、住所・電話・email・外部URL・表示本文や結果snapshotを複製しない。同じpayloadの結果不明再送は現在行が適用versionのままなら現在状態を返し、後続の保存・撤回に置き換わったcommandは競合として最新値の再読込を求める。したがって、撤回後に古い保存commandを再送しても以前の連絡先を返さず、公開状態へ戻さない。別payload/actorへのcommand再利用とversion競合も拒否する。OWNER検証・法的販売者名照合・保存は同じtransactionで行う。
 
@@ -18,7 +19,9 @@ Host UIは結果不明のcommand IDと送信済みJSONをメモリ上で固定�
 
 ## 公開
 
-`/experiences/{slug}/seller`は、現在公開中の商品、撤回されていない表示、現在のmapped OWNER、公開snapshotとseller profileの販売者名・NIHO seller参照・Connect受取口座がすべて一致する場合だけSSRする。公開DTOとURLにはprovider ID、NIHO ID、Connect参照を含めない。外部方式は既存URLを`legalNoticeUrl`と`COMMERCIAL_TRANSACTIONS`文書に保ち、native方式はこのSSR URLへ接続する。
+`/experiences/{slug}/seller`は、現在公開中の商品、撤回されていない表示、現在のmapped OWNER、公開snapshotとseller profileの販売者名・NIHO seller参照・Connect受取口座がすべて一致する場合だけSSRする。公開DTOとURLにはprovider ID、NIHO ID、Connect参照を含めない。ホストが販売者の商品（`CONNECT_DIRECT`）の販売者表示は、このSSR URLだけである。販売プランの版に残る `seller_disclosure_url`（過去の外部URLを含む。版は書き換えられない）は公開側で読まず、`publicBookingTerms` の `sellerDisclosureUrl` は NIHO が販売者の運営代行商品（`PLATFORM`）だけに付ける（`EXPERIENCE_MANAGED_COMMERCIAL_TRANSACTIONS_URL`）。オーナーの販売プラン切替は `NATIVE` の表示を条件にする。
+
+体験詳細ページは販売者名を本文に出さず、「特定商取引法に基づく表記」（英語は "Seller information"）のリンクだけをホストの欄の末尾に置く。ホストの欄が出ない体験は、本文の末尾に同じリンクだけを置く。販売者の名称・住所・連絡先はリンク先の表記ページに載せる。予約入力の決済直前は、支払先が分かるよう販売者名を引き続き表示する（オーナー決定 2026-11-28、モック `idea/mock/experience-seller-display-v1.html`）。
 
 同ページには現在の商品別料金、提供時期、取消・返金条件を既存の公開sale termsから表示する。料金や返金額をホスト自由文から再計算しない。sale termsが開いていない場合は、オンライン受付中であるとは表示しない。表示の変更・撤回は既存予約のseller/name/price/cancellation snapshotを変更しない。
 

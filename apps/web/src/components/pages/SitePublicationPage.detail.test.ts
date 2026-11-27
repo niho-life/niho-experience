@@ -31,8 +31,8 @@ import { SitePublicationPage } from "./SitePublicationPage";
 
 const japanese = { title: "合成の体験", lead: "紹介", description: "説明", language: "日本語", highlights: [], included: ["材料"], notIncluded: ["交通費"], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [] };
 const offer = (over: Record<string, unknown> = {}) => ({ ...SAMPLE_TERMS.offers[0]!, ...over });
-const item = (over: { offers?: unknown[]; english?: Record<string, unknown>; ja?: Record<string, unknown>; publication?: Record<string, unknown>; members?: PublicMemberProfile[] } = {}): SitePublicExperience => ({
-  sellerDisclosure: null, hostBio: null, memberProfiles: over.members ?? [],
+const item = (over: { offers?: unknown[]; english?: Record<string, unknown>; ja?: Record<string, unknown>; publication?: Record<string, unknown>; members?: PublicMemberProfile[]; seller?: boolean } = {}): SitePublicExperience => ({
+  sellerDisclosure: over.seller ? { method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Seller", representativeName: "Rep", publicAddress: "Addr", publicPhone: "0300000000", publicEmail: "a@example.test" } : null, hostBio: null, memberProfiles: over.members ?? [],
   publication: {
     slug: "detail-sample", publicTitle: "Detail sample", sellerDisplayName: "Seller", providerPublicName: "Sample Host", providerKind: "PERSON",
     content: { lead: "Lead", description: "Description", facts: { language: "English" }, highlights: [], included: ["Materials"], notIncluded: ["Transport"], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [], ...over.english },
@@ -109,7 +109,7 @@ describe.each([["en"], ["ja"]] as const)("the detail page in %s: the same sectio
     expect(html).toContain(`href="${prefix}/experiences/detail-sample/book"`);
     expect(html).toContain('id="book"');
     expect(html).toContain(locale === "ja" ? "日にちを選ぶ" : "Choose a date");
-    expect(html.match(new RegExp(`href="${prefix}/inquiry\\?`, "g")) ?? []).toHaveLength(2);
+    expect(html.match(new RegExp(`href="${prefix}/inquiry\\?`, "g")) ?? []).toHaveLength(1);
     const approval = await render(locale, item({ offers: [offer({ acceptanceMode: "APPROVAL" })] }));
     expect(approval).toContain(locale === "ja" ? "申込みへ進む" : "Request to book");
     expect(approval).not.toContain(locale === "ja" ? "日にちを選ぶ" : ">Choose a date</a>");
@@ -153,11 +153,35 @@ describe.each([["en"], ["ja"]] as const)("the detail page in %s: the same sectio
       ja: { timeline: [{ time: "10:00", title: "集合", text: "ここから始めます。", photoIndex: null }], faq: [{ question: "質問？", answer: "回答。" }] },
     }));
     const order = locale === "ja"
-      ? ["体験内容", "当日の流れ", "料金に含まれるもの", 'id="host"', 'id="place"', 'id="reviews"', 'id="know-before-you-go"', 'id="faq"', 'id="inquiry"', 'id="seller"']
-      : ["What you’ll do", "How the time flows", "What’s included", 'id="host"', 'id="place"', 'id="reviews"', 'id="know-before-you-go"', 'id="faq"', 'id="inquiry"', 'id="seller"'];
+      ? ["体験内容", "当日の流れ", "料金に含まれるもの", 'id="host"', 'id="place"', 'id="reviews"', 'id="know-before-you-go"', 'id="faq"']
+      : ["What you’ll do", "How the time flows", "What’s included", 'id="host"', 'id="place"', 'id="reviews"', 'id="know-before-you-go"', 'id="faq"'];
     const positions = order.map((marker) => html.indexOf(marker));
     expect(positions.every((position) => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
+  it("shows only the seller disclosure link at the end of the host section, with no seller name and no group-inquiry row", async () => {
+    const html = await render(locale, item({ seller: true }));
+    const host = html.slice(html.indexOf('id="host"'), html.indexOf("</section>", html.indexOf('id="host"')));
+    const link = locale === "ja" ? "特定商取引法に基づく表記" : "Seller information";
+    expect(host).toContain(`<a href="${prefix}/experiences/detail-sample/seller"`);
+    expect(host).toContain(link);
+    expect(host.indexOf('id="seller"')).toBeGreaterThan(host.indexOf("Sample Host"));
+    expect(html.match(/id="seller"/g)).toHaveLength(1);
+    expect(html).not.toMatch(/Sold by|販売者：/);
+    expect(html).not.toContain('id="inquiry"');
+    expect(html).not.toContain("予約の前に相談できます。");
+    expect(html).not.toContain("Ask us before booking");
+  });
+
+  it("puts the link alone at the end of the main column when there is no host section, and nothing without a disclosure", async () => {
+    const noHost = item({ seller: true, publication: { providerPublicName: null, providerKind: null } });
+    const html = await render(locale, noHost);
+    if (!html.includes('id="host"')) {
+      expect(html.match(/id="seller"/g)).toHaveLength(1);
+      expect(html).toContain(`href="${prefix}/experiences/detail-sample/seller"`);
+    }
+    expect(await render(locale)).not.toContain('id="seller"');
   });
 
   it("suggests other experiences with the shared card, and the bar under the phone layout carries the price and the button", async () => {

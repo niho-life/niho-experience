@@ -51,16 +51,13 @@ export interface RegisterProviderInput {
   kind: string;
   displayName: string;
   bio: string;
-  /** Empty when the host sets it later. */
-  sellerDisclosureUrl: string;
   consentVersion: string;
 }
 
-/** 提供者情報 as NIHO keeps it (the seller page empty when there is none). */
+/** 提供者情報 as NIHO keeps it. */
 export interface ProviderProfile {
   displayName: string;
   bio: string;
-  sellerDisclosureUrl: string;
 }
 
 /** 保存 of 提供者情報: the provider and only the fields that changed. */
@@ -118,21 +115,9 @@ export function salesPayoutNotice(load: HostPayoutLoad): SalesPayoutNotice | nul
   return { kind: "setup", title: "受取口座の設定が済んでいません", text: READINESS_TEXT[load.payout.reason] };
 }
 
-/** An https URL without a user name or password: what NIHO takes as the seller page (特商法表示). */
-export function isSellerPageUrl(value: string): boolean {
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === "https:" && !url.username && !url.password;
-  } catch {
-    return false;
-  }
-}
-
 export interface ReviewState {
   reviewStatus: HostProviderReviewStatus | null;
   role: HostProviderRole | null;
-  /** The seller page NIHO has (what was saved, not what is being typed). */
-  savedSellerUrl: string;
   /** Changes on screen that are not saved yet. */
   unsaved: boolean;
   payoutReady: boolean;
@@ -144,8 +129,8 @@ export type ReviewRow = { kind: "submit"; blocker: string | null } | { kind: "no
 
 /**
  * Only a provider not submitted yet (未申請) has 審査を申請, and only its owner can press it: once
- * the changes are saved, the saved seller page is https and the payout account is ready. NIHO
- * checks the seller page and the consent too, and answers 409 otherwise. Null: nothing to say
+ * the changes are saved, the payout account is ready. NIHO
+ * checks the consent too, and answers 409 otherwise. Null: nothing to say
  * (審査済み, or a state the console does not know).
  */
 export function reviewRow(state: ReviewState): ReviewRow | null {
@@ -158,7 +143,6 @@ export function reviewRow(state: ReviewState): ReviewRow | null {
 
 function reviewSubmitBlocker(state: ReviewState): string | null {
   if (state.unsaved) return "変更を保存すると申請できます。";
-  if (!isSellerPageUrl(state.savedSellerUrl)) return "特商法表示 URL（https）を保存すると申請できます。";
   if (!state.payoutReady) return "売上受取口座の準備ができると申請できます。";
   if (!state.consentCurrent) return "提供者規約への同意が古いため申請できません。NIHO にお問い合わせください。";
   return null;

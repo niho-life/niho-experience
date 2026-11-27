@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | 通知設定 | migration 0020、`ProviderNotificationSettings`、server action、設定画面、Push の設定参照 | factory は flag OFF または DB 未設定で `null`。`loadHostConsoleData` は旧 NIHO session を持つ場合だけ読取を呼び、native session では呼ばない。OWNER 不足も準備中へ混同。メール producer は予約・取消・OTA のみで任意通知3種が未接続 | repository の GitHub 変数 `PROD_HOST_NOTIFICATION_SETTINGS_ENABLED` は未登録。配備テーブルでは未登録を OFF と扱う。Cloud Run の実値・DB の実レコードまではこの確認に含めない |
 | チーム | `HostOperatingTeamPanel` と旧 NIHO provider operations v1 consumer | native session は旧 consumer が拒否。DB と native provider 一覧には COHOST がなく、flag のみでは完成しない | native 用 migration・コードの配備後に独立 flag を有効化して合成データで受入が必要 |
-| 販売者表示 | `/host/seller` の NATIVE / EXTERNAL / WITHDRAWN、本人同意、version、結果不明 command の再送 | 設定に古い URL 入力と無効な「NIHO のページに表示する」が残り、専用画面と二重の導線 | 専用画面の既存正本・同意契約をそのまま使う。新しい代理表示や本番データ変更は不要 |
+| 販売者表示 | `/host/seller` の NATIVE / WITHDRAWN（外部URL方式は 2026-11-28 廃止）、本人同意、version、結果不明 command の再送 | 設定に古い URL 入力と無効な「NIHO のページに表示する」が残り、専用画面と二重の導線 | 専用画面の既存正本・同意契約をそのまま使う。新しい代理表示や本番データ変更は不要 |
 
 GitHub 変数は必要な boolean 名だけを読み取った。`PROD_HOST_ACCOUNTS_ENABLED` と `PROD_HOST_MAIL_ENABLED` は `true`。秘密、メールアドレス、顧客情報、口座、DB接続情報は証跡に含めない。
 

@@ -58,7 +58,7 @@ describe("Experience site publication selection", () => {
     mocks.publications.listPublic.mockResolvedValue([publication]);
     mocks.publications.listClaimedSlugs.mockResolvedValue([publication.slug, "stopped-experience"]);
     mocks.bookings.publicBookingTerms.mockResolvedValue(terms);
-    mocks.disclosures.getPublicBySlug.mockResolvedValue({ method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic seller", externalUrl: "https://seller.example.test/legal" });
+    mocks.disclosures.getPublicBySlug.mockResolvedValue({ method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic seller", representativeName: "Rep", publicAddress: "Addr", publicPhone: "0300000000", publicEmail: "a@example.test" });
     mocks.members.listPublicForExperiences.mockResolvedValue(new Map());
     mocks.hostBios.getPublicBySlug.mockResolvedValue({ ja: "合成の紹介文", en: "Synthetic bio" });
   });
@@ -68,7 +68,7 @@ describe("Experience site publication selection", () => {
     expect(published).toEqual({ kind: "published", item: {
       publication,
       saleTerms: expect.objectContaining({ sellerDisplayName: "Synthetic seller", offers: terms.offers }),
-      sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic seller", externalUrl: "https://seller.example.test/legal" },
+      sellerDisclosure: { method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic seller", representativeName: "Rep", publicAddress: "Addr", publicPhone: "0300000000", publicEmail: "a@example.test" },
       hostBio: { ja: "合成の紹介文", en: "Synthetic bio" },
       memberProfiles: [],
     } });

@@ -326,7 +326,7 @@ describe("managed Experience sale end-to-end (#507/#508/#509)", { skip: database
 
       const directTerms = await guests.publicBookingTerms(draft.slug);
       assert.equal(directTerms?.salesPlanRevision, 2);
-      assert.equal(directTerms?.sellerDisclosureUrl, sellerDisclosureUrl);
+      assert.equal(directTerms?.sellerDisclosureUrl, undefined, "a host-sold product has no external seller URL; the site builds its own seller page");
       assert.deepEqual(await disclosures.getPublicBySlug(draft.slug), {
         method: "NATIVE", sellerKind: "PERSON", sellerDisplayName: "Synthetic Owner Seller", representativeName: null,
         publicAddress: disclosure.publicAddress, publicPhone: disclosure.publicPhone, publicEmail: disclosure.publicEmail,

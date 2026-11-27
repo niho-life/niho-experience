@@ -261,7 +261,7 @@ OWNER は予約の画面と同じ二重の確認（NIHO が OWNER と言い、ex
 
 Experience新規商品の予約フォームは`PublicBookingTerms`の取消コードと数値条件をそのまま表示する。`CUSTOM`取消条件と`minimumChargeableParticipants`はlegacy NIHO detail型へ丸めず、表示金額をExperienceの課金計算と同じadult-price floorで計算する。最終金額、質問fingerprint、同意版、開催枠と残席はhold transactionで再検証される。
 
-このlossless public terms projectionは `GET /api/public/experiences/{slug}/sale-terms`（`{ saleTerms }`）で読める。provider/product IDを含まず、`no-store`。既存の `/booking-terms` は旧NIHO本文に販売条件を重ねる画面用なので、対応できない取消条件を返さない。
+このlossless public terms projectionは `GET /api/public/experiences/{slug}/sale-terms`（`{ saleTerms }`）で読める。provider/product IDを含まず、`no-store`。`saleTerms.sellerDisclosureUrl` は NIHO が販売者の運営代行商品（`PLATFORM`）だけに付く。ホストが販売者の商品は付かず、販売者表示はこのサイトの `/experiences/{slug}/seller` を使う（[provider-seller-disclosure.md](provider-seller-disclosure.md)）。既存の `/booking-terms` は旧NIHO本文に販売条件を重ねる画面用なので、対応できない取消条件を返さない。
 
 ### 遷移先・CSP
 

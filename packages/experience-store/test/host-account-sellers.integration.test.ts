@@ -465,19 +465,38 @@ describe("seller disclosure and host bio for a host-account seller", { skip }, (
       // The NIHO user stays the OWNER of its own NIHO-mapped seller.
       assert.equal((await disclosures.getForOwner({ providerId: "provider-niho", nihoUserId: "niho-user-synthetic-1" })).sellerDisplayName, "NIHO Legal Seller");
 
-      const saved = await disclosures.save(owner, {
-        commandId: randomUUID(), expectedVersion: null, disclosure: {
+      // 外部URL方式は廃止: 旧行が残っていても公開側は読まず、NATIVEで保存し直すと external_url が消える。
+      await pool.query(
+        `INSERT INTO provider_seller_disclosures (provider_id,method,seller_kind,seller_display_name,external_url,consent_version,consented_at,consented_by_niho_user_id)
+         VALUES ('provider-supper','EXTERNAL','BUSINESS','Synthetic Legal Seller KK','https://example.test/legal','seller-public-disclosure-v1',clock_timestamp(),$1)`,
+        [owner.nihoUserId],
+      );
+      const legacy = await disclosures.getForOwner(owner);
+      assert.equal(legacy.disclosure?.method, "EXTERNAL");
+      await listedProduct(pool, owner, "synthetic-supper-public");
+      assert.equal(await disclosures.getPublicBySlug("synthetic-supper-public"), null);
+      await assert.rejects(() => disclosures.save(owner, {
+        commandId: randomUUID(), expectedVersion: 1, disclosure: {
           method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Legal Seller KK",
           externalUrl: "https://example.test/legal", consentVersion: "seller-public-disclosure-v1", accepted: true,
+        } as never,
+      }), StoreValidationError);
+      const saved = await disclosures.save(owner, {
+        commandId: randomUUID(), expectedVersion: 1, disclosure: {
+          method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Legal Seller KK", representativeName: "Synthetic Responsible Person",
+          publicAddress: "1-2 Synthetic, Kamakura", publicPhone: "046-000-0000", publicEmail: "public@example.test",
+          consentVersion: "seller-public-disclosure-v1", accepted: true,
         },
       });
-      assert.equal(saved.version, 1);
+      assert.equal(saved.version, 2);
+      assert.equal(saved.method, "NATIVE");
+      assert.equal(saved.externalUrl, null);
       await assert.rejects(() => bios.save(editor, { bioJa: "合成の紹介文です。", bioEn: null, expectedVersion: null, consentVersion: HOST_BIO_CONSENT_VERSION }), StoreAccessDeniedError);
       assert.equal((await bios.save(owner, { bioJa: "合成の紹介文です。", bioEn: null, expectedVersion: null, consentVersion: HOST_BIO_CONSENT_VERSION })).version, 1);
 
-      await listedProduct(pool, owner, "synthetic-supper-public");
       assert.deepEqual(await disclosures.getPublicBySlug("synthetic-supper-public"), {
-        method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Legal Seller KK", externalUrl: "https://example.test/legal",
+        method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Legal Seller KK", representativeName: "Synthetic Responsible Person",
+        publicAddress: "1-2 Synthetic, Kamakura", publicPhone: "046-000-0000", publicEmail: "public@example.test",
       });
       assert.deepEqual(await bios.getPublicBySlug("synthetic-supper-public"), { ja: "合成の紹介文です。", en: null });
       // Without an ACTIVE host-account OWNER the public seller and bio disappear (the NIHO OWNER row does not count).

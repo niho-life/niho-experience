@@ -15,7 +15,7 @@ import { SitePublicationPage } from "./SitePublicationPage";
 
 /** 団体・個別の相談 (#532): the experience page's links to the inquiry form carry the experience and its host. */
 const item = {
-  sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Seller", externalUrl: "https://seller.example.test/legal" },
+  sellerDisclosure: { method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Seller", representativeName: "Rep", publicAddress: "Addr", publicPhone: "0300000000", publicEmail: "a@example.test" },
   publication: {
     slug: "synthetic-tea", publicTitle: "Synthetic tea", providerPublicName: "Sample Sato",
     content: { lead: "Lead", description: "Description", facts: { language: "English" }, highlights: [], included: [], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [] },
@@ -32,21 +32,21 @@ const hrefs = (html: string) => [...html.matchAll(/href="(\/(?:ja\/)?inquiry[^"]
 beforeEach(() => { state.config = { ...state.config, groupInquiryEnabled: true }; });
 
 describe("the experience page's inquiry links", () => {
-  it("offer a question about the experience in Japanese (in the section and in the booking column), with the context in the link, and none to the host: a person is written to from their own page (#589)", async () => {
+  it("offer a question about the experience in Japanese (in the booking column only), with the context in the link, and none to the host: a person is written to from their own page (#589)", async () => {
     const html = renderToStaticMarkup(await SitePublicationPage({ item, locale: "ja" }));
     const links = hrefs(html);
-    expect(links).toHaveLength(2);
-    expect(links.filter((href) => href.includes("from=experience") && href.includes("experience=synthetic-tea") && href.includes("title=合成茶道体験") && href.includes("host=Sample Sato"))).toHaveLength(2);
+    expect(links).toHaveLength(1);
+    expect(links.filter((href) => href.includes("from=experience") && href.includes("experience=synthetic-tea") && href.includes("title=合成茶道体験") && href.includes("host=Sample Sato"))).toHaveLength(1);
     expect(links.some((href) => href.includes("from=provider"))).toBe(false);
     expect(html).not.toContain("Sample Satoさんに相談する");
     expect(html).toContain("ほかの日・グループの相談");
-    expect(html).toContain("予約の前に相談できます。");
-    expect(html).toContain(">相談する</a>");
+    expect(html).not.toContain("予約の前に相談できます。");
+    expect(html).not.toContain('id="inquiry"');
   });
 
-  it("keeps two compact inquiry links in English", async () => {
+  it("keeps one compact inquiry link in English", async () => {
     const links = hrefs(renderToStaticMarkup(await SitePublicationPage({ item, locale: "en" })));
-    expect(links).toHaveLength(2);
+    expect(links).toHaveLength(1);
     expect(links.every((href) => href.includes("from=experience") && href.includes("host=Sample Sato"))).toBe(true);
     expect(links.some((href) => href.includes("from=provider"))).toBe(false);
   });

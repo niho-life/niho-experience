@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  read: vi.fn(), begin: vi.fn(), finalize: vi.fn(),
+  read: vi.fn(), begin: vi.fn(), finalize: vi.fn(), disclosure: { method: "NATIVE" } as Record<string, unknown> | null,
 }));
 
 vi.mock("@/lib/config", () => ({ config: { siteUrl: "https://experience.example.test" } }));
@@ -19,7 +19,7 @@ vi.mock("@/lib/experience/publication-host-boundary", () => ({
 vi.mock("@/lib/experience/store-server", () => ({
   managedExperienceSalesRepository: () => ({ get: mocks.read, beginOwnerSwitch: mocks.begin, finalizeSwitch: mocks.finalize }),
   experiencePublicationRepository: () => ({ getProduct: async () => ({ slug: "synthetic-experience" }) }),
-  providerSellerDisclosureRepository: () => ({ getForOwner: async () => ({ disclosure: { method: "NATIVE", sellerDisplayName: "Synthetic Seller" } }) }),
+  providerSellerDisclosureRepository: () => ({ getForOwner: async () => ({ disclosure: mocks.disclosure && { sellerDisplayName: "Synthetic Seller", ...mocks.disclosure } }) }),
   experienceStore: () => ({}),
   guestHoldReleases: () => ({}),
 }));
@@ -35,6 +35,7 @@ const context = { params: Promise.resolve({ productId: "product-synthetic" }) };
 const endpoint = "https://experience.example.test/host/api/products/product-synthetic/sales-plan";
 
 beforeEach(() => {
+  mocks.disclosure = { method: "NATIVE" };
   vi.clearAllMocks();
   vi.stubEnv("EXPERIENCE_MANAGED_SALES_ENABLED", "false");
   vi.stubEnv("EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION", "owner-v2");
@@ -60,5 +61,16 @@ describe("OWNER sales plan reconciliation", () => {
       sellerDisclosureUrl: "https://experience.example.test/experiences/synthetic-experience/seller",
     }));
     expect(mocks.finalize).toHaveBeenCalledWith(expect.anything(), "product-synthetic", commandId, saved.version);
+  });
+
+  it("refuses the switch unless the seller disclosure is a native one (an old EXTERNAL row, or none, is not enough)", async () => {
+    for (const disclosure of [{ method: "EXTERNAL", externalUrl: "https://seller.example.test/legal" }, { method: "WITHDRAWN" }, null]) {
+      mocks.disclosure = disclosure;
+      const response = await POST(new Request(endpoint, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ commandId, expectedVersion: 3, plan: pending.plan, agreementVersion: pending.agreementVersion }),
+      }), context);
+      expect(response.status).toBeGreaterThanOrEqual(400);
+    }
+    expect(mocks.begin).not.toHaveBeenCalled();
   });
 });

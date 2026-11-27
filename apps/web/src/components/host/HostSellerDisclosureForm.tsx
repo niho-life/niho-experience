@@ -14,11 +14,11 @@ import {
 type Load = { seller: { sellerDisplayName: string; disclosure: SellerDisclosure | null }; consentVersion: string };
 
 const FIELD = "min-h-11 w-full rounded-xl border border-line-strong bg-canvas px-3 py-2 disabled:bg-sand";
-const EMPTY = { representativeName: "", publicAddress: "", publicPhone: "", publicEmail: "", externalUrl: "" };
+const EMPTY = { representativeName: "", publicAddress: "", publicPhone: "", publicEmail: "" };
+const EXTERNAL_ENDED = "以前の外部ページへの案内は終了しました。公開する販売者情報を入力して保存してください。";
 
 export function HostSellerDisclosureForm() {
   const [loaded, setLoaded] = useState<Load | null>(null);
-  const [method, setMethod] = useState<"NATIVE" | "EXTERNAL">("NATIVE");
   const [sellerKind, setSellerKind] = useState<SellerKind>("PERSON");
   const [fields, setFields] = useState(EMPTY);
   const [accepted, setAccepted] = useState(false);
@@ -37,18 +37,19 @@ export function HostSellerDisclosureForm() {
   const apply = (value: Load, status = "") => {
     setLoaded(value);
     const disclosure = value.seller.disclosure;
-    if (disclosure && disclosure.method !== "WITHDRAWN") {
-      setMethod(disclosure.method);
+    if (disclosure && disclosure.method === "NATIVE") {
       setSellerKind(disclosure.sellerKind);
       setFields({
         representativeName: disclosure.representativeName ?? "", publicAddress: disclosure.publicAddress ?? "",
-        publicPhone: disclosure.publicPhone ?? "", publicEmail: disclosure.publicEmail ?? "", externalUrl: disclosure.externalUrl ?? "",
+        publicPhone: disclosure.publicPhone ?? "", publicEmail: disclosure.publicEmail ?? "",
       });
+    } else if (disclosure && disclosure.method === "EXTERNAL") {
+      setSellerKind(disclosure.sellerKind); setFields(EMPTY);
     } else {
-      setMethod("NATIVE"); setSellerKind("PERSON"); setFields(EMPTY);
+      setSellerKind("PERSON"); setFields(EMPTY);
     }
     setAccepted(false);
-    setMessage(status || (disclosure?.method === "WITHDRAWN" ? "販売者表示は撤回されています。" : ""));
+    setMessage(status || (disclosure?.method === "WITHDRAWN" ? "販売者表示は撤回されています。" : disclosure?.method === "EXTERNAL" ? EXTERNAL_ENDED : ""));
   };
   const reload = async (status = "") => {
     if (pendingCommandRef.current) {
@@ -70,14 +71,7 @@ export function HostSellerDisclosureForm() {
         return;
       }
       if (!response.ok) { setMessage("販売者表示を読み込めませんでした。時間をおいて再度お試しください。"); return; }
-      const value = await response.json() as Load;
-      setLoaded(value);
-      const disclosure = value.seller.disclosure;
-      if (disclosure && disclosure.method !== "WITHDRAWN") {
-        setMethod(disclosure.method); setSellerKind(disclosure.sellerKind);
-        setFields({ representativeName: disclosure.representativeName ?? "", publicAddress: disclosure.publicAddress ?? "", publicPhone: disclosure.publicPhone ?? "", publicEmail: disclosure.publicEmail ?? "", externalUrl: disclosure.externalUrl ?? "" });
-      }
-      setMessage(disclosure?.method === "WITHDRAWN" ? "販売者表示は撤回されています。" : "");
+      apply(await response.json() as Load);
     }).catch((caught: unknown) => {
       if (!(caught instanceof DOMException && caught.name === "AbortError")) setMessage("通信結果を確認できません。保存済みとは表示していません。再読込してください。");
     });
@@ -132,13 +126,10 @@ export function HostSellerDisclosureForm() {
       ? { expectedVersion: current?.version }
       : {
           expectedVersion: current?.version ?? null,
-          disclosure: method === "NATIVE" ? {
-            method, sellerKind, sellerDisplayName: loaded.seller.sellerDisplayName,
+          disclosure: {
+            method: "NATIVE" as const, sellerKind, sellerDisplayName: loaded.seller.sellerDisplayName,
             representativeName: sellerKind === "BUSINESS" ? fields.representativeName : null,
             publicAddress: fields.publicAddress, publicPhone: fields.publicPhone, publicEmail: fields.publicEmail,
-            consentVersion: loaded.consentVersion, accepted,
-          } : {
-            method, sellerKind, sellerDisplayName: loaded.seller.sellerDisplayName, externalUrl: fields.externalUrl,
             consentVersion: loaded.consentVersion, accepted,
           },
         };
@@ -156,24 +147,15 @@ export function HostSellerDisclosureForm() {
   const locked = busy || pendingCommand !== null;
   return <div className="space-y-4">
     <section className="rounded-2xl border border-line bg-canvas p-4 sm:p-5">
-      <h2 className="font-extrabold">公開方法</h2>
-      <p className="mt-2 rounded-xl bg-warn-pale p-3 text-sm font-bold">ここへ入力する氏名・住所・電話番号・メールアドレスは、旅行者に公開されます。NIHOの本人情報やStripeの確認情報は自動でコピーされません。</p>
-      <fieldset className="mt-4 grid gap-2"><legend className="font-bold">表示方法</legend>
-        <label className="flex min-h-11 items-center gap-2"><input type="radio" disabled={locked} checked={method === "NATIVE"} onChange={() => setMethod("NATIVE")} /> このサイトに公開情報を入力する</label>
-        <label className="flex min-h-11 items-center gap-2"><input type="radio" disabled={locked} checked={method === "EXTERNAL"} onChange={() => setMethod("EXTERNAL")} /> 自分の既存の販売者表示（https）へ案内する</label>
-      </fieldset>
-    </section>
-    <section className="rounded-2xl border border-line bg-canvas p-4 sm:p-5">
       <h2 className="font-extrabold">販売者情報</h2>
+      <p className="mt-2 rounded-xl bg-warn-pale p-3 text-sm font-bold">ここへ入力する氏名・住所・電話番号・メールアドレスは、旅行者に公開されます。NIHOの本人情報やStripeの確認情報は自動でコピーされません。</p>
       <div className="mt-4 grid gap-4">
         <label className="grid gap-1 font-bold">販売者区分<select className={FIELD} disabled={locked} value={sellerKind} onChange={(event) => setSellerKind(event.target.value as SellerKind)}><option value="PERSON">個人</option><option value="BUSINESS">法人・事業者</option></select></label>
         <label className="grid gap-1 font-bold">氏名・名称<input className={FIELD} value={loaded.seller.sellerDisplayName} disabled /><span className="text-xs font-normal text-muted">Experienceの法的販売者名と一致させています。この画面では変更できません。</span></label>
-        {method === "NATIVE" ? <>
-          {sellerKind === "BUSINESS" ? <label className="grid gap-1 font-bold">業務責任者<input className={FIELD} disabled={locked} required maxLength={200} value={fields.representativeName} onChange={(event) => setFields({ ...fields, representativeName: event.target.value })} /></label> : null}
-          <label className="grid gap-1 font-bold">公開用住所<textarea className={FIELD} disabled={locked} required maxLength={500} rows={3} value={fields.publicAddress} onChange={(event) => setFields({ ...fields, publicAddress: event.target.value })} /></label>
-          <label className="grid gap-1 font-bold">公開用電話番号<input className={FIELD} disabled={locked} required maxLength={40} inputMode="tel" value={fields.publicPhone} onChange={(event) => setFields({ ...fields, publicPhone: event.target.value })} /></label>
-          <label className="grid gap-1 font-bold">公開用メールアドレス<input className={FIELD} disabled={locked} required maxLength={254} type="email" value={fields.publicEmail} onChange={(event) => setFields({ ...fields, publicEmail: event.target.value })} /></label>
-        </> : <label className="grid gap-1 font-bold">既存の販売者表示URL<input className={FIELD} disabled={locked} required maxLength={2048} type="url" inputMode="url" placeholder="https://example.jp/seller" value={fields.externalUrl} onChange={(event) => setFields({ ...fields, externalUrl: event.target.value })} /></label>}
+        {sellerKind === "BUSINESS" ? <label className="grid gap-1 font-bold">業務責任者<input className={FIELD} disabled={locked} required maxLength={200} value={fields.representativeName} onChange={(event) => setFields({ ...fields, representativeName: event.target.value })} /></label> : null}
+        <label className="grid gap-1 font-bold">公開用住所<textarea className={FIELD} disabled={locked} required maxLength={500} rows={3} value={fields.publicAddress} onChange={(event) => setFields({ ...fields, publicAddress: event.target.value })} /></label>
+        <label className="grid gap-1 font-bold">公開用電話番号<input className={FIELD} disabled={locked} required maxLength={40} inputMode="tel" value={fields.publicPhone} onChange={(event) => setFields({ ...fields, publicPhone: event.target.value })} /></label>
+        <label className="grid gap-1 font-bold">公開用メールアドレス<input className={FIELD} disabled={locked} required maxLength={254} type="email" value={fields.publicEmail} onChange={(event) => setFields({ ...fields, publicEmail: event.target.value })} /></label>
       </div>
       <label className="mt-5 flex items-start gap-2 rounded-xl bg-sand p-3 font-bold"><input className="mt-1" disabled={locked} type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} />入力内容が公開されることを確認し、この版の公開に同意します。</label>
       <div className="mt-5 flex flex-wrap gap-2"><button type="button" disabled={locked || !accepted} className={consoleButtonClass("primary", "lg")} onClick={() => mutate("PUT")}>確認して保存</button>{pendingCommand ? <button type="button" disabled={busy} className={consoleButtonClass("primary", "lg")} onClick={() => void runCommand(pendingCommand)}>同じ内容で結果を再確認</button> : null}<button type="button" disabled={locked} className={consoleButtonClass("secondary", "lg")} onClick={() => void reload("現在の保存値を読み直しました。")}>現在値を再読込</button></div>

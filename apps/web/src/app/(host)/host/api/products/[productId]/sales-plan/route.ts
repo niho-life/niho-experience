@@ -89,10 +89,8 @@ export async function POST(request: Request, context: Context): Promise<Response
     }
     const product = await publications.getProduct(boundary.value.actor, productId);
     const disclosure = (await disclosures.getForOwner(boundary.value.actor)).disclosure;
-    if (!disclosure || disclosure.sellerDisplayName !== boundary.value.provider.sellerDisplayName) throw new StoreConflictError("Seller disclosure is not current.");
-    const sellerDisclosureUrl = disclosure.method === "EXTERNAL"
-      ? disclosure.externalUrl ?? ""
-      : `${config.siteUrl}/experiences/${encodeURIComponent(product.slug)}/seller`;
+    if (!disclosure || disclosure.method !== "NATIVE" || disclosure.sellerDisplayName !== boundary.value.provider.sellerDisplayName) throw new StoreConflictError("Seller disclosure is not current.");
+    const sellerDisclosureUrl = `${config.siteUrl}/experiences/${encodeURIComponent(product.slug)}/seller`;
     let transition = await repository.beginOwnerSwitch(boundary.value.actor, productId, {
       commandId: body.commandId, expectedVersion: body.expectedVersion as number, plan: body.plan,
       agreementVersion: body.agreementVersion, agreementConfirmedAtUtc: new Date().toISOString(),

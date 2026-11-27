@@ -22,16 +22,8 @@ export type NativeSellerDisclosureInput = {
   readonly accepted: true;
 };
 
-export type ExternalSellerDisclosureInput = {
-  readonly method: "EXTERNAL";
-  readonly sellerKind: SellerKind;
-  readonly sellerDisplayName: string;
-  readonly externalUrl: string;
-  readonly consentVersion: string;
-  readonly accepted: true;
-};
-
-export type SellerDisclosureInput = NativeSellerDisclosureInput | ExternalSellerDisclosureInput;
+/** 外部の販売者表示URL（EXTERNAL）は新規保存できない。既存行は SellerDisclosureState でのみ読める。 */
+export type SellerDisclosureInput = NativeSellerDisclosureInput;
 
 export type SellerDisclosureState = {
   readonly version: number;
@@ -54,22 +46,15 @@ export type HostSellerDisclosure = {
   readonly disclosure: SellerDisclosureState | null;
 };
 
-export type PublicSellerDisclosure =
-  | {
-      readonly method: "NATIVE";
-      readonly sellerKind: SellerKind;
-      readonly sellerDisplayName: string;
-      readonly representativeName: string | null;
-      readonly publicAddress: string;
-      readonly publicPhone: string;
-      readonly publicEmail: string;
-    }
-  | {
-      readonly method: "EXTERNAL";
-      readonly sellerKind: SellerKind;
-      readonly sellerDisplayName: string;
-      readonly externalUrl: string;
-    };
+export type PublicSellerDisclosure = {
+  readonly method: "NATIVE";
+  readonly sellerKind: SellerKind;
+  readonly sellerDisplayName: string;
+  readonly representativeName: string | null;
+  readonly publicAddress: string;
+  readonly publicPhone: string;
+  readonly publicEmail: string;
+};
 
 export type SaveSellerDisclosureCommand = {
   readonly commandId: string;
@@ -96,27 +81,13 @@ function text(value: unknown, name: string, max: number, control = CONTROL): str
   return value;
 }
 
-function httpsUrl(value: unknown): string {
-  const urlText = text(value, "externalUrl", 2048);
-  try {
-    const url = new URL(urlText);
-    if (url.protocol !== "https:" || url.username || url.password || !url.hostname) throw new Error("invalid");
-    return url.href;
-  } catch {
-    throw new StoreValidationError("externalUrl must be a canonical https URL without credentials.");
-  }
-}
-
 /** Store-level validation is also used by the strict HTTP parser tests. It never invents missing public values. */
 export function validateSellerDisclosureInput(input: SellerDisclosureInput): SellerDisclosureInput {
-  if (input.method !== "NATIVE" && input.method !== "EXTERNAL") throw new StoreValidationError("method is invalid.");
+  if (input.method !== "NATIVE") throw new StoreValidationError("method is invalid.");
   if (input.sellerKind !== "PERSON" && input.sellerKind !== "BUSINESS") throw new StoreValidationError("sellerKind is invalid.");
   const sellerDisplayName = text(input.sellerDisplayName, "sellerDisplayName", 300);
   const consentVersion = text(input.consentVersion, "consentVersion", 160);
   if (input.accepted !== true) throw new StoreValidationError("Public disclosure consent is required.");
-  if (input.method === "EXTERNAL") {
-    return { method: "EXTERNAL", sellerKind: input.sellerKind, sellerDisplayName, externalUrl: httpsUrl(input.externalUrl), consentVersion, accepted: true };
-  }
   const representativeName = input.sellerKind === "BUSINESS"
     ? text(input.representativeName, "representativeName", 200)
     : input.representativeName === null ? null : (() => { throw new StoreValidationError("A person disclosure cannot set representativeName."); })();
@@ -273,7 +244,6 @@ export class ProviderSellerDisclosureRepository {
       const locked = await client.query<DbRow>("SELECT version FROM provider_seller_disclosures WHERE provider_id=$1 FOR UPDATE", [actor.providerId]);
       const currentVersion = locked.rows[0] ? Number(locked.rows[0].version) : null;
       if (currentVersion !== command.expectedVersion) throw new StoreConflictError("Seller disclosure version changed; read it again.");
-      const native = disclosure.method === "NATIVE";
       const result = await client.query<DbRow>(
         `INSERT INTO provider_seller_disclosures
            (provider_id,method,seller_kind,seller_display_name,representative_name,public_address,public_phone,public_email,
@@ -287,9 +257,9 @@ export class ProviderSellerDisclosureRepository {
            withdrawn_at=NULL,withdrawn_by_niho_user_id=NULL,version=provider_seller_disclosures.version+1,updated_at=clock_timestamp()
          RETURNING *`,
         [actor.providerId, disclosure.method, disclosure.sellerKind, disclosure.sellerDisplayName,
-          native ? disclosure.representativeName : null, native ? disclosure.publicAddress : null,
-          native ? disclosure.publicPhone : null, native ? disclosure.publicEmail : null,
-          native ? null : disclosure.externalUrl, disclosure.consentVersion, actor.nihoUserId],
+          disclosure.representativeName, disclosure.publicAddress, disclosure.publicPhone, disclosure.publicEmail,
+          // NATIVE 保存は旧EXTERNAL行の external_url も必ず消す（0059 の method 別 CHECK 制約に合わせる）。
+          null, disclosure.consentVersion, actor.nihoUserId],
       );
       const saved = stateFromRow(result.rows[0]!);
       await recordResult(client, actor, command.commandId, "SAVE", requestFingerprint, saved.version);
@@ -339,7 +309,7 @@ export class ProviderSellerDisclosureRepository {
          JOIN provider_seller_disclosures disclosure ON disclosure.provider_id=publication.provider_id
         WHERE publication.slug=$1
           AND state.self_stopped_at IS NULL AND state.operations_suspended_at IS NULL AND state.owner_resume_required=false
-          AND disclosure.method IN ('NATIVE','EXTERNAL')
+          AND disclosure.method='NATIVE'
           AND (plan.charge_mode IS NULL OR plan.charge_mode='CONNECT_DIRECT')
           AND disclosure.seller_display_name=COALESCE(plan.seller_display_name,publication.seller_display_name)
           AND disclosure.seller_display_name=profile.seller_display_name
@@ -358,7 +328,6 @@ export class ProviderSellerDisclosureRepository {
     if (!row) return null;
     const sellerKind = String(row.seller_kind) as SellerKind;
     const sellerDisplayName = String(row.seller_display_name);
-    if (row.method === "EXTERNAL") return { method: "EXTERNAL", sellerKind, sellerDisplayName, externalUrl: String(row.external_url) };
     return {
       method: "NATIVE", sellerKind, sellerDisplayName, representativeName: nullableText(row.representative_name),
       publicAddress: String(row.public_address), publicPhone: String(row.public_phone), publicEmail: String(row.public_email),

@@ -88,7 +88,7 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const ids = useId();
   const formId = `${ids}-form`;
   const owner = role === "OWNER";
-  const initialProfile: ProviderProfile = { displayName: settings.displayName, bio: "", sellerDisclosureUrl: settings.sellerDisclosureUrl };
+  const initialProfile: ProviderProfile = { displayName: settings.displayName, bio: "" };
   const [saved, setSaved] = useState(initialProfile);
   const [profile, setProfile] = useState(initialProfile);
   const [reviewStatus, setReviewStatus] = useState(settings.reviewStatus);
@@ -116,7 +116,6 @@ export function HostSettingsForm({ providerId, role, settings, payout: initialPa
   const review = preview ? null : reviewRow({
     reviewStatus,
     role,
-    savedSellerUrl: saved.sellerDisclosureUrl,
     unsaved,
     payoutReady: payout.status === "owner" && payout.payout.reason === "READY",
     consentCurrent: settings.consentCurrent === true,

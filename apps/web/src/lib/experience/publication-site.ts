@@ -91,9 +91,8 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
   const providerKind = providerKindFor(publication, disclosure?.sellerKind);
   const hostAvatar = providerPhoto ?? (publication.providerPublicName && providerKind === "BUSINESS" ? businessLogo : null);
   const canonicalUrl = `${config.siteUrl}${locale === "ja" ? "/ja" : ""}/experiences/${encodeURIComponent(publication.slug)}`;
-  const sellerLegalUrl = terms?.sellerDisclosureUrl ?? (disclosure?.method === "EXTERNAL"
-    ? disclosure.externalUrl
-    : disclosure?.method === "NATIVE" ? `${config.siteUrl}/experiences/${encodeURIComponent(publication.slug)}/seller` : "");
+  const sellerLegalUrl = terms?.sellerDisclosureUrl
+    ?? (disclosure?.method === "NATIVE" ? `${config.siteUrl}${locale === "ja" ? "/ja" : ""}/experiences/${encodeURIComponent(publication.slug)}/seller` : "");
   return {
     booking: {
       checkoutAvailable: Boolean(terms?.offers.length && config.guestBookingEnabled),

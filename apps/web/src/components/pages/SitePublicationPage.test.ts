@@ -44,7 +44,7 @@ const saleTerms = {
   conditionsVersion: SAMPLE_TERMS.conditionsVersion,
 };
 const item = {
-  sellerDisclosure: { method: "EXTERNAL", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Legal Seller", externalUrl: "https://seller.example.test/legal" },
+  sellerDisclosure: { method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Synthetic Legal Seller", representativeName: "Rep", publicAddress: "Addr", publicPhone: "0300000000", publicEmail: "a@example.test" },
   publication: {
     slug: "native-review-page",
     publicTitle: "Native review page",
@@ -114,7 +114,7 @@ describe("native publication reviews", () => {
     expect(html).toContain("★ 4.7 · 3 reviews");
     expect(html).toContain("Reply from Synthetic Host");
     expect(html).toContain("Thank you for joining us.");
-    expect(html).toContain("https://seller.example.test/legal");
+    expect(html).toContain("/experiences/native-review-page/seller");
     expect(html).not.toContain("</script><script>alert(1)</script>");
 
     const nodes = jsonLd(html);
@@ -133,9 +133,11 @@ describe("native publication reviews", () => {
     expect(html).toContain("with Synthetic Actual Host");
     expect(html).toContain("About your host");
     expect(html).toContain("Synthetic Actual Host");
-    expect(html).toContain("Sold by ");
-    expect(html).toContain("Synthetic Legal Seller");
+    expect(html).not.toContain("Sold by ");
     expect(html).toContain("Seller information");
+    const host = html.slice(html.indexOf('id="host"'), html.indexOf("</section>", html.indexOf('id="host"')));
+    expect(host).toContain('id="seller"');
+    expect(host).toContain("/experiences/native-review-page/seller");
     const nodes = jsonLd(html);
     expect(nodes[0]).toMatchObject({ provider: { name: "Synthetic Actual Host" } });
     expect(nodes[1]).not.toHaveProperty("brand");

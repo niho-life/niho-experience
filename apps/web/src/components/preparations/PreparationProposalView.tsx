@@ -41,21 +41,15 @@ function PageContent({ page, language, images }: { page: Page; language: "日本
   );
 }
 
-function safePublicUrl(value: string | null): string | null {
-  if (!value) return null;
-  try { const url = new URL(value); return url.protocol === "https:" || url.protocol === "http:" ? url.href : null; } catch { return null; }
-}
-
 export function PreparationProposalView({ proposal, images }: { proposal: ExperiencePreparationProposal; images: ExperiencePreparationImage[] }) {
   const offer = proposal.offer;
-  const sellerUrl = safePublicUrl(proposal.provider.sellerDisclosureUrl);
   const childAges = offer.childMinAge === null && offer.childMaxAge === null ? "年齢設定なし" : `${offer.childMinAge ?? 0}〜${offer.childMaxAge ?? 17}歳`;
   return (
     <div className="space-y-8">
       <section aria-labelledby="preparation-provider-heading" className="space-y-3">
         <div><p className="text-xs font-extrabold tracking-[0.12em] text-ink-soft">販売者</p><h2 id="preparation-provider-heading" className="font-display text-2xl font-medium">{proposal.provider.displayName}</h2></div>
         <p className="whitespace-pre-wrap text-ink-soft">{proposal.provider.bio || "店舗・提供者紹介はありません。"}</p>
-        <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="text-xs font-bold text-ink-soft">販売者区分</dt><dd>{proposal.provider.kind === "BUSINESS" ? "事業者" : "個人"}</dd></div><div><dt className="text-xs font-bold text-ink-soft">販売者情報・特定商取引法に基づく表示</dt><dd>{sellerUrl ? <a className="break-all underline" href={sellerUrl} target="_blank" rel="noreferrer">{proposal.provider.sellerDisclosureUrl}</a> : proposal.provider.sellerDisclosureUrl || "未設定"}</dd></div></dl>
+        <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="text-xs font-bold text-ink-soft">販売者区分</dt><dd>{proposal.provider.kind === "BUSINESS" ? "事業者" : "個人"}</dd></div></dl>
       </section>
 
       <section aria-labelledby="preparation-listing-heading" className="space-y-4 border-t border-line pt-7">
