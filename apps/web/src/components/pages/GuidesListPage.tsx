@@ -31,19 +31,19 @@ export function GuidesListPage({ catalog, locale }: { catalog: GuideCatalog; loc
         const guides = catalog.guides.filter((guide) => guide.category?.slug === category.slug);
         return <section key={category.slug} id={category.slug} aria-labelledby={`${category.slug}-heading`} className="scroll-mt-24">
           <h2 id={`${category.slug}-heading`} className="mb-5 text-[2rem] sm:text-[2.375rem]">{locale === "ja" ? category.labelJa ?? category.label : category.label}</h2>
-          <GuideTeasers guides={guides} descriptions={false} locale={locale} />
+          <GuideTeasers guides={guides} locale={locale} />
         </section>;
       }) : GUIDE_PILLARS.map((pillar) => {
         const guides = catalog.guides.filter((guide) => guide.pillar === pillar.key);
         return guides.length ? <section key={pillar.key} id={pillar.key} aria-labelledby={`${pillar.key}-heading`} className="scroll-mt-24">
           <p className="eyebrow">{pillar.label}</p>
           <h2 id={`${pillar.key}-heading`} className="mb-5 mt-1 text-[2rem] sm:text-[2.375rem]">{pillar.heading}</h2>
-          <GuideTeasers guides={guides} draftSlugs={catalog.draftSlugs} descriptions={false} locale={locale} />
+          <GuideTeasers guides={guides} draftSlugs={catalog.draftSlugs} locale={locale} />
         </section> : null;
       })}
       {unclassified.length ? <section id="unclassified" aria-labelledby="unclassified-heading" className="scroll-mt-24">
         <h2 id="unclassified-heading" className="mb-5 text-[2rem] sm:text-[2.375rem]">{text.unclassified}</h2>
-        <GuideTeasers guides={unclassified} draftSlugs={catalog.draftSlugs} descriptions={false} locale={locale} />
+        <GuideTeasers guides={unclassified} draftSlugs={catalog.draftSlugs} locale={locale} />
       </section> : null}
     </div> : null}
   </div>;
