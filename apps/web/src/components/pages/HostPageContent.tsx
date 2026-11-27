@@ -94,7 +94,7 @@ export async function HostPageContent({ searchParams, locale }: { searchParams: 
   const managementUrl = consoleEntry ? null : nihoProviderUrl;
   const startUrl = config.hostSignupMode === "open" ? managementUrl : null;
   const contactUrl = safeHttpsUrl(config.hostPilotContactUrl);
-  const talkHref = locale === "ja" && groupInquiryOpen() ? inquiryHref("ja", { type: "LISTING", from: "LISTING" }) : contactUrl;
+  const talkHref = groupInquiryOpen() ? inquiryHref(locale, { type: "LISTING", from: "LISTING" }) : contactUrl;
   const loginHref = consoleEntry?.loginHref ?? managementUrl;
   const loginTitle = locale === "ja" ? "登録済みのホストの方" : "Already registered as a host?";
   const loginBody = locale === "ja" ? "ログインして体験、予約、売上を確認できます。" : "Sign in to see your experiences, bookings and sales.";

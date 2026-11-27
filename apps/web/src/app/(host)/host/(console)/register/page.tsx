@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { HostNoHostGuide } from "@/components/host/HostRegisterPrompt";
 import { HostRegisterForm } from "@/components/host/HostRegisterForm";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
@@ -13,6 +14,8 @@ export const metadata: Metadata = { title: "提供者の登録" };
  * provider terms shown here (NIHO in http mode, the contract mock in mock mode).
  */
 export default async function HostRegisterPage() {
+  // Against the real API the old registration cannot work (#695): guide to the inquiry instead of showing NIHO's error.
+  if (!isHostMock()) return <HostNoHostGuide title="ホストの登録" />;
   const consent = await loadRegistrationConsent();
   return (
     <HostPageBody>
