@@ -278,7 +278,7 @@ const SCREENS=[
   ['home','5. ホーム（チェックリスト）'],['editor','6. 体験のページを作る'],['public','7. 公開ページ'],['payout','8. 売上の受け取り'],
   ['stripe','9. Stripe で口座を登録'],['seller','10. 販売者情報'],
 ];
-const initial=()=>({scen:'existing',kind:'business',width:'phone',screen:'landing',nihoFixed:true,usePhoto:true,
+const initial=()=>({scen:'existing',kind:'business',width:'phone',screen:'landing',nihoFixed:true,usePhoto:false,
   name:'',nameEn:'',email:'',terms:false,registered:false,emailVerified:false,logo:false,
   title:'',lead:'',description:'',photos:0,price:'',cancel:'',meeting:'',slots:false,
   pagePublished:false,plan:null,planConsent:false,stripe:'none',payoutConsent:false,managed:'none',sellerSaved:false,bookingOpen:false});
@@ -367,7 +367,7 @@ view['niho-confirm']=()=>{const isNew=state.scen==='new';const fixed=state.nihoF
 view.start=()=>{const s=S();const biz=isBiz();const ok=state.name.trim()&&/.+@.+\..+/.test(state.email)&&state.terms;const p=nihoProfile();
   const fromNiho=!biz&&state.name===p.name?'<span class="from-niho">NIHO のプロフィールから</span>':'';
   const photoRow=biz?`<div style="display:flex;gap:10px;align-items:center">${mono(48)}<button type="button" class="btn sm" data-act="logo">${state.logo?'外す':'ロゴを選ぶ'}</button></div>`
-    :`<div style="display:flex;gap:10px;align-items:center">${state.usePhoto?nihoAvatar(48):mono(48)}<span class="small soft">${state.usePhoto?'NIHO のプロフィール写真':'頭文字の印'}</span><button type="button" class="btn sm" data-act="toggle-photo">${state.usePhoto?'使わない':'NIHO の写真を使う'}</button></div>`;
+    :`<div style="display:flex;gap:10px;align-items:center">${state.usePhoto?nihoAvatar(48):mono(48)}<span class="small soft">${state.usePhoto?'NIHO のプロフィール写真':'頭文字の印'}</span><button type="button" class="btn sm" data-act="toggle-photo">${state.usePhoto?'使わない':'NIHO の写真を使う'}</button></div>${state.usePhoto?'':'<p class="help">押すと、NIHO のプロフィール写真を体験のページに載せる写真として登録します（掲載してよい写真かを確かめてください）。</p>'}`;
   const preview=`<div id="preview" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px"><p class="small muted" style="font-weight:800">体験のページではこう見えます</p>
     <p class="hostline" style="margin-top:8px">${!biz&&state.usePhoto?nihoAvatar(26):mono(26)}<span>${esc(withLine())}</span></p></div>`;
   const form=`<div class="card" style="text-align:left">
@@ -387,7 +387,7 @@ view.start=()=>{const s=S();const biz=isBiz();const ok=state.name.trim()&&/.+@.+
   return {url:'travel.niho.life/host/start',html:`<div class="auth"><div class="col"><div class="tile travel">NIHO<br>Travel</div><h1>ホストとして登録</h1>
   <div class="stepsrow" aria-label="進み具合"><span class="ok"><i>✓</i>ログイン</span><span class="sep">―</span><span class="now"><i>2</i>ホストの登録</span><span class="sep">―</span><span><i>3</i>体験のページ</span></div>
   <p class="small soft" style="text-align:center;margin-top:10px">登録も、体験のページの公開も無料です。受取口座は、予約の受付を始めるときにつなぎます。</p>${form}</div></div>`,
-  notes:[['見た目','NIHO のログイン・接続の確認と同じ並び（中央の 1 列・タイル・見出し・角の丸いカード）。段階の行で「いまどこか」を見せる（NIHO の参加登録の段階の行と同じ考え）。'],['初期値',biz?'会社・お店のときは掲載名は空欄から。NIHO の表示名と写真は「オーナー（あなた）」の紹介の初期値に回す。':'個人のときは、NIHO の表示名を掲載名に、プロフィール写真を顔写真に入れておく（本人が変えられる）。'],['作るもの','登録で hst_（SELF_REGISTRATION で結び付け）・ホスト・公開名（本人の同意）・オーナー権限・規約の同意・連絡用アドレス（確認待ち）を 1 回で作る。'],['メール','NIHO はメールアドレスを渡さないので、連絡用は本人が入れる（確認のメールで確定）。']]}};
+  notes:[['見た目','NIHO のログイン・接続の確認と同じ並び（中央の 1 列・タイル・見出し・角の丸いカード）。段階の行で「いまどこか」を見せる（NIHO の参加登録の段階の行と同じ考え）。'],['初期値',biz?'会社・お店のときは掲載名は空欄から。NIHO の表示名と写真は「オーナー（あなた）」の紹介の初期値に回す。':'個人のときは、NIHO の表示名を掲載名の初期値に入れておく（本人が変えられる）。プロフィール写真は自動では使わず、「NIHO の写真を使う」を押したときだけ、掲載の確認つきで登録する（Codex レビュー）。'],['作るもの','登録で hst_（SELF_REGISTRATION で結び付け）・ホスト・公開名（本人の同意）・オーナー権限・規約の同意・連絡用アドレス（確認待ち）を 1 回で作る。'],['メール','NIHO はメールアドレスを渡さないので、連絡用は本人が入れる（確認のメールで確定）。']]}};
 
 view.home=()=>{const pt=pageTasks();const pDone=pt.filter(([,ok])=>ok).length;const b=bookingBlockers();
   const st1=state.pagePublished?'done':'active';const st2=state.bookingOpen?'done':state.pagePublished?'active':'';
