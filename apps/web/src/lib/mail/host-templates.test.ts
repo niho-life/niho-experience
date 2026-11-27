@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { hostAddressConfirmationEmail, hostBookingEmail, hostNotificationEmail, hostTeamInvitationEmail } from "./host-templates";
+import { hostAddressConfirmationEmail, hostBookingEmail, hostInvitationEmail, hostNotificationEmail, hostTeamInvitationEmail } from "./host-templates";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import { HOST_NOTIFICATION_TOPICS } from "@niho-experience/experience-store";
 
@@ -102,6 +102,10 @@ describe("team invitation email (#636)", () => {
     expect(named.text).toContain("最初にリンクを開いたブラウザで続けてください。");
     expect(named.text).toContain("心当たりがなければ、このメールは無視してください。");
     expect(named.text).not.toContain("アカウントが無ければ");
+    for (const body of [named.text, named.html]) {
+      expect(body).toContain("NIHO アカウントをお持ちでない方は、ログインの画面で作れます。");
+      expect(body).toContain("「このまま接続する」を選んでください。");
+    }
   });
 
   it("says a generic provider when the office has no name on record", () => {
@@ -109,6 +113,19 @@ describe("team invitation email (#636)", () => {
       const anonymous = hostTeamInvitationEmail({ ...base, providerDisplayName });
       expect(anonymous.subject).toBe("NIHO Travel ホストのメンバーへのご招待");
       expect(anonymous.text).toContain("NIHO Travel ホストで、体験の提供者 を一緒に運営するメンバー（共同ホスト）に招待されました。");
+    }
+  });
+});
+
+describe("host invitation email (#696)", () => {
+  it("tells people without a NIHO account how to make one and which button to choose at NIHO's confirmation, in text and HTML", () => {
+    const invitation = hostInvitationEmail({ siteUrl: "https://experience.example.test", token: "hostInviteToken".padEnd(43, "Q"), expiresAt: "2026-12-02T00:00:00.000Z" });
+    expect(invitation.subject).toBe("NIHO Travel ホストへのご招待");
+    expect(invitation.text).toContain("NIHO アカウントをお持ちの方は、いつも使っているログインの方法でお願いします。");
+    for (const body of [invitation.text, invitation.html]) {
+      expect(body).toContain("NIHO アカウントをお持ちでない方は、ログインの画面で作れます。");
+      expect(body).toContain("いつもと別の方法を選んでいませんか？");
+      expect(body).toContain("「このまま接続する」を選んでください。");
     }
   });
 });

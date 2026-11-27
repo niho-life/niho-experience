@@ -113,6 +113,9 @@ export function hostLoginLinkEmail(input: { readonly siteUrl: string; readonly t
   ], "ja");
 }
 
+/** For an invited person with no NIHO account yet: NIHO's confirmation after sign-up asks them to switch accounts (#696). */
+const NEW_ACCOUNT_GUIDE = "NIHO アカウントをお持ちでない方は、ログインの画面で作れます。作った直後の確認画面で「いつもと別の方法を選んでいませんか？」と出たときは、はじめて作ったのであれば「このまま接続する」を選んでください。";
+
 /**
  * 「NIHO Travel ホストへのご招待」 (Epic #591, #596): the link that binds the host's NIHO account to the host account ops
  * registered (`/host/auth/invite#t=<token>`; the token in the fragment only). It works until `expiresAt`, once, in the
@@ -124,10 +127,11 @@ export function hostInvitationEmail(input: { readonly siteUrl: string; readonly 
     { kind: "p", text: "NIHO Travel ホストを、NIHO アカウントでご利用いただけるようにするための招待です。" },
     {
       kind: "link",
-      lead: `下のリンクを開いて、NIHO にログインしてください。ご登録の NIHO アカウント（いつも使っているログインの方法）でお願いします。リンクは ${until} まで、1 回だけ使えます。最初にリンクを開いたブラウザで続けてください。`,
+      lead: `下のリンクを開いて、NIHO にログインしてください。NIHO アカウントをお持ちの方は、いつも使っているログインの方法でお願いします。リンクは ${until} まで、1 回だけ使えます。最初にリンクを開いたブラウザで続けてください。`,
       label: "NIHO アカウントでログインする",
       href: `${absolute(input.siteUrl, HOST_INVITE_PATH)}#t=${encodeURIComponent(input.token)}`,
     },
+    { kind: "p", text: NEW_ACCOUNT_GUIDE },
     { kind: "p", text: "メールのアプリの中でリンクが開いたときは、そのブラウザのままログインを続けてください。別のブラウザで開き直すと、使えなくなります。" },
     { kind: "p", text: "心当たりがなければ、このメールは無視してください。" },
     REPLY,
@@ -152,6 +156,7 @@ export function hostTeamInvitationEmail(input: { readonly siteUrl: string; reado
       label: "NIHO アカウントでログインして参加する",
       href: `${absolute(input.siteUrl, HOST_TEAM_INVITE_PATH)}#t=${encodeURIComponent(input.token)}`,
     },
+    { kind: "p", text: NEW_ACCOUNT_GUIDE },
     { kind: "p", text: "メールのアプリの中でリンクが開いたときは、そのブラウザのままログインを続けてください。別のブラウザで開き直すと、使えなくなります。" },
     { kind: "p", text: "心当たりがなければ、このメールは無視してください。" },
     REPLY,
