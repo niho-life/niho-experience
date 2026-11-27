@@ -28,7 +28,13 @@ export function ExperienceCard({ card, priority = false, highlight = null, brows
     face: { ...card.face, image: card.face.image ? { src: card.face.image.url, alt: "" } : null },
     priceSuffix: ` ${copy.text("common.perAdult")}`,
   };
-  return <ExperienceCardV1 card={model} priority={priority} highlight={highlight} dates={<></>} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} />;
+  const rendered = <ExperienceCardV1 card={model} priority={priority} highlight={highlight} dates={<></>} primitives={PRESENTATION_PRIMITIVES_V1} copy={copy} />;
+  // A public page whose bookings are not open yet (#706): a small badge on the cover, the same in both languages. It carries no date.
+  if (card.bookingAvailable !== false) return rendered;
+  return <div className="relative h-full">
+    {rendered}
+    <span data-card-state="preparing" className="pointer-events-none absolute top-3 left-3 z-[1] rounded-full bg-white/95 px-3 py-1 text-[0.8125rem] font-extrabold text-ink">{locale === "ja" ? "受付準備中" : "Coming soon"}</span>
+  </div>;
 }
 
 /** Closing card on the home carousel: an invitation to host, not a listing. */

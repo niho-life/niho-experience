@@ -22,7 +22,7 @@ import { providerNameFor } from "@/lib/experience/provider-name";
 import { sitePublicationCard } from "@/lib/experience/site-card-model";
 import { filterByCategory, parseCategoryParam, resolveCategories } from "@/lib/experience-categories";
 import { loadCategoryBySlug } from "@/lib/experience-categories-server";
-import { englishListCatalog } from "@/lib/experience-list-catalog";
+import { bookableFirst, englishListCatalog } from "@/lib/experience-list-catalog";
 import { withoutNativeSlugs } from "@/lib/experience/dedupe-slugs";
 
 export const dynamic = "force-dynamic";
@@ -71,7 +71,8 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
     bySlug,
     parseCategoryParam(query.category),
   );
-  const cardsWithoutReviews = filterByCategory([...withoutNativeSlugs(legacyCards, nativeCards.map((card) => card.slug)), ...nativeCards], bySlug, category);
+  // Pages whose bookings are not open yet come after the ones that can be booked (#706).
+  const cardsWithoutReviews = bookableFirst(filterByCategory([...withoutNativeSlugs(legacyCards, nativeCards.map((card) => card.slug)), ...nativeCards], bySlug, category));
   const cards = withReviewLines(cardsWithoutReviews, await getReviewSummaries(cardsWithoutReviews.map((card) => card.slug)));
   if (!result.ok && result.kind !== "not_found" && cards.length === 0) return <ErrorState title="We couldn't load experiences" />;
 

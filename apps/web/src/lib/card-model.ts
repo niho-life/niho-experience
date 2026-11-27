@@ -34,6 +34,11 @@ export type CardModel = {
   /** True when options have different adult prices, so the price reads "From ¥X". */
   priceIsFrom: boolean;
   offers: CardOffer[];
+  /**
+   * False for an experience whose page is public but whose bookings are not open yet (#706): the card says so and the list puts it
+   * after the ones a guest can book. Absent (legacy NIHO cards) means bookable.
+   */
+  bookingAvailable?: boolean;
   /** "★ 4.9 · 12" or "2 reviews". Only for experiences that have reviews (lib/reviews-ui.ts); the average only from three. */
   reviewLine?: { text: string; label: string };
 };

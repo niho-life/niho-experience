@@ -175,7 +175,21 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
           <aside className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
             {bookable && lowest !== null
               ? <SitePublicationDatePicker item={item} locale={locale} siteOrigin={new URL(config.siteUrl).origin} bookingHref={bookingHref} nextDates={nextDates} inquiryHref={config.groupInquiryEnabled ? askHref : null} enabled={bookable} priceFrom={lowest} ratingLabel={headline?.label ?? null} />
-              : <section id="book" className="rounded-[var(--radius-card)] border border-line bg-white p-5"><p className="eyebrow">{ja ? "料金" : "From"}</p><p className="mt-1 text-3xl font-extrabold">{shownFrom === null ? (ja ? "料金未設定" : "Price unavailable") : yen(shownFrom)}</p><p className="mt-4 rounded-xl bg-sand p-3 text-sm text-ink-soft">{notOpenYet ? (ja ? "予約の受付は準備中です。" : "Bookings are not open yet.") : ja ? "現在、オンライン予約はご利用いただけません。" : "Online booking is temporarily unavailable."}</p>{config.groupInquiryEnabled ? <a href={askHref} className="mt-3 inline-flex min-h-11 items-center font-bold text-moss underline underline-offset-4">{ja ? "ほかの日・グループの相談" : "Ask about other dates or a group"}</a> : null}</section>}
+              : <section id="book" className="rounded-[var(--radius-card)] border border-line bg-white p-5">
+                <p className="eyebrow">{ja ? "料金" : "From"}</p>
+                <p className="mt-1 text-3xl font-extrabold">{shownFrom === null ? (ja ? "料金未設定" : "Price unavailable") : <>{yen(shownFrom)}<small className="ml-1 text-sm font-semibold text-ink-soft">{ja ? "/ 人" : "per person"}</small></>}</p>
+                {notOpenYet
+                  ? <div data-booking-state="preparing" className="mt-4 rounded-xl bg-sand p-3 text-sm text-ink-soft">
+                    <p className="font-extrabold text-ink">{ja ? "予約の受付は準備中です" : "Bookings are not open yet"}</p>
+                    <p className="mt-1">{ja ? "日にちが決まりしだい、このページから予約できます。日にちや人数の相談は、いまでもホストに送れます。" : "You will be able to book here as soon as the dates are set. In the meantime, you can still message the host about dates or group size."}</p>
+                  </div>
+                  : <p className="mt-4 rounded-xl bg-sand p-3 text-sm text-ink-soft">{ja ? "現在、オンライン予約はご利用いただけません。" : "Online booking is temporarily unavailable."}</p>}
+                {config.groupInquiryEnabled
+                  ? notOpenYet
+                    ? <a href={askHref} className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-moss px-5 text-base font-extrabold text-white">{ja ? "ホストに相談する" : "Ask the host"}</a>
+                    : <a href={askHref} className="mt-3 inline-flex min-h-11 items-center font-bold text-moss underline underline-offset-4">{ja ? "ほかの日・グループの相談" : "Ask about other dates or a group"}</a>
+                  : null}
+              </section>}
           </aside>
           <main className="min-w-0 lg:col-start-1 lg:row-start-2">
             <section className="pt-6" aria-label={ja ? "概要" : "Overview"}>

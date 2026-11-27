@@ -376,8 +376,11 @@ describe("a public page whose bookings are not open yet (#705)", () => {
     expect(html).toContain("Native review page");
     expect(html).toContain("Synthetic Actual Host");
     expect(html).toContain("¥4,000");
-    expect(html).toContain("Bookings are not open yet.");
-    expect(html).toContain("Ask about other dates or a group");
+    expect(html).toContain("Bookings are not open yet");
+    expect(html).toContain("You will be able to book here as soon as the dates are set.");
+    expect(html).toContain(">Ask the host<");
+    expect(html).toContain("/inquiry?from=experience");
+    expect(html).not.toMatch(/payout|bank|identity|Stripe/i);
     expect(html).not.toContain("Seller information");
     expect(html).not.toContain('id="seller"');
     expect(html).not.toContain("Synthetic Legal Seller");
@@ -388,8 +391,10 @@ describe("a public page whose bookings are not open yet (#705)", () => {
   it("says the same in Japanese", async () => {
     state.reviews = null;
     const html = renderToStaticMarkup(await SitePublicationPage({ item: notOpen, locale: "ja" }));
-    expect(html).toContain("予約の受付は準備中です。");
-    expect(html).toContain("ほかの日・グループの相談");
+    expect(html).toContain("予約の受付は準備中です");
+    expect(html).toContain("日にちが決まりしだい、このページから予約できます。日にちや人数の相談は、いまでもホストに送れます。");
+    expect(html).toContain(">ホストに相談する<");
+    expect(html).not.toMatch(/口座|本人確認/);
     expect(html).toContain("¥4,000");
     expect(html).not.toContain("特定商取引法に基づく表記");
     for (const node of jsonLd(html)) expect(node).not.toHaveProperty("offers");

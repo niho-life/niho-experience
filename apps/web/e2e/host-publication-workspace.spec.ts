@@ -253,12 +253,15 @@ test("the photo dialog asks both descriptions on a page in both languages", asyn
   await expect(dialog.getByLabel("写真の用途")).toHaveCount(0);
 });
 
-test("「同意して公開」 names what is missing only when pressed, and asks for consent when nothing is", async ({ page }) => {
+test("the two buttons say in words what is missing, and the list opens from there (#706)", async ({ page }) => {
   await mountHost(page, baseProduct({ publicationBlockers: ["SCHEDULE_REQUIRED", "PRICE_REQUIRED", "CONNECT_NOT_READY"] }));
-  await expect(page.getByText("あと2つ必要です")).toHaveCount(0);
   await expect(page.getByRole("img", { name: "確認が必要" })).toHaveCount(0);
-  await page.getByRole("button", { name: "同意して公開", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "公開するには、あと3つ必要です" });
+  await expect(page.getByRole("button", { name: "ページを公開する", exact: true })).toBeDisabled();
+  await expect(page.getByText("ページの公開には、料金が必要です。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "予約の受付を始める", exact: true })).toBeDisabled();
+  await expect(page.getByText("予約の受付には、料金・受取口座・開催枠が必要です。")).toBeVisible();
+  await page.getByRole("button", { name: "必要なことを見る" }).last().click();
+  const dialog = page.getByRole("dialog", { name: "予約の受付を始めるには、あと3つ必要です" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("link", { name: "カレンダーを開く" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "入力する" })).toHaveCount(1);
@@ -267,13 +270,22 @@ test("「同意して公開」 names what is missing only when pressed, and asks
   await expect(page.getByRole("tab", { name: /日程/ }).getByRole("img", { name: "確認が必要" })).toHaveCount(0);
 });
 
-test("with nothing missing the main button opens the publish confirmation", async ({ page }) => {
-  await mountHost(page, baseProduct());
-  await page.getByRole("button", { name: "同意して公開", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "この商品を公開しますか？" })).toBeVisible();
+test("only the booking reasons left: the page can be published, and starting bookings stays off with its reasons", async ({ page }) => {
+  await mountHost(page, baseProduct({ publicationBlockers: ["SCHEDULE_REQUIRED", "CONNECT_NOT_READY"] }));
+  await expect(page.getByRole("button", { name: "ページを公開する", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "予約の受付を始める", exact: true })).toBeDisabled();
+  await expect(page.getByText("予約の受付には、受取口座・開催枠が必要です。")).toBeVisible();
+  await page.getByRole("button", { name: "ページを公開する", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "体験のページを公開しますか？" })).toBeVisible();
 });
 
-test("「同意して公開」 confirms manuscripts that were saved without a confirmation, with no edit needed", async ({ page }) => {
+test("with nothing missing both buttons open their confirmations", async ({ page }) => {
+  await mountHost(page, baseProduct());
+  await page.getByRole("button", { name: "予約の受付を始める", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "予約の受付を始めますか？" })).toBeVisible();
+});
+
+test("「ページを公開する」 confirms manuscripts that were saved without a confirmation, with no edit needed", async ({ page }) => {
   // Written in both languages under the old screen but never confirmed: nothing is unsaved, and the server holds MANUSCRIPT_REQUIRED.
   const product = baseProduct({ publicationBlockers: ["MANUSCRIPT_REQUIRED"] });
   await mountHost(page, product);
@@ -284,8 +296,8 @@ test("「同意して公開」 confirms manuscripts that were saved without a co
     drafts.push(posted.draft);
     await route.fulfill({ json: { product: { ...product, version: "2", publicationBlockers: [], draft: { ...product.draft, ...posted.draft } } } });
   });
-  await page.getByRole("button", { name: "同意して公開", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "この商品を公開しますか？" })).toBeVisible();
+  await page.getByRole("button", { name: "ページを公開する", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "体験のページを公開しますか？" })).toBeVisible();
   expect(drafts).toHaveLength(1);
   const translation = drafts[0]!.content.translation ?? {};
   expect(typeof translation.sourceFingerprint).toBe("string");

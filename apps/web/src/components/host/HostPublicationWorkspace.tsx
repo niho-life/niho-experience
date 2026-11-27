@@ -18,6 +18,8 @@ import {
   type PublicationTermsForm,
 } from "./publication-terms";
 import { publicationBlockerDestination, publicationCanPublish, publicationNextAction } from "./publication-workflow";
+import { HostPublicationStages } from "./HostPublicationStages";
+import { PUBLICATION_ACTION_NOTICE, PUBLICATION_ACTION_PATH, SECTION_NEED_LABEL, publicationConfirmCopy, publicationStages, splitBlockers, type PublicationAction, type SectionNeed } from "./publication-stages";
 import { canonicalPublicationJson as canonicalJson, confirmPublicationEnglish, englishIsConfirmed, englishPublicationManuscript, liveEnglishStaleNote, publicationManuscriptFingerprint } from "./publication-confirmation";
 import { photoRightsConfirmed, type PhotoRightsConfirmation } from "./photo-rights";
 import { reapplyProviderMediaEdits } from "./publication-conflict";
@@ -54,6 +56,11 @@ type Product = {
   status: Status;
   publicationNeedsUpdate: boolean;
   publicationBlockers: string[];
+  /** The same reasons split in two (#705): what stops the public page, and what only stops bookings from opening. */
+  pageBlockers?: string[];
+  bookingBlockers?: string[];
+  /** Bookings are actually being taken (a booking version, and not stopped or suspended). */
+  bookingOpen?: boolean;
   acceptanceMode?: "INSTANT" | "APPROVAL";
   adminEnglishReview?: {
     reviewed: boolean;
@@ -391,6 +398,8 @@ export function HostPublicationWorkspace({
   const [translateConfirm, setTranslateConfirm] = useState<"en" | "ja" | null>(null);
   const [discardConfirm, setDiscardConfirm] = useState(false);
   const [blockerDialog, setBlockerDialog] = useState(false);
+  /** Which button's reasons the blocker dialog lists: the page's, or the start of bookings'. */
+  const [blockerScope, setBlockerScope] = useState<"page" | "booking">("booking");
   /** The blocker dialog was shown: until the page is published, the tabs it names carry a small mark. */
   const [blockersShown, setBlockersShown] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -408,7 +417,7 @@ export function HostPublicationWorkspace({
   const [salesPlanCommandId, setSalesPlanCommandId] = useState<string | null>(null);
   const [createDraftRestored, setCreateDraftRestored] = useState(false);
   /** 公開・停止 waiting for its confirmation in the page's dialog. */
-  const [stateConfirm, setStateConfirm] = useState<"publish" | "stop" | null>(null);
+  const [stateConfirm, setStateConfirm] = useState<"publish" | PublicationAction | null>(null);
   const stateConfirmStay = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const japaneseSourceRef = useRef<LocaleManuscript>(blankJapanese);
@@ -949,7 +958,7 @@ export function HostPublicationWorkspace({
     } finally { setBusy(false); }
   }
 
-  async function changeState(action: "publish" | "stop") {
+  async function changeState(action: "publish" | PublicationAction) {
     if (conflictProduct) { setError("別の更新との競合を解決してから、公開・停止を行ってください。"); return; }
     if (!product || dirty || busy) { if (dirty) setError("公開・停止の前に、入力を保存してください。"); return; }
     if (action === "publish" && product.publicationBlockers.length > 0) {
@@ -964,7 +973,7 @@ export function HostPublicationWorkspace({
     setStateConfirm(action);
   }
 
-  async function runStateChange(action: "publish" | "stop") {
+  async function runStateChange(action: "publish" | PublicationAction) {
     if (!product || dirty || busy) return;
     setBusy(true); setError(""); setNotice("");
     try {
@@ -972,7 +981,9 @@ export function HostPublicationWorkspace({
       const publishBody = adminDraft
         ? { version: product.version, accepted: true, sellerConfirmationMethod, photoRightsConfirmed: true, consentVersion }
         : { version: product.version, consentVersion, accepted: true };
-      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/${action}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(action === "publish" ? publishBody : { version: product.version }) });
+      // 予約の受付を始める takes the same consent as the old one-step publish; the page alone and the stops take only the version.
+      const body_ = action === "publish" ? publishBody : action === "open-booking" ? { version: product.version, consentVersion, accepted: true } : { version: product.version };
+      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/${action === "publish" ? "publish" : PUBLICATION_ACTION_PATH[action]}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body_) });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       if (adminDraft) {
@@ -982,8 +993,8 @@ export function HostPublicationWorkspace({
         return;
       }
       const saved = (body as ProductResponse).product;
-      setProduct(saved); setNotice(action === "publish" ? "公開しました。" : "販売を停止しました。");
-      if (action === "publish") setBlockersShown(false);
+      setProduct(saved); setNotice(action === "publish" ? "公開しました。" : PUBLICATION_ACTION_NOTICE[action]);
+      if (action === "publish" || action === "publish-page" || action === "open-booking") setBlockersShown(false);
       await refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "処理結果を確認できませんでした。入力は保持しています。");
@@ -1135,8 +1146,12 @@ export function HostPublicationWorkspace({
     if (hostCreate) router.replace(experiencesBase);
   }
 
-  /** 「同意して公開」: save first when there is something unsaved, then either say what is still missing or ask for the consent. */
-  async function requestPublish() {
+  /**
+   * 「ページを公開する」 / 「予約の受付を始める」 (#706): save first when there is something unsaved, then either say what is still
+   * missing or ask for the confirmation. The page alone needs only the page's reasons (while bookings are open it needs the
+   * booking's too: the store moves the page and the sale together); starting bookings needs both.
+   */
+  async function requestPublish(action: Extract<PublicationAction, "publish-page" | "open-booking">) {
     if (!product || busy || conflictProduct || product.status === "SUSPENDED") return;
     let current = product;
     // Manuscripts that were saved without a confirmation (the old 「英語を確認」) get it from this press: no edit is needed for it.
@@ -1146,8 +1161,11 @@ export function HostPublicationWorkspace({
       if (!savedProduct) return;
       current = savedProduct;
     }
-    if ((current.publicationBlockers ?? []).length > 0) { setBlockersShown(true); setBlockerDialog(true); return; }
-    setStateConfirm("publish");
+    const split = splitBlockers(current);
+    const selling = current.bookingOpen ?? current.status === "PUBLISHED";
+    const needs = action === "open-booking" || selling ? [...split.page, ...split.booking] : split.page;
+    if (needs.length > 0) { setBlockerScope(action === "open-booking" ? "booking" : "page"); setBlockersShown(true); setBlockerDialog(true); return; }
+    setStateConfirm(action);
   }
 
   /** 「日本語から翻訳」(into the English tab) or 「英語から翻訳」(into the Japanese tab): asks first when the tab already has something written. */
@@ -1312,6 +1330,13 @@ export function HostPublicationWorkspace({
   const galleryMedia = mediaDraft.filter((item) => item.placement === "GALLERY");
   const calendarHref = adminDraft ? `${experiencesBase}/${encodeURIComponent(product.id)}/calendar` : `/host/calendar?experience=${encodeURIComponent(product.id)}`;
   const savedBlockers = product.publicationBlockers ?? [];
+  /** The two buttons (#706): what is shown, what can be pressed, and why not. */
+  const stages = publicationStages({
+    status: product.status, publicationBlockers: savedBlockers, pageBlockers: product.pageBlockers, bookingBlockers: product.bookingBlockers,
+    bookingOpen: product.bookingOpen, publicationNeedsUpdate: product.publicationNeedsUpdate, dirty: needsSave, conflict: !!conflictProduct,
+    confirmManuscriptsOnPress: content.japaneseOnly !== true,
+  });
+  const bookingIsOpen = product.bookingOpen ?? product.status === "PUBLISHED";
   const canPublish = !conflictProduct && publicationCanPublish({ dirty, blockers: savedBlockers, suspended: product.status === "SUSPENDED" });
   const nextAction = publicationNextAction({ dirty, blockers: savedBlockers, published: product.status === "PUBLISHED" && !product.publicationNeedsUpdate });
   // A pending draft may have a different slug from the current publication.
@@ -1480,16 +1505,25 @@ export function HostPublicationWorkspace({
     const statusTone = product.status === "PUBLISHED" ? "bg-leaf-pale text-moss"
       : product.status === "DRAFT" ? "bg-sand text-ink-soft"
         : product.status === "RESTART_REQUIRED" ? "bg-warn-pale text-warn" : "bg-danger-pale text-danger";
-    const pendingChanges = product.status === "PUBLISHED" && (product.publicationNeedsUpdate || savedBlockers.length > 0);
-    const showPrimary = !(product.status === "PUBLISHED" && !product.publicationNeedsUpdate);
+    // Booking reasons are normal on a page whose bookings are not open yet: they only say "changes not shown" while bookings are open.
+    const pendingChanges = product.status === "PUBLISHED" && (product.publicationNeedsUpdate || (bookingIsOpen && savedBlockers.length > 0));
     const titleText = L === "ja" ? japanese.title || english.title || "体験を編集" : english.title || japanese.title || "体験を編集";
-    const blockerGoal = product.status === "PUBLISHED" ? "公開中のページに反映する" : product.status === "STOPPED" ? "再開する" : "公開する";
+    const dialogBlockers = blockerScope === "page" ? stages.page.blockers : stages.booking.blockers;
+    const blockerGoal = blockerScope === "booking" ? (product.status === "STOPPED" || product.status === "RESTART_REQUIRED" ? "予約の受付を再開する" : "予約の受付を始める")
+      : product.status === "PUBLISHED" ? "公開中のページに反映する" : product.status === "STOPPED" || product.status === "RESTART_REQUIRED" ? "ページを公開し直す" : "ページを公開する";
     const markedTabs = new Set<string>();
     if (blockersShown && !dirty) for (const blocker of savedBlockers) { const destination = publicationBlockerDestination(blocker); if (destination?.kind === "tab") markedTabs.add(destination.tab); }
     const missingAltMark = blockersShown && savedBlockers.includes("PHOTOS_REQUIRED");
     const perOffer = perOfferOpen ?? terms.offerPrices.some((price) => price.adultPriceYen !== "");
     const sectionClass = `${HOST_SURFACE} scroll-mt-4 p-4 md:p-6`;
-    const headingClass = "mb-3.5 flex items-center text-base font-extrabold";
+    const headingClass = "mb-3.5 flex flex-wrap items-center text-base font-extrabold";
+    /** The small tag on a section (#706): what it is needed for, and once it is saved and met, 「入力済み」. */
+    const savedNeeds = new Set(savedBlockers);
+    const tag = (need: SectionNeed, codes: readonly string[] = []) => {
+      const met = need !== "optional" && !codes.some((code) => savedNeeds.has(code));
+      const tone = met ? "bg-leaf-pale text-moss" : need === "page" ? "bg-warn-pale text-warn" : "bg-sand text-ink-soft";
+      return <small data-section-need={met ? "met" : need} className={`ml-2 inline-flex h-5 items-center rounded-full px-2 text-[0.6875rem] font-extrabold ${tone}`}>{met ? "✓ 入力済み" : SECTION_NEED_LABEL[need]}</small>;
+    };
     const setTermsField = <K extends keyof PublicationTermsForm>(key: K, value: PublicationTermsForm[K]) => setTerms((current) => ({ ...current, [key]: value }));
     const classificationShown = listing.ja && !classification.hidden && classification.value !== null;
 
@@ -1521,7 +1555,7 @@ export function HostPublicationWorkspace({
     </section> : null;
 
     const photoSection = <section id="publication-photos" className={sectionClass} aria-labelledby="publication-photos-title">
-      <h2 id="publication-photos-title" className={headingClass}>写真<HostInfoTip label="写真">1枚目が体験ページの表紙です。写真を選ぶと、説明と並び順を変えられます。並び順は英語と日本語で共通です。</HostInfoTip></h2>
+      <h2 id="publication-photos-title" className={headingClass}>写真{tag("page", ["PHOTOS_REQUIRED"])}<HostInfoTip label="写真">1枚目が体験ページの表紙です。写真を選ぶと、説明と並び順を変えられます。並び順は英語と日本語で共通です。</HostInfoTip></h2>
       <div className="grid grid-cols-3 gap-2.5 md:grid-cols-4">
         {mediaDraft.map((photo, index) => <button key={photo.id} type="button" aria-pressed={photo.id === activePhotoId} aria-label={`写真 ${index + 1}${index === 0 ? "（表紙）" : ""}を編集`} onClick={() => setActivePhotoId((current) => current === photo.id ? null : photo.id)} className={`relative block aspect-[4/3] w-full overflow-hidden rounded-xl border-2 bg-sand ${photo.id === activePhotoId ? "border-ink" : "border-transparent"}`}>
           <Image src={photo.previewUrl} alt="" width={160} height={120} unoptimized className="size-full object-cover" />
@@ -1549,7 +1583,7 @@ export function HostPublicationWorkspace({
     </section>;
 
     const timelineSection = <section id="publication-timeline" className={sectionClass} aria-labelledby="publication-timeline-title">
-      <h2 id="publication-timeline-title" className={headingClass}>当日の流れ</h2>
+      <h2 id="publication-timeline-title" className={headingClass}>当日の流れ{tag("optional")}</h2>
       <div className="grid gap-2">
         {timeline.map((item, index) => <div key={index}>
           <div className="grid grid-cols-[1fr_34px] items-start gap-2 rounded-xl bg-sand p-2.5 md:grid-cols-[96px_1fr_34px]">
@@ -1593,7 +1627,7 @@ export function HostPublicationWorkspace({
     </div>;
 
     const hostSection = <section id="publication-host" className={sectionClass} aria-labelledby="publication-host-title">
-      <h2 id="publication-host-title" className={headingClass}>迎える人<HostInfoTip label="迎える人">販売者の表示と、提供者の写真・ロゴです。すべての体験に同じ内容が出ます。</HostInfoTip></h2>
+      <h2 id="publication-host-title" className={headingClass}>迎える人{tag("optional")}<HostInfoTip label="迎える人">販売者の表示と、提供者の写真・ロゴです。すべての体験に同じ内容が出ます。</HostInfoTip></h2>
       <p className="text-sm text-ink-soft">販売者表示: <span className="font-bold text-ink">{product.sellerDisplayName || "未設定"}</span></p>
       <div className="mt-3 grid gap-3">
         {providerMediaDraft.map((photo) => <div key={photo.id} className="grid gap-3 rounded-xl border border-line p-3 md:grid-cols-[5rem_1fr]">
@@ -1618,21 +1652,21 @@ export function HostPublicationWorkspace({
           {staleNotice}
           {photoSection}
           <section id="publication-intro" className={sectionClass} aria-labelledby="publication-intro-title">
-            <h2 id="publication-intro-title" className={headingClass}>紹介</h2>
+            <h2 id="publication-intro-title" className={headingClass}>紹介{tag("page", ["MANUSCRIPT_REQUIRED", "PUBLIC_CONTENT_INVALID"])}</h2>
             {manuscriptField("体験名", "title")}
             {manuscriptField("ひとこと紹介", "lead", { rows: 2 })}
             {manuscriptField("当日の言語", "language")}
             {manuscriptField("詳しい説明", "description", { rows: 6 })}
           </section>
           <section id="publication-highlights" className={sectionClass} aria-labelledby="publication-highlights-title">
-            <h2 id="publication-highlights-title" className={headingClass}>見どころ・含まれるもの</h2>
+            <h2 id="publication-highlights-title" className={headingClass}>見どころ・含まれるもの{tag("optional")}</h2>
             {rowsEditor("見どころ", "highlights")}
             {rowsEditor("含まれるもの", "included")}
             {rowsEditor("含まれないもの", "notIncluded")}
           </section>
           {timelineSection}
           <section id="publication-meeting" className={sectionClass} aria-labelledby="publication-meeting-title">
-            <h2 id="publication-meeting-title" className={headingClass}>集合場所</h2>
+            <h2 id="publication-meeting-title" className={headingClass}>集合場所{tag("optional")}</h2>
             <EditorChoice name="meeting-disclosure" legend="集合場所を見せる時期" info="「予約が確定してから案内する」では、公開ページに「集合の概要」だけが出ます。「予約前から公開する」では、公開ページに集合場所が出ます。英語と日本語で共通です。"
               value={disclosure} onChange={(next) => setContent((current) => ({ ...current, meetingPointDisclosure: next, publicMapPoint: next === "PUBLIC" ? current.publicMapPoint ?? null : null, publicMapArea: next === "AFTER_BOOKING" ? current.publicMapArea ?? null : null }))}
               options={[{ value: "AFTER_BOOKING", label: "予約が確定してから案内する" }, { value: "PUBLIC", label: "予約前から公開する" }]} />
@@ -1664,7 +1698,7 @@ export function HostPublicationWorkspace({
             </div>
           </section>
           <section id="publication-notes" className={sectionClass} aria-labelledby="publication-notes-title">
-            <h2 id="publication-notes-title" className={headingClass}>注意事項・よくある質問</h2>
+            <h2 id="publication-notes-title" className={headingClass}>注意事項・よくある質問{tag("optional")}</h2>
             {rowsEditor("参加前の注意", "knowBeforeYouGo")}
             {rowsEditor("参加に向かない条件", "notSuitableFor", "任意")}
             <div className="mt-5">{faqSection}</div>
@@ -1682,7 +1716,7 @@ export function HostPublicationWorkspace({
 
     const pricingTab = <div className="grid max-w-[720px] gap-4">
       <section id="publication-price" className={sectionClass} aria-labelledby="publication-price-title">
-        <h2 id="publication-price-title" className={headingClass}>料金</h2>
+        <h2 id="publication-price-title" className={headingClass}>料金{tag("page", ["PRICE_REQUIRED"])}</h2>
         <EditorUnitField label="大人1人" small="税込" prefix="¥" info="無料の体験は0円にします。有料は50円以上にしてください。" value={unitAmount} onChange={setUnitAmount} />
         <EditorSwitch label="子ども料金を設定する" checked={terms.childPricingEnabled} onChange={(on) => setTermsField("childPricingEnabled", on)} />
         {terms.childPricingEnabled ? <div className="mt-2.5 border-l-2 border-line pl-4">
@@ -1707,7 +1741,7 @@ export function HostPublicationWorkspace({
         <EditorUnitField label="最少催行人数" small="任意" suffix="人" info="管理用の記録です。旅行者には表示されず、自動の中止・返金もありません。" value={terms.minimumAttendance} onChange={(next) => setTermsField("minimumAttendance", next)} />
       </section>
       <section id="publication-cancel" className={sectionClass} aria-labelledby="publication-cancel-title">
-        <h2 id="publication-cancel-title" className={headingClass}>取消条件<HostInfoTip label="取消条件">無料の期限を過ぎた取消には返金しません。「返金なし」は、予約後の取消に返金しません。確定している条件を選んでください。</HostInfoTip></h2>
+        <h2 id="publication-cancel-title" className={headingClass}>取消条件{tag("page", ["CANCELLATION_TERMS_REQUIRED"])}<HostInfoTip label="取消条件">無料の期限を過ぎた取消には返金しません。「返金なし」は、予約後の取消に返金しません。確定している条件を選んでください。</HostInfoTip></h2>
         <EditorChoice name="cancel-policy" legend="取消条件を選ぶ" legendHidden value={terms.cancellationPolicy} onChange={(next) => setTermsField("cancellationPolicy", next)}
           options={[{ value: "FREE_UNTIL_24H", label: "開始24時間前まで無料" }, { value: "FREE_UNTIL_48H", label: "開始48時間前まで無料" }, { value: "NONE", label: "返金なし" }, { value: "CUSTOM", label: "期限と返金割合を決める" }]} />
         {terms.cancellationPolicy === "CUSTOM" ? <div className="mt-2.5 border-l-2 border-line pl-4">
@@ -1731,7 +1765,7 @@ export function HostPublicationWorkspace({
 
     const scheduleTab = <div className="grid max-w-[720px] gap-4">
       <section id="publication-offers" className={sectionClass} aria-labelledby="publication-offers-title">
-        <h2 id="publication-offers-title" className={headingClass}>開催枠<HostInfoTip label="開催枠">旅行者が選べる曜日と時刻です。枠の追加・休止・回ごとの変更は、カレンダーで行います。</HostInfoTip></h2>
+        <h2 id="publication-offers-title" className={headingClass}>開催枠{tag("booking", ["SCHEDULE_REQUIRED"])}<HostInfoTip label="開催枠">旅行者が選べる曜日と時刻です。枠の追加・休止・回ごとの変更は、カレンダーで行います。</HostInfoTip></h2>
         {product.offers.length ? <ul>{product.offers.map((offer) => <li key={offer.id} className="border-t border-line py-3 first:border-t-0 first:pt-0">{offerLabel(offer)}</li>)}</ul> : <p className="text-sm text-muted">開催枠はまだありません。</p>}
         <div className="mt-3.5 border-t border-line pt-3.5"><Link className={consoleButtonClass("secondary")} href={calendarHref}>カレンダーで日程を編集 →</Link></div>
       </section>
@@ -1748,7 +1782,7 @@ export function HostPublicationWorkspace({
         {listingNotice ? <p role="status" className="mt-2 text-sm font-bold text-warn">{listingNotice}</p> : null}
       </section>
       {membersProviderId ? <section id="publication-members" className={sectionClass} aria-labelledby="publication-members-title">
-        <h2 id="publication-members-title" className={headingClass}>案内するメンバー</h2>
+        <h2 id="publication-members-title" className={headingClass}>案内するメンバー{tag("optional")}</h2>
         <ProductMemberSelection key={`${membersProviderId}/${product.id}`} providerId={membersProviderId} productId={product.id} />
       </section> : null}
       <section id="publication-slug" className={sectionClass} aria-labelledby="publication-slug-title">
@@ -1776,8 +1810,8 @@ export function HostPublicationWorkspace({
       <div className="mb-3.5 flex flex-col gap-3 md:flex-row md:items-start">
         <h1 className="min-w-0 flex-1 font-display text-[1.375rem] leading-[1.35] font-medium tracking-[-0.01em] [overflow-wrap:anywhere] md:text-[1.625rem]">
           {titleText}
-          <span className={`${pillBase} ${statusTone} ml-2.5 align-middle`}>{STATUS_COPY[product.status]}</span>
-          {pendingChanges ? <button type="button" disabled={busy} onClick={() => { if (savedBlockers.length > 0) { setBlockersShown(true); setBlockerDialog(true); } else void requestPublish(); }} className={`${pillBase} ml-2 bg-warn-pale align-middle text-warn`}>未反映の変更あり</button> : null}
+          <span className={`${pillBase} ${statusTone} ml-2.5 align-middle`}>{stages.statusLabel}</span>
+          {pendingChanges ? <button type="button" disabled={busy} onClick={() => void requestPublish("publish-page")} className={`${pillBase} ml-2 bg-warn-pale align-middle text-warn`}>未反映の変更あり</button> : null}
         </h1>
         <div ref={menuRef} className="relative flex shrink-0 items-center gap-2 pt-0.5 max-md:w-full">
           {publicHref ? <Link className={consoleButtonClass("secondary")} href={publicHref}>公開ページを見る ↗</Link> : null}
@@ -1785,11 +1819,15 @@ export function HostPublicationWorkspace({
           {menuOpen ? <div role="menu" className="absolute top-12 right-0 z-20 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-canvas p-1.5 shadow-[0_10px_30px_rgb(28_28_26/0.12)]">
             {publicSiteOrigin && providerBookingLinkAvailable(product) ? <div className="px-3 py-2"><HostBookingLinkCopy slug={product.draft.slug} origin={publicSiteOrigin} japaneseOnly={japaneseOnly} /></div> : null}
             {embedEnabled && publicHref && !japaneseOnly ? <Link role="menuitem" href={`${experiencesBase}/${encodeURIComponent(product.id)}/embed`} onClick={() => setMenuOpen(false)} className="block w-full rounded-[9px] px-3 py-2 text-left text-[0.8125rem] font-bold text-ink hover:bg-sand">自分のサイトに貼る</Link> : null}
-            <button type="button" role="menuitem" disabled={busy || dirty || !!conflictProduct} onClick={() => { setMenuOpen(false); void changeState("stop"); }} className="block w-full rounded-[9px] px-3 py-2 text-left text-[0.8125rem] font-bold text-danger hover:bg-sand disabled:opacity-45">新しい予約を停止</button>
+            <button type="button" role="menuitem" disabled={busy || dirty || !!conflictProduct} onClick={() => { setMenuOpen(false); void changeState("stop"); }} className="block w-full rounded-[9px] px-3 py-2 text-left text-[0.8125rem] font-bold text-danger hover:bg-sand disabled:opacity-45">ページを止める（予約も止まります）</button>
           </div> : null}
-          {showPrimary ? <button type="button" disabled={busy || !!conflictProduct || product.status === "SUSPENDED"} className={`${consoleButtonClass("primary")} max-md:flex-1`} onClick={() => void requestPublish()}>{product.status === "STOPPED" ? "予約の受付を再開" : "同意して公開"}</button> : null}
         </div>
       </div>
+      <HostPublicationStages
+        stages={stages} busy={busy} publicHref={publicHref}
+        onRun={(action) => { if (action === "stop-booking") void changeState("stop-booking"); else void requestPublish(action); }}
+        onShowBlockers={(scope) => { setBlockerScope(scope); setBlockersShown(true); setBlockerDialog(true); }}
+      />
       {(error && !photoDialog) || conflictProduct ? <div role="alert" className="mb-3 rounded-xl bg-danger-pale p-3 text-danger">{error && !photoDialog ? <p>{error}</p> : null}{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
       {product.status === "SUSPENDED" ? <p className="mb-3 rounded-xl bg-warn-pale p-3 text-warn">運営停止中です。入力と下書きは保存できますが、再開は運営の停止解除後に行えます。</p> : null}
       <div role="tablist" aria-label="体験の編集" className="mb-5 flex gap-6 overflow-x-auto border-b border-line">
@@ -1812,20 +1850,21 @@ export function HostPublicationWorkspace({
           </div> : null}
         </div> : null}
       </form>
-      {stateConfirm ? <HostConfirmDialog title={stateConfirm === "stop" ? "新しい予約を停止しますか？" : product.status === "STOPPED" ? "予約の受付を再開しますか？" : "この商品を公開しますか？"} description={stateConfirm === "stop" ? "この商品の新しい予約を停止します。受け付けた予約はそのまま残ります。" : "掲載条件を確認し、この商品を公開します。公開内容と販売条件に同意します。"} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>{stateConfirm === "stop" ? "停止する" : "同意して公開する"}</button>} onConfirm={() => { const action = stateConfirm; void runStateChange(action); }} onClose={() => setStateConfirm(null)} /> : null}
+      {stateConfirm && stateConfirm !== "publish" ? <HostConfirmDialog title={publicationConfirmCopy(stateConfirm, product.status).title} description={publicationConfirmCopy(stateConfirm, product.status).description} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>{publicationConfirmCopy(stateConfirm, product.status).confirm}</button>} onConfirm={() => { const action = stateConfirm; void runStateChange(action); }} onClose={() => setStateConfirm(null)} /> : null}
       {translateConfirm ? <HostConfirmDialog title={`今の${NAME[translateConfirm]}を置き換えますか？`} description={`${translateConfirm === "en" ? "日本語" : "英語"}の原稿から翻訳し直します。${NAME[translateConfirm]}に手で書いた内容は消えます。`} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>置き換える</button>} onConfirm={() => void (translateConfirm === "en" ? generateEnglish() : generateJapanese())} onClose={() => setTranslateConfirm(null)} /> : null}
       {discardConfirm ? <HostConfirmDialog title="変更を元に戻しますか？" description="保存していない入力は消えて、最後に保存した内容に戻ります。" focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>元に戻す</button>} onConfirm={() => void discardToLatest()} onClose={() => setDiscardConfirm(false)} /> : null}
-      <EditorDialog open={blockerDialog} onClose={() => setBlockerDialog(false)} title={`${blockerGoal}には、あと${savedBlockers.length}つ必要です`}>
+      <EditorDialog open={blockerDialog} onClose={() => setBlockerDialog(false)} title={`${blockerGoal}には、あと${dialogBlockers.length}つ必要です`}>
         <ul className="mt-3">
-          {savedBlockers.map((blocker) => {
+          {dialogBlockers.map((blocker) => {
             const destination = publicationBlockerDestination(blocker);
             const link = "font-extrabold whitespace-nowrap text-moss underline underline-offset-4";
             return <li key={blocker} className="flex items-center justify-between gap-3.5 border-t border-line py-2.5">
-              <span>{blocker === "MANUSCRIPT_REQUIRED" ? `${listing.en && listing.ja ? "英語と日本語" : listing.en ? "英語" : "日本語"}の原稿（体験名・ひとこと紹介・当日の言語・詳しい説明）を書いてください。` : BLOCKER_COPY[blocker] ?? "公開条件を確認してください。"}</span>
+              <span>{blocker === "MANUSCRIPT_REQUIRED" ? `${listing.en && listing.ja ? "英語と日本語" : listing.en ? "英語" : "日本語"}の原稿（体験名・ひとこと紹介・当日の言語・詳しい説明）を書いてください。` : BLOCKER_COPY[blocker] ?? (blocker.startsWith("READINESS_") ? BLOCKER_COPY.READINESS_MISSING : "公開条件を確認してください。")}</span>
               {destination?.kind === "calendar" ? <Link href={calendarHref} className={link}>カレンダーを開く</Link>
                 : destination?.kind === "tab" ? <button type="button" className={link} onClick={() => { setBlockerDialog(false); setWorkspaceSection(destination.tab); }}>入力する</button>
                   : destination?.kind === "href" ? <Link href={destination.href} className={link}>確認する</Link>
-                    : destination?.kind === "payment-consent" && paymentConsentHref ? <a href={paymentConsentHref} referrerPolicy="no-referrer" className={link}>{paymentConsentLabel}</a> : null}
+                    : destination?.kind === "payment-consent" && paymentConsentHref ? <a href={paymentConsentHref} referrerPolicy="no-referrer" className={link}>{paymentConsentLabel}</a>
+                      : paymentConsentHref && (blocker === "CONNECT_NOT_READY" || blocker === "SELLER_REQUIRED" || blocker === "SELLER_MISMATCH" || blocker.startsWith("READINESS_")) ? <a href={paymentConsentHref} referrerPolicy="no-referrer" className={link}>受取口座を開く</a> : null}
             </li>;
           })}
         </ul>

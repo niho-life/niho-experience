@@ -34,19 +34,22 @@ describe("カテゴリーの絞り込み", () => {
     expect(resolveCategories(["x"], bySlug, null).available).toEqual([]);
   });
 
-  it("一覧の掲載条件と同じ判定で、販売のない商品やその言語の原稿がない商品のカテゴリを除く", () => {
+  it("一覧の掲載条件と同じ判定で、その言語の原稿がない商品のカテゴリを除く（予約の受付が準備中の商品は入れる）", () => {
     const publication = (slug: string, offers: number, japanese: boolean) => ({
       publication: { slug, japanese: japanese ? { title: slug } : null },
       saleTerms: { offers: Array.from({ length: offers }, () => ({})) },
     }) as unknown as SitePublicExperience;
     const experiences = [publication("a", 1, true), publication("b", 0, true), publication("d", 1, false)];
+    // 予約の受付が準備中のページ（販売なし）も、日本語の原稿があれば一覧に載せる（#706）。
     const classifications = new Map([...bySlug, ["d", "zen"] as const]);
     const en = englishListCatalog([{ slug: "b" }, { slug: "e" }], { experiences, claimedSlugs: ["b"] });
     const ja = experiences.filter(japaneseListPublication).map(({ publication }) => publication.slug);
 
-    expect(en.slugs).toEqual(["e", "a", "d"]);
-    expect(resolveCategories(en.slugs, classifications, null).available).toEqual(["walk", "zen"]);
-    expect(resolveCategories(ja, classifications, null).available).toEqual(["walk"]);
+    expect(en.slugs).toEqual(["e", "a", "b", "d"]);
+    expect(resolveCategories(en.slugs, classifications, null).available).toEqual(["walk", "zen", "sea"]);
+    expect(ja).toEqual(["a", "b"]);
+    // b is a page with no sale (sea): it stays on the Japanese list; d has no Japanese text (zen) and does not.
+    expect(resolveCategories(ja, classifications, null).available).toEqual(["walk", "sea"]);
   });
 
   it("分類を読めないときは並びを出さず、絞り込みもしない", () => {
