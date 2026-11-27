@@ -42,7 +42,12 @@ describe("sitePublicationCard in Japanese (#658)", () => {
   it("names a business as 「が案内」, and falls back to the seller's display name", () => {
     expect(sitePublicationCard(item({ providerKind: "BUSINESS" }), "ja", { copy })!.withLabel).toBe("合成ホストが案内");
     const noName = item();
-    expect(sitePublicationCard({ ...noName, publication: { ...noName.publication, providerPublicName: null } }, "ja", { copy })).toMatchObject({ withLabel: "合成販売者", face: { name: "合成販売者" } });
+    // The legal seller name is never the host's name (#691): without any host name the label is left out.
+    expect(sitePublicationCard({ ...noName, publication: { ...noName.publication, providerPublicName: null } }, "ja", { copy })).toMatchObject({ withLabel: "", face: { name: "" } });
+    // Without a public profile, the registered name is used; the kind comes from the seller disclosure, else it is unknown.
+    const registered = { ...noName.publication, providerPublicName: null, providerKind: null, providerRegisteredName: "合成登録名" };
+    expect(sitePublicationCard({ ...noName, publication: registered, sellerDisclosure: { sellerKind: "BUSINESS" } as never }, "ja", { copy })!.withLabel).toBe("合成登録名が案内");
+    expect(sitePublicationCard({ ...noName, publication: registered, sellerDisclosure: null }, "ja", { copy })).toMatchObject({ withLabel: "ホスト：合成登録名", face: { name: "合成登録名", initial: "合" } });
   });
 
   it("is null without a Japanese manuscript or without a sale", () => {

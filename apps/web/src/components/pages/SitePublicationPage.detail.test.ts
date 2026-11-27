@@ -234,9 +234,36 @@ describe("the detail page in Japanese: the differences that stay", () => {
     expect(off).not.toContain("/ja/people/");
   });
 
-  it("labels a business seller-name fallback as the host in both languages", async () => {
+  it("shows the host section for a host without a public profile, by its registered name and never the legal seller name (#691)", async () => {
+    const registered = (sellerKind: "BUSINESS" | "PERSON" | null) => ({ ...item({ publication: {
+      providerPublicName: null, providerPublicNameEn: null, providerKind: null, providerRegisteredName: "NIHO kamakura",
+      sellerDisplayName: "NIHO kamakura (Panasonic Holdings Corporation)",
+    } }), sellerDisclosure: sellerKind ? { sellerKind, sellerDisplayName: "NIHO kamakura (Panasonic Holdings Corporation)" } : null }) as unknown as SitePublicExperience;
+    const hostSection = (html: string) => html.slice(html.indexOf('id="host"'), html.indexOf("</section>", html.indexOf('id="host"')));
+    const jaBusiness = await render("ja", registered("BUSINESS"));
+    const enBusiness = await render("en", registered("BUSINESS"));
+    for (const html of [jaBusiness, enBusiness]) {
+      expect(html.match(/id="host"/g)).toHaveLength(1);
+      expect(hostSection(html)).toContain("NIHO kamakura");
+      expect(hostSection(html)).not.toContain("Panasonic");
+      expect(hostSection(html)).toContain(">N</span>");
+    }
+    expect(jaBusiness).toContain("ホストについて");
+    expect(jaBusiness).toContain("NIHO kamakura が開催");
+    expect(enBusiness).toContain("About your host");
+    const jaUnknown = await render("ja", registered(null));
+    const enUnknown = await render("en", registered(null));
+    expect(jaUnknown).toContain("ホスト：NIHO kamakura");
+    expect(enUnknown).toContain("Hosted by NIHO kamakura");
+    expect(jaUnknown).not.toContain("が開催");
+    const jaPerson = await render("ja", registered("PERSON"));
+    expect(jaPerson).toContain("NIHO kamakuraさんと");
+    expect(hostSection(jaPerson)).toContain("rounded-full");
+  });
+
+  it("labels a business public-profile host in both languages, with its people on the Japanese page", async () => {
     const business = item({ publication: {
-      providerPublicName: null,
+      providerPublicName: "NIHO kamakura (Panasonic Holdings Corporation)",
       providerPublicNameEn: null,
       providerKind: "BUSINESS",
       sellerDisplayName: "NIHO kamakura (Panasonic Holdings Corporation)",

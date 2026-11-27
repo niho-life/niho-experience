@@ -1,5 +1,5 @@
 import { japaneseListPublication } from "@/lib/experience-list-catalog";
-import { providerNameFor } from "./provider-name";
+import { providerKindFor, providerNameFor } from "./provider-name";
 import type { SitePublicExperience, SitePublicOffer } from "./site-publications";
 import type { CardModel } from "@/lib/card-model";
 import type { StaticCopyAccessorV1 } from "@niho/experience-presentation/v1";
@@ -20,10 +20,10 @@ function japaneseSiteCard(item: SitePublicExperience, { people = item.memberProf
   const { japanese } = publication;
   const offers = saleTerms.offers;
   // The same decisions as the Japanese list's card (`jaCardOf`): the people it is met through, else the provider's public name.
-  const providerName = publication.providerPublicName?.trim() || null;
-  const person = publication.providerKind === "PERSON";
-  const withLabel = jaGuideLine(people.map((entry) => entry.name)) ?? (providerName ? (person ? `${providerName}さんと` : `${providerName}が案内`) : publication.sellerDisplayName);
-  const faceName = people[0]?.name.trim() || providerName || publication.sellerDisplayName;
+  const providerName = providerNameFor(publication, "ja");
+  const kind = providerKindFor(publication, item.sellerDisclosure?.sellerKind);
+  const withLabel = jaGuideLine(people.map((entry) => entry.name)) ?? (providerName ? (kind === "PERSON" ? `${providerName}さんと` : kind === "BUSINESS" ? `${providerName}が案内` : `ホスト：${providerName}`) : "");
+  const faceName = people[0]?.name.trim() || providerName || "";
   const faceUrl = people[0]?.photo?.src ?? publication.providerPhoto?.src ?? null;
   const durations = offers.map((offer) => offer.durationMinutes).sort((a, b) => a - b);
   const prices = offers.map((offer) => offer.pricing.adultPriceYen);
@@ -64,10 +64,11 @@ export function sitePublicationCard(item: SitePublicExperience, locale: "en" | "
   const prices = offers.map((offer) => offer.pricing.adultPriceYen);
   const image = firstPhoto ? { url: firstPhoto.src, alt: firstPhoto.alt } : null;
   // The English card (the Japanese list has its own): the English public name when the provider has one (#587).
-  const providerName = providerNameFor(publication, "en") ?? publication.sellerDisplayName;
-  const legacyFaceMedia = sellerDisclosure?.sellerKind === "BUSINESS"
+  const providerName = providerNameFor(publication, "en");
+  const kind = providerKindFor(publication, sellerDisclosure?.sellerKind);
+  const legacyFaceMedia = kind === "BUSINESS"
     ? publication.businessLogo
-    : sellerDisclosure?.sellerKind === "PERSON" ? publication.providerPhoto : publication.providerPhoto ?? publication.businessLogo;
+    : kind === "PERSON" ? publication.providerPhoto : publication.providerPhoto ?? publication.businessLogo;
   const faceMedia = publication.providerPublicName
     ? publication.providerPhoto ?? (publication.providerKind === "BUSINESS" ? publication.businessLogo : null)
     : legacyFaceMedia;
@@ -77,8 +78,8 @@ export function sitePublicationCard(item: SitePublicExperience, locale: "en" | "
     title: publication.publicTitle,
     lead: publication.content.lead,
     cover: image,
-    withLabel: `with ${providerName}`,
-    face: { name: providerName, initial: initialOf(providerName), image: faceImage },
+    withLabel: providerName ? `with ${providerName}` : "",
+    face: { name: providerName ?? "", initial: initialOf(providerName ?? ""), image: faceImage },
     groupLabel: offers.length ? groupSizeLabel(offers.map((offer) => ({ capacity: offer.capacity, maxPartySize: offer.maxPartySize, minimumParticipants: offer.minimumParticipants }))) : null,
     durationLabel: durations.length ? durations[0] === durations.at(-1) ? formatDuration(durations[0]!, "en") : `${formatDuration(durations[0]!, "en")}–${formatDuration(durations.at(-1)!, "en")}` : "See details",
     language: language ? { short: shortLanguageNote(language), full: language } : null,

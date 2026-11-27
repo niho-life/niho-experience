@@ -101,6 +101,16 @@ describe("Experience public site DTO", () => {
     ]);
   });
 
+  it("names a host without a public profile by its registered name, not the legal seller name (#691)", async () => {
+    state.publications.getPublicBySlug.mockResolvedValueOnce({ ...publication, providerPublicName: null, providerKind: null, providerPhoto: null, businessLogo: null, providerRegisteredName: "Synthetic Registered Host" });
+    const detail = await getPublicationDetail(publication.slug, "en");
+    expect(detail).toMatchObject({
+      provider: { name: "Synthetic Registered Host" },
+      hosts: [{ displayName: "Synthetic Registered Host" }],
+      seller: { displayName: "Panasonic" },
+    });
+  });
+
   it("preserves existing host identity and media for legacy publications", async () => {
     state.publications.getPublicBySlug.mockResolvedValueOnce({ ...publication, providerPublicName: null, providerKind: null });
     const detail = await getPublicationDetail(publication.slug, "en");

@@ -59,6 +59,27 @@ describe("体験を載せる (/ja/host)", () => {
   });
 });
 
+describe("Host an experience (/host)", () => {
+  const render = async () => renderToStaticMarkup(await HostPageContent({ searchParams: Promise.resolve({}), locale: "en" }));
+  const jaRender = async () => renderToStaticMarkup(await HostPageContent({ searchParams: Promise.resolve({}), locale: "ja" }));
+
+  it("offers Talk with us in the hero and the closing section, linking to the English listing inquiry, while the Japanese page is unchanged (#694)", async () => {
+    const html = await render();
+    expect(hrefs(html).filter((href) => href === "/inquiry?type=listing&from=listing")).toHaveLength(2);
+    expect(text(html).match(/Talk with us/g)).toHaveLength(2);
+    const ja = await jaRender();
+    expect(hrefs(ja).filter((href) => href === "/ja/inquiry?type=listing&from=listing")).toHaveLength(2);
+    expect(hrefs(ja)).not.toContain("/inquiry?type=listing&from=listing");
+  });
+
+  it("uses the pilot contact link only while the inquiry form is closed", async () => {
+    state.config = { ...state.config, groupInquiryEnabled: false, hostPilotContactUrl: "https://contact.example/host" };
+    expect(hrefs(await render())).toContain("https://contact.example/host");
+    state.config = { ...state.config, groupInquiryEnabled: false, hostPilotContactUrl: "" };
+    expect(text(await render())).not.toContain("Talk with us");
+  });
+});
+
 describe("相談のページ (/ja/inquiry)", () => {
   const page = (search: Record<string, string>, locale: "ja" | "en" = "ja") => renderToStaticMarkup(createElement(InquiryPage, { locale, search }));
 

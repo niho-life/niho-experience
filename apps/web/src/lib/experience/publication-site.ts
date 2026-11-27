@@ -4,7 +4,7 @@ import type { PublicBookingTerms, PublicExperiencePublication, PublicSellerDiscl
 import type { ExperiencePublicationDetailForSite } from "@/lib/experience-types";
 import { experiencePublicationRepository, guestBookingRepository, providerSellerDisclosureRepository } from "./store-server";
 import { config } from "@/lib/config";
-import { providerNameFor } from "./provider-name";
+import { providerKindFor, providerNameFor } from "./provider-name";
 
 type Locale = "en" | "ja";
 
@@ -20,7 +20,7 @@ function summaryOf(publication: PublicExperiencePublication, terms: PublicBookin
     lead: locale === "ja" && publication.japanese ? publication.japanese.lead : publication.content.lead,
     priceFrom: { amountYen: prices.length ? Math.min(...prices) : publication.unitAmount, taxIncluded: true, unit: "PER_ADULT" },
     provider: {
-      kind: (publication.providerPublicName ? publication.providerKind : disclosure?.sellerKind) === "PERSON" ? "INDIVIDUAL" : "BUSINESS",
+      kind: providerKindFor(publication, disclosure?.sellerKind) === "PERSON" ? "INDIVIDUAL" : "BUSINESS",
       name: providerNameFor(publication, locale) ?? publication.sellerDisplayName,
     },
     region: { key: "kamakura", name: "Kamakura" },
@@ -88,7 +88,7 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
   const providerPhoto = publication.providerPhoto ? localizedPhoto(publication.providerPhoto) : null;
   const businessLogo = publication.businessLogo ? localizedPhoto(publication.businessLogo) : null;
   const providerName = providerNameFor(publication, locale) ?? publication.sellerDisplayName;
-  const providerKind = publication.providerPublicName ? publication.providerKind : disclosure?.sellerKind;
+  const providerKind = providerKindFor(publication, disclosure?.sellerKind);
   const hostAvatar = providerPhoto ?? (publication.providerPublicName && providerKind === "BUSINESS" ? businessLogo : null);
   const canonicalUrl = `${config.siteUrl}${locale === "ja" ? "/ja" : ""}/experiences/${encodeURIComponent(publication.slug)}`;
   const sellerLegalUrl = terms?.sellerDisclosureUrl
@@ -107,7 +107,7 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
     cover: photos[0] ?? null,
     description: content.description,
     highlights: [...content.highlights],
-    hosts: publication.providerPublicName || hostAvatar ? [{ avatar: hostAvatar, bio: null, displayName: providerName }] : [],
+    hosts: providerNameFor(publication, locale) || hostAvatar ? [{ avatar: hostAvatar, bio: null, displayName: providerName }] : [],
     included: [...content.included],
     knowBeforeYouGo: [...content.knowBeforeYouGo],
     languageNote: content.language,
