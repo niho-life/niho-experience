@@ -77,6 +77,7 @@ export type {
   ExperiencePublicationContentChecks,
   ExperienceHostSellerProfile,
   ExperienceHostProviderMembership,
+  HostAccountMembership,
   HostAccountSellerProfile,
   HostAccountSellerProfileResolution,
   NihoMappedSellerProfile,

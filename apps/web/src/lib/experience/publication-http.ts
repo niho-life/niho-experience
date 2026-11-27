@@ -31,6 +31,7 @@ import {
   publicationHostMutationAllowed,
   type PublicationHostContext,
 } from "./publication-host-boundary";
+import { requestedProviderId } from "./provider-context";
 import { experiencePublicMediaStorage } from "./public-media-storage";
 import { GuideCoverImageError, processGuideCoverImage, readGuideCoverInput } from "@/lib/guide-cover-image";
 import { anthropicTranslator } from "@/lib/translation/anthropic";
@@ -49,6 +50,7 @@ type ProductDraftBody = {
 };
 type Action = "read" | "save" | "publish" | "stop" | "readSaleTerms" | "saveSaleTerms" | "readBookingGuide" | "saveBookingGuide" | "readClassification" | "saveClassification";
 const BODY_LIMIT = 256 * 1024;
+const NOT_FOUND = { code: "NOT_FOUND", status: 404 } as const;
 const PRODUCT_ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TERMS_KEYS = [
@@ -165,16 +167,24 @@ function mapStoreError(error: unknown): Response {
   return responseError("UNAVAILABLE", 503);
 }
 
-async function prepareHost(operation: "READ" | "EDIT" | "OWNER"): Promise<
-  { readonly ok: true; readonly context: PublicationHostContext; readonly repository: NonNullable<ReturnType<typeof experiencePublicationRepository>> }
+/**
+ * `sales` says what the operation needs beyond membership (docs/host-publication.md). "readiness": the product screens
+ * return the publication blockers the store reads from the readiness snapshot (getPublicationBlockers, saveDraft,
+ * saveSaleTerms, publish, createDraft), so they refresh it first, as before. "none": membership only, no Stripe call
+ * and no snapshot write. (The NIHO path resolves the whole sale side regardless, and so still refreshes.)
+ */
+async function prepareHost(operation: "READ" | "EDIT" | "OWNER", providerId: string | null, sales: "readiness" | "none"): Promise<
+  { readonly ok: true; readonly context: PublicationHostContext<"none">; readonly repository: NonNullable<ReturnType<typeof experiencePublicationRepository>> }
   | { readonly ok: false; readonly response: Response }
 > {
-  const boundary = await publicationHostBoundary(operation);
+  const boundary = sales === "none"
+    ? await publicationHostBoundary(operation, { providerId, sales: "none" })
+    : await publicationHostBoundary(operation, { providerId });
   if (!boundary.ok) return boundary;
   const repository = experiencePublicationRepository();
   if (!repository) return { ok: false, response: responseError("UNAVAILABLE", 503) };
   try {
-    await repository.refreshReadiness(boundary.value.actor, boundary.value.readiness);
+    if (boundary.value.readiness) await repository.refreshReadiness(boundary.value.actor, boundary.value.readiness);
     return { ok: true, context: boundary.value, repository };
   } catch (error) {
     return { ok: false, response: mapStoreError(error) };
@@ -262,6 +272,11 @@ function checksFor(content: Readonly<Record<string, unknown>>, photosReady: bool
   return { manuscriptReady: review.publicContentReady && review.ownerConfirmed, photosReady };
 }
 
+/** Product screens read publication blockers from the readiness snapshot; classification and the booking guide do not. */
+function actionNeedsSales(action: Action): boolean {
+  return action !== "readClassification" && action !== "saveClassification" && action !== "readBookingGuide" && action !== "saveBookingGuide";
+}
+
 function actionOperation(action: Action): "READ" | "EDIT" | "OWNER" {
   if (action === "publish" || action === "stop" || action === "readBookingGuide" || action === "saveBookingGuide" || action === "readClassification" || action === "saveClassification") return "OWNER";
   if (action === "save" || action === "saveSaleTerms") return "EDIT";
@@ -292,7 +307,7 @@ function validActionBody(action: Action, body: RecordValue): ProductRevision | n
 export async function publicationCollectionRequest(request: Request, action: "list" | "create"): Promise<Response> {
   if (!config.experienceHostPublicationApiEnabled) return responseError("NOT_FOUND", 404);
   if (!publicationHostMutationAllowed(request)) return responseError("FORBIDDEN", 403);
-  if (new URL(request.url).search) return responseError("NOT_FOUND", 404);
+  const requested = requestedProviderId(request, NOT_FOUND); if (!requested.ok) return requested.response;
   let body: RecordValue | null = null;
   if (action === "create") {
     const parsed = await parseJson(request);
@@ -300,7 +315,7 @@ export async function publicationCollectionRequest(request: Request, action: "li
     body = parsed;
     if (!validDraft(body)) return responseError("INVALID_INPUT", 400);
   }
-  const prepared = await prepareHost(action === "create" ? "OWNER" : "READ");
+  const prepared = await prepareHost(action === "create" ? "OWNER" : "READ", requested.providerId, "readiness");
   if (!prepared.ok) return prepared.response;
   try {
     if (action === "list") {
@@ -320,7 +335,8 @@ export async function publicationCollectionRequest(request: Request, action: "li
 export async function publicationRequest(request: Request, context: PublicationProductContext, action: Action): Promise<Response> {
   if (!config.experienceHostPublicationApiEnabled) return responseError("NOT_FOUND", 404);
   const productId = (await context.params).productId;
-  if (!PRODUCT_ID.test(productId) || new URL(request.url).search) return responseError("NOT_FOUND", 404);
+  if (!PRODUCT_ID.test(productId)) return responseError("NOT_FOUND", 404);
+  const requested = requestedProviderId(request, NOT_FOUND); if (!requested.ok) return requested.response;
   if (!publicationHostMutationAllowed(request)) return responseError("FORBIDDEN", 403);
 
   let body: RecordValue | null = null;
@@ -349,7 +365,7 @@ export async function publicationRequest(request: Request, context: PublicationP
     }
   }
 
-  const prepared = await prepareHost(actionOperation(action));
+  const prepared = await prepareHost(actionOperation(action), requested.providerId, actionNeedsSales(action) ? "readiness" : "none");
   if (!prepared.ok) return prepared.response;
   const { repository } = prepared;
   const actor = prepared.context.actor;
@@ -431,7 +447,8 @@ export async function publicationRequest(request: Request, context: PublicationP
 export async function publicationMediaRequest(request: Request, context: PublicationProductContext): Promise<Response> {
   if (!config.experienceHostPublicationApiEnabled) return responseError("NOT_FOUND", 404);
   const productId = (await context.params).productId;
-  if (!PRODUCT_ID.test(productId) || new URL(request.url).search) return responseError("NOT_FOUND", 404);
+  if (!PRODUCT_ID.test(productId)) return responseError("NOT_FOUND", 404);
+  const requested = requestedProviderId(request, NOT_FOUND); if (!requested.ok) return requested.response;
   if (!publicationHostMutationAllowed(request)) return responseError("FORBIDDEN", 403);
   if (request.headers.get("x-experience-photo-rights-confirmed") !== "true") return responseError("PHOTO_RIGHTS_CONFIRMATION_REQUIRED", 422);
   const altText = decodeBase64UrlHeader(request.headers.get("x-experience-photo-alt-text-utf8-base64url")) ?? "";
@@ -447,7 +464,7 @@ export async function publicationMediaRequest(request: Request, context: Publica
   }
   const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (mediaType !== "image/jpeg" && mediaType !== "image/png") return responseError("UNSUPPORTED_FORMAT", 415);
-  const prepared = await prepareHost("OWNER");
+  const prepared = await prepareHost("OWNER", requested.providerId, "readiness");
   if (!prepared.ok) return prepared.response;
   const storage = experiencePublicMediaStorage();
   if (!storage || !prepared.context.readiness) return responseError("SELLER_SETUP_REQUIRED", 409);
@@ -495,7 +512,8 @@ export async function publicationMediaRequest(request: Request, context: Publica
 export async function publicationMediaSelectionRequest(request: Request, context: PublicationProductContext): Promise<Response> {
   if (!config.experienceHostPublicationApiEnabled) return responseError("NOT_FOUND", 404);
   const productId = (await context.params).productId;
-  if (!PRODUCT_ID.test(productId) || new URL(request.url).search) return responseError("NOT_FOUND", 404);
+  if (!PRODUCT_ID.test(productId)) return responseError("NOT_FOUND", 404);
+  const requested = requestedProviderId(request, NOT_FOUND); if (!requested.ok) return requested.response;
   if (!publicationHostMutationAllowed(request)) return responseError("FORBIDDEN", 403);
   const body = await parseJson(request);
   if (body instanceof Response) return body;
@@ -510,7 +528,7 @@ export async function publicationMediaSelectionRequest(request: Request, context
       || (item.publicCredit !== null && typeof item.publicCredit !== "string")) return responseError("INVALID_INPUT", 400);
     media.push({ id: item.id, altText: item.altText, altTextJa: item.altTextJa, publicCredit: item.publicCredit as string | null });
   }
-  const prepared = await prepareHost("OWNER");
+  const prepared = await prepareHost("OWNER", requested.providerId, "readiness");
   if (!prepared.ok) return prepared.response;
   try {
     await prepared.repository.saveMediaSelection(prepared.context.actor, productId, revision.draft, media);
@@ -521,8 +539,8 @@ export async function publicationMediaSelectionRequest(request: Request, context
 /** Seller-level profile media is shared by every public product for the authenticated OWNER. */
 export async function providerMediaCollectionRequest(request: Request): Promise<Response> {
   if (!config.experienceHostPublicationApiEnabled) return responseError("NOT_FOUND", 404);
-  if (new URL(request.url).search) return responseError("NOT_FOUND", 404);
-  const prepared = await prepareHost("OWNER");
+  const requested = requestedProviderId(request, NOT_FOUND); if (!requested.ok) return requested.response;
+  const prepared = await prepareHost("OWNER", requested.providerId, "none");
   if (!prepared.ok) return prepared.response;
   if (request.method === "GET") {
     try { return noStoreJson({ providerMedia: await providerMediaDto(prepared.repository, prepared.context.actor) }); }
@@ -557,7 +575,7 @@ export async function providerMediaCollectionRequest(request: Request): Promise<
 /** Upload one provider-level photo or business logo after explicit use-specific permission. */
 export async function providerMediaUploadRequest(request: Request): Promise<Response> {
   if (!config.experienceHostPublicationApiEnabled) return responseError("NOT_FOUND", 404);
-  if (new URL(request.url).search) return responseError("NOT_FOUND", 404);
+  const requested = requestedProviderId(request, NOT_FOUND); if (!requested.ok) return requested.response;
   if (!publicationHostMutationAllowed(request)) return responseError("FORBIDDEN", 403);
   if (request.headers.get("x-experience-photo-rights-confirmed") !== "true") return responseError("PHOTO_RIGHTS_CONFIRMATION_REQUIRED", 422);
   const altText = decodeBase64UrlHeader(request.headers.get("x-experience-photo-alt-text-utf8-base64url")) ?? "";
@@ -574,7 +592,7 @@ export async function providerMediaUploadRequest(request: Request): Promise<Resp
     || (publicCredit !== null && (publicCredit.trim() === "" || publicCredit.length > 300))) return responseError("INVALID_INPUT", 400);
   const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (mediaType !== "image/jpeg" && mediaType !== "image/png") return responseError("UNSUPPORTED_FORMAT", 415);
-  const prepared = await prepareHost("OWNER");
+  const prepared = await prepareHost("OWNER", requested.providerId, "none");
   if (!prepared.ok) return prepared.response;
   const storage = experiencePublicMediaStorage();
   if (!storage) return responseError("UNAVAILABLE", 503);
@@ -620,8 +638,9 @@ export async function providerMediaUploadRequest(request: Request): Promise<Resp
 export async function providerMediaAssetRequest(request: Request, context: { params: Promise<{ assetId: string }> }): Promise<Response> {
   if (!config.experienceHostPublicationApiEnabled) return responseError("NOT_FOUND", 404);
   const { assetId } = await context.params;
-  if (!UUID_V4.test(assetId) || new URL(request.url).search) return responseError("NOT_FOUND", 404);
-  const prepared = await prepareHost("OWNER");
+  if (!UUID_V4.test(assetId)) return responseError("NOT_FOUND", 404);
+  const requested = requestedProviderId(request, NOT_FOUND); if (!requested.ok) return requested.response;
+  const prepared = await prepareHost("OWNER", requested.providerId, "none");
   if (!prepared.ok) return prepared.response;
   const storage = experiencePublicMediaStorage();
   if (!storage) return responseError("UNAVAILABLE", 503);
@@ -655,7 +674,8 @@ const faqLength = (manuscript: Readonly<Record<string, unknown>>): number => Arr
 export async function publicationTranslationRequest(request: Request, context: PublicationProductContext): Promise<Response> {
   if (!config.experienceHostPublicationApiEnabled) return responseError("NOT_FOUND", 404);
   const productId = (await context.params).productId;
-  if (!PRODUCT_ID.test(productId) || new URL(request.url).search) return responseError("NOT_FOUND", 404);
+  if (!PRODUCT_ID.test(productId)) return responseError("NOT_FOUND", 404);
+  const requested = requestedProviderId(request, NOT_FOUND); if (!requested.ok) return requested.response;
   if (!publicationHostMutationAllowed(request)) return responseError("FORBIDDEN", 403);
   const parsed = await parseJson(request);
   // Exactly one of the two: the Japanese to translate into English, or the English to translate into Japanese.
@@ -664,7 +684,7 @@ export async function publicationTranslationRequest(request: Request, context: P
   if (!toJapanese && !exactKeys(parsed, ["japanese"])) return responseError("INVALID_INPUT", 400);
   const source = toJapanese ? parsed.english : parsed.japanese;
   if (!validPublicationLocaleManuscript(source)) return responseError("INVALID_INPUT", 400);
-  const prepared = await prepareHost("OWNER");
+  const prepared = await prepareHost("OWNER", requested.providerId, "none");
   if (!prepared.ok) return prepared.response;
   const translator = anthropicTranslator({ timeoutMs: 45_000 });
   if (!translator) return responseError("TRANSLATION_UNAVAILABLE", 503);
@@ -683,8 +703,9 @@ export async function publicationTranslationRequest(request: Request, context: P
 export async function readPublicationMedia(request: Request, context: PublicationProductContext & { params: Promise<{ productId: string; assetId: string }> }): Promise<Response> {
   if (!config.experienceHostPublicationApiEnabled) return responseError("NOT_FOUND", 404);
   const { productId, assetId } = await context.params;
-  if (!PRODUCT_ID.test(productId) || !UUID_V4.test(assetId) || new URL(request.url).search) return responseError("NOT_FOUND", 404);
-  const prepared = await prepareHost("READ");
+  if (!PRODUCT_ID.test(productId) || !UUID_V4.test(assetId)) return responseError("NOT_FOUND", 404);
+  const requested = requestedProviderId(request, NOT_FOUND); if (!requested.ok) return requested.response;
+  const prepared = await prepareHost("READ", requested.providerId, "none");
   if (!prepared.ok) return prepared.response;
   const storage = experiencePublicMediaStorage();
   if (!storage) return responseError("UNAVAILABLE", 503);

@@ -194,6 +194,30 @@ describe("Experience owner product API", () => {
     expect(mocks.repository.refreshReadiness).toHaveBeenCalledWith(actor, hostContext.readiness);
   });
 
+  it("asks for the sale side (readiness) only where the screens show or check it, and passes ?providerId= as a hint", async () => {
+    const withoutSales = { actor, role: "OWNER", provider: null, readiness: null };
+    const membershipOnly = { providerId: null, sales: "none" } as const;
+    const cases: Array<[string, () => Promise<Response>, unknown[]]> = [
+      ["provider media read", () => readProviderMedia(request("/host/api/provider-media")), ["OWNER", membershipOnly]],
+      ["provider media save", () => saveProviderMedia(request("/host/api/provider-media", "PUT", { version: 5, media: [] })), ["OWNER", membershipOnly]],
+      ["booking guide", () => readBookingGuide(request(`/host/api/products/${product.id}/booking-guide`), context), ["OWNER", membershipOnly]],
+      // Product screens return the publication blockers the store reads from the snapshot, so they keep the sale side.
+      ["product list", () => listProducts(request("/host/api/products")), ["READ", { providerId: null }]],
+      ["product read", () => readProduct(request(`/host/api/products/${product.id}`), context), ["READ", { providerId: null }]],
+      ["product list with hint", () => listProducts(request("/host/api/products?providerId=provider-private")), ["READ", { providerId: "provider-private" }]],
+    ];
+    for (const [name, call, args] of cases) {
+      mocks.boundary.mockClear();
+      mocks.repository.refreshReadiness.mockClear();
+      const sales = args.length === 2 && (args[1] as { sales?: string }).sales === undefined;
+      mocks.boundary.mockResolvedValue({ ok: true, value: sales ? hostContext : withoutSales });
+      await call();
+      expect(mocks.boundary, name).toHaveBeenCalledWith(...args);
+      // The snapshot is written only when the boundary resolved one: a membership-only request writes nothing.
+      expect(mocks.repository.refreshReadiness.mock.calls.length > 0, name).toBe(sales);
+    }
+  });
+
   it("uses one opaque version for edit, sale terms, publish, stop and restart", async () => {
     const read = await readProduct(request(`/host/api/products/${product.id}`), context);
     const dto = (await read.json()).product;
@@ -327,7 +351,8 @@ describe("Experience owner product API", () => {
     const read = await readBookingGuide(request(`/host/api/products/${product.id}/booking-guide`), context);
     expect(read.status).toBe(200);
     expect((await read.json()).bookingGuide).toEqual({ version: null, guide: null, updatedAtUtc: null });
-    expect(mocks.boundary).toHaveBeenCalledWith("OWNER");
+    // Classification and the guide are membership-only: no seller, no Stripe, no readiness snapshot.
+    expect(mocks.boundary).toHaveBeenCalledWith("OWNER", { providerId: null, sales: "none" });
 
     const saved = await saveBookingGuide(request(`/host/api/products/${product.id}/booking-guide`, "PUT", { expectedVersion: null, guide }), context);
     expect(saved.status).toBe(200);
@@ -348,7 +373,11 @@ describe("Experience owner product API", () => {
     expect(selected.status).toBe(400);
     expect(mocks.boundary).not.toHaveBeenCalled();
 
-    expect((await listProducts(request("/host/api/products?providerId=provider-private"))).status).toBe(404);
+    // Only ?providerId= is a query these APIs take (a hint the boundary checks); any other query, or a malformed id, is refused.
+    expect((await listProducts(request("/host/api/products?seller=provider-private"))).status).toBe(404);
+    expect((await listProducts(request("/host/api/products?providerId=a&providerId=b"))).status).toBe(404);
+    expect((await listProducts(request("/host/api/products?providerId=bad%20id"))).status).toBe(422);
+    expect(mocks.boundary).not.toHaveBeenCalled();
     const legacyContext = { params: Promise.resolve({ productId: "provider-private/product-1" }) };
     expect((await readProduct(request("/host/api/products/provider-private/product-1"), legacyContext)).status).toBe(404);
 

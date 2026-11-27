@@ -58,7 +58,8 @@ async function prepared(request: Request) {
     if (member instanceof Response) return { ok: false as const, response: member };
     actor = { providerId: member.providerId, nihoUserId: member.memberId };
   } else {
-    const boundary = await publicationHostBoundary("OWNER");
+    // The bio is the provider's own text: membership only, no seller and no Stripe.
+    const boundary = await publicationHostBoundary("OWNER", { sales: "none" });
     if (!boundary.ok) return boundary;
     actor = boundary.value.actor;
   }

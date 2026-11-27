@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   ownerProfile: vi.fn(),
   ensureOwner: vi.fn(),
   hostAccountProfile: vi.fn(),
+  memberships: vi.fn(),
   refreshReadiness: vi.fn(),
   currentConsent: vi.fn(),
   retrieve: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/lib/experience/store-server", () => ({
     currentOwnerSellerProfile: mocks.ownerProfile,
     ensureMappedOwnerMembership: mocks.ensureOwner,
     currentHostAccountSellerProfile: mocks.hostAccountProfile,
+    listHostAccountMemberships: mocks.memberships,
     refreshReadiness: mocks.refreshReadiness,
   }),
   payoutAccountConsents: () => ({ current: mocks.currentConsent }),
@@ -158,6 +160,7 @@ describe("Experience publication NIHO contract v1 boundary", () => {
       vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_synthetic");
       mocks.read.mockResolvedValue({ kind: "experience", hostAccountId, sessionRef: "0f8fad5b-d9cb-469f-a165-70867728950e" });
       mocks.hostAccountProfile.mockResolvedValue({ kind: "ready", profile: hostProfile, hostAccountActive: true });
+      mocks.memberships.mockResolvedValue([{ providerId: profile.providerId, role: "OWNER", accountActive: true }]);
       mocks.retrieve.mockResolvedValue({ kind: "ready", account: summary });
       mocks.currentConsent.mockResolvedValue(consent);
       mocks.refreshReadiness.mockResolvedValue({});
@@ -177,7 +180,7 @@ describe("Experience publication NIHO contract v1 boundary", () => {
       const result = await publicationHostBoundary("OWNER");
       expect(result.ok).toBe(true);
       if (!result.ok) return;
-      expect(mocks.hostAccountProfile).toHaveBeenCalledWith(hostAccountId);
+      expect(mocks.hostAccountProfile).toHaveBeenCalledWith(hostAccountId, profile.providerId);
       expect(mocks.retrieve).toHaveBeenCalledWith({ accountId: profile.stripeConnectAccountRef, platformStripeKey: "sk_test_synthetic" });
       expect(mocks.currentConsent).toHaveBeenCalledWith({ providerId: profile.providerId, nihoUserId: hostAccountId });
       expect(result.value.actor).toEqual({ providerId: profile.providerId, nihoUserId: hostAccountId });
@@ -277,6 +280,83 @@ describe("Experience publication NIHO contract v1 boundary", () => {
       expect(keyless.ok).toBe(false);
       if (!keyless.ok) expect(await keyless.response.json()).toEqual({ error: { code: "READINESS_UNAVAILABLE" } });
       expect(mocks.retrieve).toHaveBeenCalledTimes(1);
+    });
+
+    describe("which provider (#703)", () => {
+      const other = "experience-provider-other";
+      const members = (...rows: Array<[string, string]>) => mocks.memberships.mockResolvedValue(rows.map(([providerId, role]) => ({ providerId, role, accountActive: true })));
+      const failure = async (result: Awaited<ReturnType<typeof publicationHostBoundary>>) => {
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error("unreachable");
+        return { status: result.response.status, body: await result.response.json() };
+      };
+
+      it("acts for the named provider when the account is its OWNER, checking the store each time", async () => {
+        members([profile.providerId, "OWNER"], [other, "OWNER"]);
+        const result = await publicationHostBoundary("OWNER", { providerId: other, sales: "none" });
+        expect(result.ok).toBe(true);
+        if (result.ok) expect(result.value).toMatchObject({ actor: { providerId: other, nihoUserId: hostAccountId }, role: "OWNER", provider: null, readiness: null });
+        expect(mocks.memberships).toHaveBeenCalledWith(hostAccountId, other);
+      });
+
+      it("refuses a provider the account is not a member of, or is a member of without the role", async () => {
+        mocks.memberships.mockResolvedValueOnce([]);
+        expect(await failure(await publicationHostBoundary("OWNER", { providerId: other, sales: "none" }))).toEqual({ status: 403, body: { error: { code: "FORBIDDEN" } } });
+        for (const role of ["EDITOR", "COHOST", "VIEWER"]) {
+          members([other, role]);
+          for (const operation of ["READ", "EDIT", "OWNER"] as const) {
+            expect(await failure(await publicationHostBoundary(operation, { providerId: other, sales: "none" }))).toEqual({ status: 403, body: { error: { code: "FORBIDDEN" } } });
+          }
+        }
+        // A provider the account could act for is not enough when the store answers another one: the id is never authority.
+        members([profile.providerId, "OWNER"]);
+        expect((await failure(await publicationHostBoundary("OWNER", { providerId: other, sales: "none" }))).status).toBe(403);
+        expect(mocks.hostAccountProfile).not.toHaveBeenCalled();
+        expect(mocks.retrieve).not.toHaveBeenCalled();
+      });
+
+      it("takes the only OWNER provider when none is named, and asks which when there are two", async () => {
+        members([profile.providerId, "OWNER"], [other, "EDITOR"]);
+        const one = await publicationHostBoundary("OWNER", { sales: "none" });
+        expect(one.ok && one.value.actor.providerId).toBe(profile.providerId);
+        expect(mocks.memberships).toHaveBeenCalledWith(hostAccountId);
+        members([profile.providerId, "OWNER"], [other, "OWNER"]);
+        for (const sales of ["none", "seller", "readiness"] as const) {
+          expect(await failure(await publicationHostBoundary("OWNER", { sales } as { sales: "none" }))).toEqual({ status: 409, body: { error: { code: "PROVIDER_REQUIRED" } } });
+        }
+        members([other, "EDITOR"]);
+        expect((await failure(await publicationHostBoundary("OWNER"))).status).toBe(403);
+        mocks.memberships.mockRejectedValueOnce(new Error("db down"));
+        expect(await failure(await publicationHostBoundary("OWNER"))).toEqual({ status: 502, body: { error: { code: "READINESS_UNAVAILABLE" } } });
+      });
+
+      it("resolves the sale side for the named provider only when the operation needs it", async () => {
+        members([profile.providerId, "OWNER"], [other, "OWNER"]);
+        mocks.hostAccountProfile.mockResolvedValue({ kind: "ready", profile: { ...hostProfile, providerId: other }, hostAccountActive: true });
+        const ready = await publicationHostBoundary("OWNER", { providerId: other });
+        expect(mocks.hostAccountProfile).toHaveBeenCalledWith(hostAccountId, other);
+        expect(ready.ok && ready.value.provider.providerId).toBe(other);
+        expect(mocks.retrieve).toHaveBeenCalledTimes(1);
+      });
+
+      it("makes no Stripe or consent call for a membership-only operation, and none for the seller alone", async () => {
+        for (const operation of ["READ", "EDIT", "OWNER"] as const) {
+          const none = await publicationHostBoundary(operation, { sales: "none" });
+          expect(none.ok && none.value).toMatchObject({ provider: null, readiness: null });
+        }
+        expect(mocks.hostAccountProfile).not.toHaveBeenCalled();
+        const seller = await publicationHostBoundary("OWNER", { sales: "seller" });
+        expect(seller.ok && seller.value).toMatchObject({ provider: hostProfile, readiness: null });
+        for (const mock of [mocks.retrieve, mocks.currentConsent, mocks.refreshReadiness]) expect(mock).not.toHaveBeenCalled();
+        // The seller is still required where the store needs it.
+        mocks.hostAccountProfile.mockResolvedValueOnce({ kind: "setup-required", providerId: profile.providerId });
+        expect(await failure(await publicationHostBoundary("OWNER", { sales: "seller" }))).toEqual({ status: 409, body: { error: { code: "SELLER_SETUP_REQUIRED" } } });
+        // Publishing and the sales plan ask for the whole sale side: Stripe is called.
+        const full = await publicationHostBoundary("OWNER");
+        expect(full.ok).toBe(true);
+        expect(mocks.retrieve).toHaveBeenCalledTimes(1);
+        expect(mocks.currentConsent).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });
