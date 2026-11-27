@@ -1088,7 +1088,7 @@ export class ChannelRuntime {
               OR a.version IS DISTINCT FROM j.account_version OR l.id IS NULL OR l.active IS DISTINCT FROM true
               OR l.mapping_version IS DISTINCT FROM j.mapping_version
               OR l.can_observe IS DISTINCT FROM true OR l.can_read_reservations IS DISTINCT FROM true
-              OR p.status IS DISTINCT FROM 'PUBLISHED' OR wa.worker_id IS NULL
+              OR p.status IS NULL OR p.status='ARCHIVED' OR wa.worker_id IS NULL
               OR a.site IS DISTINCT FROM j.target_site OR a.external_account_id IS DISTINCT FROM j.target_external_account_id
               OR l.external_product_id IS DISTINCT FROM j.target_external_product_id
               OR l.external_option_id IS DISTINCT FROM j.target_external_option_id
@@ -1113,7 +1113,7 @@ export class ChannelRuntime {
             AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$2)
             AND a.quarantined_at IS NULL AND l.active=true AND l.can_observe=true AND l.can_read_reservations=true
             AND (a.site || '/' || l.adapter || '@' || l.adapter_version)=ANY($4::text[])
-            AND p.status='PUBLISHED' AND (s.listing_id IS NULL OR (s.pending_job_id IS NULL AND s.halted_at IS NULL AND s.next_due_at<=$2))
+            AND p.status<>'ARCHIVED' AND (s.listing_id IS NULL OR (s.pending_job_id IS NULL AND s.halted_at IS NULL AND s.next_due_at<=$2))
           ORDER BY COALESCE(s.next_due_at,'-infinity'::timestamptz),l.id COLLATE "C" LIMIT $3`,
         [identity.workerId, nowUtc, limit * 4, deployedReaders],
       );
@@ -1150,7 +1150,7 @@ export class ChannelRuntime {
             WHERE wa.worker_id=$1 AND wa.revoked_at IS NULL AND l.id=$2
               AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$3)
               AND a.quarantined_at IS NULL AND l.active=true AND l.can_observe=true AND l.can_read_reservations=true
-              AND p.status='PUBLISHED' FOR SHARE OF wa,a,l,p`,
+              AND p.status<>'ARCHIVED' FOR SHARE OF wa,a,l,p`,
           [identity.workerId, candidate.id, nowUtc],
         );
         const listing = currentListing.rows[0];
@@ -1853,7 +1853,7 @@ export class ChannelRuntime {
          LEFT JOIN external_reservation_listing_health h ON h.provider_id=l.provider_id AND h.listing_id=l.id
         WHERE wa.worker_id=$1 AND wa.revoked_at IS NULL
           AND a.active=true AND a.revoked_at IS NULL AND (a.delegated_until IS NULL OR a.delegated_until>$2) AND a.quarantined_at IS NULL
-          AND l.active=true AND l.can_observe=true AND l.can_read_reservations=true AND p.status='PUBLISHED'
+          AND l.active=true AND l.can_observe=true AND l.can_read_reservations=true AND p.status<>'ARCHIVED'
           AND (a.site || '/' || l.adapter || '@' || l.adapter_version)=ANY($4::text[])
           AND (h.listing_id IS NULL OR h.read_started_at<$3) LIMIT 1`,
       [workerId, nowUtc, holdSince, this.#deployedReaderKeys()],
@@ -1933,7 +1933,9 @@ export class ChannelRuntime {
              AND j.google_propagation_delivery_id IS NULL AND a.quarantine_reason<>'MANUAL_HANDLING'))
            AND a.version=j.account_version AND l.active=true AND l.mapping_version=j.mapping_version
            -- A product that takes no bookings (DRAFT) may still have its slots closed, never opened or read.
-           AND (p.status='PUBLISHED' OR (j.action='SET_CLOSED' AND j.purpose IN ('AVAILABILITY','SLOT_RETIREMENT')))
+           AND (p.status='PUBLISHED' OR (j.action='SET_CLOSED' AND j.purpose IN ('AVAILABILITY','SLOT_RETIREMENT'))
+             -- Reading the reservations that already came in through a listing never depends on the product taking new bookings (#706).
+             OR (j.action='OBSERVE' AND j.purpose='RESERVATION_WINDOW' AND p.status<>'ARCHIVED'))
            AND ((j.purpose IN ('AVAILABILITY','RESERVATION_WINDOW')
                AND d.mapping_version=j.mapping_version AND d.source_start_at=j.source_start_at AND d.source_end_at=j.source_end_at
                AND ((j.purpose='AVAILABILITY' AND d.desired_version=j.desired_version
@@ -2083,7 +2085,7 @@ export class ChannelRuntime {
     const current = state.rows[0];
     if (!current || current.account_active !== true || current.revoked_at !== null
       || (current.delegated_until !== null && isoValue(current, "delegated_until") <= nowUtc) || current.quarantined_at !== null
-      || current.listing_active !== true || current.product_status !== "PUBLISHED"
+      || current.listing_active !== true || current.product_status === "ARCHIVED"
       || current.can_observe !== true || current.can_read_reservations !== true
       || integer(current, "account_version") !== integer(job, "account_version")
       || integer(current, "mapping_version") !== integer(job, "mapping_version")
@@ -2346,7 +2348,7 @@ export class ChannelRuntime {
               AND l.mapping_version=r.mapping_version AND l.product_id=r.product_id
               AND l.external_product_id=r.target_external_product_id AND l.external_option_id=r.target_external_option_id
               AND l.adapter=j.target_adapter AND l.adapter_version=j.target_adapter_version
-              AND l.connection_mode=j.target_connection_mode AND p.status='PUBLISHED'
+              AND l.connection_mode=j.target_connection_mode AND p.status<>'ARCHIVED'
             FOR SHARE OF wa,a,l,p`, [input.readId, this.#nowIso()],
         );
         if (!authorized.rows[0] || !this.#adapterSupports(authorized.rows[0], "OBSERVE")
@@ -3123,7 +3125,7 @@ export class ChannelRuntime {
       const reservationVersionsCurrent = reservationJob && assignmentCurrent && current !== undefined
         && current.account_active === true && current.revoked_at === null
         && (current.delegated_until === null || isoValue(current, "delegated_until") > nowUtc)
-        && current.quarantined_at === null && current.listing_active === true && current.product_status === "PUBLISHED"
+        && current.quarantined_at === null && current.listing_active === true && current.product_status !== "ARCHIVED"
         && current.can_observe === true && current.can_read_reservations === true
         && this.#adapterSupports(current, "OBSERVE") && this.#adapterSupportsReservationRead(current)
         && integer(current, "account_version") === integer(job, "account_version")

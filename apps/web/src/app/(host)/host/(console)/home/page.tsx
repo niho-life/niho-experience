@@ -4,9 +4,11 @@ import { redirect } from "next/navigation";
 import { HostAppBadge } from "@/components/host/HostAppWindow";
 import { HostHomeTodos } from "@/components/host/HostHomeTodos";
 import { HostIcon } from "@/components/host/HostIcon";
+import { HostPublishProgress } from "@/components/host/HostPublishProgress";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { consoleButtonClass, HOST_SURFACE, LIST_ROW, LIST_ROW_DETAIL, LIST_ROW_TITLE } from "@/components/host/host-ui";
 import { HostPageBody, MoreLink, PageHead, SectionTitle } from "@/components/host/ui";
+import type { ProgressProduct } from "@/host/publish-progress";
 import { homeCalendarPrompt, type HomeCalendarPrompt } from "@/host/calendar";
 import { loadHostCalendar } from "@/host/calendar-server";
 import { hostPageContext, loadHostConsoleData } from "@/host/data";
@@ -25,6 +27,14 @@ import { translateRoomsEnabled } from "@/lib/host/translate-rooms-server";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
 
 export const metadata: Metadata = { title: "ホーム" };
+
+/** The preview's synthetic experience for 公開までの道のり: its page is public; bookings wait for the payout account, the terms and a slot. */
+function previewProgressProducts(experiences: readonly { id: string; title: string }[]): ProgressProduct[] {
+  return experiences.slice(0, 1).map((experience) => ({
+    id: experience.id, title: experience.title, status: "PUBLISHED", publicationBlockers: ["SUPPORT_CONSENT_REQUIRED", "CONNECT_NOT_READY", "SCHEDULE_REQUIRED"],
+    pageBlockers: [], bookingBlockers: ["SUPPORT_CONSENT_REQUIRED", "CONNECT_NOT_READY", "SCHEDULE_REQUIRED"], bookingOpen: false,
+  }));
+}
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -127,7 +137,7 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
   if (!provider) {
     return <HostRegisterPrompt title="ホーム" />;
   }
-  const [{ home: consoleHome, settings }, site, siteMonth, live, liveCalendar, ota] = await Promise.all([
+  const [{ home: consoleHome, settings, experiences }, site, siteMonth, live, liveCalendar, ota] = await Promise.all([
     loadHostConsoleData(provider),
     loadSiteHome(provider),
     loadSiteHomeMonth(provider, context.session),
@@ -174,6 +184,15 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
         </p>
       ) : null}
 
+      {/* 公開までの道のり (#706): the OWNER's two stages. In the preview the card reads a synthetic experience whose page is public and whose bookings wait; in http mode it reads the experiences list the 体験 screen reads. */}
+      {provider.memberRole === "OWNER" && (isHostMock() || config.experienceHostPublicationApiEnabled) ? (
+        <HostPublishProgress
+          key={`progress-${provider.id}`}
+          hostName={provider.displayName}
+          linkProviderId={linkProviderId}
+          initialProducts={isHostMock() ? previewProgressProducts(experiences) : undefined}
+        />
+      ) : null}
       {/* Keyed by provider: another provider's rows start from their own list. */}
       <HostHomeTodos key={provider.id} todos={home.todos} providerId={linkProviderId} />
       <HostAppBadge enabled={config.hostPwaEnabled} count={homeBadgeCount(home.todos)} />

@@ -10,15 +10,24 @@ import { jaGuideLine, jaYen } from "@/lib/ja-catalog";
 
 /** The Japanese card's extras: the people on 街の人 this experience is met through (#585), and the Japanese interface copy. */
 export type SiteCardOptions = {
+  /**
+   * Make a card for a page whose bookings are not open yet too (#706): the list and the related cards do; the home and the guide
+   * pages show only what can be booked.
+   */
+  readonly includePageOnly?: boolean;
   readonly people?: readonly { readonly name: string; readonly photo?: { readonly src: string } }[];
   readonly copy?: StaticCopyAccessorV1;
 };
 
-function japaneseSiteCard(item: SitePublicExperience, { people = item.memberProfiles ?? [], copy }: SiteCardOptions): CardModel | null {
+/** A guest can book it now: the page says its bookings are open and there is something to book. */
+const cardBookable = ({ publication, saleTerms }: SitePublicExperience): boolean => publication.bookingAvailable === true && (saleTerms?.offers.length ?? 0) > 0;
+
+function japaneseSiteCard(item: SitePublicExperience, { people = item.memberProfiles ?? [], copy, includePageOnly = false }: SiteCardOptions): CardModel | null {
   if (!japaneseListPublication(item)) return null;
   const { publication, saleTerms } = item;
   const { japanese } = publication;
-  const offers = saleTerms.offers;
+  const offers = saleTerms?.offers ?? [];
+  if (offers.length === 0 && !includePageOnly) return null;
   // The same decisions as the Japanese list's card (`jaCardOf`): the people it is met through, else the provider's public name.
   const providerName = providerNameFor(publication, "ja");
   const kind = providerKindFor(publication, item.sellerDisclosure?.sellerKind);
@@ -37,13 +46,15 @@ function japaneseSiteCard(item: SitePublicExperience, { people = item.memberProf
     withLabel,
     face: { name: faceName, initial: initialOf(faceName), image: faceUrl ? { url: faceUrl, alt: "" } : null },
     groupLabel: groupSizeLabel(offers.map((offer) => ({ capacity: offer.capacity, maxPartySize: offer.maxPartySize, minimumParticipants: offer.minimumParticipants })), "ja", copy),
-    durationLabel: durations[0] === durations.at(-1) ? formatDuration(durations[0]!, "ja") : `${formatDuration(durations[0]!, "ja")}–${formatDuration(durations.at(-1)!, "ja")}`,
+    durationLabel: durations.length ? durations[0] === durations.at(-1) ? formatDuration(durations[0]!, "ja") : `${formatDuration(durations[0]!, "ja")}–${formatDuration(durations.at(-1)!, "ja")}` : "詳しくはページで",
     language: language ? { short: language, full: language } : null,
     scheduleLabel: scheduleSummary(offers.map((offer) => ({ weekdays: [...offer.weekdays], startTime: offer.startTime })), "ja"),
     // 日本語サイトの料金は半角の ¥（一覧・詳細と同じ `jaYen`）。Intl の ja-JP は全角の ￥ を返す。
-    priceLabel: Math.min(...prices) === 0 ? "無料" : jaYen(Math.min(...prices)),
+    // 予約の受付が準備中のページは、ページに載せた大人1人の料金を出す。次回の日程は出さない。
+    priceLabel: (prices.length ? Math.min(...prices) : publication.unitAmount) === 0 ? "無料" : jaYen(prices.length ? Math.min(...prices) : publication.unitAmount),
     priceIsFrom: new Set(prices).size > 1,
     offers: offers.map((offer) => ({ id: offer.id, minimumParticipants: offer.minimumParticipants, maxPartySize: offer.maxPartySize })),
+    bookingAvailable: cardBookable(item),
   };
 }
 
@@ -87,6 +98,7 @@ export function sitePublicationCard(item: SitePublicExperience, locale: "en" | "
     priceLabel: prices.length ? formatYen(Math.min(...prices), "en") : formatYen(publication.unitAmount, "en"),
     priceIsFrom: new Set(prices).size > 1,
     offers: offers.map((offer) => ({ id: offer.id, minimumParticipants: offer.minimumParticipants, maxPartySize: offer.maxPartySize })),
+    bookingAvailable: cardBookable(item),
   };
 }
 

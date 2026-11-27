@@ -64,9 +64,12 @@ describe("relatedSiteExperienceCards (#146)", () => {
     expect(slugs(await relatedSiteExperienceCards("n1"))).toEqual(["plain", "night"]);
   });
 
-  it("leaves out an experience without a valid sale, as the list page does", async () => {
+  it("suggests a page whose bookings are not open yet too, after the ones that can be booked and marked as not bookable (#706)", async () => {
     state.catalog = { experiences: [native("no-sale", null), native("no-offers", { ...sale, offers: [] }), native("ok")], claimedSlugs: ["no-sale", "no-offers", "ok"] };
-    expect(slugs(await relatedSiteExperienceCards("elsewhere"))).toEqual(["ok"]);
+    const cards = await relatedSiteExperienceCards("elsewhere");
+    expect(slugs(cards)).toEqual(["ok", "no-sale", "no-offers"]);
+    expect(cards.map((card) => card.bookingAvailable)).toEqual([true, false, false]);
+    expect(cards[1]!.priceLabel).toBe("¥4,000");
   });
 
   it("never lets a slug this site claims reveal the NIHO item with the same slug", async () => {

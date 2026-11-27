@@ -197,3 +197,44 @@ describe("stopping bookings closes the external channel slots (#705)", { skip },
     }
   });
 });
+
+describe("reading the reservations that already came in through a channel survives stopping bookings (#706)", { skip }, () => {
+  it("stopBooking keeps OBSERVE (reservation read) jobs claimable for the DRAFT product, opens nothing, and ARCHIVED stops it", async () => {
+    await withDb(async (pool) => {
+      const { publications, owner, draft, opened, worker } = await openWithChannel(pool);
+      await pool.query("UPDATE channel_listings SET can_read_reservations=true WHERE id='listing-ch'");
+      const runtime = new ChannelRuntime(pool, {
+        now: () => new Date("2099-01-01T00:00:00.000Z"),
+        supportedAdapters: { "Airbnb/browser-v1@1": { canObserve: true, canClose: true, canOpen: true, canReadReservations: true } },
+      });
+      await publications.stopBooking(owner, draft.id, opened.version);
+      assert.equal((await pool.query("SELECT status FROM experience_products WHERE id=$1", [draft.id])).rows[0]?.status, "DRAFT");
+      await runtime.consumeCalendarOutbox();
+
+      // The existing OTA bookings are still read: a reservation read is scheduled for the DRAFT product ...
+      assert.equal((await runtime.enqueueDueReservationReads(worker, 1)).enqueued, 1);
+      assert.equal(await count(pool, "SELECT count(*)::int AS n FROM channel_jobs WHERE purpose='RESERVATION_WINDOW' AND action='OBSERVE' AND status='QUEUED'"), 1);
+      // ... and the worker can claim it (the CLOSE jobs may come first).
+      let observed = false;
+      for (let i = 0; i < 60 && !observed; i += 1) {
+        const claimed = await runtime.claim(worker);
+        if (!claimed) break;
+        const row = (await pool.query("SELECT action,purpose FROM channel_jobs WHERE id=$1", [claimed.id])).rows[0];
+        assert.notEqual(row?.action, "SET_OPEN");
+        assert.notEqual(row?.action, "ENSURE_OCCURRENCE");
+        observed = row?.purpose === "RESERVATION_WINDOW" && row?.action === "OBSERVE";
+        if (!observed) await pool.query("UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',lease_digest=NULL,lease_expires_at=NULL WHERE id=$1", [claimed.id]);
+      }
+      assert.ok(observed, "the reservation read of the DRAFT product is claimable");
+      // Selling stays closed: no OPEN anywhere.
+      assert.equal(await count(pool, "SELECT count(*)::int AS n FROM channel_desired_states WHERE desired_state='OPEN'"), 0);
+      assert.equal(await count(pool, "SELECT count(*)::int AS n FROM channel_jobs WHERE action IN ('SET_OPEN','ENSURE_OCCURRENCE') AND status IN ('QUEUED','LEASED')"), 0);
+
+      // An archived product is no longer read.
+      await pool.query("UPDATE channel_jobs SET status='FINISHED',outcome='SUPERSEDED',lease_digest=NULL,lease_expires_at=NULL WHERE purpose='RESERVATION_WINDOW' AND status IN ('QUEUED','LEASED')");
+      await pool.query("UPDATE external_reservation_read_dispatch_states SET pending_job_id=NULL,next_due_at='2000-01-01T00:00:00Z'");
+      await pool.query("UPDATE experience_products SET status='ARCHIVED' WHERE id=$1", [draft.id]);
+      assert.equal((await runtime.enqueueDueReservationReads(worker, 1)).enqueued, 0);
+    });
+  });
+});

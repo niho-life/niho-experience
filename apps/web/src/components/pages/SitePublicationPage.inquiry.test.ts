@@ -39,7 +39,7 @@ describe("the experience page's inquiry links", () => {
     expect(links.filter((href) => href.includes("from=experience") && href.includes("experience=synthetic-tea") && href.includes("title=合成茶道体験") && href.includes("host=Sample Sato"))).toHaveLength(1);
     expect(links.some((href) => href.includes("from=provider"))).toBe(false);
     expect(html).not.toContain("Sample Satoさんに相談する");
-    expect(html).toContain("ほかの日・グループの相談");
+    expect(html).toContain("ホストに相談する");
     expect(html).not.toContain("予約の前に相談できます。");
     expect(html).not.toContain('id="inquiry"');
   });

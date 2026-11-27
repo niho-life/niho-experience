@@ -55,6 +55,19 @@ describe("sitePublicationCard in Japanese (#658)", () => {
     expect(sitePublicationCard(item({ offers: [] }), "ja")).toBeNull();
   });
 
+  it("makes a card for a page whose bookings are not open yet only when asked (#706): the price is the page's, no dates, not bookable", () => {
+    const preparing = { ...item({ offers: [] }), saleTerms: null } as SitePublicExperience;
+    expect(sitePublicationCard(preparing, "ja", { copy })).toBeNull();
+    const card = sitePublicationCard(preparing, "ja", { copy, includePageOnly: true })!;
+    expect(card).toMatchObject({ slug: "synthetic", title: "合成の体験", priceLabel: "¥3,000", priceIsFrom: false, bookingAvailable: false, offers: [], scheduleLabel: null, groupLabel: null });
+    // English: always a card, with the same flag.
+    expect(sitePublicationCard(preparing)).toMatchObject({ priceLabel: "¥3,000", bookingAvailable: false, offers: [], scheduleLabel: null });
+    // Open and sellable: bookable.
+    const open = item(); (open.publication as { bookingAvailable?: boolean }).bookingAvailable = true;
+    expect(sitePublicationCard(open, "ja", { copy })?.bookingAvailable).toBe(true);
+    expect(sitePublicationCard(open)?.bookingAvailable).toBe(true);
+  });
+
   it("leaves the English card as it was", () => {
     const card = sitePublicationCard(item());
     expect(card).toMatchObject({ title: "Synthetic English", withLabel: "with 合成ホスト", groupLabel: "Up to 4 guests", durationLabel: "2 hr–3 hr", priceLabel: "¥3,000" });

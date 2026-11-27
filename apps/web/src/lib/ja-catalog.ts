@@ -6,8 +6,8 @@ import { providerKindFor, providerNameFor } from "./experience/provider-name";
 import type { SitePublicExperience } from "./experience/site-publications";
 
 /*
- * The Japanese site's list and cards (#529, #561): one card per published product that has Japanese text and a sale, with its
- * classification. Pure: the page reads the store and hands the rows here. English pages do not use any of this.
+ * The Japanese site's list and cards (#529, #561): one card per published product that has Japanese text, with its
+ * classification. A page whose bookings are not open yet is a card too (#706): it has no offers, so no duration or party size. Pure: the page reads the store and hands the rows here. English pages do not use any of this.
  */
 
 export type JaCard = {
@@ -19,6 +19,8 @@ export type JaCard = {
   /** 「◯◯さんと」 / 「◯◯が案内」: who the day is spent with, from the admin-confirmed public name. Null when none is confirmed. */
   readonly withLine: string | null;
   readonly face: { readonly url: string; readonly alt: string } | null;
+  /** False while the page is public but its bookings are not open yet (no offers, no next dates). */
+  readonly bookingAvailable: boolean;
   readonly durationMinutes: number | null;
   readonly capacity: { readonly min: number; readonly max: number } | null;
   readonly priceFromYen: number | null;
@@ -38,18 +40,20 @@ export function jaGuideLine(names: readonly string[]): string | null {
 }
 
 /**
- * The card of a published, saleable product with Japanese text, or null (it is not on the Japanese list). `people`: the people on
+ * The card of a published product with Japanese text, or null (it is not on the Japanese list). Bookable or not yet: a page
+ * without offers still has its price (the adult price on the page). `people`: the people on
  * 街の人 this experience is met through (#585); when there are any, the card says they guide it, in place of the provider's name.
  */
 export function jaCardOf(item: SitePublicExperience, classification: ExperienceClassification | undefined, people: readonly { readonly name: string; readonly photo?: { readonly src: string } }[] = []): JaCard | null {
   const japanese = item.publication.japanese;
   const offers = item.saleTerms?.offers ?? [];
-  if (!japanese || offers.length === 0) return null;
+  if (!japanese) return null;
   const name = providerNameFor(item.publication, "ja");
   const kind = providerKindFor(item.publication, item.sellerDisclosure?.sellerKind);
   const photo = item.publication.photos[0];
   const face = item.publication.providerPhoto;
   const durations = offers.map((offer) => offer.durationMinutes);
+  const bookable = item.publication.bookingAvailable === true && offers.length > 0;
   return {
     slug: item.publication.slug,
     title: japanese.title,
@@ -58,9 +62,10 @@ export function jaCardOf(item: SitePublicExperience, classification: ExperienceC
     withLine: jaGuideLine(people.map((entry) => entry.name)) ?? (name ? (kind === "PERSON" ? `${name}さんと` : kind === "BUSINESS" ? `${name}が案内` : `ホスト：${name}`) : null),
     // The face on the card is the first person it is met through (the name beside it is theirs); the provider's own photo only when nobody is linked.
     face: people[0]?.photo ? { url: people[0].photo.src, alt: "" } : face ? { url: face.src, alt: "" } : null,
-    durationMinutes: Math.min(...durations),
-    capacity: { min: Math.min(...offers.map((offer) => offer.minimumParticipants)), max: Math.max(...offers.map((offer) => offer.maxPartySize)) },
-    priceFromYen: Math.min(...offers.map((offer) => offer.pricing.adultPriceYen)),
+    bookingAvailable: bookable,
+    durationMinutes: offers.length ? Math.min(...durations) : null,
+    capacity: offers.length ? { min: Math.min(...offers.map((offer) => offer.minimumParticipants)), max: Math.max(...offers.map((offer) => offer.maxPartySize)) } : null,
+    priceFromYen: offers.length ? Math.min(...offers.map((offer) => offer.pricing.adultPriceYen)) : item.publication.unitAmount,
     classification: classification ?? EMPTY_EXPERIENCE_CLASSIFICATION,
     offers: offers.map((offer) => ({ minimumParticipants: offer.minimumParticipants, maxPartySize: offer.maxPartySize, weekdays: offer.weekdays })),
   };
