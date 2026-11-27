@@ -171,17 +171,22 @@ export class ProviderHostBioRepository {
          JOIN experience_product_publications publication
            ON publication.id=state.current_publication_id
           AND publication.provider_id=state.provider_id AND publication.product_id=state.product_id
-         JOIN experience_host_seller_profiles profile ON profile.provider_id=publication.provider_id
+         LEFT JOIN experience_host_seller_profiles profile ON profile.provider_id=publication.provider_id
          JOIN provider_host_bios bio ON bio.provider_id=publication.provider_id
         WHERE publication.slug=$1
           AND state.self_stopped_at IS NULL AND state.operations_suspended_at IS NULL AND state.owner_resume_required=false
-          AND publication.seller_niho_account_ref=profile.seller_niho_account_ref
-          AND publication.stripe_connect_account_ref=profile.stripe_connect_account_ref
-          AND EXISTS (
-            SELECT 1 FROM provider_memberships owner
-             WHERE owner.provider_id=publication.provider_id
-               AND owner.active=true AND owner.role='OWNER'
-               AND ${sellerOwnerSql("owner", "profile")}
+          AND (
+            -- A page without bookings (#705) has no seller: the bio shows while the provider has an active OWNER.
+            (state.booking_publication_id IS DISTINCT FROM publication.id AND EXISTS (
+              SELECT 1 FROM provider_memberships owner
+               WHERE owner.provider_id=publication.provider_id AND owner.active=true AND owner.role='OWNER'))
+            OR (publication.seller_niho_account_ref=profile.seller_niho_account_ref
+              AND publication.stripe_connect_account_ref=profile.stripe_connect_account_ref
+              AND EXISTS (
+                SELECT 1 FROM provider_memberships owner
+                 WHERE owner.provider_id=publication.provider_id
+                   AND owner.active=true AND owner.role='OWNER'
+                   AND ${sellerOwnerSql("owner", "profile")}))
           )
         ORDER BY publication.published_at DESC,publication.id DESC LIMIT 1`,
       [slug],

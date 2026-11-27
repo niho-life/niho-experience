@@ -74,7 +74,7 @@ export async function getSitePublicExperience(slug: string, locale: SitePublicLo
   return { kind: "published", item: {
     publication,
     saleTerms,
-    sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null,
+    sellerDisclosure: publication.bookingAvailable && disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null,
     hostBio,
     memberProfiles: profiles.get(slug) ?? [],
   } };
@@ -88,7 +88,10 @@ async function readMemberProfiles(slugs: readonly string[], locale: SitePublicLo
   }
 }
 
-/** List public Experience products with a valid sale; products without sale terms stay out of the booking catalog. */
+/**
+ * List the public Experience pages. A page without open bookings is listed too (with `saleTerms: null`, and no seller);
+ * it is never sold: the catalog only decides what to show, the booking routes and checkout decide what can be bought.
+ */
 export const listSitePublicExperiences = cache(async (locale: SitePublicLocale = "en"): Promise<SitePublicCatalog> => {
   if (config.apiMode !== "http") return { experiences: [], claimedSlugs: [] };
   if (!config.experiencePublicationsEnabled) return { experiences: [], claimedSlugs: [] };
@@ -99,7 +102,7 @@ export const listSitePublicExperiences = cache(async (locale: SitePublicLocale =
   const disclosures = providerSellerDisclosureRepository();
   const profiles = await readMemberProfiles(items.map((item) => item.slug), locale);
   if (!config.guestBookingEnabled) return {
-    experiences: await Promise.all(items.map(async (publication) => ({ publication, saleTerms: null, sellerDisclosure: disclosures ? await disclosures.getPublicBySlug(publication.slug) : null, hostBio: null, memberProfiles: profiles.get(publication.slug) ?? [] }))),
+    experiences: await Promise.all(items.map(async (publication) => ({ publication, saleTerms: null, sellerDisclosure: disclosures && publication.bookingAvailable ? await disclosures.getPublicBySlug(publication.slug) : null, hostBio: null, memberProfiles: profiles.get(publication.slug) ?? [] }))),
     claimedSlugs,
   };
   const bookings = guestBookingRepository();
@@ -110,18 +113,24 @@ export const listSitePublicExperiences = cache(async (locale: SitePublicLocale =
       disclosures ? disclosures.getPublicBySlug(publication.slug) : null,
     ]);
     const saleTerms = projectSitePublicSaleTerms(terms);
-    return { publication, saleTerms, sellerDisclosure: disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null, hostBio: null, memberProfiles: profiles.get(publication.slug) ?? [] };
+    return { publication, saleTerms, sellerDisclosure: publication.bookingAvailable && disclosure && (!saleTerms || saleTerms.sellerDisplayName === disclosure.sellerDisplayName) ? disclosure : null, hostBio: null, memberProfiles: profiles.get(publication.slug) ?? [] };
   }));
   return { experiences: sales, claimedSlugs };
 });
 
-/** Every HTTP sale endpoint requires a currently active Experience publication. */
-export async function publicExperienceRouteAllowedForSlug(slug: string): Promise<boolean> {
+/**
+ * The guard of every HTTP BOOKING route (booking terms, sale terms, availability, checkout, the booking page; #705). It is
+ * not the guard of the detail page or the catalog: a page can be public without bookings. Bookings need the page AND an
+ * open sale version (the page says `bookingAvailable`) AND current sale terms. The store re-checks all of it from the
+ * database on every checkout, so this is the second lock, not the only one.
+ */
+export async function bookingRouteAllowedForSlug(slug: string): Promise<boolean> {
   if (config.apiMode !== "http") return true;
   if (!config.experiencePublicationsEnabled) return false;
   const publications = experiencePublicationRepository();
   if (!publications) throw new Error("Experience public publication store is unavailable.");
-  if (!await publications.getPublicBySlug(slug)) return false;
+  const publication = await publications.getPublicBySlug(slug);
+  if (!publication || !publication.bookingAvailable) return false;
   const bookings = guestBookingRepository();
   if (!bookings) throw new Error("Experience public sales store is unavailable.");
   return projectSitePublicSaleTerms(await bookings.publicBookingTerms(slug)) !== null;

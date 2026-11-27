@@ -60,7 +60,7 @@
 
 - **印**：公開原稿の `content.japaneseOnly === true`（draft にも公開版の snapshot にも入る。DB の列・migration は足していない）。印があるとき、日本語（`content.ja`）が唯一の原稿で、英語の原稿・「英語原稿を確認」は要らない。英語側の欄（`content` の英語の項目）は空のまま。公開上の商品名（`publicTitle`）は日本語の商品名と同じにする（サーバーが `PUBLIC_CONTENT_INVALID` で確かめる。メール・Stripe・予約画面の商品名はこれを使うため）。印が無い商品は従来どおり日本語＋確認済みの英語が要る。
 - **公開 projection**（`PublicExperiencePublication.japaneseOnly`）：`japanese` は英語との fingerprint 照合なしで読む。読めなければ公開として成立しない（英語で補わない）。事務局の代理公開レビューの監査表は英語 fingerprint が NOT NULL なので、`JAPANESE_ONLY_ENGLISH_FINGERPRINT`（`{"japaneseOnly":true}` の sha256）で埋める。
-- **公開 read**：`getSitePublicExperience(slug, locale)`・`listSitePublicExperiences(locale)`・`listPublicationSummaries`・`getPublicationDetail` は、英語では印のある商品を除く（英語の詳細・予約は「予約済みの slug」として 404。同じ slug の NIHO の体験も出さない）。日本語では出す。`publicExperienceRouteAllowedForSlug`（空き・checkout・販売条件の route）は言語によらず許す。日本語の予約がこれを使う。
+- **公開 read**：`getSitePublicExperience(slug, locale)`・`listSitePublicExperiences(locale)`・`listPublicationSummaries`・`getPublicationDetail` は、英語では印のある商品を除く（英語の詳細・予約は「予約済みの slug」として 404。同じ slug の NIHO の体験も出さない）。日本語では出す。`bookingRouteAllowedForSlug`（空き・checkout・販売条件の route）は言語によらず許す。日本語の予約がこれを使う。
 - **sitemap・hreflang・言語切替**：`mapPublicationJapaneseExperiences` は印のある商品を `japaneseOnly` として持ち（売れる状態のものだけ）、`experienceCounterparts`（言語切替）には載せず、`sitemapEntries` は日本語の URL だけを hreflang なしで出す。日本語詳細の metadata は canonical だけ（存在しない英語を指さない）。
 - **保存の条件**：`japaneseOnly` の draft は `EXPERIENCE_JAPANESE_SITE_ENABLED` が `true` の環境でだけ保存できる（host・admin の draft API が `INVALID_INPUT` で拒否する）。既定は OFF なので、この flag を入れるまで日本語のみの商品は作れない。
 - **host・admin の編集画面**：host は「掲載設定 › 掲載言語」で日本語だけにチェックを入れる（#640）。admin の代理登録は、原稿の節に「日本語のみで公開する」の選択肢がある。選ぶと英語の欄・翻訳・英語の確認が消え、事務局の代理公開は「日本語原稿を確認」になる。

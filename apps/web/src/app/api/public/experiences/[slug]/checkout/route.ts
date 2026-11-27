@@ -5,7 +5,7 @@ import { config } from "@/lib/config";
 import { checkoutIpDigest } from "@/lib/experience/checkout-ip-limit";
 import { checkoutError, readGuestCheckout, storeCheckoutError, stripeReturnPath } from "@/lib/experience/guest-booking-http";
 import { fromThisSite, publicEmpty, publicJson } from "@/lib/experience/public-http";
-import { publicExperienceRouteAllowedForSlug } from "@/lib/experience/site-publications";
+import { bookingRouteAllowedForSlug } from "@/lib/experience/site-publications";
 import { guestBookingRepository } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
@@ -39,7 +39,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   if (slug.length < 1 || slug.length > 160) return publicEmpty(404);
   if (!fromThisSite(request)) return publicEmpty(403);
   try {
-    if (!await publicExperienceRouteAllowedForSlug(slug)) return publicEmpty(404);
+    if (!await bookingRouteAllowedForSlug(slug)) return publicEmpty(404);
   } catch (error) {
     logFailure("store", error);
     return checkoutError("CHECKOUT_UNAVAILABLE");

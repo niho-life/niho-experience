@@ -36,10 +36,10 @@ async function fixture(pool: Pool) {
     if (!current) return;
     const versions = await pool.query<{ id: string }>(
       `INSERT INTO experience_product_publications (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,cancellation_terms_ref,
-         seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id)
-       VALUES ($1,$2,1,$2,$2,'{}','JPY',5000,'terms','seller','acct_x','Seller','consent-v1','member-owner') RETURNING id::text`, [providerId, slug],
+         seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id,sale_terms_version,sale_terms_snapshot)
+       VALUES ($1,$2,1,$2,$2,'{}','JPY',5000,'terms','seller','acct_x','Seller','consent-v1','member-owner',1,'{"fixture":true}'::jsonb) RETURNING id::text`, [providerId, slug],
     );
-    await pool.query("INSERT INTO experience_product_publication_states (provider_id,product_id,current_publication_id,first_published_at) VALUES ($1,$2,$3::bigint,clock_timestamp())", [providerId, slug, versions.rows[0]!.id]);
+    await pool.query("INSERT INTO experience_product_publication_states (provider_id,product_id,current_publication_id,booking_publication_id,first_published_at) VALUES ($1,$2,$3::bigint,$3::bigint,clock_timestamp())", [providerId, slug, versions.rows[0]!.id]);
   };
   return { providerId, publications, people, profiles, member, photo, list, product };
 }

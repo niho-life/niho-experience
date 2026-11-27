@@ -826,7 +826,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
             plan_state.phase AS sales_plan_phase
        FROM experience_products p
        LEFT JOIN experience_product_publication_states s ON s.provider_id=p.provider_id AND s.product_id=p.id
-       LEFT JOIN experience_product_publications pub ON pub.id=s.current_publication_id
+       LEFT JOIN experience_product_publications pub ON pub.id=s.booking_publication_id
        LEFT JOIN experience_product_sales_plan_states plan_state
          ON plan_state.provider_id=p.provider_id AND plan_state.product_id=p.id
        LEFT JOIN experience_product_sales_plan_versions plan
@@ -1815,7 +1815,7 @@ export class GuestBookingRepository {
                  )) AS active_offer_ids
          FROM experience_products p
          LEFT JOIN experience_product_publication_states state ON state.provider_id=p.provider_id AND state.product_id=p.id
-         LEFT JOIN experience_product_publications pub ON pub.id=state.current_publication_id
+         LEFT JOIN experience_product_publications pub ON pub.id=state.booking_publication_id
          LEFT JOIN provider_sale_settings s ON s.provider_id=p.provider_id
          LEFT JOIN experience_product_sales_plan_states plan_state
            ON plan_state.provider_id=p.provider_id AND plan_state.product_id=p.id

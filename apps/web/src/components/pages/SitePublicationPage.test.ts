@@ -52,7 +52,7 @@ const item = {
       lead: "A synthetic native experience.", description: "Only public manuscript appears here.", facts: { language: "English" },
       highlights: [], included: ["Materials"], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [],
     },
-    currency: "JPY", unitAmount: 4_000, sellerDisplayName: "Synthetic Legal Seller",
+    currency: "JPY", unitAmount: 4_000, sellerDisplayName: "Synthetic Legal Seller", bookingAvailable: true,
     providerPublicName: "Synthetic Actual Host", providerKind: "PERSON", meetingOverview: null,
     meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null, publicMapPoint: null, publicMapArea: null, photos: [],
     providerPhoto: { src: "/api/public/experience-provider-media/00000000-0000-4000-8000-000000000001", alt: "Synthetic actual host", altJa: "合成の実提供者", publicCredit: null }, businessLogo: null,
@@ -359,5 +359,44 @@ describe("native publication context under the title and below the sections (#14
 
     state.related = [];
     expect(await page()).not.toContain("More experiences in Kamakura");
+  });
+});
+
+describe("a public page whose bookings are not open yet (#705)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const notOpen = {
+    ...item,
+    publication: { ...item.publication, sellerDisplayName: null, bookingAvailable: false, japanese: { title: "準備中の体験", lead: "紹介", description: "説明", language: "日本語", highlights: [], included: [], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [] } },
+    saleTerms: null,
+    sellerDisclosure: null,
+  } as unknown as SitePublicExperience;
+
+  it("shows the experience, the price and the host, says bookings are not open, offers the inquiry link, and hides the seller line (English)", async () => {
+    const html = await render(null, notOpen);
+    expect(html).toContain("Native review page");
+    expect(html).toContain("Synthetic Actual Host");
+    expect(html).toContain("¥4,000");
+    expect(html).toContain("Bookings are not open yet.");
+    expect(html).toContain("Ask about other dates or a group");
+    expect(html).not.toContain("Seller information");
+    expect(html).not.toContain('id="seller"');
+    expect(html).not.toContain("Synthetic Legal Seller");
+    expect(siteNextDates).not.toHaveBeenCalled();
+    for (const node of jsonLd(html)) expect(node).not.toHaveProperty("offers");
+  });
+
+  it("says the same in Japanese", async () => {
+    state.reviews = null;
+    const html = renderToStaticMarkup(await SitePublicationPage({ item: notOpen, locale: "ja" }));
+    expect(html).toContain("予約の受付は準備中です。");
+    expect(html).toContain("ほかの日・グループの相談");
+    expect(html).toContain("¥4,000");
+    expect(html).not.toContain("特定商取引法に基づく表記");
+    for (const node of jsonLd(html)) expect(node).not.toHaveProperty("offers");
+  });
+
+  it("does not show the seller line even if a seller disclosure were passed along without open bookings", async () => {
+    const html = await render(null, { ...notOpen, sellerDisclosure: item.sellerDisclosure } as SitePublicExperience);
+    expect(html).not.toContain("Seller information");
   });
 });

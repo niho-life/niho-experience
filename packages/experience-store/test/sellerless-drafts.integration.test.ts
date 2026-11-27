@@ -119,14 +119,14 @@ describe("drafts of a provider with no seller (#704)", { skip }, () => {
       // And only a product with a seller can leave DRAFT, which closes every PUBLISHED-only reader (checkout, booking
       // terms, OTA/channel feeds, reviews, article links).
       await assert.rejects(pool.query("UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2", [PROVIDER, draft.id]), { code: "23514" });
-      // A publication cannot be copied from a product with no seller (its seller columns stay NOT NULL).
+      // A publication with a consent version but no seller is neither a page version nor a sale version (all-or-none CHECK).
       await assert.rejects(pool.query(
         `INSERT INTO experience_product_publications
            (provider_id,product_id,draft_version,sale_terms_version,slug,public_title,content,currency,unit_amount,
             cancellation_terms_ref,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,
             published_by_niho_user_id,publisher_kind,sale_terms_snapshot)
          VALUES ($1,$2,1,1,'x','x','{}'::jsonb,'JPY',1000,'t',NULL,NULL,NULL,'c',$3,'OWNER','{}'::jsonb)`,
-        [PROVIDER, draft.id, owner.nihoUserId]), { code: "23502" });
+        [PROVIDER, draft.id, owner.nihoUserId]), { code: "23514" });
 
       // Booking terms, checkout and the Admin proxy refuse the draft.
       const guests = new GuestBookingRepository(pool);

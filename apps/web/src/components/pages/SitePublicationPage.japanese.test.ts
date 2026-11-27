@@ -25,6 +25,7 @@ const item = {
     providerPhoto: null,
     businessLogo: null,
     sellerDisplayName: "Synthetic Seller",
+    bookingAvailable: true,
     meetingOverview: "English meeting overview",
     meetingPointDisclosure: "AFTER_BOOKING",
     meetingPoint: null,

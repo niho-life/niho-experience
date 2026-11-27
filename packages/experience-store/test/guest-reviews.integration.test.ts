@@ -167,14 +167,14 @@ async function seedNativePublication(pool: Pool): Promise<{ providerId: string; 
   const publication = await pool.query<{ id: string }>(
     `INSERT INTO experience_product_publications
        (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,cancellation_terms_ref,
-        seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id)
-     VALUES ($1,$2,1,'native-live','Native live','{}','JPY',1000,'terms','seller-native','acct_NativeSynthetic','Native Seller','consent-v1','owner-native')
+        seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id,sale_terms_version,sale_terms_snapshot)
+     VALUES ($1,$2,1,'native-live','Native live','{}','JPY',1000,'terms','seller-native','acct_NativeSynthetic','Native Seller','consent-v1','owner-native',1,'{"fixture":true}'::jsonb)
      RETURNING id::text`,
     [providerId, productId],
   );
   await pool.query(
-    `INSERT INTO experience_product_publication_states (provider_id,product_id,current_publication_id,first_published_at)
-     SELECT $1,$2,$3::bigint,published_at FROM experience_product_publications WHERE id=$3::bigint`,
+    `INSERT INTO experience_product_publication_states (provider_id,product_id,current_publication_id,booking_publication_id,first_published_at)
+     SELECT $1,$2,$3::bigint,$3::bigint,published_at FROM experience_product_publications WHERE id=$3::bigint`,
     [providerId, productId, publication.rows[0]!.id],
   );
   return { providerId, productId, owner: { providerId, nihoUserId: "owner-native" } };
@@ -544,16 +544,17 @@ describe("PostgreSQL guest reviews (#104 #108)", { skip: databaseUrl === undefin
       assert.equal(await reviews.listPublishedReviews("native-live"), null, "owner_resume_required remains closed");
       await pool.query("UPDATE experience_product_publication_states SET owner_resume_required=false WHERE provider_id=$1 AND product_id=$2", [native.providerId, native.productId]);
       assert.equal((await reviews.listPublishedReviews("native-live"))?.summary.count, 2);
+      // Reviews belong to the PAGE (#705): a page whose bookings were stopped (status DRAFT) keeps showing them.
       await pool.query("UPDATE experience_products SET status='DRAFT' WHERE provider_id=$1 AND id=$2", [native.providerId, native.productId]);
-      assert.equal(await reviews.listPublishedReviews("native-live"), null);
+      assert.equal((await reviews.listPublishedReviews("native-live"))?.summary.count, 2);
       await pool.query("UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2", [native.providerId, native.productId]);
 
       // A historical native slug is reserved too, even if an unclaimed legacy row has that slug.
       await pool.query(
         `INSERT INTO experience_product_publications
            (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,cancellation_terms_ref,
-            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id)
-         VALUES ($1,$2,2,'native-old','Native old','{}','JPY',1000,'terms','seller-native','acct_NativeSynthetic','Native Seller','consent-v2','owner-native')`,
+            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id,sale_terms_version,sale_terms_snapshot)
+         VALUES ($1,$2,2,'native-old','Native old','{}','JPY',1000,'terms','seller-native','acct_NativeSynthetic','Native Seller','consent-v2','owner-native',1,'{"fixture":true}'::jsonb)`,
         [native.providerId, native.productId],
       );
       await pool.query(

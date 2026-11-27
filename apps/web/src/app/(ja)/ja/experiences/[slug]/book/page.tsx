@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { BookingSummaryHeader } from "@/components/BookingSummaryHeader";
 import { loadClassificationOf } from "@/lib/experience-categories-server";
 import { BookingPageContent } from "@/components/pages/BookingPageContent";
@@ -16,6 +16,7 @@ export default async function JapaneseBookPage(props: { params: Promise<{ slug: 
   if (config.apiMode === "http") {
     const local = await getSitePublicExperience((await props.params).slug, "ja");
     if (local?.kind !== "published" || !local.item.publication.japanese) notFound();
+    if (!local.item.publication.bookingAvailable) redirect(`/ja/experiences/${encodeURIComponent(local.item.publication.slug)}`);
     const initialSelection = siteBookingSelectionFromSearch(await props.searchParams);
     const slug = local.item.publication.slug;
     const classification = await loadClassificationOf(slug);

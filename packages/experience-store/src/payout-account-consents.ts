@@ -241,7 +241,7 @@ export class ProviderPayoutAccountConsents {
       const stopped = await client.query(
         `UPDATE experience_product_publication_states
             SET self_stopped_at=COALESCE(self_stopped_at,clock_timestamp()),version=version+1,updated_at=clock_timestamp()
-          WHERE provider_id=$1 AND current_publication_id IS NOT NULL AND self_stopped_at IS NULL`,
+          WHERE provider_id=$1 AND booking_publication_id IS NOT NULL AND self_stopped_at IS NULL`,
         [actor.providerId],
       );
       await client.query(

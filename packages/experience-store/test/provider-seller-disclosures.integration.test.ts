@@ -98,15 +98,15 @@ describe("provider seller disclosure persistence", { skip: databaseUrl === undef
       const publication = await pool.query<{ id: string }>(
         `INSERT INTO experience_product_publications
            (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,cancellation_terms_ref,
-            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id)
+            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id,sale_terms_version,sale_terms_snapshot)
          VALUES ($1,'product-seller',1,'synthetic-seller-page','Synthetic seller page','{}','JPY',5000,'synthetic-terms',$2,
-                 'acct_SellerSynthetic','Synthetic Legal Seller','publication-v1',$2) RETURNING id::text`,
+                 'acct_SellerSynthetic','Synthetic Legal Seller','publication-v1',$2,1,'{"fixture":true}'::jsonb) RETURNING id::text`,
         [actor.providerId, actor.nihoUserId],
       );
       await pool.query(
         `INSERT INTO experience_product_publication_states
-           (provider_id,product_id,current_publication_id,first_published_at)
-         VALUES ($1,'product-seller',$2,clock_timestamp())`,
+           (provider_id,product_id,current_publication_id,booking_publication_id,first_published_at)
+         VALUES ($1,'product-seller',$2,$2,clock_timestamp())`,
         [actor.providerId, publication.rows[0]!.id],
       );
       await pool.query(

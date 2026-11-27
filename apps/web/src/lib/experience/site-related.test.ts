@@ -35,7 +35,7 @@ const native = (slug: string, saleTerms: typeof sale | null = sale): SitePublicE
   publication: {
     slug, publicTitle: `Native ${slug}`,
     content: { lead: "Lead.", description: "Description.", facts: { language: "English" }, highlights: [], included: [], notIncluded: [], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [] },
-    currency: "JPY", unitAmount: 4_000, sellerDisplayName: "Synthetic Host", meetingOverview: null, meetingPointDisclosure: "AFTER_BOOKING",
+    currency: "JPY", unitAmount: 4_000, sellerDisplayName: "Synthetic Host", bookingAvailable: true, meetingOverview: null, meetingPointDisclosure: "AFTER_BOOKING",
     meetingPoint: null, publicMapPoint: null, publicMapArea: null, photos: [], providerPhoto: null, businessLogo: null, japanese: null, japaneseOnly: false, publishedAtUtc: "2026-11-05T00:00:00.000Z",
   },
 });

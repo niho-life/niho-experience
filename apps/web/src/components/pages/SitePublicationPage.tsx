@@ -58,7 +58,8 @@ const NO_GUIDES: Awaited<ReturnType<typeof guidesAboutExperience>> = { guides: [
 export async function SitePublicationPage({ item, cancelled = false, locale = "en" }: { item: SitePublicExperience; cancelled?: boolean; locale?: "en" | "ja" }) {
   const { publication, saleTerms, hostBio } = item;
   const ja = locale === "ja";
-  const sellerInformationHref = siteSellerInformationHref(item, locale);
+  // No seller line while bookings are not open (#705): the legal seller belongs to the sale, not to the page.
+  const sellerInformationHref = publication.bookingAvailable ? siteSellerInformationHref(item, locale) : null;
   const content = ja ? publication.japanese! : null;
   const title = content?.title ?? publication.publicTitle;
   const photos = publication.photos.map((photo) => ({ url: photo.src, alt: ja ? (photo.altJa || `${title}の写真`) : photo.alt }));
@@ -107,10 +108,14 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   const category = classification?.category ?? null;
   const area = classification?.area ?? null;
   const peopleLinks = ja && config.peoplePagesEnabled;
-  const bookable = Boolean(config.bookingsEnabled && config.guestBookingEnabled && offers.length);
+  const bookable = Boolean(publication.bookingAvailable && config.bookingsEnabled && config.guestBookingEnabled && offers.length);
   // The Japanese site writes yen with the half-width ¥, as its cards do.
   const yen = (amount: number) => ja ? jaYen(amount) : formatYen(amount, "en");
   const lowest = offers.length ? Math.min(...offers.map((offer) => offer.pricing.adultPriceYen)) : null;
+  // A page whose host has not opened bookings yet (#705) still shows its price (the adult price on the page) and the host;
+  // it shows no booking card, no seller line and no offers. The adult price is the page version's, not a sale snapshot's.
+  const notOpenYet = !publication.bookingAvailable;
+  const shownFrom = lowest ?? (notOpenYet ? publication.unitAmount : null);
   const askHref = inquiryHref(locale, { from: "EXPERIENCE", experienceSlug: publication.slug, experienceTitle: title, hostName: providerName });
   const cancellation = cancellationLines(offers, locale);
   const hostStoryGuide = relatedGuides.guides.find((guide) => "pillar" in guide && guide.pillar === "hosts" && !relatedGuides.draftSlugs.includes(guide.slug));
@@ -170,7 +175,7 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
           <aside className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
             {bookable && lowest !== null
               ? <SitePublicationDatePicker item={item} locale={locale} siteOrigin={new URL(config.siteUrl).origin} bookingHref={bookingHref} nextDates={nextDates} inquiryHref={config.groupInquiryEnabled ? askHref : null} enabled={bookable} priceFrom={lowest} ratingLabel={headline?.label ?? null} />
-              : <section id="book" className="rounded-[var(--radius-card)] border border-line bg-white p-5"><p className="eyebrow">{ja ? "料金" : "From"}</p><p className="mt-1 text-3xl font-extrabold">{lowest === null ? (ja ? "料金未設定" : "Price unavailable") : yen(lowest)}</p><p className="mt-4 rounded-xl bg-sand p-3 text-sm text-ink-soft">{ja ? "現在、オンライン予約はご利用いただけません。" : "Online booking is temporarily unavailable."}</p>{config.groupInquiryEnabled ? <a href={askHref} className="mt-3 inline-flex min-h-11 items-center font-bold text-moss underline underline-offset-4">{ja ? "ほかの日・グループの相談" : "Ask about other dates or a group"}</a> : null}</section>}
+              : <section id="book" className="rounded-[var(--radius-card)] border border-line bg-white p-5"><p className="eyebrow">{ja ? "料金" : "From"}</p><p className="mt-1 text-3xl font-extrabold">{shownFrom === null ? (ja ? "料金未設定" : "Price unavailable") : yen(shownFrom)}</p><p className="mt-4 rounded-xl bg-sand p-3 text-sm text-ink-soft">{notOpenYet ? (ja ? "予約の受付は準備中です。" : "Bookings are not open yet.") : ja ? "現在、オンライン予約はご利用いただけません。" : "Online booking is temporarily unavailable."}</p>{config.groupInquiryEnabled ? <a href={askHref} className="mt-3 inline-flex min-h-11 items-center font-bold text-moss underline underline-offset-4">{ja ? "ほかの日・グループの相談" : "Ask about other dates or a group"}</a> : null}</section>}
           </aside>
           <main className="min-w-0 lg:col-start-1 lg:row-start-2">
             <section className="pt-6" aria-label={ja ? "概要" : "Overview"}>

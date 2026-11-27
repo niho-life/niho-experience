@@ -134,28 +134,28 @@ export function sitePublicationJsonLd(item: SitePublicExperience, siteUrl: strin
     url,
     ...(images.length ? { image: images } : {}),
     ...reviewJsonLdFacts(reviews),
-    ...(bookingsEnabled && offers.length
+    // No offer while bookings are not open (#705): a page can be public before its host can take bookings.
+    ...(bookingsEnabled && publication.bookingAvailable && offers.length
       ? {
           offers: {
             "@type": "Offer",
             url,
             price: Math.min(...offers.map((offer) => offer.pricing.adultPriceYen)),
             priceCurrency: "JPY",
-            seller: { "@type": "Organization", name: saleTerms?.sellerDisplayName ?? publication.sellerDisplayName },
+            seller: { "@type": "Organization", name: saleTerms?.sellerDisplayName ?? publication.sellerDisplayName ?? providerNameFor(publication, locale) ?? publication.publicTitle },
           },
         }
       : {}),
   };
   const kind = providerKindFor(publication, sellerKind);
-  const provider = {
-    "@type": kind === "PERSON" ? "Person" : "Organization",
-    name: providerNameFor(publication, locale) ?? publication.sellerDisplayName,
-  };
+  const providerName = providerNameFor(publication, locale) ?? publication.sellerDisplayName;
+  // A page whose host has no public name and no seller yet names no provider rather than a wrong one.
+  const provider = providerName ? { "@type": kind === "PERSON" ? "Person" : "Organization", name: providerName } : null;
   return {
-    touristTrip: { "@context": "https://schema.org", "@type": "TouristTrip", ...facts, inLanguage: locale, provider },
+    touristTrip: { "@context": "https://schema.org", "@type": "TouristTrip", ...facts, inLanguage: locale, ...(provider ? { provider } : {}) },
     product: {
       "@context": "https://schema.org", "@type": "Product", ...facts,
-      ...(!publication.providerPublicName || kind === "BUSINESS" ? { brand: provider } : {}),
+      ...(provider && (!publication.providerPublicName || kind === "BUSINESS") ? { brand: provider } : {}),
     },
   };
 }

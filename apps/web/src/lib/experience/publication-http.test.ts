@@ -21,6 +21,9 @@ const mocks = vi.hoisted(() => ({
     saveDraft: vi.fn(),
     saveSaleTerms: vi.fn(),
     publish: vi.fn(),
+    publishPage: vi.fn(),
+    openBooking: vi.fn(),
+    stopBooking: vi.fn(),
     stop: vi.fn(),
     addMedia: vi.fn(),
     getProviderMedia: vi.fn(),
@@ -58,6 +61,9 @@ import { GET as readProduct, PATCH as saveProduct } from "@/app/(host)/host/api/
 import { PUT as saveTerms } from "@/app/(host)/host/api/products/[productId]/sale-terms/route";
 import { POST as publishProduct } from "@/app/(host)/host/api/products/[productId]/publish/route";
 import { POST as stopProduct } from "@/app/(host)/host/api/products/[productId]/stop/route";
+import { POST as publishPage } from "@/app/(host)/host/api/products/[productId]/publish-page/route";
+import { POST as openBooking } from "@/app/(host)/host/api/products/[productId]/open-booking/route";
+import { POST as stopBooking } from "@/app/(host)/host/api/products/[productId]/stop-booking/route";
 import { POST as uploadProductMedia } from "@/app/(host)/host/api/products/[productId]/media/route";
 import { GET as readProviderMedia, PUT as saveProviderMedia } from "@/app/(host)/host/api/provider-media/route";
 import { POST as uploadProviderMedia } from "@/app/(host)/host/api/provider-media/upload/route";
@@ -165,6 +171,9 @@ describe("Experience owner product API", () => {
     mocks.repository.saveDraft.mockResolvedValue({ draft: product, publicationUpdated: true, blockers: [] });
     mocks.repository.saveSaleTerms.mockResolvedValue({ draftVersion: 4, stateVersion: 3, saleTerms: terms, publicationUpdated: true, blockers: [] });
     mocks.repository.publish.mockResolvedValue(state);
+    mocks.repository.publishPage.mockResolvedValue(state);
+    mocks.repository.openBooking.mockResolvedValue(state);
+    mocks.repository.stopBooking.mockResolvedValue({ ...state, version: 4 });
     mocks.repository.stop.mockResolvedValue({ ...state, selfStoppedAtUtc: "2026-11-04T01:00:00.000Z", version: 4 });
     mocks.repository.getProviderMedia.mockResolvedValue(providerMedia);
     mocks.repository.addProviderMedia.mockResolvedValue(providerMedia);
@@ -581,4 +590,76 @@ describe("Experience owner product API", () => {
       expect(mocks.translator).not.toHaveBeenCalled();
     });
   });
+
+  describe("page and bookings are separate steps (#705)", () => {
+    const sellerless = { actor, role: "OWNER", provider: null, readiness: null };
+
+    it("publishes the page of a host with no seller or payout account, and never asks Stripe", async () => {
+      mocks.boundary.mockResolvedValue({ ok: true, value: sellerless });
+      mocks.repository.getProduct.mockResolvedValue({ ...product, seller: null, status: "DRAFT" });
+      mocks.repository.getState.mockResolvedValue(null);
+      mocks.repository.getSaleTerms.mockResolvedValue({ draftVersion: 4, stateVersion: null, saleTerms: terms });
+      const version = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.version;
+      mocks.boundary.mockClear();
+      const response = await publishPage(request(`/host/api/products/${product.id}/publish-page`, "POST", { version }), context);
+      expect(response.status).toBe(200);
+      // The boundary is asked for the OWNER with "optional" sales: a seller is read only when there is one.
+      expect(mocks.boundary).toHaveBeenCalledWith("OWNER", { providerId: null, sales: "optional" });
+      expect(mocks.repository.refreshReadiness).not.toHaveBeenCalled();
+      expect(mocks.repository.publishPage).toHaveBeenCalledWith(actor, product.id, expect.objectContaining({ expectedDraftVersion: 4, expectedStateVersion: null, expectedSaleTermsVersion: 2 }));
+      expect(mocks.repository.publish).not.toHaveBeenCalled();
+      expect(mocks.repository.openBooking).not.toHaveBeenCalled();
+    });
+
+    it("splits the blockers of a product into page and booking reasons", async () => {
+      mocks.repository.getPublicationBlockers.mockImplementation(async (_actor: unknown, _id: string, _checks: unknown, _consent: unknown, scope?: string) =>
+        scope === "PAGE" ? ["PHOTOS_REQUIRED"] : ["PHOTOS_REQUIRED", "SELLER_REQUIRED", "SCHEDULE_REQUIRED"]);
+      const dto = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product;
+      expect(dto.pageBlockers).toEqual(["PHOTOS_REQUIRED"]);
+      expect(dto.bookingBlockers).toEqual(["SELLER_REQUIRED", "SCHEDULE_REQUIRED"]);
+      expect(dto.publicationBlockers).toEqual(["PHOTOS_REQUIRED", "SELLER_REQUIRED", "SCHEDULE_REQUIRED"]);
+    });
+
+    it("opens bookings only with the consent and a ready payout account, through the readiness boundary", async () => {
+      const version = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.version;
+      mocks.boundary.mockClear();
+      const declined = await openBooking(request(`/host/api/products/${product.id}/open-booking`, "POST", { version, consentVersion: "listing-v1", accepted: false }), context);
+      expect(declined.status).toBe(422);
+      const opened = await openBooking(request(`/host/api/products/${product.id}/open-booking`, "POST", { version, consentVersion: "listing-v1", accepted: true }), context);
+      expect(opened.status).toBe(200);
+      expect(mocks.boundary).toHaveBeenLastCalledWith("OWNER", { providerId: null });
+      expect(mocks.repository.openBooking).toHaveBeenCalledWith(actor, product.id, expect.objectContaining({ expectedDraftVersion: 4, expectedStateVersion: 3, consentVersion: "listing-v1" }));
+      mocks.boundary.mockResolvedValue({ ok: true, value: { ...hostContext, readiness: { ...hostContext.readiness, connectReady: false } } });
+      const notReady = await openBooking(request(`/host/api/products/${product.id}/open-booking`, "POST", { version, consentVersion: "listing-v1", accepted: true }), context);
+      expect(notReady.status).toBe(422);
+      expect((await notReady.json()).error.blockers).toEqual(["CONNECT_NOT_READY"]);
+      expect(mocks.repository.openBooking).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops bookings without any payout lookup, by the state version, and refuses a stale one", async () => {
+      mocks.boundary.mockResolvedValue({ ok: true, value: sellerless });
+      const version = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.version;
+      mocks.boundary.mockClear();
+      const stopped = await stopBooking(request(`/host/api/products/${product.id}/stop-booking`, "POST", { version }), context);
+      expect(stopped.status).toBe(200);
+      expect(mocks.boundary).toHaveBeenCalledWith("OWNER", { providerId: null, sales: "none" });
+      expect(mocks.repository.stopBooking).toHaveBeenCalledWith(actor, product.id, 3);
+      mocks.repository.getState.mockResolvedValue({ ...state, version: 9 });
+      const stale = await stopBooking(request(`/host/api/products/${product.id}/stop-booking`, "POST", { version }), context);
+      expect(stale.status).toBe(409);
+      expect(mocks.repository.stopBooking).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects extra fields and a forged page publish that carries sale input", async () => {
+      const version = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.version;
+      for (const route of [publishPage, stopBooking]) {
+        const path = route === publishPage ? "publish-page" : "stop-booking";
+        const response = await route(request(`/host/api/products/${product.id}/${path}`, "POST", { version, sellerDisplayName: "Forged" }), context);
+        expect(response.status).toBe(400);
+      }
+      expect(mocks.repository.publishPage).not.toHaveBeenCalled();
+      expect(mocks.repository.stopBooking).not.toHaveBeenCalled();
+    });
+  });
+
 });
