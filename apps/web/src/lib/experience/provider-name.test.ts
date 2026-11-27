@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sitePublicationCard } from "./site-card-model";
-import { providerNameFor } from "./provider-name";
+import { providerKindFor, providerNameFor } from "./provider-name";
 import type { SitePublicExperience } from "./site-publications";
 
 /** 提供者の英語の公開名 (#587): the English pages use it, the Japanese pages do not. Synthetic data only. */
@@ -12,6 +12,25 @@ describe("providerNameFor", () => {
     for (const empty of [null, undefined, "", "  "]) expect(providerNameFor({ providerPublicName: "志龍", providerPublicNameEn: empty }, "en")).toBe("志龍");
     expect(providerNameFor({ providerPublicName: null, providerPublicNameEn: "Shiryu" }, "ja")).toBeNull();
     expect(providerNameFor({}, "en")).toBeNull();
+  });
+
+  it("falls back to the host's registered name when there is no public profile, in both languages, and never to the seller name (#691)", () => {
+    const registered = { providerPublicName: null, providerRegisteredName: " NIHO kamakura ", sellerDisplayName: "NIHO kamakura (Panasonic Holdings Corporation)" };
+    expect(providerNameFor(registered, "ja")).toBe("NIHO kamakura");
+    expect(providerNameFor(registered, "en")).toBe("NIHO kamakura");
+    expect(providerNameFor({ ...registered, providerPublicName: "志龍", providerPublicNameEn: "Shiryu" }, "en")).toBe("Shiryu");
+    expect(providerNameFor({ ...registered, providerPublicName: "志龍" }, "ja")).toBe("志龍");
+    expect(providerNameFor({ providerRegisteredName: "  " }, "ja")).toBeNull();
+  });
+});
+
+describe("providerKindFor", () => {
+  it("uses the public profile's kind when there is a profile, else the seller's kind, else null (#691)", () => {
+    expect(providerKindFor({ providerPublicName: "志龍", providerKind: "PERSON" }, "BUSINESS")).toBe("PERSON");
+    expect(providerKindFor({ providerPublicName: "志龍", providerKind: null }, "BUSINESS")).toBeNull();
+    expect(providerKindFor({ providerPublicName: null }, "BUSINESS")).toBe("BUSINESS");
+    expect(providerKindFor({ providerPublicName: null }, null)).toBeNull();
+    expect(providerKindFor({}, undefined)).toBeNull();
   });
 });
 

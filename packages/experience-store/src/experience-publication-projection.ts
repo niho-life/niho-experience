@@ -50,6 +50,11 @@ export interface PublicExperiencePublication {
   /** The provider's English public name (#587); the English pages show it in place of `providerPublicName` when there is one. */
   readonly providerPublicNameEn?: string | null;
   readonly providerKind?: "PERSON" | "BUSINESS" | null;
+  /**
+   * The name the host uses on its seller registration (already public in the "Sold by" line). Used as the host's name only when
+   * there is no public profile; never the legal seller name (`sellerDisplayName`).
+   */
+  readonly providerRegisteredName?: string | null;
   readonly meetingOverview: string | null;
   readonly meetingPointDisclosure: "PUBLIC" | "AFTER_BOOKING";
   readonly meetingPoint: {
@@ -397,6 +402,7 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   const sellerDisplayName = text(row.seller_display_name, false);
   const providerPublicName = text(row.provider_public_name, false);
   const providerPublicNameEn = text(row.provider_public_name_en, false);
+  const providerRegisteredName = text(row.provider_registered_name, false);
   const providerKind = row.provider_kind === null || row.provider_kind === undefined
     ? null : row.provider_kind === "PERSON" || row.provider_kind === "BUSINESS" ? row.provider_kind : undefined;
   const media = projectPhotos(row.photos);
@@ -411,7 +417,7 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   // 日本語のみの商品は、日本語の原稿が読めなければ公開として成立しない（英語で補わない）。
   if (japaneseOnly && !japanese) return null;
   return {
-    slug, publicTitle, ...manuscript, currency, unitAmount, sellerDisplayName, providerPublicName, providerPublicNameEn, providerKind,
+    slug, publicTitle, ...manuscript, currency, unitAmount, sellerDisplayName, providerPublicName, providerPublicNameEn, providerKind, providerRegisteredName,
     photos: media.photos, providerPhoto: providerMedia.providerPhoto, businessLogo: providerMedia.businessLogo, japanese, japaneseOnly, publishedAtUtc,
   };
 }

@@ -18,6 +18,7 @@ import { englishAlternates } from "@/lib/locale-metadata";
 import { guideCatalogForSite } from "@/lib/guide-registry";
 import { guestBookingSources } from "@/lib/guest-booking-source";
 import { listSitePublicExperiences } from "@/lib/experience/site-publications";
+import { providerNameFor } from "@/lib/experience/provider-name";
 import { sitePublicationCard } from "@/lib/experience/site-card-model";
 import { filterByCategory, parseCategoryParam, resolveCategories } from "@/lib/experience-categories";
 import { loadCategoryBySlug } from "@/lib/experience-categories-server";
@@ -64,7 +65,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const items = filterExperienceSummaries(catalog, searchQuery);
   const legacyCards = buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview);
   const nativeCards = native
-    .filter(({ publication }) => !theme && matchesExperienceQuery(`${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${publication.providerPublicName ?? publication.sellerDisplayName} ${NATIVE_REGION_NAME}`, searchQuery))
+    .filter(({ publication }) => !theme && matchesExperienceQuery(`${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${providerNameFor(publication, "ja") ?? ""} ${publication.sellerDisplayName} ${NATIVE_REGION_NAME}`, searchQuery))
     .map((entry) => sitePublicationCard(entry));
   const bySlug = await loadCategoryBySlug();
   const { available: categories, selected: category } = resolveCategories(

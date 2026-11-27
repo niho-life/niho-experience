@@ -23,7 +23,8 @@ import { iconForText } from "@/lib/themes";
 import { publicMetadata } from "@/lib/public-metadata";
 import { seoDescription } from "@/lib/seo-description";
 import { cancellationLines, scheduleDescription } from "@/lib/experience/site-card-model";
-import { providerNameFor } from "@/lib/experience/provider-name";
+import { initialOf } from "@/lib/card-model";
+import { providerKindFor, providerNameFor } from "@/lib/experience/provider-name";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import { relatedSiteExperienceCards } from "@/lib/experience/site-related";
 import { siteSellerDisplayName, siteSellerInformationHref } from "@/lib/experience/site-seller-information";
@@ -82,8 +83,11 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
   // The host's own bio (#146) in the page's language only: English needs the host's confirmed English. No filler.
   const hostBioText = (ja ? hostBio?.ja : hostBio?.en) ?? null;
   const providerName = providerNameFor(publication, locale);
-  const isBusiness = publication.providerKind === "BUSINESS";
-  const providerIdentityMedia = isBusiness ? publication.businessLogo : publication.providerPhoto;
+  // The host's kind (#691): the public profile's, else the seller disclosure's, else unknown (no "〜さんと" / "〜が開催" wording).
+  const providerKind = providerKindFor(publication, item.sellerDisclosure?.sellerKind);
+  const isBusiness = providerKind === "BUSINESS";
+  const isPerson = providerKind === "PERSON";
+  const providerIdentityMedia = isBusiness ? publication.businessLogo : isPerson ? publication.providerPhoto : publication.businessLogo ?? publication.providerPhoto;
   const providerIdentityPhoto = providerIdentityMedia
     ? { url: providerIdentityMedia.src, alt: ja ? providerIdentityMedia.altJa : providerIdentityMedia.alt }
     : null;
@@ -95,11 +99,9 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
     loadClassificationOf(publication.slug),
   ]);
   const people = item.memberProfiles ?? [];
-  const hasHostIdentity = Boolean(providerName || hostBioText || publication.providerKind || people.length);
-  const hostSectionHeading = hasHostIdentity
-    ? (ja ? "ホストについて" : "About your host")
-    : (ja ? "提供者について" : "About the provider");
-  const showHostSection = hasHostIdentity;
+  // The host section shows whenever there is a name, a bio or people; logo, photo and bio are optional (#691).
+  const showHostSection = Boolean(providerName || hostBioText || people.length);
+  const hostSectionHeading = ja ? "ホストについて" : "About your host";
   const category = classification?.category ?? null;
   const area = classification?.area ?? null;
   const peopleLinks = ja && config.peoplePagesEnabled;
@@ -147,8 +149,13 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
               <Link href="#place" className="hover:text-ink">{placeHeadline}</Link>
               {showHostSection ? <Link href="#host" className="inline-flex items-center gap-2 hover:text-ink">
                 {isBusiness && people.length > 0 ? <span aria-hidden className="flex -space-x-2">{people.slice(0, 3).map((person, index) => <Photo key={person.name + "/" + index} image={{ url: person.photo.src, alt: person.photo.alt }} alt="" aspect="" rounded="rounded-full" className="size-7 border-2 border-white" sizes="28px" />)}</span>
-                  : providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt="" aspect="" rounded={isBusiness ? "rounded-lg" : "rounded-full"} className="size-7 shrink-0" sizes="28px" /> : null}
-                <span>{providerName ? isBusiness ? ja ? people.length ? `${providerName} のみなさんと` : `${providerName} が開催` : providerName : ja ? `${providerName}さんと` : `with ${providerName}` : ja ? "ホスト" : "Your host"}</span>
+                  : providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt="" aspect="" rounded={isPerson ? "rounded-full" : "rounded-lg"} className="size-7 shrink-0" sizes="28px" />
+                  : providerName ? <HostMonogram name={providerName} className={`size-7 text-sm ${isPerson ? "rounded-full" : "rounded-lg"}`} /> : null}
+                <span>{providerName
+                  ? isBusiness ? ja ? people.length ? `${providerName} のみなさんと` : `${providerName} が開催` : providerName
+                    : isPerson ? ja ? `${providerName}さんと` : `with ${providerName}`
+                      : ja ? `ホスト：${providerName}` : `Hosted by ${providerName}`
+                  : ja ? "ホスト" : "Your host"}</span>
               </Link> : null}
             </div>
             <ul className="mt-[18px] grid grid-cols-2 gap-x-3 gap-y-4 border-y border-line py-[18px] lg:gap-x-6">
@@ -196,16 +203,17 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
             </section> : null}
             {showHostSection ? <section id="host" aria-labelledby="host-heading" className="scroll-mt-24 border-b border-line py-8 lg:py-10">
               <h2 id="host-heading" className="text-2xl">{hostSectionHeading}</h2>
-              {isBusiness ? <>
+              {!isPerson ? <>
                 <div className="mt-4 flex items-start gap-4">
-                  {providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt={providerIdentityPhoto.alt} aspect="" rounded="rounded-2xl" className="size-20 shrink-0" sizes="80px" /> : null}
+                  {providerIdentityPhoto ? <Photo image={providerIdentityPhoto} alt={providerIdentityPhoto.alt} aspect="" rounded="rounded-2xl" className="size-20 shrink-0" sizes="80px" />
+                    : providerName ? <HostMonogram name={providerName} className="size-20 rounded-2xl text-3xl" /> : null}
                   <div className="min-w-0"><p className="font-extrabold">{providerName ?? (ja ? "開催する事業者" : "Experience provider")}</p>{area ? <p className="mt-1 text-sm text-ink-soft">{areaLabel(area, locale)}</p> : null}</div>
                 </div>
                 {hostBioText ? <HostBioText text={hostBioText} locale={locale} /> : null}
               </> : <div className="mt-4 flex items-start gap-4">
                 {providerIdentityPhoto
                   ? <Photo image={providerIdentityPhoto} alt={providerIdentityPhoto.alt} aspect="" rounded="rounded-full" className="size-20 shrink-0" sizes="80px" />
-                  : null}
+                  : providerName ? <HostMonogram name={providerName} className="size-20 rounded-full text-3xl" /> : null}
                 <div className="min-w-0">
                   <p className="font-extrabold">{providerName ?? (ja ? "ホスト" : "Your host")}</p>
                   {hostBioText ? <HostBioText text={hostBioText} locale={locale} /> : null}
@@ -297,6 +305,11 @@ export async function SitePublicationPage({ item, cancelled = false, locale = "e
       </div>
     </div>
   </>;
+}
+
+/** The host's initial where there is no logo or photo (#691). Decorative: the name is always written next to it. */
+function HostMonogram({ name, className }: { name: string; className: string }) {
+  return <span aria-hidden className={`grid shrink-0 place-items-center bg-leaf-pale font-extrabold text-moss ${className}`}>{initialOf(name)}</span>;
 }
 
 function FactIcon({ kind }: { kind: "clock" | "language" | "people" | "calendar" }) {

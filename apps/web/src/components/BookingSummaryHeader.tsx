@@ -2,7 +2,7 @@ import Link from "next/link";
 import { HandIcon } from "@/components/HandIcon";
 import { Photo } from "@/components/Photo";
 import { areaLabel } from "@/lib/experience-categories";
-import { providerNameFor } from "@/lib/experience/provider-name";
+import { providerKindFor, providerNameFor } from "@/lib/experience/provider-name";
 import { formatDuration } from "@/lib/format";
 import type { SitePublicExperience } from "@/lib/experience/site-publications";
 import type { ExperienceAreaId } from "@niho-experience/experience-domain";
@@ -25,10 +25,12 @@ export function BookingSummaryHeader({ item, locale, area = null, people = [] }:
   const title = ja ? publication.japanese?.title ?? publication.publicTitle : publication.publicTitle;
   const request = offers.some((offer) => offer.acceptanceMode === "APPROVAL");
   const providerName = providerNameFor(publication, locale)?.trim() || null;
-  const business = publication.providerKind === "BUSINESS";
-  const withLine = business
+  const kind = providerKindFor(publication, item.sellerDisclosure?.sellerKind);
+  const withLine = kind === "BUSINESS"
     ? providerName ? ja ? people.length ? `${providerName} のみなさんと` : `${providerName}が開催` : `with ${providerName}` : ja ? "ホストのみなさんと" : "with the host team"
-    : providerName ? ja ? `${providerName}さんと` : `with ${providerName}` : null;
+    : kind === null
+      ? providerName ? ja ? `ホスト：${providerName}` : `Hosted by ${providerName}` : null
+      : providerName ? ja ? `${providerName}さんと` : `with ${providerName}` : null;
   const durations = offers.map((offer) => offer.durationMinutes).sort((a, b) => a - b);
   const duration = durations.length ? durations[0] === durations.at(-1) ? formatDuration(durations[0]!, locale) : `${formatDuration(durations[0]!, locale)}–${formatDuration(durations.at(-1)!, locale)}` : null;
   const minimum = offers.length ? Math.min(...offers.map((offer) => offer.minimumParticipants)) : null;

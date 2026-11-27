@@ -26,8 +26,12 @@ describe("sitePublicationCard actual provider face", () => {
   it("preserves existing cards for a publication without a public profile", () => {
     const base = item("PERSON");
     const publication = { ...base.publication, providerPublicName: null, providerKind: null };
-    expect(sitePublicationCard({ ...base, publication }).face).toMatchObject({
-      name: "Synthetic Legal Seller", image: { url: businessLogo.src },
+    // The legal seller name is never the host's name (#691); the media follows the seller's kind as before.
+    expect(sitePublicationCard({ ...base, publication }).face).toMatchObject({ name: "", image: { url: businessLogo.src } });
+    expect(sitePublicationCard({ ...base, publication }).withLabel).toBe("");
+    const registered = { ...publication, providerRegisteredName: "Synthetic Registered Host" };
+    expect(sitePublicationCard({ ...base, publication: registered })).toMatchObject({
+      withLabel: "with Synthetic Registered Host", face: { name: "Synthetic Registered Host", initial: "S" },
     });
     expect(sitePublicationCard({ ...base, publication, sellerDisclosure: null }).face.image).toMatchObject({ url: providerPhoto.src });
   });

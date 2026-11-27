@@ -2,7 +2,7 @@ import type { JourneyReviews } from "@niho-experience/api-client";
 import type { Guide } from "@/content/guides/types";
 import type { ExperienceDetailForSite } from "./experience-types";
 import type { SitePublicExperience } from "./experience/site-publications";
-import { providerNameFor } from "./experience/provider-name";
+import { providerKindFor, providerNameFor } from "./experience/provider-name";
 import { guidePillarDetails, guideSummary, shareableGuideImage } from "./guides";
 import { reviewDisplay } from "./reviews-ui";
 import { safeHttpsUrl } from "./safe-url";
@@ -118,6 +118,7 @@ export function experienceProductJsonLd(e: ExperienceDetailForSite, siteUrl: str
 /** Product and TouristTrip for the native publication renderer, using only fields visible on that page. */
 export function sitePublicationJsonLd(item: SitePublicExperience, siteUrl: string, bookingsEnabled: boolean, reviews: ReturnType<typeof reviewsForJsonLd>, locale: JsonLdLocale = "en"): { touristTrip: JsonLd; product: JsonLd } {
   const { publication, saleTerms } = item;
+  const sellerKind = item.sellerDisclosure?.sellerKind;
   const origin = siteUrl.replace(/\/$/, "");
   const japanese = locale === "ja" ? publication.japanese : null;
   const url = `${origin}${locale === "ja" ? "/ja" : ""}/experiences/${publication.slug}`;
@@ -145,15 +146,16 @@ export function sitePublicationJsonLd(item: SitePublicExperience, siteUrl: strin
         }
       : {}),
   };
+  const kind = providerKindFor(publication, sellerKind);
   const provider = {
-    "@type": publication.providerKind === "PERSON" ? "Person" : "Organization",
+    "@type": kind === "PERSON" ? "Person" : "Organization",
     name: providerNameFor(publication, locale) ?? publication.sellerDisplayName,
   };
   return {
     touristTrip: { "@context": "https://schema.org", "@type": "TouristTrip", ...facts, inLanguage: locale, provider },
     product: {
       "@context": "https://schema.org", "@type": "Product", ...facts,
-      ...(!publication.providerPublicName || publication.providerKind === "BUSINESS" ? { brand: provider } : {}),
+      ...(!publication.providerPublicName || kind === "BUSINESS" ? { brand: provider } : {}),
     },
   };
 }
