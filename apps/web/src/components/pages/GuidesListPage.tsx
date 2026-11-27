@@ -25,26 +25,27 @@ export function GuidesListPage({ catalog, locale }: { catalog: GuideCatalog; loc
       <p className="mt-3 text-lg leading-relaxed text-ink-soft">{text.listDescription}</p>
     </header>
     {catalog.draftProblems.length ? <div className="mt-8 max-w-[46rem]"><GuideDraftProblems problems={catalog.draftProblems} /></div> : null}
-    <div className="mt-12 grid max-w-[46rem] gap-14">
+    {!catalog.guides.length && !catalog.draftProblems.length ? <p className="mt-8 max-w-[46rem] rounded-[18px] bg-sand px-5 py-8 text-center text-ink-soft">{text.listEmpty}</p> : null}
+    {catalog.guides.length ? <div className="mt-12 grid max-w-[46rem] gap-14">
       {catalog.source !== "static" ? categories.map((category) => {
         const guides = catalog.guides.filter((guide) => guide.category?.slug === category.slug);
         return <section key={category.slug} id={category.slug} aria-labelledby={`${category.slug}-heading`} className="scroll-mt-24">
           <h2 id={`${category.slug}-heading`} className="mb-5 text-[2rem] sm:text-[2.375rem]">{locale === "ja" ? category.labelJa ?? category.label : category.label}</h2>
-          <GuideTeasers guides={guides} descriptions={false} locale={locale} />
+          <GuideTeasers guides={guides} locale={locale} />
         </section>;
       }) : GUIDE_PILLARS.map((pillar) => {
         const guides = catalog.guides.filter((guide) => guide.pillar === pillar.key);
         return guides.length ? <section key={pillar.key} id={pillar.key} aria-labelledby={`${pillar.key}-heading`} className="scroll-mt-24">
           <p className="eyebrow">{pillar.label}</p>
           <h2 id={`${pillar.key}-heading`} className="mb-5 mt-1 text-[2rem] sm:text-[2.375rem]">{pillar.heading}</h2>
-          <GuideTeasers guides={guides} draftSlugs={catalog.draftSlugs} descriptions={false} locale={locale} />
+          <GuideTeasers guides={guides} draftSlugs={catalog.draftSlugs} locale={locale} />
         </section> : null;
       })}
       {unclassified.length ? <section id="unclassified" aria-labelledby="unclassified-heading" className="scroll-mt-24">
         <h2 id="unclassified-heading" className="mb-5 text-[2rem] sm:text-[2.375rem]">{text.unclassified}</h2>
-        <GuideTeasers guides={unclassified} draftSlugs={catalog.draftSlugs} descriptions={false} locale={locale} />
+        <GuideTeasers guides={unclassified} draftSlugs={catalog.draftSlugs} locale={locale} />
       </section> : null}
-    </div>
+    </div> : null}
   </div>;
 }
 
