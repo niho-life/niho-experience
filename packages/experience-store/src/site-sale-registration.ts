@@ -411,7 +411,7 @@ export class SiteSaleRegistration {
    * immutable and keep theirs, so a provider whose listing (live or stopped) still stands on a version published under
    * the NIHO seller is refused: its public seller and host pages would no longer find their seller. The old NIHO OWNER
    * membership stays as it is. The host account `ownerHostAccountId` becomes the OWNER in the same transaction
-   * (grantProviderOwnerIn): when it cannot (suspended, another role here, the OWNER of another provider, another host
+   * (grantProviderOwnerIn): when it cannot (suspended, another role here, at its OWNER limit (HOST_PROVIDER_OWNER_LIMIT), another host
    * OWNER already), nothing is written, so a failed run never leaves a moved seller without its OWNER. That OWNER
    * consents to the account again.
    *

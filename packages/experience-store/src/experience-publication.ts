@@ -1272,8 +1272,9 @@ export class ExperiencePublicationRepository {
       await client.query("INSERT INTO experience_provider_media_state (provider_id) VALUES ($1)", [providerId]);
       const result = await client.query<DbRow>(
         `INSERT INTO experience_provider_public_profiles
-           (provider_id,public_display_name,provider_kind,consent_version,consented_at,consented_by_admin_niho_user_id,public_display_name_en)
-         VALUES ($1,$2,$3,$4,clock_timestamp(),$5,$6)
+           (provider_id,public_display_name,provider_kind,consent_version,consented_at,consented_by_admin_niho_user_id,public_display_name_en,
+            consent_source,consented_by_host_account_id)
+         VALUES ($1,$2,$3,$4,clock_timestamp(),$5,$6,'ADMIN',NULL)
          RETURNING provider_id,public_display_name,public_display_name_en,provider_kind,consent_version,consented_at,version`,
         [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId, englishNameOf(input)],
       );
@@ -1322,8 +1323,9 @@ export class ExperiencePublicationRepository {
       const result = expectedVersion === null
         ? await client.query<DbRow>(
           `INSERT INTO experience_provider_public_profiles
-             (provider_id,public_display_name,provider_kind,consent_version,consented_at,consented_by_admin_niho_user_id,public_display_name_en)
-           VALUES ($1,$2,$3,$4,clock_timestamp(),$5,$6)
+             (provider_id,public_display_name,provider_kind,consent_version,consented_at,consented_by_admin_niho_user_id,public_display_name_en,
+              consent_source,consented_by_host_account_id)
+           VALUES ($1,$2,$3,$4,clock_timestamp(),$5,$6,'ADMIN',NULL)
            ON CONFLICT DO NOTHING
            RETURNING provider_id,public_display_name,public_display_name_en,provider_kind,consent_version,consented_at,version`,
           [providerId, input.publicDisplayName, input.providerKind, input.consentVersion, actor.nihoUserId, englishNameOf(input)],
@@ -1331,7 +1333,7 @@ export class ExperiencePublicationRepository {
         : await client.query<DbRow>(
           `UPDATE experience_provider_public_profiles
               SET public_display_name=$2,provider_kind=$3,consent_version=$4,consented_at=clock_timestamp(),
-                  consented_by_admin_niho_user_id=$5,version=version+1,updated_at=clock_timestamp(),
+                  consented_by_admin_niho_user_id=$5,consent_source='ADMIN',consented_by_host_account_id=NULL,version=version+1,updated_at=clock_timestamp(),
                   public_display_name_en=CASE WHEN $7::boolean THEN $8 ELSE public_display_name_en END
             WHERE provider_id=$1 AND version=$6
             RETURNING provider_id,public_display_name,public_display_name_en,provider_kind,consent_version,consented_at,version`,

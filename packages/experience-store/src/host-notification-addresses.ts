@@ -93,6 +93,59 @@ async function clearOverride(client: PoolClient, nihoUserId: string): Promise<vo
   await dropEmptyRow(client, nihoUserId);
 }
 
+/**
+ * HostNotificationAddresses.requestChange inside the caller's transaction (host self-registration writes the first request
+ * with the provider and its OWNER). The same checks, locks and limit; a rate limit throws StoreRateLimitedError and the
+ * caller's transaction decides what is kept.
+ */
+export async function requestHostNotificationAddressChangeIn(
+  client: PoolClient,
+  input: { readonly nihoUserId: string; readonly providerId: string; readonly email: string },
+): Promise<HostNotificationAddressChange> {
+  assertStoreIdentifier(input.nihoUserId, "nihoUserId");
+  assertStoreIdentifier(input.providerId, "providerId");
+  const address = email(input.email, "email");
+  await lockPerson(client, input.nihoUserId);
+  const member = await client.query(
+    `SELECT 1 WHERE EXISTS (SELECT 1 FROM provider_memberships m WHERE m.provider_id = $1 AND m.niho_user_id = $2 AND m.active)
+        OR EXISTS (SELECT 1 FROM product_operator_grants g WHERE g.provider_id = $1 AND g.niho_user_id = $2 AND g.active
+                    AND (g.expires_at IS NULL OR g.expires_at > clock_timestamp()))`,
+    [input.providerId, input.nihoUserId],
+  );
+  if (member.rows.length === 0) throw new StoreAccessDeniedError();
+  const current = await readAddress(client, input.nihoUserId);
+  if (sameEmail(address, current.overrideEmail) || (current.overrideEmail === null && sameEmail(address, current.loginEmail))) {
+    await cancelOpenRequests(client, input.nihoUserId);
+    return { kind: "UNCHANGED", address: await readAddress(client, input.nihoUserId) };
+  }
+  if (sameEmail(address, current.loginEmail)) {
+    await cancelOpenRequests(client, input.nihoUserId);
+    await clearOverride(client, input.nihoUserId);
+    return { kind: "DEFAULT", address: await readAddress(client, input.nihoUserId) };
+  }
+  const recent = await client.query<DbRow>(
+    `SELECT count(*)::int AS requests, EXTRACT(EPOCH FROM (min(created_at) + interval '1 hour' - clock_timestamp()))::int AS wait
+       FROM host_notification_address_confirmations
+      WHERE niho_user_id = $1 AND created_at > clock_timestamp() - interval '1 hour'`,
+    [input.nihoUserId],
+  );
+  if (Number(recent.rows[0]?.requests ?? 0) >= HOST_NOTIFICATION_ADDRESS_LIMITS.requestsPerHour) {
+    throw new StoreRateLimitedError(Math.max(1, Number(recent.rows[0]?.wait ?? 60)));
+  }
+  await cancelOpenRequests(client, input.nihoUserId);
+  const created = await client.query<DbRow>(
+    "INSERT INTO host_notification_address_confirmations (niho_user_id, email) VALUES ($1, $2) RETURNING id::text AS id",
+    [input.nihoUserId, address],
+  );
+  const id = String(created.rows[0]?.id);
+  await client.query(
+    `INSERT INTO outbox_messages (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload)
+     VALUES ($1, 'host_notification_address', $2, $3, $4, $5::jsonb)`,
+    [input.providerId, id, HOST_MAIL_TOPICS.addressConfirmation, `host-mail:address-confirmation:${id}`, JSON.stringify({ v: 1 })],
+  );
+  return { kind: "PENDING", address: await readAddress(client, input.nihoUserId) };
+}
+
 export class HostNotificationAddresses {
   readonly #pool: Pool;
 
@@ -147,50 +200,7 @@ export class HostNotificationAddresses {
    * HOST_NOTIFICATION_ADDRESS_LIMITS.requestsPerHour requests an hour.
    */
   async requestChange(input: { readonly nihoUserId: string; readonly providerId: string; readonly email: string }): Promise<HostNotificationAddressChange> {
-    assertStoreIdentifier(input.nihoUserId, "nihoUserId");
-    assertStoreIdentifier(input.providerId, "providerId");
-    const address = email(input.email, "email");
-    return withTransaction(this.#pool, async (client) => {
-      await lockPerson(client, input.nihoUserId);
-      const member = await client.query(
-        `SELECT 1 WHERE EXISTS (SELECT 1 FROM provider_memberships m WHERE m.provider_id = $1 AND m.niho_user_id = $2 AND m.active)
-            OR EXISTS (SELECT 1 FROM product_operator_grants g WHERE g.provider_id = $1 AND g.niho_user_id = $2 AND g.active
-                        AND (g.expires_at IS NULL OR g.expires_at > clock_timestamp()))`,
-        [input.providerId, input.nihoUserId],
-      );
-      if (member.rows.length === 0) throw new StoreAccessDeniedError();
-      const current = await readAddress(client, input.nihoUserId);
-      if (sameEmail(address, current.overrideEmail) || (current.overrideEmail === null && sameEmail(address, current.loginEmail))) {
-        await cancelOpenRequests(client, input.nihoUserId);
-        return { kind: "UNCHANGED", address: await readAddress(client, input.nihoUserId) };
-      }
-      if (sameEmail(address, current.loginEmail)) {
-        await cancelOpenRequests(client, input.nihoUserId);
-        await clearOverride(client, input.nihoUserId);
-        return { kind: "DEFAULT", address: await readAddress(client, input.nihoUserId) };
-      }
-      const recent = await client.query<DbRow>(
-        `SELECT count(*)::int AS requests, EXTRACT(EPOCH FROM (min(created_at) + interval '1 hour' - clock_timestamp()))::int AS wait
-           FROM host_notification_address_confirmations
-          WHERE niho_user_id = $1 AND created_at > clock_timestamp() - interval '1 hour'`,
-        [input.nihoUserId],
-      );
-      if (Number(recent.rows[0]?.requests ?? 0) >= HOST_NOTIFICATION_ADDRESS_LIMITS.requestsPerHour) {
-        throw new StoreRateLimitedError(Math.max(1, Number(recent.rows[0]?.wait ?? 60)));
-      }
-      await cancelOpenRequests(client, input.nihoUserId);
-      const created = await client.query<DbRow>(
-        "INSERT INTO host_notification_address_confirmations (niho_user_id, email) VALUES ($1, $2) RETURNING id::text AS id",
-        [input.nihoUserId, address],
-      );
-      const id = String(created.rows[0]?.id);
-      await client.query(
-        `INSERT INTO outbox_messages (provider_id, aggregate_type, aggregate_id, topic, deduplication_key, payload)
-         VALUES ($1, 'host_notification_address', $2, $3, $4, $5::jsonb)`,
-        [input.providerId, id, HOST_MAIL_TOPICS.addressConfirmation, `host-mail:address-confirmation:${id}`, JSON.stringify({ v: 1 })],
-      );
-      return { kind: "PENDING", address: await readAddress(client, input.nihoUserId) };
-    });
+    return withTransaction(this.#pool, (client) => requestHostNotificationAddressChangeIn(client, input));
   }
 
   /** 「ログインのメールに戻す」: the choice goes, and any open request with it. */

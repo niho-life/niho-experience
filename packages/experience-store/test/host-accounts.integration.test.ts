@@ -408,8 +408,7 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
       const row = (await pool.query("SELECT role, active, created_at FROM provider_memberships WHERE provider_id = 'provider-a' AND niho_user_id = $1", [first])).rows[0]!;
       assert.deepEqual([row.role, row.active, (row.created_at as Date).toISOString()], ["OWNER", true, at(MINUTE)]);
       assert.deepEqual(await grant("provider-a", first), { kind: "already-owner" });
-      // One provider per OWNER account; one host-account OWNER registered per provider by this path.
-      assert.deepEqual(await grant("provider-b", first), { kind: "owner-of-another-provider" });
+      // One host-account OWNER registered per provider by this path.
       assert.deepEqual(await grant("provider-a", second), { kind: "provider-has-host-owner" });
       // A NIHO user's OWNER membership (the current sign-in) does not block the host account, and stays.
       await pool.query("INSERT INTO provider_memberships (provider_id, niho_user_id, role, active) VALUES ('provider-b', 'niho-owner-b', 'OWNER', true)");

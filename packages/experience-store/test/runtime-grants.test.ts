@@ -67,6 +67,8 @@ describe("Experience runtime grants", () => {
     assert.deepEqual(RUNTIME_TABLE_GRANTS.google_channel_output_bindings?.updateColumns,
       ["active", "binding_version", "initialize_missing_open_anchor", "updated_at"]);
     assert.deepEqual(RUNTIME_TABLE_GRANTS.guest_mail_delivery_feedback?.updateColumns, ["created_at"]);
+    // Self-registration records (#707) are written with the provider and never changed.
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_provider_self_registrations, { write: ["INSERT"] });
     const binding = RUNTIME_TABLE_GRANTS.google_channel_output_bindings!;
     assert.equal(updateAllowed(binding, "active=true,binding_version=binding_version+1,updated_at=clock_timestamp()"), true);
     assert.equal(updateAllowed(binding, "active=true,opaque_calendar_id=$1"), false);

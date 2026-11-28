@@ -85,7 +85,7 @@ describe("provider team invitations", { skip: databaseUrl === undefined }, () =>
   it("brings in a person with no host account: a new account, bound to NIHO, added as COHOST, the address dropped", async () => {
     await withTeam(async (context) => {
       const { pool, invitations, team, identities } = context;
-      await pool.query("INSERT INTO experience_provider_public_profiles (provider_id,public_display_name,consent_version,consented_at,consented_by_admin_niho_user_id) VALUES ($1,'Synthetic Farm','v1',$2,'niho-admin-synthetic')", [PROVIDER, at(0)]);
+      await pool.query("INSERT INTO experience_provider_public_profiles (provider_id,public_display_name,consent_version,consented_at,consent_source,consented_by_admin_niho_user_id) VALUES ($1,'Synthetic Farm','v1',$2,'ADMIN','niho-admin-synthetic')", [PROVIDER, at(0)]);
       const before = await revision(pool);
       const sent = await invite(context, "  New.Person@Example.test ", HOUR);
       assert.match(sent.token, /^[A-Za-z0-9_-]{43}$/);
