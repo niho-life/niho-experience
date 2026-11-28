@@ -209,7 +209,9 @@ describe("PostgreSQL guest booking changes (#720 stage 1)", { skip: databaseUrl 
 
       const input = moveTo(offered.fromStartUtc, target);
       const result = await changes.changeAsGuest(session, made.publicBookingId, input);
-      assert.deepEqual(result, { outcome: "OK", repeated: false, changeNumber: 1 });
+      // A move that went through also says where the guest's session now ends: the page sets its cookie to it.
+      const { sessionExpiresAtUtc: movedUntil, ...moved } = result!;
+      assert.deepEqual(moved, { outcome: "OK", repeated: false, changeNumber: 1 });
 
       const after = await bookingRow(pool, made.publicBookingId);
       assert.notEqual(after.occurrence_id, before.occurrence_id);
@@ -252,6 +254,7 @@ describe("PostgreSQL guest booking changes (#720 stage 1)", { skip: databaseUrl 
       const sessionAfter = (await pool.query("SELECT absolute_expires_at, idle_expires_at FROM booking_sessions")).rows[0];
       assert.equal((sessionAfter.absolute_expires_at as Date).toISOString(), new Date(Date.parse(after.occurrence_snapshot.endUtc) + 30 * DAY_MS).toISOString());
       assert.ok((sessionAfter.absolute_expires_at as Date) > sessionBefore);
+      assert.equal(movedUntil, (sessionAfter.absolute_expires_at as Date).toISOString(), "the cookie follows the session's new end");
       assert.ok((sessionAfter.idle_expires_at as Date) <= (sessionAfter.absolute_expires_at as Date));
       // No personal data in the history, the outbox rows of the move or the commands.
       const written2 = JSON.stringify([
@@ -277,7 +280,9 @@ describe("PostgreSQL guest booking changes (#720 stage 1)", { skip: databaseUrl 
       assert.deepEqual([rewrite?.action, rewrite?.publicBookingId, rewrite?.startUtc], ["WRITE", made.publicBookingId, tenAm(day(6))]);
 
       // The same command again: the first result, no second move.
-      assert.deepEqual(await changes.changeAsGuest(session, made.publicBookingId, input), { outcome: "OK", repeated: true, changeNumber: 1 });
+      const { sessionExpiresAtUtc: repeatedUntil, ...repeated } = (await changes.changeAsGuest(session, made.publicBookingId, input))!;
+      assert.deepEqual(repeated, { outcome: "OK", repeated: true, changeNumber: 1 });
+      assert.equal(repeatedUntil, movedUntil, "the same command again carries the same session end");
       assert.equal(Number((await pool.query("SELECT count(*) FROM booking_changes")).rows[0].count), 1);
       // The same command with other input is refused.
       await assert.rejects(changes.changeAsGuest(session, made.publicBookingId, { ...input, toDate: day(7) }), StoreConflictError);
@@ -297,7 +302,9 @@ describe("PostgreSQL guest booking changes (#720 stage 1)", { skip: databaseUrl 
       assert.equal(made.status, "CONFIRMED");
       const session = await sessionFor(context, made.publicBookingId);
       assert.equal((await changes.changeAsGuest(session, made.publicBookingId, moveToDate(tenAm(day(5)), day(6))))?.outcome, "OK");
-      assert.deepEqual(await changes.changeAsGuest(session, made.publicBookingId, moveToDate(tenAm(day(6)), day(7))), { outcome: "OK", repeated: false, changeNumber: 2 });
+      const { sessionExpiresAtUtc: secondUntil, ...second } = (await changes.changeAsGuest(session, made.publicBookingId, moveToDate(tenAm(day(6)), day(7))))!;
+      assert.deepEqual(second, { outcome: "OK", repeated: false, changeNumber: 2 });
+      assert.ok(typeof secondUntil === "string");
       assert.deepEqual(await changes.listChangeOptions(session, made.publicBookingId), { changeable: false });
       assert.equal(await changes.isChangeable(session, made.publicBookingId), false);
       assert.equal((await changes.changeAsGuest(session, made.publicBookingId, moveToDate(tenAm(day(7)), day(8))))?.outcome, "NOT_CHANGEABLE");

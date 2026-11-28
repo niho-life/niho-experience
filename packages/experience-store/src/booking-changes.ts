@@ -71,6 +71,12 @@ export interface BookingChangeResult {
   readonly repeated: boolean;
   /** The move's number for this booking (1, 2 …), when it moved. */
   readonly changeNumber?: number;
+  /**
+   * The end of the guest's booking-page session after the move (it is extended to 30 days past the new end), for a guest
+   * change that went through (also the same command again): the page sets its cookie to this, or the browser would drop it
+   * at the old end. Absent for any other outcome.
+   */
+  readonly sessionExpiresAtUtc?: string;
 }
 
 /** One date the booking may move to, as the page offers it. */
@@ -340,7 +346,7 @@ export class BookingChanges {
     const input = validInput(rawInput);
     const located = await withTransaction(this.#pool, (client) => sessionBookingRef(client, sessionId, publicBookingId));
     if (!located) return null;
-    return withTransaction(this.#pool, async (client) => {
+    const result = await withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, located.providerId);
       // The session is checked again under the lock: signed out or revoked meanwhile is null as before.
       const session = await sessionBookingRef(client, sessionId, publicBookingId);
@@ -456,6 +462,10 @@ export class BookingChanges {
       );
       return done("OK", { changeNumber, changeId });
     });
+    if (!result || result.outcome !== "OK") return result;
+    // The session now ends where the move put it (after the commit, so a repeat of the same command reads the same end).
+    const after = await withTransaction(this.#pool, (client) => sessionBookingRef(client, sessionId, publicBookingId));
+    return after ? { ...result, sessionExpiresAtUtc: after.absoluteExpiresAtUtc } : result;
   }
 
   /**

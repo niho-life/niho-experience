@@ -5,6 +5,7 @@ import {
   bookingChangesEnabled,
   bookingEmpty,
   bookingJson,
+  bookingSessionCookie,
   bookingSessionCookieName,
   publicBookingIdOrNull,
   readBookingAccessBody,
@@ -58,5 +59,7 @@ export async function POST(request: Request): Promise<Response> {
     return bookingEmpty(503);
   }
   if (!result) return bookingEmpty(404);
-  return bookingJson(200, { outcome: result.outcome });
+  // The move extended the session to 30 days past the new end: the cookie follows, or the browser drops it at the old end.
+  const headers: Record<string, string> = result.sessionExpiresAtUtc ? { "set-cookie": bookingSessionCookie(bookingId, sessionId, result.sessionExpiresAtUtc) } : {};
+  return bookingJson(200, { outcome: result.outcome }, headers);
 }

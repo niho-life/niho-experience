@@ -46,7 +46,7 @@ beforeEach(() => {
   state.config = { guestBookingEnabled: true, guestMailEnabled: true, guestBookingChangeEnabled: true, siteUrl: ORIGIN };
   state.changes = {
     listChangeOptions: vi.fn(async () => OFFERED),
-    changeAsGuest: vi.fn(async () => ({ outcome: "OK", repeated: false, changeNumber: 1 })),
+    changeAsGuest: vi.fn(async () => ({ outcome: "OK", repeated: false, changeNumber: 1, sessionExpiresAtUtc: "2099-01-01T00:00:00.000Z" })),
   };
   errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
@@ -94,9 +94,13 @@ describe("POST /api/public/bookings/change", () => {
     expect(state.changes!.changeAsGuest).toHaveBeenCalledExactlyOnceWith(SESSION, BOOKING, {
       commandId: COMMAND, toDate: "2026-11-16", shownFromStartUtc: FROM, shownToStartUtc: TO, shownNewDeadlineUtc: NEW_DEADLINE,
     });
+    // The move extended the session, so the cookie is set again to the new end (or the browser drops it at the old one).
+    expect(response.headers.get("set-cookie")).toMatch(new RegExp(`^__Host-nb_[0-9a-f]{8}=${SESSION}; Max-Age=[1-9][0-9]+; Path=/; Secure; HttpOnly; SameSite=Lax$`));
     for (const outcome of ["CHANGED", "FULL", "NOT_CHANGEABLE"]) {
       state.changes!.changeAsGuest!.mockResolvedValueOnce({ outcome, repeated: false });
-      expect(await (await change(changeRequest(valid))).json()).toEqual({ outcome });
+      const other = await change(changeRequest(valid));
+      expect(await other.json()).toEqual({ outcome });
+      expect(other.headers.get("set-cookie"), `${outcome} leaves the cookie alone`).toBeNull();
     }
   });
 

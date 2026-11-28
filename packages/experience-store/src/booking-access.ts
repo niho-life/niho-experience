@@ -256,10 +256,10 @@ function requestView(value: unknown): GuestCancellationRequestView | null {
  * The booking a session may act on (取消, #285 slice 7), under the same checks as readBookingSession: its
  * provider and row id, or null alike for anything else. Used inside the cancelling transaction.
  */
-export async function sessionBookingRef(client: PoolClient, sessionId: string, publicBookingId: string): Promise<{ providerId: string; bookingId: string } | null> {
+export async function sessionBookingRef(client: PoolClient, sessionId: string, publicBookingId: string): Promise<{ providerId: string; bookingId: string; absoluteExpiresAtUtc: string } | null> {
   if (!isSecret(sessionId) || !isBookingId(publicBookingId)) return null;
   const found = await client.query<DbRow>(
-    `SELECT s.provider_id, s.booking_id::text AS booking_id
+    `SELECT s.provider_id, s.booking_id::text AS booking_id, s.absolute_expires_at
        FROM booking_sessions s
        JOIN booking_guests g ON g.provider_id = s.provider_id AND g.booking_id = s.booking_id
        JOIN bookings b ON b.provider_id = s.provider_id AND b.id = s.booking_id
@@ -269,7 +269,7 @@ export async function sessionBookingRef(client: PoolClient, sessionId: string, p
     [digest(sessionId), publicBookingId.toLowerCase(), GUEST_BOOKING_VIEW_STATUSES],
   );
   const row = found.rows[0];
-  return row ? { providerId: text(row.provider_id, "provider_id"), bookingId: text(row.booking_id, "booking_id") } : null;
+  return row ? { providerId: text(row.provider_id, "provider_id"), bookingId: text(row.booking_id, "booking_id"), absoluteExpiresAtUtc: isoValue(row, "absolute_expires_at") } : null;
 }
 
 /** The guest's side of a booking made on this site: links, sessions and "Find your booking". */
