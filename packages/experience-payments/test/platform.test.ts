@@ -45,6 +45,19 @@ function booking(): BookingRecord {
   };
 }
 
+/** 代理受領 (#725): the host sells (sellerParty PROVIDER), NIHO's receiving party takes the payment. */
+function agentBooking(over: Record<string, unknown> = {}): BookingRecord {
+  const base = booking();
+  return {
+    ...base,
+    pricingSnapshot: { ...base.pricingSnapshot, platformFee: { amount: 1_500, basisPoints: 1_500, supportEnabled: true, salesPlan: "SUPPORTED_15" } },
+    sellerSnapshot: {
+      ...base.sellerSnapshot, nihoAccountRef: `agt_${"a".repeat(32)}`, displayName: "合成 販売者", salesPlan: "SUPPORTED_15", feeBasisPoints: 1_500,
+      sellerParty: "PROVIDER", payoutDelayDays: 3, receivingAgentName: "Synthetic NIHO Receiver KK", ...over,
+    },
+  };
+}
+
 function signed(event: Record<string, unknown>) {
   const rawBody = Buffer.from(JSON.stringify(event));
   const stripe = new Stripe("sk_test_synthetic");
@@ -81,6 +94,60 @@ describe("managed platform payment boundary", () => {
     assert.deepEqual(params.metadata, { source: "niho-experience-platform", booking_id: BOOKING_ID });
     assert.equal("application_fee_amount" in (params.payment_intent_data as Record<string, unknown>), false);
     assert.equal("payment_method_types" in params, false, "platform Checkout uses Stripe's dynamic payment methods");
+  });
+
+  it("creates the same platform Checkout for agent sales, plus a transfer group and the seller-and-receiver notice (ja and en)", async () => {
+    const run = async (locale: "auto" | "ja", target: BookingRecord) => {
+      const calls: unknown[][] = [];
+      const stripe = { checkout: { sessions: { create: async (...args: unknown[]) => {
+        calls.push(args); return { id: "cs_test_platform_synthetic", url: "https://checkout.stripe.com/c/pay/platform" };
+      } } } } as unknown as PaymentsStripeClient;
+      await createPlatformCheckout({ booking: target, returnOrigin: "https://example.test", returnPath: "/return", locale, stripe, now: NOW });
+      return calls[0]! as [Record<string, unknown>, Record<string, unknown>];
+    };
+    const [ja, jaOptions] = await run("ja", agentBooking());
+    assert.deepEqual(jaOptions, { idempotencyKey: `experience-platform-checkout:${BOOKING_ID}` }, "no account header, the booking's key");
+    assert.deepEqual(ja.metadata, { source: "niho-experience-platform", booking_id: BOOKING_ID }, "the platform webhook's two keys");
+    const intent = ja.payment_intent_data as Record<string, unknown>;
+    assert.equal("application_fee_amount" in intent, false);
+    assert.deepEqual(intent.metadata, { source: "niho-experience-platform", booking_id: BOOKING_ID });
+    assert.equal(intent.transfer_group, `niho-experience-agent-payout:${BOOKING_ID}`);
+    assert.deepEqual(ja.custom_text, { submit: { message: "販売者：合成 販売者。お支払いはSynthetic NIHO Receiver KKが販売者に代わって受け取ります。" } });
+    const [en] = await run("auto", agentBooking());
+    assert.deepEqual(en.custom_text, { submit: { message: "Seller: 合成 販売者. Your payment is received by Synthetic NIHO Receiver KK on the seller's behalf." } });
+    // The 20% booking's parameters are unchanged: no transfer group, no notice.
+    const [managed] = await run("ja", booking());
+    assert.equal("custom_text" in managed, false);
+    assert.equal("transfer_group" in (managed.payment_intent_data as Record<string, unknown>), false);
+    // A platform charge that is neither a 20% sale nor an agent sale is refused.
+    const stripe = { checkout: { sessions: { create: async () => { throw new Error("Stripe must not be called"); } } } } as unknown as PaymentsStripeClient;
+    for (const bad of [{ sellerParty: undefined }, { feeBasisPoints: 1_000 }, { salesPlan: "INDEPENDENT_10", feeBasisPoints: 1_000 }, { receivingAgentName: undefined }]) {
+      await assert.rejects(() => createPlatformCheckout({ booking: agentBooking(bad), returnOrigin: "https://example.test", returnPath: "/return", stripe, now: NOW }), /not a managed platform charge|no seller or receiving party name/);
+    }
+  });
+
+  it("writes the Checkout notice for each locale, drops control characters and cuts a long name at 1200 characters", async () => {
+    const message = async (locale: "auto" | "ja", over: Record<string, unknown>) => {
+      let params: Record<string, unknown> = {};
+      const stripe = { checkout: { sessions: { create: async (given: Record<string, unknown>) => {
+        params = given; return { id: "cs_test_platform_synthetic", url: "https://checkout.stripe.com/c/pay/platform" };
+      } } } } as unknown as PaymentsStripeClient;
+      await createPlatformCheckout({ booking: agentBooking(over), returnOrigin: "https://example.test", returnPath: "/return", locale, stripe, now: NOW });
+      return (params.custom_text as { submit: { message: string } }).submit.message;
+    };
+    assert.equal(await message("auto", { displayName: "Sample Host", receivingAgentName: "NIHO KK" }), "Seller: Sample Host. Your payment is received by NIHO KK on the seller's behalf.");
+    assert.equal(await message("ja", { displayName: "Sample Host", receivingAgentName: "NIHO KK" }), "販売者：Sample Host。お支払いはNIHO KKが販売者に代わって受け取ります。");
+    assert.equal(await message("auto", { displayName: "A\u0000B\r\nC\u007fD\u2028E", receivingAgentName: "  NIHO\tKK  " }), "Seller: A B C D E. Your payment is received by NIHO KK on the seller's behalf.");
+    for (const locale of ["auto", "ja"] as const) {
+      const cut = await message(locale, { displayName: "x".repeat(5_000) });
+      assert.equal(cut.length, 1_200);
+      assert.ok(cut.endsWith("…"));
+    }
+  });
+
+  it("accepts an agent-sales Checkout Session in the platform webhook", () => {
+    const event = verifyPlatformCheckoutWebhook(signed(checkoutEvent()));
+    assert.ok(event && "publicBookingId" in event && event.publicBookingId === BOOKING_ID, "metadata is the platform's two keys, not the sale kind");
   });
 
   it("verifies the key's current account instead of accepting an arbitrary connected account", async () => {

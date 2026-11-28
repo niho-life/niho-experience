@@ -24,7 +24,8 @@ vi.mock("@/lib/experience/store-server", () => ({
   memberProfileRepository: () => mocks.members,
 }));
 
-import { getSitePublicExperience, bookingRouteAllowedForSlug, listSitePublicExperiences } from "./site-publications";
+import { getSitePublicExperience, bookingRouteAllowedForSlug, listSitePublicExperiences, projectSitePublicSaleTerms } from "./site-publications";
+import { siteSellerInformationHref } from "./site-seller-information";
 
 const publication = {
   slug: "local-seller-experience",
@@ -213,4 +214,16 @@ it("closes publication-off detail, catalog and sale paths without a legacy fallb
   expect(mocks.publications.getPublicBySlug).not.toHaveBeenCalled();
   expect(mocks.publications.listPublic).not.toHaveBeenCalled();
   expect(mocks.bookings.publicBookingTerms).not.toHaveBeenCalled();
+});
+
+describe("the sale terms of agent sales (#725)", () => {
+  const terms = { providerId: "p", productId: "x", title: "T", currency: "JPY" as const, sellerDisplayName: "Sample Host", offers: [], conditionsVersion: null, salesPlanRevision: 1 };
+  it("carries who takes the payment, and links the seller information to the host's own page, not a stored URL", () => {
+    expect(projectSitePublicSaleTerms({ ...terms, paymentCollectedBy: "Synthetic NIHO Receiver KK" })).toMatchObject({ paymentCollectedBy: "Synthetic NIHO Receiver KK" });
+    expect(projectSitePublicSaleTerms(terms)).not.toHaveProperty("paymentCollectedBy");
+    const item = { publication: { slug: "sample-walk", sellerDisplayName: "Sample Host" }, saleTerms: projectSitePublicSaleTerms({ ...terms, paymentCollectedBy: "X" }),
+      sellerDisclosure: { method: "NATIVE", sellerDisplayName: "Sample Host" }, hostBio: null } as never;
+    expect(siteSellerInformationHref(item, "en")).toBe("/experiences/sample-walk/seller");
+    expect(siteSellerInformationHref(item, "ja")).toBe("/ja/experiences/sample-walk/seller");
+  });
 });

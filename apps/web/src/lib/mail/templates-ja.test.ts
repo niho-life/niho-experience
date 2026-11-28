@@ -59,6 +59,16 @@ describe("日本語のゲストへのメール（#59）", () => {
     expect(mail.text).not.toContain("英語の表示のみ");
   });
 
+  it("確定メール：代理受領（#725）は、販売者がホストで、代金を受け取った者を言う（無料の予約では言わない）", () => {
+    const agentSeller = { displayName: "合成ホスト", receivingAgentName: "合成NIHO受領株式会社" };
+    const mail = bookingConfirmationEmail({ ...confirmation, agentSeller }, { siteUrl: SITE, now: NOW });
+    expect(mail.text).toContain("販売者: 合成ホスト\n代金の受領: 合成NIHO受領株式会社（合成ホストに代わって受領）");
+    expect(mail.text).toContain("代金の受領: 合成NIHO受領株式会社（合成ホストに代わって受領）");
+    expect(mail.text).not.toContain("NIHO事務局から、開催前に集合場所");
+    expect(bookingConfirmationEmail({ ...confirmation, totalAmount: 0, agentSeller }, { siteUrl: SITE, now: NOW }).text).not.toContain("代金の受領");
+    expect(bookingConfirmationEmail(confirmation, { siteUrl: SITE, now: NOW }).text).not.toContain("代金の受領");
+  });
+
   it("英語のゲストの確定メールは変わらない", () => {
     const mail = bookingConfirmationEmail({ ...confirmation, guestLanguage: "EN", experienceTitle: "Synthetic tea ceremony", hostDisplayName: "Sample Host", guestName: "Sample Guest" }, { siteUrl: SITE, now: NOW, bookingPageGrant: null });
     expect(mail.subject).toBe("Your booking is confirmed: Synthetic tea ceremony, Sat 14 Nov 2026 10:00");

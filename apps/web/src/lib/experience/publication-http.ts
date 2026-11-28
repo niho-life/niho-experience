@@ -21,12 +21,15 @@ import {
   type JsonValue,
   type ProductSaleTermsInput,
   validateGuestMeetingGuide,
+  salesKindOf,
+  type AgentPublishCheck,
 } from "@niho-experience/experience-store";
 import { createHash, randomUUID } from "node:crypto";
 import { config } from "@/lib/config";
 import { noStoreJson } from "@/lib/host/server";
 import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";
-import { experiencePublicationRepository, guestMeetingGuideRepository, managedExperienceSalesRepository, productClassificationRepository } from "./store-server";
+import { retrievePlatformAccount } from "@niho-experience/experience-payments";
+import { experiencePublicationRepository, guestMeetingGuideRepository, managedExperienceSalesRepository, productClassificationRepository, providerAgentSales, providerSellerDisclosureRepository } from "./store-server";
 import {
   publicationHostBoundary,
   publicationHostMutationAllowed,
@@ -224,6 +227,7 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
   ]);
   const gallery = media.filter((asset) => asset.placement === "GALLERY");
   const photosReady = gallery.length > 0 && gallery.every((asset) => asset.altText.trim() !== "" && asset.altTextJa.trim() !== "");
+  const agentSales = await agentSalesOffer(repository, actor, salesPlan);
   const publicationBlockers = await repository.getPublicationBlockers(
     actor,
     productId,
@@ -264,19 +268,46 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
     saleTerms: termsState.saleTerms,
     salesPlan: salesPlan ? {
       current: { revision: salesPlan.current.revision, plan: salesPlan.current.plan,
-        feeBasisPoints: salesPlan.current.feeBasisPoints, agreementVersion: salesPlan.current.agreementVersion },
+        feeBasisPoints: salesPlan.current.feeBasisPoints, agreementVersion: salesPlan.current.agreementVersion,
+        chargeMode: salesPlan.current.chargeMode, sellerParty: salesPlan.current.sellerParty },
       phase: salesPlan.phase,
       pending: salesPlan.pending ? { revision: salesPlan.pending.revision, plan: salesPlan.pending.plan,
-        feeBasisPoints: salesPlan.pending.feeBasisPoints, agreementVersion: salesPlan.pending.agreementVersion } : null,
+        feeBasisPoints: salesPlan.pending.feeBasisPoints, agreementVersion: salesPlan.pending.agreementVersion,
+        chargeMode: salesPlan.pending.chargeMode, sellerParty: salesPlan.pending.sellerParty } : null,
       transitionCommandId: salesPlan.transitionCommandId,
       version: salesPlan.version,
     } : null,
     ownerSalesPlanAgreementVersion: process.env.EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION ?? null,
+    // 代理受領 (#725): what the "サポート 15%（NIHO が代金を受け取る）" choice shows. Null with the flag off, and for a host with a seller profile.
+    agentSales,
     offers,
     media: media.map((asset) => ({
       ...asset,
       previewUrl: productMediaUrl(actor.providerId, product.id, asset.id),
     })),
+  };
+}
+
+/**
+ * The choice of 代理受領 (#725) as the host screen shows it: the configured agreement version, the receiving party's name, the delay, and whether
+ * the host can choose now (no seller profile, a public seller disclosure to sell under). Null while the flag is off or when the host has a seller profile.
+ */
+async function agentSalesOffer(repository: NonNullable<ReturnType<typeof experiencePublicationRepository>>, actor: PublicationHostContext["actor"], salesPlan: Awaited<ReturnType<NonNullable<ReturnType<typeof managedExperienceSalesRepository>>["get"]>> | null) {
+  if (!config.hostAgentSalesEnabled || !config.hostAccountsEnabled) return null;
+  if (await repository.providerHasSellerProfile(actor.providerId)) return null;
+  const disclosures = providerSellerDisclosureRepository();
+  const disclosure = disclosures ? (await disclosures.getForOwner(actor, { agentSales: true }).catch(() => null))?.disclosure ?? null : null;
+  const isAgentPlan = salesPlan !== null && salesKindOf({ chargeMode: salesPlan.current.chargeMode, salesPlan: salesPlan.current.plan,
+    sellerParty: salesPlan.current.sellerParty, feeBasisPoints: salesPlan.current.feeBasisPoints }) === "AGENT_15";
+  // For an agent plan: does the OWNER's consent still count, and which name does the plan sell under (the screen offers a new choice when either differs)?
+  const consentCounted = isAgentPlan ? await providerAgentSales()?.consentCounts(actor.providerId, salesPlan.current.sellerNihoAccountRef).catch(() => undefined) : undefined;
+  return {
+    agreementVersion: config.hostAgentSalesAgreementVersion,
+    receiverName: config.hostAgentReceiverName,
+    payoutDelayDays: config.hostAgentPayoutDelayDays,
+    sellerName: disclosure?.method === "NATIVE" ? disclosure.sellerDisplayName : null,
+    ...(isAgentPlan ? { planSellerName: salesPlan.current.sellerDisplayName } : {}),
+    ...(consentCounted === undefined ? {} : { consentCounted }),
   };
 }
 
@@ -307,6 +338,10 @@ function actionSales(action: Action): "readiness" | "optional" | "none" {
   // must work while Stripe is down, so it asks for no readiness at all.
   if (action === "publishPage") return "optional";
   if (action === "stopBooking") return "none";
+  // 代理受領 (#725): opening bookings needs no seller profile or payout account for a host that sells that way. "optional" reads the readiness
+  // only when the host has a seller profile, so every other host is checked exactly as before.
+  // Stopping the page, and the older `publish` (page and bookings together), follow the same rule: a host with no seller profile can stop its page.
+  if ((action === "openBooking" || action === "publish" || action === "stop") && config.hostAgentSalesEnabled && config.hostAccountsEnabled) return "optional";
   return action === "publish" || action === "openBooking" || action === "stop" ? "readiness" : "optional";
 }
 
@@ -457,7 +492,26 @@ export async function publicationRequest(request: Request, context: PublicationP
       });
     }
     if (action === "publish" || action === "openBooking") {
-      if (!prepared.context.readiness?.connectReady) return responseError("PUBLICATION_BLOCKED", 422, { blockers: ["CONNECT_NOT_READY"] });
+      // 代理受領 (#725): a product whose sales-plan revision is the agent plan is not judged by the host's payout account or readiness. NIHO's own
+      // platform account is read from Stripe now, and the store checks the consent and the public seller disclosure.
+      const salesPlan = config.hostAgentSalesEnabled ? await managedExperienceSalesRepository()?.get(actor.providerId, productId) ?? null : null;
+      const agent = salesPlan !== null && salesKindOf({ chargeMode: salesPlan.current.chargeMode, salesPlan: salesPlan.current.plan,
+        sellerParty: salesPlan.current.sellerParty, feeBasisPoints: salesPlan.current.feeBasisPoints }) === "AGENT_15";
+      let agentCheck: AgentPublishCheck | undefined;
+      if (agent) {
+        const platformKey = process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY;
+        const platformAccount = salesPlan!.current.stripeAccountRef;
+        let accountCheck: AgentPublishCheck["accountCheck"] = null;
+        try {
+          if (platformKey) {
+            const account = await retrievePlatformAccount({ expectedAccountId: platformAccount, platformStripeKey: platformKey });
+            if (account.chargesEnabled && account.detailsSubmitted && account.country === "JP" && account.defaultCurrency === "JPY") {
+              accountCheck = { stripeConnectAccountRef: platformAccount, checkedAtUtc: new Date().toISOString() };
+            }
+          }
+        } catch { return responseError("READINESS_UNAVAILABLE", 502); }
+        agentCheck = { agreementVersion: config.hostAgentSalesAgreementVersion, accountCheck };
+      } else if (!prepared.context.readiness?.connectReady) return responseError("PUBLICATION_BLOCKED", 422, { blockers: ["CONNECT_NOT_READY"] });
       const currentTermsVersion = terms.saleTerms?.version ?? null;
       if (currentTermsVersion !== revision!.saleTerms) return responseError("VERSION_CONFLICT", 409);
       await (action === "openBooking" ? repository.openBooking : repository.publish).call(repository, actor, productId, {
@@ -466,6 +520,7 @@ export async function publicationRequest(request: Request, context: PublicationP
         expectedSaleTermsVersion: revision!.saleTerms,
         consentVersion: config.experiencePublicationConsentVersion,
         checks,
+        ...(agentCheck ? { agentCheck } : {}),
       });
       return noStoreJson({ product: await productDto(repository, actor, productId) });
     }

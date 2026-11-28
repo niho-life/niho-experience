@@ -42,7 +42,9 @@ export function bookingConfirmationEmailJa(
         ["時間", `${email.localStartTime}（${zoneNameJa(email.timeZone)}）`],
         ["人数", partyJa(email.adultCount, email.childCount)],
         [free ? "合計" : "お支払い額", free ? "無料" : moneyJa(email.totalAmount, email.currency)],
-        ...(managed ? [["販売者", oneLine(managed.displayName)] as const, ...(provider ? [["ホスト", provider] as const] : [])] : [["ホスト", host] as const]),
+        ...(managed ? [["販売者", oneLine(managed.displayName)] as const, ...(provider ? [["ホスト", provider] as const] : [])] : [[email.agentSeller ? "販売者" : "ホスト", host] as const]),
+        // 代理受領 (#725): 販売者はホスト。代金は NIHO の受領者が販売者に代わって受け取った。
+        ...(email.agentSeller && !free ? [["代金の受領", `${oneLine(email.agentSeller.receivingAgentName)}（${oneLine(email.agentSeller.displayName)}に代わって受領）`] as const] : []),
         ["予約番号", email.publicBookingId],
       ],
     },

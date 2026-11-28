@@ -2,7 +2,7 @@ import "server-only";
 import { config } from "@/lib/config";
 import { parseChannelAdapters } from "./channel-adapters";
 import { Pool } from "pg";
-import { AdminSessions, ExperienceConnectAccounts, OperatorCliRequests, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GroupInquiryRepository, PeopleListingRepository, MemberProfileRepository, GuideRepository, HostAccountIdentities, HostAccounts, HostInvitations, HostTeamInvitations, NihoAccountStatusStore, TravelerAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedBookingApprovalRepository, ManagedExperienceSalesRepository, OccurrenceAssignmentRepository, ProductClassificationRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, isHostAccountId, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { AdminSessions, ExperienceConnectAccounts, OperatorCliRequests, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GroupInquiryRepository, PeopleListingRepository, MemberProfileRepository, GuideRepository, HostAccountIdentities, HostAccounts, HostInvitations, HostTeamInvitations, NihoAccountStatusStore, TravelerAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedBookingApprovalRepository, ManagedExperienceSalesRepository, ProviderAgentSales, OccurrenceAssignmentRepository, ProductClassificationRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, isHostAccountId, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -30,6 +30,12 @@ export function experiencePublicationRepository(): ExperiencePublicationReposito
 export function managedExperienceSalesRepository(): ManagedExperienceSalesRepository | null {
   const pool = experiencePool();
   return pool ? new ManagedExperienceSalesRepository(pool) : null;
+}
+
+/** 代理受領で売る (#725): the OWNER's choice of "サポート 15%（NIHO が代金を受け取る）" and its consent. */
+export function providerAgentSales(): ProviderAgentSales | null {
+  const pool = experiencePool();
+  return pool ? new ProviderAgentSales(pool) : null;
 }
 
 export function managedBookingApprovalRepository(): ManagedBookingApprovalRepository | null {

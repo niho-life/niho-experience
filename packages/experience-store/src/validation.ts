@@ -134,6 +134,9 @@ export function buildSnapshots(
     readonly paymentDueDays?: number | null;
     readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
     readonly acceptanceMode?: "INSTANT" | "APPROVAL";
+    readonly sellerParty?: "NIHO" | "PROVIDER";
+    readonly payoutDelayDays?: number;
+    readonly receivingAgentName?: string;
   },
   guest?: GuestPricingInput,
 ): {
@@ -187,6 +190,9 @@ export function buildSnapshots(
       ...(product.paymentDueDays !== undefined ? { paymentDueDays: product.paymentDueDays } : {}),
       ...(product.paymentDuePolicy ? { paymentDuePolicy: product.paymentDuePolicy } : {}),
       ...(product.acceptanceMode ? { acceptanceMode: product.acceptanceMode } : {}),
+      ...(product.sellerParty ? { sellerParty: product.sellerParty } : {}),
+      ...(product.payoutDelayDays !== undefined ? { payoutDelayDays: product.payoutDelayDays } : {}),
+      ...(product.receivingAgentName ? { receivingAgentName: product.receivingAgentName } : {}),
     },
   };
 }

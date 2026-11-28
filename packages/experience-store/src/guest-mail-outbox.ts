@@ -6,6 +6,7 @@ import { HOST_NOTIFICATION_TOPICS } from "./host-notification-outbox.ts";
 import { enqueueHostBookingMails, HOST_MAIL_TOPICS } from "./host-mail-shared.ts";
 import { MANAGED_GUEST_MAIL_TOPICS, MANAGED_OPERATIONS_MAIL_TOPICS } from "./managed-booking-mail.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
+import { salesKindOf, type SalesKindInput } from "./sales-kind.ts";
 import { cancellationTermsOf } from "./cancellation-terms.ts";
 import { validateGuestMeetingGuide } from "./guest-meeting-guides.ts";
 import { isoValue, type DbRow } from "./rows.ts";
@@ -73,6 +74,8 @@ export interface BookingConfirmationEmail {
   readonly hostDisplayName: string;
   /** A platform booking has a separate seller and a consented public provider name. */
   readonly managedSeller?: { readonly displayName: string; readonly providerDisplayName: string | null };
+  /** 代理受領 (#725): the host sells and NIHO's receiving party takes the payment for it. Absent for every other booking. */
+  readonly agentSeller?: { readonly displayName: string; readonly receivingAgentName: string };
 }
 
 /** One claimed `booking.confirmed` row. */
@@ -425,6 +428,9 @@ function emailFromRow(row: DbRow): BookingConfirmationEmail | null {
         // The provider as the guest's language names them: an English guest reads the English public name when there is one (#587).
         providerDisplayName: row.guest_language !== "JA" && typeof row.provider_public_name_en === "string" ? row.provider_public_name_en : typeof row.provider_public_name === "string" ? row.provider_public_name : null,
       },
+    } : {}),
+    ...(salesKindOf(seller as SalesKindInput) === "AGENT_15" && typeof seller.receivingAgentName === "string" && seller.receivingAgentName.length > 0 ? {
+      agentSeller: { displayName: sellerName, receivingAgentName: seller.receivingAgentName },
     } : {}),
   };
 }

@@ -10,6 +10,10 @@
       "default": "./src/index.ts"
     },
     "./package.json": "./package.json",
+    "./sales-kind": {
+      "types": "./src/sales-kind.ts",
+      "default": "./src/sales-kind.ts"
+    },
     "./channel-sites": {
       "types": "./src/channel-sites.ts",
       "default": "./src/channel-sites.ts"

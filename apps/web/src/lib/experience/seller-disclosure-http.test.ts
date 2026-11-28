@@ -4,9 +4,11 @@ const mocks = vi.hoisted(() => ({
   boundary: vi.fn(),
   mutationAllowed: vi.fn(),
   repository: { getForOwner: vi.fn(), save: vi.fn(), withdraw: vi.fn() },
+  config: { hostAgentSalesEnabled: false, hostAccountsEnabled: false },
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/config", () => ({ config: mocks.config }));
 vi.mock("@/lib/host/server", () => ({
   noStoreJson: (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-robots-tag": "noindex, nofollow" } }),
 }));
@@ -38,6 +40,7 @@ function request(method: string, body?: unknown) {
 describe("host seller disclosure HTTP boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.assign(mocks.config, { hostAgentSalesEnabled: false, hostAccountsEnabled: false });
     mocks.boundary.mockResolvedValue({ ok: true, value: { actor } });
     mocks.mutationAllowed.mockReturnValue(true);
     mocks.repository.getForOwner.mockResolvedValue({ sellerDisplayName: "Synthetic Legal Seller", disclosure: null });
@@ -52,6 +55,22 @@ describe("host seller disclosure HTTP boundary", () => {
     const body = await response.json();
     expect(body).toEqual({ seller: { sellerDisplayName: "Synthetic Legal Seller", disclosure: null }, consentVersion: "seller-public-disclosure-v1" });
     expect(JSON.stringify(body)).not.toMatch(/provider-private|user-private|stripe|niho/i);
+  });
+
+  it("asks for the seller side as before, and with agent sales (#725) only for the OWNER, passing the option to the store", async () => {
+    await getSellerDisclosure(request("GET"));
+    expect(mocks.boundary).toHaveBeenLastCalledWith("READ", { providerId: null, sales: "seller" });
+    expect(mocks.repository.getForOwner).toHaveBeenLastCalledWith(actor);
+
+    Object.assign(mocks.config, { hostAgentSalesEnabled: true, hostAccountsEnabled: true });
+    const commandId = "11111111-1111-4111-8111-111111111111";
+    await getSellerDisclosure(request("GET"));
+    expect(mocks.boundary).toHaveBeenLastCalledWith("READ", { providerId: null, sales: "none" });
+    expect(mocks.repository.getForOwner).toHaveBeenLastCalledWith(actor, { agentSales: true });
+    expect((await putSellerDisclosure(request("PUT", { commandId, expectedVersion: null, disclosure: native }))).status).toBe(200);
+    expect(mocks.repository.save).toHaveBeenLastCalledWith(actor, { commandId, expectedVersion: null, disclosure: native }, { agentSales: true });
+    expect((await deleteSellerDisclosure(request("DELETE", { commandId, expectedVersion: 1 }))).status).toBe(200);
+    expect(mocks.repository.withdraw).toHaveBeenLastCalledWith(actor, { commandId, expectedVersion: 1 }, { agentSales: true });
   });
 
   it("accepts one exact native command and rejects unknown JSON fields", async () => {

@@ -44,6 +44,7 @@ export const SHAPES = Object.freeze({
   consentVersion: { pattern: /^[A-Za-z0-9._:+-]{1,100}$/, words: "letters, digits and ._:+- (1-100)" },
   sellerReference: { pattern: /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/, words: "a seller reference (1-256 characters)" },
   sellerName: { pattern: /^(?=.*\S)[^,\p{Cc}]{1,300}$/u, words: "a seller name without commas or control characters (1-300 characters)" },
+  payoutDelayDays: { pattern: /^([1-9]|[12][0-9]|30)$/, words: "a number of days from 1 to 30" },
   stripeAccount: { pattern: /^acct_[A-Za-z0-9]{8,}$/, words: "a Stripe account ID" },
   bucketName: { pattern: /^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/, words: "a 3-63 character lower-case GCS bucket name" },
   mailbox: { pattern: new RegExp(`^(${ADDRESS}|[^<>",\\u0000-\\u001F\\u007F\\s][^<>",\\u0000-\\u001F\\u007F]{0,99} <${ADDRESS}>)$`), words: "an address, or Name <address> without commas or quotes" },
@@ -74,7 +75,7 @@ const siteUrl = ({ siteUrl: url }) => url;
  * The table. `id` identifies a flag when multiple mutually-exclusive choices write the same runtime env; otherwise
  * `env` is also the id. `env`: the Cloud Run variable set to "true". `variable`: the GitHub variable after the prefix.
  * `defaults`: on when its variable is unset (only staging's PWA, which it always had). `needs`: CAPABILITIES or other
- * flags' `env`, "A|B" for either. `conflicts`: flags that may not be on at the same time. `secrets`: Secret Manager
+ * flags' `env`, "A|B" for either (`prodNeeds`: more of them, for production only). `conflicts`: flags that may not be on at the same time. `secrets`: Secret Manager
  * references (`name:version`), with staging's fixed Secret name. `optional` permits an unset reference.
  * `settings`: plain values with their shape. `fixed`: values the workflow derives (job audiences and callers).
  */
@@ -400,6 +401,23 @@ export const FLAGS = Object.freeze([
     variable: "HOST_CONNECT_ONBOARDING_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
   },
+  // サポート 15% を NIHO が代理で受領する・3b-1 (Epic #700, #725, docs/host-payouts.md): the host with no seller profile chooses "サポート 15%（NIHO が代金を
+  // 受け取る）", opens bookings with no payout account, and the guest pays NIHO's platform account (the 20% path's webhook and refunds). Migration 0096 and its
+  // runtime grants first. The platform account is MANAGED_PLATFORM_ACCOUNT_ID's. `prodNeeds`: needs of production only. **Production also needs the payout flag of
+  // 3b-2 (EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED), which no table entry defines yet, so it cannot be turned on there until 3b-2 adds it** (money NIHO took must have
+  // a way to be sent). Staging can run it, to check the flow with Stripe's test mode.
+  {
+    env: "EXPERIENCE_HOST_AGENT_SALES_ENABLED",
+    variable: "HOST_AGENT_SALES_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED", "EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED", "EXPERIENCE_HOST_ACCOUNTS_ENABLED",
+      "EXPERIENCE_HOST_PUBLICATION_API_ENABLED", "EXPERIENCE_GUEST_MAIL_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"],
+    prodNeeds: ["EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED"],
+    settings: [
+      { env: "EXPERIENCE_HOST_AGENT_SALES_AGREEMENT_VERSION", variable: "HOST_AGENT_SALES_AGREEMENT_VERSION", shape: "consentVersion" },
+      { env: "EXPERIENCE_HOST_AGENT_RECEIVER_NAME", variable: "HOST_AGENT_RECEIVER_NAME", shape: "sellerName" },
+      { env: "EXPERIENCE_HOST_AGENT_PAYOUT_DELAY_DAYS", variable: "HOST_AGENT_PAYOUT_DELAY_DAYS", shape: "payoutDelayDays", optional: true },
+    ],
+  },
   // 開催回の担当 (#535 v0, docs/occurrence-assignments.md): 承認後決済の開催回に1人の内部担当。報酬の計算・送金はしない。
   {
     env: "EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED",
@@ -522,7 +540,7 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
   for (const flag of FLAGS) {
     if (!on.has(flagId(flag))) continue;
     const by = `${flagId(flag)} (${name(flag.variable)})`;
-    for (const need of flag.needs ?? []) {
+    for (const need of [...(flag.needs ?? []), ...(target === "prod" ? flag.prodNeeds ?? [] : [])]) {
       if (!has(need)) {
         const words = need.split("|").map((one) => (one === "HOST_CONSOLE" || one === "DATABASE" ? (target === "prod" ? "enable_host_calendar=true" : "the host console") : one)).join(" or ");
         problems.push(`${by} needs ${words}`);

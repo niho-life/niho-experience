@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HOST_SURFACE, consoleButtonClass } from "./host-ui";
 import { MapboxLocationMap, type MapArea, type MapCoordinate } from "@/components/MapboxLocationMap";
 import { HostPageBody, PageHead } from "./ui";
+import { HostAgentSalesSection } from "./HostAgentSalesSection";
 import { HostSharedPhotoOffer } from "./HostSharedPhoto";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { HostErrorMessage } from "./HostProviderRequired";
@@ -76,13 +77,15 @@ type Product = {
   sellerDisplayName: string | null;
   saleTerms: SaleTerms | null;
   salesPlan: {
-    current: { revision: number; plan: "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10"; feeBasisPoints: 1000 | 1500 | 2000; agreementVersion: string };
+    current: { revision: number; plan: "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10"; feeBasisPoints: 1000 | 1500 | 2000; agreementVersion: string; chargeMode?: "PLATFORM" | "CONNECT_DIRECT"; sellerParty?: "NIHO" | "PROVIDER" };
     phase: "ACTIVE" | "EXPIRING_OLD_CHECKOUTS" | "RECONCILING";
     pending: { revision: number; plan: "SUPPORTED_15" | "INDEPENDENT_10"; feeBasisPoints: 1000 | 1500; agreementVersion: string } | null;
     transitionCommandId: string | null;
     version: number;
   } | null;
   ownerSalesPlanAgreementVersion: string | null;
+  /** 代理受領 (#725): present while the flag is on and the host has no seller profile. */
+  agentSales?: import("./HostAgentSalesSection").AgentSalesOffer | null;
   offers: { id: string; localStartTime: string; durationMinutes: number; capacity: number; recurrence: { kind: string; weekdays?: readonly string[] } }[];
   media: Media[];
 };
@@ -133,11 +136,18 @@ const readError: Record<string, string> = {
   UNAVAILABLE: "保存結果を確認できませんでした。入力は保持しています。最新状態を読み直してから続けてください。",
   TRANSLATION_UNAVAILABLE: "英語案を作成できませんでした。入力はそのまま保持しています。",
   PAYOUT_CHECK_UNAVAILABLE: "Stripeで販売者の受取口座を確認できませんでした。時間をおいて再度お試しください。",
+  READINESS_UNAVAILABLE: "Stripeの状態を確認できませんでした。時間をおいて再度お試しください。",
+  SELLER_EXISTS: "販売者プロフィールがあるホストは、この選択はできません。",
+  SELLER_DISCLOSURE_REQUIRED: "先に「販売者表示」で、特定商取引法に基づく表記を保存してください。",
+  CONSENT_OUTDATED: "同意の内容が更新されました。ページを読み込み直して、もう一度ご確認ください。",
+  CONSENT_REQUIRED: "同意にチェックを入れてください。",
 };
 
 const BLOCKER_COPY: Record<string, string> = {
   ACCOUNT_NOT_USABLE: "ログインしているアカウントが利用できる状態か確認してください。",
   CANCELLATION_TERMS_REQUIRED: "取消期限と返金割合を入力してください。",
+  AGENT_CONSENT_REQUIRED: "「サポート 15%（NIHO が代金を受け取る）」への同意を、もう一度確認してください。",
+  SELLER_DISCLOSURE_REQUIRED: "「販売者表示」の保存が必要です。保存した名前と体験の販売者名が一致しているか確認してください。",
   CONNECT_NOT_READY: "販売者の受取口座を確認してください。",
   CONSENT_OUTDATED: "掲載条件が更新されました。最新の条件を確認して公開してください。",
   FEE_SETTINGS_REQUIRED: "運営側の手数料設定が完了するまで公開できません。",
@@ -431,6 +441,8 @@ export function HostPublicationWorkspace({
   const [ownerSalesPlan, setOwnerSalesPlan] = useState<"SUPPORTED_15" | "INDEPENDENT_10">("SUPPORTED_15");
   const [ownerSalesPlanAccepted, setOwnerSalesPlanAccepted] = useState(false);
   const [salesPlanCommandId, setSalesPlanCommandId] = useState<string | null>(null);
+  const [agentConsentAccepted, setAgentConsentAccepted] = useState(false);
+  const [agentCommandId, setAgentCommandId] = useState<string | null>(null);
   const [createDraftRestored, setCreateDraftRestored] = useState(false);
   /** 公開・停止 waiting for its confirmation in the page's dialog. */
   const [stateConfirm, setStateConfirm] = useState<"publish" | PublicationAction | null>(null);
@@ -1229,6 +1241,31 @@ export function HostPublicationWorkspace({
     } finally { setBusy(false); }
   }
 
+  /** 「サポート 15%（NIHO が代金を受け取る）」を選ぶ (#725). The same command ID is kept until the result is read back. */
+  async function chooseAgentSales() {
+    const offer = product?.agentSales;
+    if (!product || !offer || busy || !agentConsentAccepted) return;
+    const commandId = agentCommandId ?? crypto.randomUUID();
+    setAgentCommandId(commandId); setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(api(`${apiBase}/${encodeURIComponent(product.id)}/agent-sales`), {
+        method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ commandId, expectedStateVersion: product.salesPlan?.version ?? null, agreementVersion: offer.agreementVersion, accepted: true }),
+      });
+      const body: unknown = await response.json().catch(() => null);
+      if (response.status === 401 && typeof body === "object" && body !== null && (body as { error?: { code?: unknown; href?: unknown } }).error?.code === "REAUTH_REQUIRED") {
+        const href = (body as { error: { href?: unknown } }).error.href;
+        if (typeof href === "string" && href.startsWith("/")) { window.location.assign(href); return; }
+      }
+      if (!response.ok) { if (response.status !== 408 && response.status < 500) setAgentCommandId(null); throw new Error(apiErrorMessage(body, response.status)); }
+      setAgentCommandId(null); setAgentConsentAccepted(false);
+      await refresh(false, dirty);
+      setNotice("「サポート 15%（NIHO が代金を受け取る）」を選びました。予約の受付は、公開の手順から始められます。");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "結果を確認できませんでした。もう一度お試しください。");
+    } finally { setBusy(false); }
+  }
+
   async function uploadPhoto(): Promise<boolean> {
     if (!product || !selectedPhoto || !rightsConfirmed || busy || conflictProduct) return false;
     setBusy(true); setError(""); setNotice("");
@@ -1735,6 +1772,7 @@ export function HostPublicationWorkspace({
     </>;
 
     const pricingTab = <div className="grid max-w-[720px] gap-4">
+      <HostAgentSalesSection product={product} busy={busy} dirty={dirty} accepted={agentConsentAccepted} onAccept={setAgentConsentAccepted} retrying={agentCommandId !== null} onChoose={() => void chooseAgentSales()} sellerHref={api("/host/seller")} />
       <section id="publication-price" className={sectionClass} aria-labelledby="publication-price-title">
         <h2 id="publication-price-title" className={headingClass}>料金{tag("page", ["PRICE_REQUIRED"])}</h2>
         <EditorUnitField label="大人1人" small="税込" prefix="¥" info="無料の体験は0円にします。有料は50円以上にしてください。" value={unitAmount} onChange={setUnitAmount} />
@@ -1942,7 +1980,7 @@ export function HostPublicationWorkspace({
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={sellerConfirmed} onChange={(event) => setSellerConfirmed(event.target.checked)} className="mt-1" /><span>販売者へ現在の公開内容・販売条件・掲載条件を確認済みです。</span></label>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={publicationPhotoRightsConfirmed} onChange={(event) => setPublicationPhotoRightsConfirmed(event.target.checked)} className="mt-1" /><span>公開対象の写真について掲載権利を確認済みです。</span></label>
     </section> : null}
-    {!adminDraft && product.salesPlan ? <section className={`${HOST_SURFACE} mb-4 space-y-3 p-4 md:p-5`} aria-labelledby="owner-sales-plan-title">
+    {!adminDraft && product.salesPlan && !(product.salesPlan.current.chargeMode === "PLATFORM" && product.salesPlan.current.sellerParty === "PROVIDER") ? <section className={`${HOST_SURFACE} mb-4 space-y-3 p-4 md:p-5`} aria-labelledby="owner-sales-plan-title">
       <h2 id="owner-sales-plan-title" className="font-extrabold">{product.salesPlan.current.plan === "MANAGED_20" ? "NIHO完全代行から本人販売へ切り替える" : "本人販売のプランを変更する"}</h2>
       <p className="text-sm text-ink-soft">この体験だけを切り替えます。公開URL・商品・開催枠・在庫は変わりません。切替中は新しい受付を止め、残っている旧条件の決済を元のStripeアカウントで失効または照合してから新条件へ切り替えます。</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm"><dt>現在</dt><dd>{product.salesPlan.current.plan === "MANAGED_20" ? "完全代行 20%" : product.salesPlan.current.plan === "SUPPORTED_15" ? "本人販売＋サポート 15%" : "本人販売 10%"}（版 {product.salesPlan.current.revision}）</dd><dt>切替状態</dt><dd>{product.salesPlan.phase === "ACTIVE" ? "受付中" : "旧決済の照合中（新規受付停止）"}</dd></dl>

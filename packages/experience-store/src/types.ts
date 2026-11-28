@@ -173,6 +173,10 @@ export interface ProductInput {
   readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
   /** Immutable sales-plan policy. Absent historical and owner/direct rows are instant. */
   readonly acceptanceMode?: BookingAcceptanceMode;
+  /** From the immutable revision: NIHO (MANAGED_20) or the provider. 代理受領 (AGENT_15) also carries the two values below. */
+  readonly sellerParty?: "NIHO" | "PROVIDER";
+  readonly payoutDelayDays?: number;
+  readonly receivingAgentName?: string;
 }
 
 /** The seller a product is sold under. A product of a provider without a seller profile has none (`seller: null`). */
@@ -319,6 +323,12 @@ export interface SellerSnapshot {
   readonly paymentDuePolicy?: ManagedPaymentDuePolicy;
   /** Present on new sales-plan bookings; APPROVAL must be authorized before Checkout is attached or paid. */
   readonly acceptanceMode?: BookingAcceptanceMode;
+  /** Who sells: NIHO (MANAGED_20) or the provider. Absent on bookings from before 3b-1 (read as NIHO for PLATFORM); see sales-kind.ts. */
+  readonly sellerParty?: "NIHO" | "PROVIDER";
+  /** 代理受領 only (sellerParty PROVIDER on PLATFORM): days after the experience ends that the host's share is sent, fixed by the revision. */
+  readonly payoutDelayDays?: number;
+  /** 代理受領 only: the legal name of the party that receives the payment for the seller. */
+  readonly receivingAgentName?: string;
 }
 
 export type ExperienceChargeMode = "PLATFORM" | "CONNECT_DIRECT";

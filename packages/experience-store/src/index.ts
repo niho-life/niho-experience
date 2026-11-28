@@ -15,6 +15,10 @@ export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOc
 export { ExperienceStore } from "./repository.ts";
 export { ManagedExperienceSalesRepository, validateManagedPlatformSellerConfig } from "./managed-sales.ts";
 export type { CheckoutTransitionOutcome, ManagedCompensation, ManagedPlatformSellerConfig, SalesPlanRevision, SalesPlanState, SalesPlanTransition } from "./managed-sales.ts";
+export { ProviderAgentSales } from "./agent-sales.ts";
+export type { AgentSalesChoice, AgentSalesChoiceInput, AgentSalesConsent } from "./agent-sales.ts";
+export { agentPlanSql, countedAgentConsentSql, isAgentSellerRef, salesKindOf } from "./sales-kind.ts";
+export type { SalesKind, SalesKindInput } from "./sales-kind.ts";
 export { ProductClassificationRepository } from "./product-classifications.ts";
 export type { AdminProductClassificationRow, PublicClassificationBySlug } from "./product-classifications.ts";
 export { OccurrenceAssignmentRepository } from "./occurrence-assignments.ts";
@@ -43,6 +47,7 @@ export { ProviderMediaCleanupRepository } from "./public-media-cleanup.ts";
 export type { ClaimedProviderMediaCleanup } from "./public-media-cleanup.ts";
 export type {
   HostSellerDisclosure,
+  SellerDisclosureOptions,
   NativeSellerDisclosureInput,
   PublicSellerDisclosure,
   SaveSellerDisclosureCommand,
@@ -76,6 +81,8 @@ export type {
   ExperiencePublicationManuscriptReview,
   AdminSellerConfirmationMethod,
   ExperiencePublicationBlocker,
+  AgentPublishCheck,
+  PublishInput,
   ExperiencePublicationContentChecks,
   ExperienceHostSellerProfile,
   ExperienceHostProviderMembership,

@@ -211,6 +211,9 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // 受取口座の利用同意 (ADR 0003, 0065): the current host-account OWNER records a consent; a withdrawal or a replacement
   // only marks the active row revoked (the rows are the consent's history: no DELETE, no other column changes).
   provider_payout_account_consents: { write: I, updateColumns: ["revoked_at", "revoked_by_niho_user_id"] },
+  // 代理受領の同意 (#725, 0096): the same shape. The OWNER's consent is inserted; a withdrawal only marks the active row revoked
+  // (a trigger refuses DELETE, any other column, and a second seller reference for the provider).
+  provider_agent_sales_consents: { write: I, updateColumns: ["revoked_at", "revoked_by_host_account_id"] },
   provider_publication_readiness: { write: IU },
   // Current OWNER writes only explicitly public seller fields. Idempotency receipts are append-only metadata
   // (actor, request fingerprint, action and applied version) and never duplicate disclosure/contact bodies.
