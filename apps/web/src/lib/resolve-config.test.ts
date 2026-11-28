@@ -554,6 +554,14 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true", EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "true" }).hostSelfRegistrationEnabled).toBe(true);
     expect(() => resolveConfig({ HOST_CONSOLE_ENABLED: "true", EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED=true needs EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true");
     expect(() => resolveConfig({ ...registration, EXPERIENCE_HOST_MAIL_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED=true needs EXPERIENCE_HOST_MAIL_ENABLED=true");
+    // 受取口座の登録 (#710): off by default; http needs the accounts, the DB and the platform Stripe key; the preview never has it.
+    const connect = { ...on, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_synthetic", EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED: "true" };
+    expect(resolveConfig(on).hostConnectOnboardingEnabled).toBe(false);
+    expect(resolveConfig(connect).hostConnectOnboardingEnabled).toBe(true);
+    expect(resolveConfig({ ...connect, EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED: "1" }).hostConnectOnboardingEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED: "true" }).hostConnectOnboardingEnabled).toBe(false);
+    expect(() => resolveConfig({ ...connect, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "" })).toThrow("EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY");
+    expect(() => resolveConfig({ ...connect, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
     expect(() => resolveConfig({ ...on, HOST_CONSOLE_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
     expect(() => resolveConfig({ ...host, EXPERIENCE_API_MODE: "http", EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }))
       .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_DATABASE_URL");

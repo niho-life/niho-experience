@@ -396,6 +396,26 @@ function hostSelfRegistrationSetting(
 }
 
 /**
+ * ホストが自分で受取口座（Stripe Express）を登録する (Epic #700 stage 3a, #710, docs/host-payouts.md): 設定 › 受取口座 の「受取口座を登録する」、
+ * その POST・戻りの route、Connect webhook の `account.updated`。ホストのアカウント（口座の行は experience DB）・platform の Stripe キー
+ * （口座の作成と読み直し）が要るので、http では欠けると起動時に止まる。preview (mock) には何も無い。既定 OFF。**本番では 3b（サポート 15% の
+ * 送金）が入るまで OFF のまま**（3a だけでは、登録した口座でお金を受け取れない）。
+ */
+function hostConnectOnboardingSetting(
+  apiMode: "mock" | "http",
+  env: Env,
+  needs: { readonly hostConsoleEnabled: boolean; readonly hostAccountsEnabled: boolean },
+): boolean {
+  const name = "EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (!needs.hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
+  if (!needs.hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error(`${name}=true needs EXPERIENCE_DATABASE_URL in http mode`);
+  if (!env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY?.trim()) throw new Error(`${name}=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY in http mode`);
+  return true;
+}
+
+/**
  * The flags whose code sends the signed-in admin's NIHO admin token (NIHO's Admin session) to NIHO. With the Google
  * login (ADR 0003 decision 4) there is no such token, so none of them may be on at the same time. The fee summary is
  * here for its Admin side (it is one gate for Admin and /host).
@@ -984,6 +1004,7 @@ export function resolveConfig(env: Env) {
   const hostNihoLoginEnabled = hostNihoLoginSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const hostTeamInvitationsEnabled = hostTeamInvitationsSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostTeamEnabled, hostNihoLoginEnabled, hostMailEnabled });
   const hostSelfRegistrationEnabled = hostSelfRegistrationSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostNihoLoginEnabled, hostMailEnabled });
+  const hostConnectOnboardingEnabled = hostConnectOnboardingSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled });
   const travelerAccountsEnabled = travelerAccountsSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const nihoLoginPromptEnabled = nihoLoginPromptSetting(env, hostNihoLoginEnabled);
   const nihoAccountStatusCheckEnabled = nihoAccountStatusCheckSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
@@ -1190,6 +1211,8 @@ export function resolveConfig(env: Env) {
     hostTeamInvitationsEnabled,
     // 自分でホスト登録する (Epic #700, #708): /host/start and the sign-in's continuation into it. Opened for everyone in stage 5.
     hostSelfRegistrationEnabled,
+    // ホストが自分で受取口座（Express）を登録する (Epic #700, #710). Off in production until stage 3b.
+    hostConnectOnboardingEnabled,
     occurrenceAssignmentEnabled,
     googleBusySyncEnabled: googleCalendarJobs.busySyncEnabled,
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,

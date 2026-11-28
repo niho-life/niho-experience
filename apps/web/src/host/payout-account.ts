@@ -15,6 +15,11 @@ export type ExperiencePayoutLoad =
   /** Admin/ops have not registered the provider's seller and account yet. */
   | { readonly status: "setup-required" }
   | { readonly status: "error" }
+  /**
+   * The provider has no Direct charge seller and registers its own payout account (Epic #700 stage 3a, #710, docs/host-payouts.md).
+   * `unknown`: Stripe could not be read now and no earlier state is kept.
+   */
+  | { readonly status: "connect"; readonly state: ConnectPayoutState }
   | {
     readonly status: "owner";
     readonly providerName: string;
@@ -29,6 +34,21 @@ export type ExperiencePayoutLoad =
     /** The version the OWNER agrees to now; empty while none is configured (the consent cannot be given then). */
     readonly consentVersion: string;
   };
+
+/** 設定 › 受取口座 for a host that registers its own account: `NOT_STARTED` before the first press, then what Stripe says. */
+export type ConnectPayoutState = "NOT_STARTED" | "IN_PROGRESS" | "VERIFYING" | "ACTION_REQUIRED" | "REJECTED" | "READY" | "unknown";
+
+/** The pill, the sentence and the button of each state (docs/host-payouts.md「状態」). `action`: the button posts to onboarding or opens Stripe's dashboard. */
+export const CONNECT_PAYOUT_STATES: Readonly<Record<ConnectPayoutState, { readonly pill: StatusLabel; readonly line: string; readonly action: { readonly kind: "onboard" | "dashboard"; readonly label: string } | null }>> = {
+  NOT_STARTED: { pill: { label: "未登録", tone: "wait" }, line: "売上を受け取る口座は、まだ登録されていません。", action: { kind: "onboard", label: "受取口座を登録する" } },
+  IN_PROGRESS: { pill: { label: "入力の途中", tone: "wait" }, line: "Stripe での入力が、まだ終わっていません。", action: { kind: "onboard", label: "Stripe で続きを入力する" } },
+  VERIFYING: { pill: { label: "確認中", tone: "wait" }, line: "Stripe で確認中です。", action: null },
+  ACTION_REQUIRED: { pill: { label: "追加の情報が必要", tone: "wait" }, line: "Stripe で、追加の情報の入力が必要です。", action: { kind: "onboard", label: "Stripe で入力する" } },
+  REJECTED: { pill: { label: "使えません", tone: "stop" }, line: "この口座は使えません。事務局にお問い合わせください。", action: null },
+  // 3b が入るまでは、売上を受け取れるとは書かない。銀行口座の末尾は出さない。
+  READY: { pill: { label: "登録済み", tone: "ok" }, line: "受取口座の登録が済みました。", action: { kind: "dashboard", label: "Stripe で見る" } },
+  unknown: { pill: { label: "確認が必要", tone: "wait" }, line: "Stripe から口座の状態を読み込めませんでした。時間をおいて、ページを読み込み直してください。", action: null },
+};
 
 /** Stripe's reasons in plain words, in the order they are listed. */
 export const PAYOUT_ACCOUNT_PROBLEM_TEXT: Readonly<Record<ConnectedAccountProblem, string>> = {
@@ -51,6 +71,7 @@ export const PAYOUT_ACCOUNT_TEXT = {
   consentOutdated: "同意の内容が変わりました。新しい内容を確認して、もう一度同意してください。それまで、新しい公開と公開の再開はできません。",
   consentUnavailable: "同意の受付は準備中です。",
   recentSignIn: "同意と取り消しには、30 分以内のログインが必要です。古いときは、ログインし直してから戻ります。",
+  recentSignInConnect: "登録には、30 分以内のログインが必要です。古いときは、ログインし直してから戻ります。",
   withdrawWarning: "取り消すと、公開中の体験はすべて止まり、新しい公開と販売はできなくなります。すでに入った予約はそのままです。",
 } as const;
 
@@ -67,6 +88,7 @@ export function payoutAccountConsentText(input: { readonly providerName: string;
 
 /** The pill beside 受取口座. */
 export function experiencePayoutStatus(load: ExperiencePayoutLoad): StatusLabel | null {
+  if (load.status === "connect") return CONNECT_PAYOUT_STATES[load.state].pill;
   if (load.status === "setup-required") return { label: "未登録", tone: "wait" };
   if (load.status !== "owner") return null;
   if (load.stripe !== "ready") return { label: "確認が必要", tone: "wait" };
@@ -97,7 +119,8 @@ function reasonOf(load: Extract<ExperiencePayoutLoad, { status: "owner" }>): Pay
 /** The same account as the console's other payout panels and notes read it (売上's note, 設定's review row). */
 export function hostPayoutLoadOf(load: ExperiencePayoutLoad): HostPayoutLoad {
   if (load.status === "not-owner") return { status: "not-owner" };
-  if (load.status === "setup-required") return { status: "owner", payout: { reason: "NOT_CONNECTED", sharedFrom: null, candidates: [], reuseConsent: null } };
+  // A host that registers its own account has no Direct charge seller yet: the other panels read it as not connected, as before.
+  if (load.status === "setup-required" || load.status === "connect") return { status: "owner", payout: { reason: "NOT_CONNECTED", sharedFrom: null, candidates: [], reuseConsent: null } };
   if (load.status === "error") return { status: "error" };
   const reason = reasonOf(load);
   return reason === null ? { status: "error" } : { status: "owner", payout: { reason, sharedFrom: null, candidates: [], reuseConsent: null } };
@@ -111,6 +134,12 @@ export const PAYOUT_CONSENT_OUTCOMES = {
   changed: { tone: "error", message: "受取口座または同意の内容が変わりました。表示し直した内容を確認してください。" },
   forbidden: { tone: "error", message: "この操作は、提供者のオーナーだけができます。" },
   unavailable: { tone: "error", message: "記録できませんでした。時間をおいて、もう一度お試しください。" },
+  // 受取口座の登録 (#710)
+  connectForbidden: { tone: "error", message: "受取口座の登録は、ホストのオーナーだけができます。" },
+  connectSeller: { tone: "error", message: "このホストの口座は、事務局が登録しています。" },
+  connectUnavailable: { tone: "error", message: "Stripe につながりませんでした。時間をおいて、もう一度お試しください。" },
+  connectReview: { tone: "error", message: "口座の作成の途中で止まっています。事務局にお問い合わせください。" },
+  connectNotStarted: { tone: "error", message: "受取口座の登録を、もう一度はじめからお試しください。" },
 } as const satisfies Record<string, { tone: "success" | "error"; message: string }>;
 
 export type PayoutConsentOutcome = keyof typeof PAYOUT_CONSENT_OUTCOMES;

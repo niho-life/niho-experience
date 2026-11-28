@@ -19,6 +19,7 @@ import type {
   GuestTranslationClaim,
   ClaimedHostBookingMail,
   HostAddressConfirmationClaim,
+  HostPayoutAccountMailClaim,
   HostBookingMailClaim,
   HostInvitationLinkIssue,
   HostLoginLinkIssue,
@@ -132,6 +133,9 @@ function stubs() {
     issueAddressConfirmationToken: vi.fn<(id: string) => Promise<string | null>>(async () => HOST_TOKEN),
     completeAddressConfirmation: vi.fn<(id: string) => Promise<void>>(async () => {}),
     retryAddressConfirmation: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
+    claimPayoutAccountMails: vi.fn(async (): Promise<HostPayoutAccountMailClaim> => ({ mails: [], abandoned: 0 })),
+    completePayoutAccountMail: vi.fn<(id: string) => Promise<void>>(async () => {}),
+    retryPayoutAccountMail: vi.fn(async (): Promise<"RETRY" | "FAILED" | "STALE"> => "RETRY"),
   };
   const allowed = vi.fn<(providerId: string, kind: string) => Promise<boolean>>(async () => true);
   const deps: ExperienceJobDeps = {
@@ -935,6 +939,41 @@ describe("host emails (#194)", () => {
     expect(mail!.text).toContain("心当たりがなければ、このメールは無視してください。");
     // The token is in the fragment only.
     expect(mail!.text).not.toContain(`?t=${HOST_TOKEN}`);
+  });
+});
+
+describe("payout account emails (#710)", () => {
+  const withHostMail = () => ({ ...s.deps, hostPayoutAccountMails: true, hostMail: { outbox: s.hostOutbox, allowed: s.allowed } });
+
+  it("sends one email per claimed row to its recipient, a row that should not go is closed unsent, and a transient failure retries", async () => {
+    const rows = [
+      { id: "701", attempts: 1, providerId: "provider-a", to: "owner@example.test" },
+      { id: "702", attempts: 1, providerId: "provider-a", to: null },
+      { id: "703", attempts: 1, providerId: "provider-b", to: "other@example.test" },
+    ];
+    s.hostOutbox.claimPayoutAccountMails.mockImplementation(async () => ({ mails: rows.splice(0, 1), abandoned: 0 }));
+    const counts = await runExperienceJobs(withHostMail());
+    expect(counts.hostPayoutAccountMails).toEqual({ claimed: 3, sent: 2, skipped: 1, retried: 0, failed: 0, abandoned: 0 });
+    expect(s.sent.map((mail) => mail.to)).toEqual(["owner@example.test", "other@example.test"]);
+    expect(s.sent[0]!.subject).toBe("受取口座に追加の情報が必要です");
+    expect(s.sent[0]!.text).toContain(`${SITE}/host/settings?providerId=provider-a#settings-payout`);
+    expect(s.hostOutbox.completePayoutAccountMail.mock.calls.map((call) => call[0])).toEqual(["701", "702", "703"]);
+  });
+
+  it("keeps the row for a later run when the mail server fails for now", async () => {
+    const rows = [{ id: "711", attempts: 2, providerId: "provider-a", to: "owner@example.test" }];
+    s.hostOutbox.claimPayoutAccountMails.mockImplementation(async () => ({ mails: rows.splice(0, 1), abandoned: 0 }));
+    s.results.push({ ok: false, failure: "transient" });
+    const counts = await runExperienceJobs(withHostMail());
+    expect(counts.hostPayoutAccountMails).toEqual({ claimed: 1, sent: 0, skipped: 0, retried: 1, failed: 0, abandoned: 0 });
+    expect(s.hostOutbox.retryPayoutAccountMail).toHaveBeenCalledWith("711", 2);
+    expect(s.hostOutbox.completePayoutAccountMail).not.toHaveBeenCalled();
+  });
+
+  it("does not claim anything while the onboarding flag is off (code may be deployed before migration 0095)", async () => {
+    const counts = await runExperienceJobs({ ...withHostMail(), hostPayoutAccountMails: false });
+    expect(counts.hostPayoutAccountMails).toBeUndefined();
+    expect(s.hostOutbox.claimPayoutAccountMails).not.toHaveBeenCalled();
   });
 });
 
