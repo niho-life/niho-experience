@@ -297,7 +297,8 @@ describe("Experience owner product API", () => {
     const dto = (await read.json()).product;
     const version = dto.version;
     expect(dto.version).toEqual(expect.any(String));
-    expect(dto.media[0].previewUrl).toContain(media[0]!.id);
+    // The image URL names the provider: an owner of two hosts would otherwise get 409 PROVIDER_REQUIRED for every image (#709).
+    expect(dto.media[0].previewUrl).toBe(`/host/api/products/${product.id}/media/${media[0]!.id}?providerId=${actor.providerId}`);
     expect(dto.offers).toEqual([expect.objectContaining({ id: "dinner-evening", localStartTime: "18:00" })]);
     expect(dto.publicationBlockers).toEqual([]);
 
@@ -369,7 +370,7 @@ describe("Experience owner product API", () => {
   it("uses seller-level profile media with explicit rights, localized alts, and version CAS", async () => {
     const read = await readProviderMedia(request("/host/api/provider-media"));
     expect(read.status).toBe(200);
-    expect(await read.json()).toMatchObject({ providerMedia: { version: 5, assets: [{ previewUrl: `/host/api/provider-media/${providerMedia.assets[0]!.id}` }] } });
+    expect(await read.json()).toMatchObject({ providerMedia: { version: 5, assets: [{ previewUrl: `/host/api/provider-media/${providerMedia.assets[0]!.id}?providerId=${actor.providerId}` }] } });
 
     const updated = await saveProviderMedia(request("/host/api/provider-media", "PUT", {
       version: 5,

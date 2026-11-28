@@ -202,6 +202,15 @@ function publicationStatus(state: ExperiencePublicationState | null): ProductSta
   return "PUBLISHED";
 }
 
+/**
+ * The image URLs the host screen puts in `<img src>`. They name the provider (`?providerId=`): an owner of two or more
+ * hosts would otherwise get 409 PROVIDER_REQUIRED for every image (#709). The id is the actor's, already checked.
+ */
+const productMediaUrl = (providerId: string, productId: string, assetId: string) =>
+  `/host/api/products/${encodeURIComponent(productId)}/media/${encodeURIComponent(assetId)}?providerId=${encodeURIComponent(providerId)}`;
+const providerMediaUrl = (providerId: string, assetId: string) =>
+  `/host/api/provider-media/${encodeURIComponent(assetId)}?providerId=${encodeURIComponent(providerId)}`;
+
 async function productDto(repository: NonNullable<ReturnType<typeof experiencePublicationRepository>>, actor: PublicationHostContext["actor"], productId: string) {
   const managedSales = managedExperienceSalesRepository();
   const [product, state, termsState, media, publicationNeedsUpdate, offers, salesPlan] = await Promise.all([
@@ -266,7 +275,7 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
     offers,
     media: media.map((asset) => ({
       ...asset,
-      previewUrl: `/host/api/products/${encodeURIComponent(product.id)}/media/${encodeURIComponent(asset.id)}`,
+      previewUrl: productMediaUrl(actor.providerId, product.id, asset.id),
     })),
   };
 }
@@ -277,7 +286,7 @@ async function providerMediaDto(repository: NonNullable<ReturnType<typeof experi
     ...profile,
     assets: profile.assets.map((asset) => ({
       ...asset,
-      previewUrl: `/host/api/provider-media/${encodeURIComponent(asset.id)}`,
+      previewUrl: providerMediaUrl(actor.providerId, asset.id),
     })),
   };
 }
@@ -543,7 +552,7 @@ export async function publicationMediaRequest(request: Request, context: Publica
     if (asset.id !== id) await storage.remove(objectKey).catch(() => undefined);
     const product = await productDto(prepared.repository, prepared.context.actor, productId);
     return noStoreJson({
-      asset: { ...asset, previewUrl: `/host/api/products/${encodeURIComponent(productId)}/media/${encodeURIComponent(asset.id)}` },
+      asset: { ...asset, previewUrl: productMediaUrl(prepared.context.actor.providerId, productId, asset.id) },
       product,
     }, 201);
   } catch (error) {
@@ -611,7 +620,7 @@ export async function providerMediaCollectionRequest(request: Request): Promise<
     const providerMedia = await prepared.repository.saveProviderMediaSelection(prepared.context.actor, body.version as number, media);
     return noStoreJson({ providerMedia: {
       ...providerMedia,
-      assets: providerMedia.assets.map((asset) => ({ ...asset, previewUrl: `/host/api/provider-media/${encodeURIComponent(asset.id)}` })),
+      assets: providerMedia.assets.map((asset) => ({ ...asset, previewUrl: providerMediaUrl(prepared.context.actor.providerId, asset.id) })),
     } });
   } catch (error) { return mapStoreError(error); }
 }
@@ -671,7 +680,7 @@ export async function providerMediaUploadRequest(request: Request): Promise<Resp
     if (old) await storage.remove(`experience-provider-media/${old.id}.jpg`).catch(() => undefined);
     return noStoreJson({ providerMedia: {
       ...profile,
-      assets: profile.assets.map((item) => ({ ...item, previewUrl: `/host/api/provider-media/${encodeURIComponent(item.id)}` })),
+      assets: profile.assets.map((item) => ({ ...item, previewUrl: providerMediaUrl(prepared.context.actor.providerId, item.id) })),
     } }, 201);
   } catch (error) {
     if (stored && !registered) await storage.remove(objectKey).catch(() => undefined);
@@ -707,7 +716,7 @@ export async function providerMediaAssetRequest(request: Request, context: { par
     await storage.remove(`experience-provider-media/${assetId}.jpg`).catch(() => undefined);
     return noStoreJson({ providerMedia: {
       ...profile,
-      assets: profile.assets.map((item) => ({ ...item, previewUrl: `/host/api/provider-media/${encodeURIComponent(item.id)}` })),
+      assets: profile.assets.map((item) => ({ ...item, previewUrl: providerMediaUrl(prepared.context.actor.providerId, item.id) })),
     } });
   } catch (error) { return mapStoreError(error); }
 }

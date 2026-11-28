@@ -12,6 +12,7 @@ import { HostPageBody } from "@/components/host/ui";
 import { hostPageContext, loadHostExperienceEditor } from "@/host/data";
 import { experiencePath } from "@/host/home";
 import { config } from "@/lib/config";
+import { screenProviderId } from "@/lib/host/api-path";
 import { HOST_EXPERIENCES_PATH, HOST_SETTINGS_PATH, hostPayoutSettingsPath, withProvider } from "@/lib/host/routes";
 import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
 
@@ -45,11 +46,12 @@ export default async function HostExperiencePage({ params, searchParams }: { par
   const [{ id }, query] = await Promise.all([params, searchParams]);
   if (config.experienceHostPublicationApiEnabled) {
     const context = await hostPageContext(query);
+    const providerId = context ? screenProviderId(context) : null;
     const membersProviderId = !context?.providerNotFound && context?.provider?.memberRole === "OWNER" ? context.provider.id : undefined;
     // With Experience host accounts the OWNER consents in 設定 › 受取口座 (ADR 0003 slice 3), not on NIHO.
     return config.hostAccountsEnabled
-      ? <HostPublicationWorkspace productId={id} membersProviderId={membersProviderId} paymentConsentHref={hostPayoutSettingsPath(null)} paymentConsentLabel="受取口座の同意へ" embedEnabled={config.embedEnabled} />
-      : <HostPublicationWorkspace productId={id} membersProviderId={membersProviderId} paymentConsentHref={new URL("/connect/experience-payments", config.nihoWebOrigin).href} embedEnabled={config.embedEnabled} />;
+      ? <HostPublicationWorkspace key={`${providerId ?? "none"}/${id}`} productId={id} providerId={providerId} membersProviderId={membersProviderId} paymentConsentHref={hostPayoutSettingsPath(providerId)} paymentConsentLabel="受取口座の同意へ" embedEnabled={config.embedEnabled} />
+      : <HostPublicationWorkspace key={`${providerId ?? "none"}/${id}`} productId={id} providerId={providerId} membersProviderId={membersProviderId} paymentConsentHref={new URL("/connect/experience-payments", config.nihoWebOrigin).href} embedEnabled={config.embedEnabled} />;
   }
   const context = await hostPageContext(query);
   if (!context) return null;

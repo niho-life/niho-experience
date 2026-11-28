@@ -3,6 +3,7 @@ import { HostBookingGuides } from "@/components/host/HostBookingGuides";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { HOST_EXPERIENCES_PATH, withProvider } from "@/lib/host/routes";
 import { hostPageContext } from "@/host/data";
+import { screenProviderId } from "@/lib/host/api-path";
 
 export const metadata: Metadata = { title: "予約後の集合案内" };
 
@@ -12,5 +13,5 @@ export default async function HostBookingGuidesPage({ searchParams }: { searchPa
   const context = await hostPageContext(await searchParams);
   if (!context) return null;
   if (!context.provider) return <HostRegisterPrompt title="予約後の集合案内" />;
-  return <HostBookingGuides key={context.provider.id} backHref={withProvider(HOST_EXPERIENCES_PATH, context.linkProviderId)} owner={context.provider.memberRole === "OWNER"} />;
+  return <HostBookingGuides key={context.provider.id} providerId={screenProviderId(context)} backHref={withProvider(HOST_EXPERIENCES_PATH, context.linkProviderId)} owner={context.provider.memberRole === "OWNER"} />;
 }

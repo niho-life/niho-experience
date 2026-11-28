@@ -13,8 +13,7 @@ NIHO アカウントを持つ人が、事務局を通さずにホストとして
 
 /host/start（サーバーで状態を決める）
      ├ 有効な登録 cookie ──▶ フォーム（NIHO の表示名を、個人のときの掲載名の初期値に）
-     ├ cookie なし・ホストのセッションあり・どのホストのオーナーでもない（ライター・メンバー）──▶ 同じフォーム（アカウントにホストを足す）
-     ├ すでにどこかのオーナー ──▶ /host/home（2 つ目を足すのは段階 2c）
+     ├ cookie なし・ホストのセッションあり（ライター・メンバー・すでにオーナーの人も）──▶ 同じフォーム（アカウントにホストを足す。3 つまで）
      └ どちらでもない ──▶ /host/auth/login?intent=register
 
 POST /host/api/registration ──▶ registerHostSelf（cookie）／registerHostSelfForAccount（セッション）──▶ /host/home?providerId=…
@@ -50,7 +49,7 @@ NIHO の表示名は、app-connect の exchange が返すもの。新しい本�
 | `TERMS_REQUIRED` | 422 | 規約に同意していない |
 | `OWNER_LIMIT_REACHED` | 409 | 3 つまで（`limit`） |
 | `ACCOUNT_SUSPENDED` | 403 | アカウントの停止 |
-| `ALREADY_REGISTERED` | 409 | すでに結び付いている（cookie を消す。ふつうにログインへ）。すでにオーナーの人のセッションにも同じ |
+| `ALREADY_REGISTERED` | 409 | すでに結び付いている（cookie を消す。ふつうにログインへ） |
 | `REGISTRATION_EXPIRED` | 401 | cookie が無い・期限切れ・改ざん。かつセッションも無い |
 | `RATE_LIMITED` | 429 | 確認のメールの回数（1 時間 5 通）。`retry-after` つき |
 | `FORBIDDEN` | 403 | 同一 origin でない |
@@ -76,3 +75,12 @@ flag ON のとき、`/host/auth/error` の「このアカウントは、ホス�
 ## ローカルで画面を見る（プレビュー）
 
 `EXPERIENCE_API_MODE=mock`（既定）で、`HOST_CONSOLE_ENABLED=true`・`EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true`・`EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED=true` を付けて起動し、`/host/auth/mock-login?mock=unregistered`（または `/host/auth/login?intent=register`）を開くと、合成の NIHO アカウント（表示名「森 ゆき」）で `/host/start` に着く。登録を押すと、何も保存せず、合成のホストのホームへ進む。
+
+## 1 人で複数のホスト（段階 2c、#709）
+
+- すでにオーナーの人も、`/host/start` と `POST /host/api/registration` でホストを足せる。上限（`HOST_PROVIDER_OWNER_LIMIT` = 3）はストアの `owner-limit-reached`（409 `OWNER_LIMIT_REACHED`）が決める。web は数えて止めない。
+- 入口は「あなたのアカウント」の「所属している提供者」の下の「ホストを追加」。`EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED` が ON で Experience のセッションのときだけ出る。3 つ持っていたらボタンの代わりに「ホストは 3 つまでです。」と出す（出し分けのための数えで、判定ではない）。
+- 登録できたら、新しいホストを選んだ状態のホーム（`/host/home?providerId=<新しいホスト>`）へ移る。
+- ホスト画面の client は、いま開いているホストの id を `?providerId=` でホスト単位の API のすべてに付ける（`apps/web/src/lib/host/api-path.ts` の `hostApiPath`）。付けずに 2 つ以上のホストを持つと 409 `PROVIDER_REQUIRED` で、画面は「ホストを選んでください。」と「あなたのアカウント」の一覧への導線を出す。ホストを切り替えると、体験・販売者表示・集合案内などの画面はそのホストで読み直す。
+- URL に `?providerId=` が無いときは、今までのホスト画面と同じく、名前の順で先頭のホストを開く。開いているホストは、サイドバーとスマホの切り替えで選ばれた状態で見え、画面はそのホストの id を API に明示して送る（暗黙に別のホストへ落ちることはない）。毎回ホストを選ばせる画面にはしない（ブックマークやアプリから開くたびに選ばせると手間が増えるため。どちらのホストも本人がオーナーで、API は毎回所属を確かめる）。
+- URL の `?providerId=` が開けないホストを指すときは、画面の部品は API に id を送らず「ホストを選んでください。」を出す（ホームは今までどおり、開けなかったことと代わりに表示しているホストを出す）。

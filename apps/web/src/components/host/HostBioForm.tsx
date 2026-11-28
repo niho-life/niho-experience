@@ -2,6 +2,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { consoleButtonClass } from "./host-ui";
+import { HostErrorMessage } from "./HostProviderRequired";
+import { PROVIDER_REQUIRED_MESSAGE, hostApiPath, isProviderRequired } from "@/lib/host/api-path";
 import {
   canSaveHostBio,
   draftFromState,
@@ -28,14 +30,15 @@ const AUTH_MESSAGE = "権限を確認できません。入力内容は画面か�
 const unknownMessage = (operation: HostBioUnknownOperation) => `通信結果を確認できません。${operation === "DELETE" ? "撤回できたかどうか" : "保存できたかどうか"}分からないため、入力はそのまま残しています。「再読込して現在の内容を確認」を押してください。`;
 export const HOST_BIO_CONSENT_TEXT = "ここに書いた内容は、あなたの体験ページ（日本語・英語）に公開されます。電話番号・メール・住所など、公開したくない情報は書かないでください。";
 
-type ReadResult = { kind: "ok"; load: HostBioLoad } | { kind: "auth" } | { kind: "failed" };
+type ReadResult = { kind: "ok"; load: HostBioLoad } | { kind: "auth" } | { kind: "provider-required" } | { kind: "failed" };
 
 async function readHostBio(api: string, signal?: AbortSignal): Promise<ReadResult> {
   const response = await fetch(api, { cache: "no-store", signal });
   if (response.status === 401 || response.status === 403) return { kind: "auth" };
-  if (!response.ok) return { kind: "failed" };
   let value: unknown = null;
   try { value = await response.json(); } catch { /* unreadable */ }
+  if (isProviderRequired(response.status, value)) return { kind: "provider-required" };
+  if (!response.ok) return { kind: "failed" };
   const load = parseHostBioLoad(value);
   return load ? { kind: "ok", load } : { kind: "failed" };
 }
@@ -47,9 +50,8 @@ function Counter({ id, text, locale }: { id: string; text: string; locale: "ja" 
   </p>;
 }
 
-export function HostBioForm({ providerId }: { providerId?: string }) {
-  const query = providerId ? `?providerId=${encodeURIComponent(providerId)}` : "";
-  const api = `${API}${query}`;
+export function HostBioForm({ providerId }: { providerId?: string | null }) {
+  const api = hostApiPath(API, providerId);
   const id = useId();
   const [loaded, setLoaded] = useState<HostBioLoad | null>(null);
   const [draft, setDraft] = useState<HostBioDraft>(EMPTY_DRAFT);
@@ -68,6 +70,7 @@ export function HostBioForm({ providerId }: { providerId?: string }) {
     const controller = new AbortController();
     void readHostBio(api, controller.signal).then((result) => {
       if (result.kind === "auth") { setLoaded(null); setDraft(EMPTY_DRAFT); setMessage(AUTH_MESSAGE); return; }
+      if (result.kind === "provider-required") { setMessage(PROVIDER_REQUIRED_MESSAGE); return; }
       if (result.kind === "failed") { setMessage("ホスト紹介を読み込めませんでした。時間をおいて再度お試しください。"); return; }
       setLoaded(result.load); setDraft(draftFromState(result.load.hostBio)); setMessage("");
     }).catch((caught: unknown) => {
@@ -83,6 +86,7 @@ export function HostBioForm({ providerId }: { providerId?: string }) {
     try {
       const result = await readHostBio(api);
       if (result.kind === "auth") return clearPrivateView(AUTH_MESSAGE);
+      if (result.kind === "provider-required") return setMessage(PROVIDER_REQUIRED_MESSAGE);
       if (result.kind === "failed") return setMessage("現在の内容を読み込めませんでした。時間をおいて再度お試しください。");
       const state = result.load.hostBio;
       setLoaded(result.load); setConsented(false); setUnknownResult(null);
@@ -112,6 +116,7 @@ export function HostBioForm({ providerId }: { providerId?: string }) {
       const response = await fetch(api, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       let value: unknown = null;
       try { value = await response.json(); } catch { /* An unreadable body is an unknown result. */ }
+      if (isProviderRequired(response.status, value)) { setMessage(PROVIDER_REQUIRED_MESSAGE); return; }
       const outcome = hostBioMutationOutcome(response.status, value);
       if (outcome.kind === "AUTH_REJECTED") return clearPrivateView(AUTH_MESSAGE);
       if (outcome.kind === "CONFIRMED") {
@@ -134,9 +139,10 @@ export function HostBioForm({ providerId }: { providerId?: string }) {
     setBusy("translate");
     setMessage("");
     try {
-      const response = await fetch(`${API}/translation${query}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ bioJa: draft.bioJa }) });
+      const response = await fetch(hostApiPath(`${API}/translation`, providerId), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ bioJa: draft.bioJa }) });
       let value: unknown = null;
       try { value = await response.json(); } catch { /* treated as a failure */ }
+      if (isProviderRequired(response.status, value)) { setMessage(PROVIDER_REQUIRED_MESSAGE); return; }
       const outcome = hostBioTranslationOutcome(response.status, value);
       if (outcome.kind === "AUTH_REJECTED") return clearPrivateView(AUTH_MESSAGE);
       if (outcome.kind === "FAILED") return setMessage("英語案を作れませんでした。時間をおいて再度お試しいただくか、英語を直接入力してください。");
@@ -149,7 +155,7 @@ export function HostBioForm({ providerId }: { providerId?: string }) {
 
   if (!loaded) {
     return <div className="rounded-2xl border border-line bg-canvas p-4 sm:p-5">
-      <p role="status">{message}</p>
+      <p role="status"><HostErrorMessage text={message} /></p>
       <button type="button" className={`${consoleButtonClass()} mt-4`} onClick={() => window.location.reload()}>再読込</button>
     </div>;
   }
@@ -220,7 +226,7 @@ export function HostBioForm({ providerId }: { providerId?: string }) {
           : <button type="button" className={consoleButtonClass("primary", "lg", "w-full sm:w-auto")} disabled={!saveAllowed} onClick={() => void mutate("PUT")}>{busy === "save" ? "保存中…" : "保存"}</button>}
         {unknownResult === null ? <button type="button" className={consoleButtonClass("secondary", "md", "self-center")} disabled={locked} onClick={() => void reload("manual")}>保存済みの内容に戻す</button> : null}
       </div>
-      {message ? <p role="status" className="mt-4 font-bold">{message}</p> : null}
+      {message ? <p role="status" className="mt-4 font-bold"><HostErrorMessage text={message} /></p> : null}
 
       {state.version > 0 ? <div className="mt-5 border-t border-line pt-4">
         <p className="text-sm text-ink-soft">撤回すると、ホスト紹介は体験ページから表示されなくなり、保存した文章も削除されます。</p>

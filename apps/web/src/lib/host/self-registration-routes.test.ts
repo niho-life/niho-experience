@@ -388,12 +388,17 @@ describe("POST /host/api/registration", () => {
     expect((await errorOf(await post(FORM, { cookie: `${ACCOUNT_SESSION_COOKIE}=${SESSION_TOKEN}` }))).code).toBe("ACCOUNT_SUSPENDED");
   });
 
-  it("does not add a second host for someone who already owns one (stage 2c)", async () => {
+  it("adds a second and a third host for someone who already owns hosts, and leaves the limit to the store (#709)", async () => {
     state.accounts.readSession.mockResolvedValue(sessionRow());
     state.accounts.listProviderMemberships.mockResolvedValue([{ providerId: "prv_mine", displayName: "自分のホスト", memberRole: "OWNER", legacyProviderId: null }]);
     const response = await post(FORM, { cookie: `${ACCOUNT_SESSION_COOKIE}=${SESSION_TOKEN}` });
-    expect([response.status, (await errorOf(response)).code]).toEqual([409, "ALREADY_REGISTERED"]);
-    expect(state.identities.registerHostSelfForAccount).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, redirect: `/host/home?providerId=${PROVIDER}` });
+    expect(state.identities.registerHostSelfForAccount).toHaveBeenCalledWith(expect.objectContaining({ hostAccountId: HOST }));
+    // The web does not count: the store's answer is the one that stops a fourth.
+    state.identities.registerHostSelfForAccount.mockResolvedValueOnce({ kind: "owner-limit-reached" });
+    const fourth = await post(FORM, { cookie: `${ACCOUNT_SESSION_COOKIE}=${SESSION_TOKEN}` });
+    expect([fourth.status, await errorOf(fourth)]).toEqual([409, { code: "OWNER_LIMIT_REACHED", limit: 3 }]);
   });
 });
 
@@ -424,13 +429,13 @@ describe("/host/start", () => {
     expect(await target(() => HostStartPage())).toBe("REDIRECT /host/auth/login?intent=register");
   });
 
-  it("adds a host to the account of a writer or a member, and sends an owner home", async () => {
+  it("adds a host to the signed-in account, whether or not it owns hosts already (#709)", async () => {
     state.cookies[ACCOUNT_SESSION_COOKIE] = SESSION_TOKEN;
     state.accounts.readSession.mockResolvedValue(sessionRow());
     const props = find((await HostStartPage()) as Tree, "HostSelfRegistrationForm");
     expect(props).toMatchObject({ mode: "account", nihoDisplayName: null });
     state.accounts.listProviderMemberships.mockResolvedValue([{ providerId: "prv_mine", displayName: "自分のホスト", memberRole: "OWNER", legacyProviderId: null }]);
-    expect(await target(() => HostStartPage())).toBe("REDIRECT /host/home");
+    expect(find((await HostStartPage()) as Tree, "HostSelfRegistrationForm")).toMatchObject({ mode: "account", nihoDisplayName: null });
   });
 });
 

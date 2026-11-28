@@ -209,6 +209,11 @@ export async function publicationHostBoundary(
       return { ok: false, response: error("SELLER_IDENTITY_MISMATCH", 403) };
     }
 
+    const actor: HostActor = { providerId: provider.providerId, nihoUserId: identity.data.nihoUserId };
+    // An operation that needs no sale (the host bio, #709) is membership only, as on the Experience account path: no
+    // payout account lookup at NIHO, so an unreachable or unready account never blocks it.
+    if (sales === "none") return { ok: true, value: { actor, role: "OWNER", provider: null, readiness: null } };
+
     const connect = await client.getLegacyConnectAccount(provider.legacyProviderId);
     if (!connect.ok) {
       if (connect.kind === "error" && connect.status === 401) return { ok: false, response: endedSession() };
@@ -235,8 +240,7 @@ export async function publicationHostBoundary(
       observedAtUtc: new Date().toISOString(),
       validUntilUtc: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     };
-    const actor: HostActor = { providerId: provider.providerId, nihoUserId: identity.data.nihoUserId };
-    // The NIHO path always resolves the whole sale side, whatever the operation needs (behaviour unchanged).
+    // Every other operation on the NIHO path resolves the whole sale side (behaviour unchanged).
     return { ok: true, value: { actor, role: "OWNER", provider, readiness } };
   } catch {
     return { ok: false, response: error("READINESS_UNAVAILABLE", 502) };

@@ -96,6 +96,17 @@ describe("Experience publication NIHO contract v1 boundary", () => {
     });
   });
 
+  it("answers a sale-free operation (the host bio) on the NIHO path with membership only, never asking NIHO for the payout account", async () => {
+    mocks.getConnect.mockRejectedValue(new Error("NIHO payout account lookup must not run"));
+    const result = await publicationHostBoundary("OWNER", { sales: "none" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(mocks.getConnect).not.toHaveBeenCalled();
+    expect(result.value).toMatchObject({ actor: { providerId: "experience-provider-synthetic", nihoUserId: "niho-user-synthetic" }, role: "OWNER", provider: null, readiness: null });
+    // A provider the NIHO person is not the OWNER of is still refused.
+    expect((await publicationHostBoundary("OWNER", { sales: "none", providerId: "another-provider" })).ok).toBe(false);
+  });
+
   it("never substitutes the seller account reference for the current identity", async () => {
     mocks.ownerProfile.mockResolvedValue({ kind: "ready", profile: { ...profile, sellerNihoAccountRef: "some-other-niho-user" } });
     const result = await publicationHostBoundary("OWNER");

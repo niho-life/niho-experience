@@ -16,6 +16,7 @@ import { LISTING_STATUS } from "@/host/status";
 import { withProvider } from "@/lib/host/routes";
 import { providerPagesEnabled } from "@/lib/host/provider-pages-server";
 import { config } from "@/lib/config";
+import { screenProviderId } from "@/lib/host/api-path";
 
 export const metadata: Metadata = { title: "体験" };
 
@@ -36,7 +37,7 @@ export default async function HostExperiencesPage({ searchParams }: { searchPara
   const { provider, linkProviderId } = context;
   if (!provider) return <HostRegisterPrompt title="体験" />;
   if (config.experienceHostPublicationApiEnabled) {
-    return <HostPublicationWorkspace bookingGuideHref={withProvider("/host/booking-guides", linkProviderId)} publicSiteOrigin={new URL(config.siteUrl).origin} embedEnabled={config.embedEnabled} />;
+    return <HostPublicationWorkspace key={provider.id} providerId={screenProviderId(context)} bookingGuideHref={withProvider("/host/booking-guides", linkProviderId)} publicSiteOrigin={new URL(config.siteUrl).origin} embedEnabled={config.embedEnabled} />;
   }
   if (providerPagesEnabled()) {
     return <HostLiveExperiences providerId={provider.id} linkProviderId={linkProviderId} ratings={await loadExperienceRatings(provider)} bookingGuideHref={config.experienceHostPublicationApiEnabled ? withProvider("/host/booking-guides", linkProviderId) : undefined} />;

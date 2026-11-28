@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { HostSubHeader } from "./HostSubHeader";
 import { HOST_SURFACE, consoleButtonClass } from "./host-ui";
 import { HostPageBody, PageHead } from "./ui";
+import { HostErrorMessage } from "./HostProviderRequired";
+import { PROVIDER_REQUIRED_MESSAGE, hostApiPath, isProviderRequired } from "@/lib/host/api-path";
 
 type Media = { id: string; previewUrl: string; altText: string };
 type Product = { id: string; status: string; draft: { publicTitle: string; slug: string }; media: Media[] };
@@ -30,8 +32,14 @@ function guideMessage(status: number): string {
   return "読み込みまたは保存に失敗しました。時間をおいてもう一度お試しください。";
 }
 
+/** The words for a refused call: 「ホストを選んでください」 when the host was not named (409 PROVIDER_REQUIRED), else by status. */
+async function failureMessage(response: Response): Promise<string> {
+  const body: unknown = await response.clone().json().catch(() => null);
+  return isProviderRequired(response.status, body) ? PROVIDER_REQUIRED_MESSAGE : guideMessage(response.status);
+}
+
 /** Private booking logistics have their own editor and version; they never change sale terms or a publication. */
-export function HostBookingGuides({ backHref, owner }: { backHref: string; owner: boolean }) {
+export function HostBookingGuides({ backHref, owner, providerId = null }: { backHref: string; owner: boolean; providerId?: string | null }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [productId, setProductId] = useState("");
   const [saved, setSaved] = useState<VersionedGuide | null>(null);
@@ -46,9 +54,9 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
     if (signal.aborted) return;
     setLoading(true); setError("");
     try {
-      const response = await fetch("/host/api/products", { cache: "no-store", signal });
+      const response = await fetch(hostApiPath("/host/api/products", providerId), { cache: "no-store", signal });
       if (signal.aborted) return;
-      if (!response.ok) throw new Error(guideMessage(response.status));
+      if (!response.ok) throw new Error(await failureMessage(response));
       const value = await response.json() as { products?: Product[] };
       if (signal.aborted) return;
       if (!Array.isArray(value.products)) throw new Error(guideMessage(500));
@@ -56,16 +64,16 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
       setProductId((current) => value.products!.some((item) => item.id === current) ? current : value.products![0]?.id ?? "");
     } catch (reason) { if (!signal.aborted) setError(reason instanceof Error ? reason.message : guideMessage(500)); }
     finally { if (!signal.aborted) setLoading(false); }
-  }, []);
+  }, [providerId]);
 
   const loadGuide = useCallback(async (id: string, signal: AbortSignal) => {
     if (signal.aborted) return;
     if (!id) { setSaved(null); setDraft(BLANK); return; }
     setLoading(true); setError(""); setNotice("");
     try {
-      const response = await fetch(`/host/api/products/${encodeURIComponent(id)}/booking-guide`, { cache: "no-store", signal });
+      const response = await fetch(hostApiPath(`/host/api/products/${encodeURIComponent(id)}/booking-guide`, providerId), { cache: "no-store", signal });
       if (signal.aborted) return;
-      if (!response.ok) throw new Error(guideMessage(response.status));
+      if (!response.ok) throw new Error(await failureMessage(response));
       const value = await response.json() as { bookingGuide: VersionedGuide };
       if (signal.aborted) return;
       if (!value.bookingGuide) throw new Error(guideMessage(500));
@@ -75,7 +83,7 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
       if (!signal.aborted) { setSaved(null); setError(reason instanceof Error ? reason.message : guideMessage(500)); }
     }
     finally { if (!signal.aborted) setLoading(false); }
-  }, [products]);
+  }, [products, providerId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -95,11 +103,11 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
     setBusy(true); setError(""); setNotice("");
     const guide: Guide = { ...draft, mapUrl: draft.mapUrl?.trim() || null, itemsToBring: draft.itemsToBring.map((item) => item.trim()).filter(Boolean) };
     try {
-      const response = await fetch(`/host/api/products/${encodeURIComponent(product.id)}/booking-guide`, {
+      const response = await fetch(hostApiPath(`/host/api/products/${encodeURIComponent(product.id)}/booking-guide`, providerId), {
         method: "PUT", headers: { "content-type": "application/json" },
         body: JSON.stringify({ expectedVersion: saved.version, guide }),
       });
-      if (!response.ok) throw new Error(guideMessage(response.status));
+      if (!response.ok) throw new Error(await failureMessage(response));
       const value = await response.json() as { bookingGuide: VersionedGuide };
       setSaved(value.bookingGuide); setDraft(value.bookingGuide.guide ?? guide); setNotice("集合案内を保存しました。既存の予約には案内のスナップショットを作成し、今後の予約にも使います。");
     } catch (reason) { setError(reason instanceof Error ? reason.message : guideMessage(500)); }
@@ -115,7 +123,7 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
       <section className={`${HOST_SURFACE} p-4 md:p-6`}>
         {loading && !products.length ? <p role="status">読み込み中…</p> : null}
         {products.length ? <label className="block max-w-xl text-sm font-bold">体験<select className={field} value={productId} onChange={(event) => setProductId(event.target.value)}>{products.map((item) => <option key={item.id} value={item.id}>{item.draft.publicTitle || item.draft.slug}</option>)}</select></label> : null}
-        {error ? <p role="alert" className="mt-4 text-sm text-danger">{error}</p> : null}
+        {error ? <p role="alert" className="mt-4 text-sm text-danger"><HostErrorMessage text={error} /></p> : null}
         {notice ? <p role="status" className="mt-4 text-sm font-bold text-moss">{notice}</p> : null}
         {!loading && !products.length && !error ? <p>Experienceの体験がありません。</p> : null}
         {product && saved ? <div className="mt-6 grid max-w-2xl gap-4">
@@ -126,7 +134,7 @@ export function HostBookingGuides({ backHref, owner }: { backHref: string; owner
           <label className="text-sm font-bold">地図URL<input className={field} type="url" maxLength={2048} value={draft.mapUrl ?? ""} onChange={(event) => change("mapUrl", event.target.value || null)} /></label>
           <label className="text-sm font-bold">集合場所の写真<select className={field} value={draft.photoAssetId ?? ""} onChange={(event) => change("photoAssetId", event.target.value || null)}><option value="">写真を選んでください</option>{product.media.map((photo) => <option key={photo.id} value={photo.id}>{photo.altText || "写真"}</option>)}</select></label>
           {!product.media.length ? <p className="text-sm text-ink-soft">選べる権利確認済みの写真がありません。体験編集から写真を登録してから設定してください。</p> : null}
-          {draft.photoAssetId ? <Image src={`/host/api/products/${encodeURIComponent(product.id)}/media/${encodeURIComponent(draft.photoAssetId)}`} alt="選択中の集合場所の写真" width={1200} height={800} unoptimized className="max-h-72 w-fit max-w-full rounded-xl object-cover" referrerPolicy="no-referrer" /> : null}
+          {draft.photoAssetId ? <Image src={hostApiPath(`/host/api/products/${encodeURIComponent(product.id)}/media/${encodeURIComponent(draft.photoAssetId)}`, providerId)} alt="選択中の集合場所の写真" width={1200} height={800} unoptimized className="max-h-72 w-fit max-w-full rounded-xl object-cover" referrerPolicy="no-referrer" /> : null}
           <label className="text-sm font-bold">持ち物（1行に1つ）<textarea className={field} rows={4} maxLength={4000} value={draft.itemsToBring.join("\n")} onChange={(event) => change("itemsToBring", event.target.value.split("\n"))} /></label>
           <label className="text-sm font-bold">雨天時の案内<textarea className={field} rows={3} maxLength={2000} value={draft.weatherPlan} onChange={(event) => change("weatherPlan", event.target.value)} /></label>
           {!owner ? <p className="text-sm text-ink-soft">閲覧のみです。保存はオーナーが行えます。</p> : null}

@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { EMBED_JAPANESE_ONLY, EMBED_NOT_PUBLISHED, EMBED_PAGE_TITLE, embedIntro } from "@/host/embed-copy";
 import { providerBookingLinkAvailable } from "@/lib/provider-booking-link";
+import { hostApiPath, isProviderRequired } from "@/lib/host/api-path";
 import { HostEmbedCode } from "./HostEmbedCode";
+import { HostProviderRequiredNotice } from "./HostProviderRequired";
 import { HostSubHeader } from "./HostSubHeader";
 import { HOST_SURFACE, consoleButtonClass } from "./host-ui";
 import { HostPageBody, SubPageHead } from "./ui";
@@ -42,7 +44,7 @@ type EmbedProduct = {
   readonly draft: { readonly slug: string; readonly publicTitle: string; readonly content: Record<string, unknown> };
 };
 
-type Load = { readonly state: "loading" } | { readonly state: "failed" } | { readonly state: "missing" } | { readonly state: "ready"; readonly product: EmbedProduct };
+type Load = { readonly state: "loading" } | { readonly state: "failed" } | { readonly state: "provider-required" } | { readonly state: "missing" } | { readonly state: "ready"; readonly product: EmbedProduct };
 
 function isEmbedProduct(value: unknown): value is EmbedProduct {
   if (typeof value !== "object" || value === null) return false;
@@ -53,20 +55,21 @@ function isEmbedProduct(value: unknown): value is EmbedProduct {
 }
 
 /** http mode: the published product's code, or why there is none. */
-export function HostEmbedWorkspace({ productId, siteOrigin, backHref }: { productId: string; siteOrigin: string; backHref: string }) {
+export function HostEmbedWorkspace({ productId, siteOrigin, backHref, providerId = null }: { productId: string; siteOrigin: string; backHref: string; providerId?: string | null }) {
   const [load, setLoad] = useState<Load>({ state: "loading" });
 
   const read = useCallback(async (): Promise<Load> => {
     try {
-      const response = await fetch(`/host/api/products/${encodeURIComponent(productId)}`, { cache: "no-store", credentials: "same-origin" });
+      const response = await fetch(hostApiPath(`/host/api/products/${encodeURIComponent(productId)}`, providerId), { cache: "no-store", credentials: "same-origin" });
       if (response.status === 404) return { state: "missing" };
       const body: unknown = await response.json().catch(() => null);
+      if (isProviderRequired(response.status, body)) return { state: "provider-required" };
       const product = typeof body === "object" && body !== null ? (body as { product?: unknown }).product : null;
       return response.ok && isEmbedProduct(product) ? { state: "ready", product } : { state: "failed" };
     } catch {
       return { state: "failed" };
     }
-  }, [productId]);
+  }, [productId, providerId]);
 
   useEffect(() => {
     let active = true;
@@ -83,6 +86,7 @@ export function HostEmbedWorkspace({ productId, siteOrigin, backHref }: { produc
     <HostEmbedPage backHref={backHref}>
       {load.state === "loading" ? <p role="status" className="text-muted">読み込み中…</p> : null}
       {load.state === "failed" ? <HostEmbedNotice action={<button type="button" onClick={retry} className={consoleButtonClass("secondary", "sm")}>再読み込み</button>}><span role="alert">読み込めませんでした。</span></HostEmbedNotice> : null}
+      {load.state === "provider-required" ? <HostProviderRequiredNotice /> : null}
       {load.state === "missing" ? <HostEmbedNotice>この体験は見つかりません。</HostEmbedNotice> : null}
       {load.state === "ready" ? <EmbedFor product={load.product} siteOrigin={siteOrigin} /> : null}
     </HostEmbedPage>

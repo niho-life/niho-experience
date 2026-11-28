@@ -190,6 +190,7 @@ export default async function HostHomePage({ searchParams }: { searchParams: Pro
           key={`progress-${provider.id}`}
           hostName={provider.displayName}
           linkProviderId={linkProviderId}
+          providerId={provider.id}
           initialProducts={isHostMock() ? previewProgressProducts(experiences) : undefined}
         />
       ) : null}

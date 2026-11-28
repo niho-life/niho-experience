@@ -6,7 +6,7 @@ import { HostSelfRegistrationForm } from "@/components/host/HostSelfRegistration
 import { HOST_HEADING } from "@/components/host/host-ui";
 import { config } from "@/lib/config";
 import { HOST_TERMS_VERSION } from "@/lib/host/host-terms";
-import { HOST_HOME_PATH, HOST_REGISTER_LOGIN_PATH } from "@/lib/host/routes";
+import { HOST_REGISTER_LOGIN_PATH } from "@/lib/host/routes";
 import { readRegistrationSource } from "@/lib/host/self-registration-server";
 import { requireHostConsole } from "@/lib/host/server";
 import { ACCOUNT_SESSION_COOKIE, REGISTRATION_COOKIE } from "@/lib/host/session";
@@ -29,8 +29,8 @@ function Step({ state, number, children }: { state: "done" | "now" | "next"; num
  * screens are: one centred column, the app's tile, a heading, the steps, one rounded card. A 404 without the flag.
  *
  * Who is registering is decided on the server (self-registration-server.ts): the sealed 30-minute cookie NIHO's return left (the
- * form starts from NIHO's name), or the signed-in account of a writer or a member (a host is added to it); someone who owns a host
- * goes to the console's home; anyone else signs in first. Nothing is created until the form is sent.
+ * form starts from NIHO's name), or the signed-in account (a host is added to it, up to the store's limit of owned hosts); anyone else signs
+ * in first. Nothing is created until the form is sent.
  */
 export default async function HostStartPage() {
   requireHostConsole();
@@ -38,7 +38,6 @@ export default async function HostStartPage() {
   const jar = await cookies();
   const source = await readRegistrationSource({ registration: jar.get(REGISTRATION_COOKIE)?.value, session: jar.get(ACCOUNT_SESSION_COOKIE)?.value });
   if (!source) redirect(HOST_REGISTER_LOGIN_PATH);
-  if (source.kind === "owner") redirect(HOST_HOME_PATH);
   return (
     <div className="flex min-h-dvh flex-col bg-sand">
       <HostEntranceHeader />
