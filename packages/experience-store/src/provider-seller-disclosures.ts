@@ -155,7 +155,7 @@ async function activePublicationsMatchSeller(client: PoolClient, actor: HostActo
     `SELECT 1
        FROM experience_product_publication_states state
        JOIN experience_product_publications publication
-         ON publication.id=state.current_publication_id
+         ON publication.id=state.booking_publication_id
         AND publication.provider_id=state.provider_id AND publication.product_id=state.product_id
        ${CURRENT_SALES_PLAN}
       WHERE state.provider_id=$1 AND state.self_stopped_at IS NULL AND state.operations_suspended_at IS NULL
@@ -302,7 +302,7 @@ export class ProviderSellerDisclosureRepository {
       `SELECT disclosure.*
          FROM experience_product_publication_states state
          JOIN experience_product_publications publication
-           ON publication.id=state.current_publication_id
+           ON publication.id=state.booking_publication_id
           AND publication.provider_id=state.provider_id AND publication.product_id=state.product_id
          ${CURRENT_SALES_PLAN}
          JOIN experience_host_seller_profiles profile ON profile.provider_id=publication.provider_id

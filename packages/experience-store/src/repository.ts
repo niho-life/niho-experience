@@ -35,6 +35,7 @@ import { enqueueNewBookingNotification } from "./host-notification-outbox.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import { enqueueManagedBookingConfirmed } from "./managed-booking-mail.ts";
 import { calendarMembershipRole, effectiveCalendarRole, listCalendarProductsForActor, requireProductCalendarAccess } from "./product-calendar-authorization.ts";
+import { assertStatusFollowsBooking } from "./booking-status.ts";
 import {
   evaluateStoredInventory,
   lockGoogleCalendarUsage,
@@ -473,6 +474,7 @@ export class ExperienceStore {
       );
       const row = result.rows[0];
       if (row === undefined) throw new StoreConflictError("Product version mismatch or product not found in this provider.");
+      await assertStatusFollowsBooking(client, actor.providerId, input.id, input.status);
       return productFromRow(row);
     });
   }

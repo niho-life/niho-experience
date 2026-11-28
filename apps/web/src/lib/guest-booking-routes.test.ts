@@ -125,7 +125,7 @@ beforeEach(() => {
   };
   state.publications = {
     claimsSlug: vi.fn(async () => false),
-    getPublicBySlug: vi.fn(async () => ({ slug: "sample-tea" })),
+    getPublicBySlug: vi.fn(async () => ({ slug: "sample-tea", bookingAvailable: true })),
   };
   state.stripeKeys = [];
   state.stripeAccountRetrieve = vi.fn(async (id: unknown) => ({
@@ -255,6 +255,15 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     expect(state.stripeCreate).not.toHaveBeenCalled();
     expect(state.stripeRetrieve).not.toHaveBeenCalled();
     expect(state.repository?.attachCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("is closed to a public page whose bookings are not open yet (#705): no checkout, no hold", async () => {
+    state.config = { ...state.config, experiencePublicationsEnabled: true };
+    state.publications!.getPublicBySlug!.mockResolvedValue({ slug: "sample-tea", sellerDisplayName: null, bookingAvailable: false });
+    const response = await checkout(post(CHECKOUT), slugParams());
+    expect(response.status).toBe(404);
+    expect(state.repository?.startGuestBooking).not.toHaveBeenCalled();
+    expect(state.stripeCreate).not.toHaveBeenCalled();
   });
 
   it("requires an active Experience publication and records Japanese guests on the shared checkout path", async () => {

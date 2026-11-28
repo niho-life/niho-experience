@@ -44,7 +44,13 @@ export interface PublicExperiencePublication {
   readonly content: PublicExperiencePublicationContent;
   readonly currency: string;
   readonly unitAmount: number;
-  readonly sellerDisplayName: string;
+  /**
+   * The legal seller, shown only while bookings are open on this version (#705). null for a page whose bookings are not
+   * open (a page can be public before its host has a payout account, and again after bookings are stopped).
+   */
+  readonly sellerDisplayName: string | null;
+  /** true only while bookings are open on this exact version; false is a normal "not open yet" page, never an error. */
+  readonly bookingAvailable: boolean;
   /** Admin-confirmed public identity of the person or business delivering the experience. */
   readonly providerPublicName?: string | null;
   /** The provider's English public name (#587); the English pages show it in place of `providerPublicName` when there is one. */
@@ -399,7 +405,9 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   let manuscript = projectPublicExperiencePublicationManuscript(source);
   const currency = typeof row.currency === "string" && /^[A-Z]{3}$/.test(row.currency) ? row.currency : null;
   const unitAmount = safeInteger(row.unit_amount);
-  const sellerDisplayName = text(row.seller_display_name, false);
+  const bookingAvailable = row.booking_available === true;
+  // A page without bookings has no seller; an open booking without one is a corrupt row and is not shown.
+  const sellerDisplayName = row.seller_display_name === null || row.seller_display_name === undefined ? null : text(row.seller_display_name, false);
   const providerPublicName = text(row.provider_public_name, false);
   const providerPublicNameEn = text(row.provider_public_name_en, false);
   const providerRegisteredName = text(row.provider_registered_name, false);
@@ -409,7 +417,7 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   const providerMedia = projectProviderMedia(row.provider_media);
   const publishedAtUtc = instant(row.published_at);
   if (slug === null || publicTitle === null || manuscript === null || currency === null || unitAmount === null
-      || sellerDisplayName === null || providerKind === undefined
+      || (bookingAvailable && sellerDisplayName === null) || providerKind === undefined
       || media === null || providerMedia === null || publishedAtUtc === null) return null;
   manuscript = remapPhotoReferences(manuscript, source, media.galleryPositionBySourcePosition);
   if (!manuscript) return null;
@@ -417,7 +425,7 @@ export function projectPublicExperiencePublication(row: UnknownRecord): PublicEx
   // 日本語のみの商品は、日本語の原稿が読めなければ公開として成立しない（英語で補わない）。
   if (japaneseOnly && !japanese) return null;
   return {
-    slug, publicTitle, ...manuscript, currency, unitAmount, sellerDisplayName, providerPublicName, providerPublicNameEn, providerKind, providerRegisteredName,
+    slug, publicTitle, ...manuscript, currency, unitAmount, sellerDisplayName, bookingAvailable, providerPublicName, providerPublicNameEn, providerKind, providerRegisteredName,
     photos: media.photos, providerPhoto: providerMedia.providerPhoto, businessLogo: providerMedia.businessLogo, japanese, japaneseOnly, publishedAtUtc,
   };
 }

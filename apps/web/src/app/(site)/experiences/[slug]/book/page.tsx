@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { BookingSummaryHeader } from "@/components/BookingSummaryHeader";
 import { BookingPageContent } from "@/components/pages/BookingPageContent";
 import { SitePublicationBooking } from "@/components/pages/SitePublicationBooking";
@@ -18,6 +18,8 @@ type Props = { params: Promise<{ slug: string }>; searchParams: Promise<SearchPa
 
 export default async function BookPage(props: Props) {
   const local = await getSitePublicExperience((await props.params).slug);
+  // A page whose bookings are not open yet has no booking step (#705): back to the page, which says so.
+  if (local?.kind === "published" && !local.item.publication.bookingAvailable) redirect(`/experiences/${encodeURIComponent(local.item.publication.slug)}`);
   if (local?.kind === "published") {
     const initialSelection = siteBookingSelectionFromSearch(await props.searchParams);
     const classification = await loadClassificationOf(local.item.publication.slug);

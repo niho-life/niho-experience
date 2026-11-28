@@ -129,7 +129,8 @@ function injected(fetchImpl: typeof fetch) {
 // Each case migrates a schema and runs real database round trips: about 2 s, and 5 s on a loaded CI runner.
 describe.skipIf(!databaseUrl)("Google delivery runtime/repository/helper integration", { timeout: 30_000 }, () => {
   it.each(["publication", "capability"] as const)("fences %s changes between preflight and the journal transaction", async (kind) => {
-    const value = await fixture();
+    // A product that stops taking bookings may still have its slots closed (#705), so the publication fence is about an OPEN.
+    const value = await fixture(kind === "publication" ? "OPEN" : "CLOSED");
     let requests = 0;
     const originalContext = value.runtime.googleDeliveryContext.bind(value.runtime);
     const contextSpy = vi.spyOn(value.runtime, "googleDeliveryContext").mockImplementationOnce(async (...args) => {

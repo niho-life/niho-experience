@@ -1405,7 +1405,7 @@ export class ChannelRuntime {
       `SELECT l.*,a.site,a.external_account_id,a.active AS account_active,a.delegated_until,a.revoked_at,a.version AS account_version,a.quarantined_at
          FROM channel_listings l JOIN channel_external_accounts a ON a.id=l.account_id
          JOIN experience_products p ON p.provider_id=l.provider_id AND p.id=l.product_id
-        WHERE ${listingWhere} AND l.active=true AND p.status='PUBLISHED' ORDER BY l.id COLLATE "C"`, [...params],
+        WHERE ${listingWhere} AND l.active=true AND p.status<>'ARCHIVED' ORDER BY l.id COLLATE "C"`, [...params],
     );
     let occurrenceCount = 0;
     let jobCount = 0;
@@ -1439,6 +1439,17 @@ export class ChannelRuntime {
           if (occurrenceCount > maxOccurrences) throw new StoreConflictError("Channel reconciliation exceeded its occurrence bound.");
           const availability = await this.#liveAvailability(client, text(listing, "provider_id"), text(listing, "product_id"), occurrence, this.#nowIso());
           const desiredState: ChannelDesiredState = availability.bookable ? "OPEN" : "CLOSED";
+          if (availability.productClosed) {
+            // A product that takes no bookings only gets slots CLOSED that were desired OPEN (or are being closed); it never
+            // creates desired rows for the many occurrences it never opened.
+            const known = await client.query("SELECT 1 FROM channel_desired_states WHERE listing_id=$1 AND occurrence_id=$2", [listing.id, occurrence.id]);
+            if (known.rows[0] === undefined) {
+              // The skip still used one slot of this page, so the cursor moves past it; otherwise a page spent only on skips
+              // returns no continuation and the occurrences after it (an OPEN slot to close) are never reached.
+              lastCursor = { listingId, ruleId: storedRule.rule.id, occurrenceId: occurrence.id };
+              continue;
+            }
+          }
           const desired = await this.#upsertDesired(client, listing, occurrence, desiredState, availability.reason);
           jobCount += await this.#enqueueDesiredJob(client, listing, occurrence, desiredState, desired.desiredVersion);
           lastCursor = { listingId, ruleId: storedRule.rule.id, occurrenceId: occurrence.id };
@@ -1448,8 +1459,25 @@ export class ChannelRuntime {
     return { occurrences: occurrenceCount, jobs: jobCount, continuation: null };
   }
 
+  /**
+   * The inventory's answer, unless the product is not taking bookings (#705): a DRAFT product (bookings stopped, or a page with
+   * no bookings), or a listing that is self-stopped, suspended or waiting for the owner's restart, is never bookable, so every
+   * channel slot of it is desired CLOSED and an OPEN can never be queued, claimed or accepted. A product with no publication
+   * state (a legacy site sale) is judged by its status alone, as before.
+   */
   async #liveAvailability(client: PoolClient, providerId: string, productId: string, occurrence: Occurrence, nowUtc: string) {
-    return (await evaluateStoredInventory(client, providerId, productId, occurrence, nowUtc, 1)).availability;
+    const availability = (await evaluateStoredInventory(client, providerId, productId, occurrence, nowUtc, 1)).availability;
+    const open = await client.query<{ open: boolean }>(
+      `SELECT (p.status='PUBLISHED' AND NOT EXISTS (
+                SELECT 1 FROM experience_product_publication_states s
+                 WHERE s.provider_id=p.provider_id AND s.product_id=p.id
+                   AND (s.booking_publication_id IS NULL OR s.self_stopped_at IS NOT NULL
+                     OR s.operations_suspended_at IS NOT NULL OR s.owner_resume_required))) AS open
+         FROM experience_products p WHERE p.provider_id=$1 AND p.id=$2`,
+      [providerId, productId],
+    );
+    if (open.rows[0]?.open === true) return { ...availability, productClosed: false };
+    return { ...availability, bookable: false, availableSeats: 0, reason: "MANUALLY_CLOSED" as const, productClosed: true };
   }
 
   async #finishGooglePropagationWait(
@@ -1908,7 +1936,9 @@ export class ChannelRuntime {
            -- MANUAL_HANDLING: staff own the external profile, so not even an OBSERVE may run until stop-confirmed recovery.
            AND (a.quarantined_at IS NULL OR (j.purpose='AVAILABILITY' AND j.action='OBSERVE'
              AND j.google_propagation_delivery_id IS NULL AND a.quarantine_reason<>'MANUAL_HANDLING'))
-           AND a.version=j.account_version AND l.active=true AND l.mapping_version=j.mapping_version AND p.status='PUBLISHED'
+           AND a.version=j.account_version AND l.active=true AND l.mapping_version=j.mapping_version
+           -- A product that takes no bookings (DRAFT) may still have its slots closed, never opened or read.
+           AND (p.status='PUBLISHED' OR (j.action='SET_CLOSED' AND j.purpose IN ('AVAILABILITY','SLOT_RETIREMENT')))
            AND ((j.purpose IN ('AVAILABILITY','RESERVATION_WINDOW')
                AND d.mapping_version=j.mapping_version AND d.source_start_at=j.source_start_at AND d.source_end_at=j.source_end_at
                AND ((j.purpose='AVAILABILITY' AND d.desired_version=j.desired_version
@@ -2673,10 +2703,15 @@ export class ChannelRuntime {
         : job.action === "ENSURE_OCCURRENCE" ? state?.can_create === true && state.can_open === true && state.connection_mode === "BROWSER" : state?.can_observe;
       if (!state || state.account_active !== true || state.revoked_at !== null
         || (state.delegated_until !== null && isoValue(state, "delegated_until") <= nowUtc) || state.listing_active !== true || capability !== true
-        || state.product_status !== "PUBLISHED" || !this.#adapterSupports(state, text(job, "action") as ChannelAction)
+        || !this.#adapterSupports(state, text(job, "action") as ChannelAction)
         || (state.quarantined_at !== null && job.action !== "OBSERVE")) {
         await this.#quarantine(client, text(job, "account_id"), "PREFLIGHT_AUTHORITY_STALE");
         return { conflict: "Job authority is stale; the account remains locked." };
+      }
+      // A product that stopped taking bookings (#705) is like availability that changed: the lease is refused (an OPEN
+      // never runs, only a CLOSE does) but the account is not quarantined, so the close jobs can follow the stopped result.
+      if (state.product_status !== "PUBLISHED" && job.action !== "SET_CLOSED") {
+        return { conflict: "The product no longer takes bookings; the old lease remains locked until stopped." };
       }
       if (integer(state, "account_version") !== integer(job, "account_version")
         || integer(state, "mapping_version") !== integer(job, "mapping_version")
@@ -2745,7 +2780,7 @@ export class ChannelRuntime {
     const state = current.rows[0];
     if (!state || state.account_active !== true || state.revoked_at !== null
       || (state.delegated_until !== null && isoValue(state, "delegated_until") <= nowUtc) || state.listing_active !== true
-      || state.can_close !== true || state.product_status !== "PUBLISHED" || !this.#adapterSupports(state, "SET_CLOSED")
+      || state.can_close !== true || !this.#adapterSupports(state, "SET_CLOSED")
       || state.quarantined_at !== null || job.action !== "SET_CLOSED") {
       await this.#quarantine(client, text(job, "account_id"), "PREFLIGHT_AUTHORITY_STALE");
       return { conflict: "Job authority is stale; the account remains locked." };
@@ -3079,7 +3114,7 @@ export class ChannelRuntime {
           || (action === "SET_CLOSED" && current.desired_state === "CLOSED"));
       const availabilityVersionsCurrent = availabilityJob && assignmentCurrent && current !== undefined && current.account_active === true && current.revoked_at === null
         && (current.delegated_until === null || isoValue(current, "delegated_until") > nowUtc)
-        && current.listing_active === true && current.product_status === "PUBLISHED" && capability === true
+        && current.listing_active === true && (current.product_status === "PUBLISHED" || action === "SET_CLOSED") && capability === true
         && (current.quarantined_at === null || action === "OBSERVE") && this.#adapterSupports(current, action)
         && integer(current, "account_version") === integer(job, "account_version")
         && integer(current, "mapping_version") === integer(job, "mapping_version")
@@ -3106,7 +3141,7 @@ export class ChannelRuntime {
       const retirementVersionsCurrent = retirementJob && assignmentCurrent && current !== undefined
         && current.account_active === true && current.revoked_at === null
         && (current.delegated_until === null || isoValue(current, "delegated_until") > nowUtc)
-        && current.quarantined_at === null && current.listing_active === true && current.product_status === "PUBLISHED"
+        && current.quarantined_at === null && current.listing_active === true
         && action === "SET_CLOSED" && current.can_close === true && this.#adapterSupports(current, "SET_CLOSED")
         && integer(current, "account_version") === integer(job, "account_version")
         && integer(current, "mapping_version") === integer(job, "mapping_version")

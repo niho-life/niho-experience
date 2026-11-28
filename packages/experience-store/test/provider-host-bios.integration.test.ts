@@ -44,14 +44,14 @@ describe("provider host bio persistence", { skip: databaseUrl === undefined ? "T
       const publication = await pool.query<{ id: string }>(
         `INSERT INTO experience_product_publications
            (provider_id,product_id,draft_version,slug,public_title,content,currency,unit_amount,cancellation_terms_ref,
-            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id)
+            seller_niho_account_ref,stripe_connect_account_ref,seller_display_name,consent_version,published_by_niho_user_id,sale_terms_version,sale_terms_snapshot)
          VALUES ($1,'product-bio',1,'synthetic-bio-page','Synthetic bio page','{}','JPY',5000,'synthetic-terms',$2,
-                 'acct_BioSynthetic','Synthetic Legal Seller','publication-v1',$2) RETURNING id::text`,
+                 'acct_BioSynthetic','Synthetic Legal Seller','publication-v1',$2,1,'{"fixture":true}'::jsonb) RETURNING id::text`,
         [owner.providerId, owner.nihoUserId],
       );
       await pool.query(
-        `INSERT INTO experience_product_publication_states (provider_id,product_id,current_publication_id,first_published_at)
-         VALUES ($1,'product-bio',$2,clock_timestamp())`,
+        `INSERT INTO experience_product_publication_states (provider_id,product_id,current_publication_id,booking_publication_id,first_published_at)
+         VALUES ($1,'product-bio',$2,$2,clock_timestamp())`,
         [owner.providerId, publication.rows[0]!.id],
       );
 

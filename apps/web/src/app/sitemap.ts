@@ -17,7 +17,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   try { japanese = await getPreparedJapaneseStaticRelease(); } catch { /* no approved JA release */ }
   // Guides only while some are published (ADR 0002), never drafts.
   const guides = await indexableGuides();
-  const experiences = sitePublications.experiences.flatMap(({ publication, saleTerms }) => saleTerms?.offers.length ? [{ slug: publication.slug, updatedAt: publication.publishedAtUtc }] : []);
+  const experiences = sitePublications.experiences.map(({ publication }) => ({ slug: publication.slug, updatedAt: publication.publishedAtUtc }));
   // 日本語サイト独自のページ（#561）。日本語版が公開されているときだけ読み、どれか読めなければそのまとまりは載せない。
   let japaneseOwn: JapaneseOwnPages | undefined;
   if (japanese) {

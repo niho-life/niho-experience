@@ -1,10 +1,19 @@
 /**
  * Static SQL shared by every anonymous Experience publication reader. Keep user input in query
  * parameters: these fragments contain table and column names only.
+ *
+ * These are PAGE readers (#705): a page is public from the state's current_publication_id, whether or not bookings are
+ * open. Whether it can be booked is `booking_available` (the state's booking_publication_id names this very version);
+ * nothing here may be used to admit a booking.
  */
 export const VISIBLE_PUBLICATION_COLUMNS = `
   p.id AS publication_id,p.provider_id,p.product_id,p.draft_version,p.publisher_kind,
-  p.slug,p.public_title,p.content,p.currency,p.unit_amount,p.seller_display_name,p.published_at,s.first_published_at,
+  p.slug,p.public_title,p.content,p.currency,p.unit_amount,
+  -- The legal seller is shown only while bookings are open on this very version (#705); a page without bookings has none.
+  CASE WHEN s.booking_publication_id=p.id AND product.status='PUBLISHED' THEN p.seller_display_name END AS seller_display_name,
+  -- Actually taking bookings: this CTE already excludes a stopped, suspended or restart-required listing.
+  (s.booking_publication_id=p.id AND product.status='PUBLISHED') AS booking_available,
+  p.published_at,s.first_published_at,
   (SELECT jsonb_build_object(
       'contentFingerprint',audit.content_fingerprint,
       'japaneseFingerprint',audit.japanese_fingerprint,
@@ -24,7 +33,7 @@ export const VISIBLE_PUBLICATIONS_CTE = `
      WHERE s.self_stopped_at IS NULL
        AND s.operations_suspended_at IS NULL
        AND s.owner_resume_required=false
-       AND product.status='PUBLISHED'
+       AND product.status<>'ARCHIVED'
        AND NOT EXISTS (
          SELECT 1 FROM experience_product_publication_media media
          JOIN experience_product_media_assets asset ON asset.id=media.asset_id
@@ -32,14 +41,22 @@ export const VISIBLE_PUBLICATIONS_CTE = `
        )
   )`;
 
-/** Current, historical and draft slugs owned by a native host seller remain reserved. */
+/**
+ * Current, historical and draft slugs of a native Experience provider remain reserved (so a same-slug legacy NIHO page
+ * cannot become visible again): a provider with a seller profile, a provider with a host account member (it may have no
+ * seller yet, #705), and every slug that was ever published here.
+ */
 export const CLAIMED_PUBLICATION_SLUGS_CTE = `
   claimed_publication_slugs AS (
     SELECT product.slug
       FROM experience_products product
-      JOIN experience_host_seller_profiles seller ON seller.provider_id=product.provider_id
+     WHERE EXISTS (SELECT 1 FROM experience_host_seller_profiles seller WHERE seller.provider_id=product.provider_id)
+        OR EXISTS (SELECT 1 FROM provider_memberships member
+                     JOIN host_accounts account ON account.id=member.niho_user_id
+                    WHERE member.provider_id=product.provider_id)
+        OR EXISTS (SELECT 1 FROM experience_product_publications ever
+                    WHERE ever.provider_id=product.provider_id AND ever.product_id=product.id)
     UNION
     SELECT publication.slug
       FROM experience_product_publications publication
-      JOIN experience_host_seller_profiles seller ON seller.provider_id=publication.provider_id
   )`;

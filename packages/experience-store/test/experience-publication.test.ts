@@ -68,7 +68,7 @@ describe("experience publication public projection", () => {
     assert.deepEqual(Object.keys(projected ?? {}), [
       "slug", "publicTitle", "content", "meetingOverview", "meetingPointDisclosure", "meetingPoint",
       "publicMapPoint", "publicMapArea",
-      "currency", "unitAmount", "sellerDisplayName", "providerPublicName", "providerPublicNameEn", "providerKind", "providerRegisteredName",
+      "currency", "unitAmount", "sellerDisplayName", "bookingAvailable", "providerPublicName", "providerPublicNameEn", "providerKind", "providerRegisteredName",
       "photos", "providerPhoto", "businessLogo", "japanese", "japaneseOnly", "publishedAtUtc",
     ]);
     assert.deepEqual(projected?.meetingPoint, { name: "Synthetic meeting area", exteriorPhotoIndex: 0 });
@@ -89,6 +89,19 @@ describe("experience publication public projection", () => {
       NIHO_SELLER_SENTINEL, HOST_USER_SENTINEL, "private-contact-sentinel", "credentials-private-sentinel",
       "unknown-private-sentinel",
     ]) assert.doesNotMatch(serialized, new RegExp(sentinel));
+  });
+
+  it("projects a page whose bookings are not open as a normal page with no seller (#705)", () => {
+    const page = projectPublicExperiencePublication({ ...row("PUBLIC"), seller_display_name: null, booking_available: false });
+    assert.ok(page, "a sellerless page is not dropped");
+    assert.equal(page?.sellerDisplayName, null);
+    assert.equal(page?.bookingAvailable, false);
+    assert.equal(page?.unitAmount, 4000);
+    const open = projectPublicExperiencePublication({ ...row("PUBLIC"), booking_available: true });
+    assert.equal(open?.bookingAvailable, true);
+    assert.equal(open?.sellerDisplayName, "Synthetic Legal Seller");
+    // Open bookings without a seller are a corrupt row and are not shown.
+    assert.equal(projectPublicExperiencePublication({ ...row("PUBLIC"), seller_display_name: null, booking_available: true }), null);
   });
 
   it("always nulls meetingPoint when disclosure is AFTER_BOOKING", () => {

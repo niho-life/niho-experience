@@ -352,7 +352,11 @@ const PUBLIC_REVIEW_SCOPE_CTES = `
   ${CLAIMED_PUBLICATION_SLUGS_CTE},
   public_review_candidates AS (
     SELECT requested.slug,requested.ordinality,publication.provider_id,publication.product_id,
-           publication.seller_display_name
+           COALESCE(publication.seller_display_name,
+             (SELECT owned.seller_display_name FROM experience_products owned
+               WHERE owned.provider_id=publication.provider_id AND owned.id=publication.product_id),
+             (SELECT profile.public_display_name FROM experience_provider_public_profiles profile
+               WHERE profile.provider_id=publication.provider_id),'') AS seller_display_name
       FROM requested
       JOIN visible_publications publication ON publication.slug=requested.slug
       CROSS JOIN review_scope_options options

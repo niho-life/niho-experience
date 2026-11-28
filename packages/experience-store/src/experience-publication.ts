@@ -31,6 +31,7 @@ import {
 import { productFromRow, type DbRow } from "./rows.ts";
 import { PRODUCT_COLUMNS, requireMembership } from "./repository.ts";
 import { lockProviderInventory } from "./inventory.ts";
+import { recordBookingEvent, requestChannelReconciliation } from "./booking-status.ts";
 import { CLAIMED_PUBLICATION_SLUGS_CTE, VISIBLE_PUBLICATIONS_CTE } from "./public-publication-scope.ts";
 import { withTransaction } from "./transaction.ts";
 import {
@@ -66,6 +67,16 @@ export type ExperiencePublicationBlocker =
   /** The product has no seller (its provider has no seller profile yet, #704): it can be edited, not sold. */
   | "SELLER_REQUIRED"
   | "SLUG_IN_USE";
+
+/** What publishing, or starting bookings, needs from the host's request (#705). */
+export interface PublishInput {
+  readonly expectedDraftVersion: number;
+  readonly expectedStateVersion: number | null;
+  /** When supplied by a host API CAS token, publish only the terms the owner just reviewed. */
+  readonly expectedSaleTermsVersion?: number | null;
+  readonly consentVersion: string;
+  readonly checks: ExperiencePublicationContentChecks;
+}
 
 export class ExperiencePublicationBlockedError extends StoreValidationError {
   readonly blockers: readonly ExperiencePublicationBlocker[];
@@ -289,7 +300,13 @@ export interface ExperienceAdminProviderPublicProfileInput {
 export interface ExperiencePublicationState {
   readonly providerId: string;
   readonly productId: string;
+  /** The PAGE version: the immutable copy the public page shows (#705). */
   readonly currentPublicationId: number | null;
+  /**
+   * The SALE version (seller and sale-terms snapshot), or null while bookings are not open. When set it equals
+   * `currentPublicationId`. Everything that sells reads this pointer, never the page pointer.
+   */
+  readonly bookingPublicationId: number | null;
   readonly selfStoppedAtUtc: string | null;
   readonly operationsSuspendedAtUtc: string | null;
   readonly operationsSuspensionCode: string | null;
@@ -397,7 +414,7 @@ const SALE_TERMS_COLUMNS = `provider_id,product_id,child_price_amount,child_min_
 
 const PUBLIC_READER_COLUMNS = `
   draft_version,publisher_kind,admin_proxy_review,
-  slug,public_title,content,currency,unit_amount,seller_display_name,published_at,
+  slug,public_title,content,currency,unit_amount,seller_display_name,booking_available,published_at,
   (SELECT profile.public_display_name FROM experience_provider_public_profiles profile
     WHERE profile.provider_id=visible_publications.provider_id) AS provider_public_name,
   (SELECT profile.public_display_name_en FROM experience_provider_public_profiles profile
@@ -468,6 +485,7 @@ function stateFromRow(row: DbRow): ExperiencePublicationState {
     providerId: String(row.provider_id),
     productId: String(row.product_id),
     currentPublicationId: row.current_publication_id === null ? null : safeInteger(row.current_publication_id, "current_publication_id"),
+    bookingPublicationId: row.booking_publication_id === null || row.booking_publication_id === undefined ? null : safeInteger(row.booking_publication_id, "booking_publication_id"),
     selfStoppedAtUtc: nullableIso(row.self_stopped_at, "self_stopped_at"),
     operationsSuspendedAtUtc: nullableIso(row.operations_suspended_at, "operations_suspended_at"),
     operationsSuspensionCode: row.operations_suspension_code === null ? null : String(row.operations_suspension_code),
@@ -476,6 +494,12 @@ function stateFromRow(row: DbRow): ExperiencePublicationState {
     version: safeInteger(row.version, "version"),
     updatedAtUtc: iso(row.updated_at, "updated_at"),
   };
+}
+
+/** Bookings are actually being taken: a booking version, and the listing is neither stopped, suspended nor awaiting restart. */
+export function isSelling(state: ExperiencePublicationState | null): boolean {
+  return state !== null && state.bookingPublicationId !== null && state.currentPublicationId !== null
+    && state.selfStoppedAtUtc === null && state.operationsSuspendedAtUtc === null && !state.ownerResumeRequired;
 }
 
 function readinessFromRow(row: DbRow): ProviderPublicationReadiness {
@@ -831,7 +855,7 @@ function validateExpectedVersion(value: number | null, field: string): void {
 
 async function lockedState(client: PoolClient, providerId: string, productId: string, lock = true): Promise<ExperiencePublicationState | null> {
   const result = await client.query<DbRow>(
-    `SELECT provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+    `SELECT provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
             operations_suspension_code,owner_resume_required,first_published_at,version,updated_at
        FROM experience_product_publication_states WHERE provider_id=$1 AND product_id=$2${lock ? " FOR UPDATE" : ""}`,
     [providerId, productId],
@@ -894,6 +918,26 @@ function isExperienceSeller(seller: ExperienceHostSellerProfile): boolean {
   return seller.legacyProviderId === null && isHostSellerRef(seller.sellerNihoAccountRef);
 }
 
+/**
+ * OWNER_NOT_CURRENT / ACCOUNT_NOT_USABLE for a page, which has no seller readiness to read them from: the provider must
+ * have an active OWNER, and one whose host account (if it is one) is ACTIVE. A still-valid readiness row that says the
+ * NIHO account is unusable also counts.
+ */
+async function pageOwnerBlockers(client: PoolClient, providerId: string): Promise<ExperiencePublicationBlocker[]> {
+  const facts = await client.query<{ has_owner: boolean; has_usable_owner: boolean; readiness_unusable: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM provider_memberships m WHERE m.provider_id=$1 AND m.role='OWNER' AND m.active=true) AS has_owner,
+            EXISTS (SELECT 1 FROM provider_memberships m LEFT JOIN host_accounts a ON a.id=m.niho_user_id
+                     WHERE m.provider_id=$1 AND m.role='OWNER' AND m.active=true AND (a.id IS NULL OR a.status='ACTIVE')) AS has_usable_owner,
+            EXISTS (SELECT 1 FROM provider_publication_readiness r WHERE r.provider_id=$1 AND r.account_usable=false
+                     AND r.observed_at <= clock_timestamp() AND r.valid_until > clock_timestamp()) AS readiness_unusable`,
+    [providerId],
+  );
+  const row = facts.rows[0];
+  if (row?.has_owner !== true) return ["OWNER_NOT_CURRENT"];
+  if (row.has_usable_owner !== true || row.readiness_unusable === true) return ["ACCOUNT_NOT_USABLE"];
+  return [];
+}
+
 async function blockers(
   client: PoolClient,
   product: ProductRecord,
@@ -901,7 +945,10 @@ async function blockers(
   consentVersion: string | null,
   state: ExperiencePublicationState | null,
   adminPayout?: AdminPayoutCheck,
+  /** PAGE: only what a public page needs. ALL: the page plus what starting bookings needs (#705). */
+  scope: "PAGE" | "ALL" = "ALL",
 ): Promise<ExperiencePublicationBlocker[]> {
+  const page = scope === "PAGE";
   const result: ExperiencePublicationBlocker[] = [];
   if (!checks.manuscriptReady) result.push("MANUSCRIPT_REQUIRED");
   const manuscriptReview = publicationManuscriptReview(product.content, product.publicTitle);
@@ -972,23 +1019,30 @@ async function blockers(
   // A product with no seller gets SELLER_REQUIRED in place of the fee setting, readiness and payout reasons. Its content
   // reasons (manuscript, photos, terms, schedule, price, slug) stay, since the host still has to finish them (#704).
   const seller = product.seller;
-  if (!managed && seller !== null && !feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
+  if (page) { /* fee settings and support consent only matter for bookings */ }
+  else if (!managed && seller !== null && !feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
   else if (!managed && seller !== null && (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
     || feeSettings.rows[0].support_agreement_revision === null)) result.push("SUPPORT_CONSENT_REQUIRED");
   if (facts.rows[0]?.sale_terms !== true || product.cancellationTermsRef.trim() === "") result.push("CANCELLATION_TERMS_REQUIRED");
-  if (facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
+  if (!page && facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
   const terms = await readSaleTerms(client, product.providerId, product.id, true);
-  if (terms !== null && !salePriceSetMatchesProduct(product.unitAmount, terms)) result.push("PRICE_REQUIRED");
-  if (terms !== null && terms.offerPrices !== null) {
+  if (!page && terms !== null && !salePriceSetMatchesProduct(product.unitAmount, terms)) result.push("PRICE_REQUIRED");
+  if (!page && terms !== null && terms.offerPrices !== null) {
     const today = tokyoDate(await databaseNow(client));
     if (!await offerPricesMatchActiveRules(client, terms, product.providerId, product.id, today)) result.push("PRICE_REQUIRED");
   }
   if (facts.rows[0]?.slug_in_use === true) result.push("SLUG_IN_USE");
   if (state?.operationsSuspendedAtUtc !== null && state?.operationsSuspendedAtUtc !== undefined) result.push("OPERATIONS_SUSPENDED");
 
+  if (page) {
+    result.push(...await pageOwnerBlockers(client, product.providerId));
+    return [...new Set(result)];
+  }
+
   if (seller === null) {
     result.push("SELLER_REQUIRED");
-    return result;
+    result.push(...await pageOwnerBlockers(client, product.providerId));
+    return [...new Set(result)];
   }
 
   if (managed) {
@@ -1045,14 +1099,14 @@ async function blockers(
   return result;
 }
 
-async function insertOrFindPublication(
+async function insertOrFindSalePublication(
   client: PoolClient,
   product: ProductRecord,
   consentVersion: string,
   publishedBy: string,
   publisherKind: "OWNER" | "ADMIN_PROXY" = "OWNER",
 ): Promise<number> {
-  // A publication is an immutable copy of a seller's offer: a product with no seller is never published (blockers).
+  // A SALE version is an immutable copy of a seller's offer: a product with no seller never gets one (blockers).
   if (product.seller === null) throw new StoreConflictError("A product with no seller cannot be published.");
   const seller = product.seller;
   const terms = await readSaleTerms(client, product.providerId, product.id, true);
@@ -1094,6 +1148,11 @@ async function insertOrFindPublication(
       publisherKind, JSON.stringify(saleTermsSnapshot)],
   );
   const publicationId = safeInteger(inserted.rows[0]?.id, "publication id");
+  await copyPublicationMedia(client, product, publicationId);
+  return publicationId;
+}
+
+async function copyPublicationMedia(client: PoolClient, product: ProductRecord, publicationId: number): Promise<void> {
   const media = await client.query(
     `INSERT INTO experience_product_publication_media
        (publication_id,asset_id,provider_id,product_id,position,alt_text,alt_text_ja,public_credit,placement,source_position)
@@ -1108,6 +1167,30 @@ async function insertOrFindPublication(
     [product.providerId, product.id, publicationId],
   );
   if (media.rowCount === 0) throw new StoreConflictError("The publication has no rights-confirmed public media.");
+}
+
+/**
+ * The PAGE version of a draft (#705): no seller, no payout consent, no sale terms. One per saved draft version.
+ * The caller holds the provider inventory and product locks.
+ */
+async function insertOrFindPagePublication(client: PoolClient, product: ProductRecord, publishedBy: string): Promise<number> {
+  const previous = await client.query<DbRow>(
+    `SELECT id FROM experience_product_publications
+      WHERE provider_id=$1 AND product_id=$2 AND draft_version=$3 AND seller_niho_account_ref IS NULL`,
+    [product.providerId, product.id, product.version],
+  );
+  if (previous.rows[0]) return safeInteger(previous.rows[0].id, "publication id");
+  const inserted = await client.query<DbRow>(
+    `INSERT INTO experience_product_publications
+       (provider_id,product_id,draft_version,sale_terms_version,slug,public_title,content,currency,unit_amount,
+        cancellation_terms_ref,published_by_niho_user_id,publisher_kind,sale_terms_snapshot)
+     VALUES ($1,$2,$3,0,$4,$5,$6::jsonb,$7,$8,$9,$10,'OWNER','{}'::jsonb)
+     RETURNING id`,
+    [product.providerId, product.id, product.version, product.slug, product.publicTitle, JSON.stringify(product.content),
+      product.currency, product.unitAmount, product.cancellationTermsRef, publishedBy],
+  );
+  const publicationId = safeInteger(inserted.rows[0]?.id, "publication id");
+  await copyPublicationMedia(client, product, publicationId);
   return publicationId;
 }
 
@@ -1446,28 +1529,29 @@ export class ExperiencePublicationRepository {
         [providerId, productId, product.version],
       );
       if (changed.rowCount !== 1) throw new StoreConflictError("Product changed while publishing.");
-      const publicationId = await insertOrFindPublication(client, product, input.consentVersion, actor.nihoUserId, "ADMIN_PROXY");
+      const publicationId = await insertOrFindSalePublication(client, product, input.consentVersion, actor.nihoUserId, "ADMIN_PROXY");
       const published = state === null
         ? await client.query<DbRow>(
           `INSERT INTO experience_product_publication_states
-             (provider_id,product_id,current_publication_id,first_published_at)
-           SELECT $1,$2,$3,published_at FROM experience_product_publications WHERE id=$3
-           RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+             (provider_id,product_id,current_publication_id,booking_publication_id,first_published_at)
+           SELECT $1,$2,$3,$3,published_at FROM experience_product_publications WHERE id=$3
+           RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
              operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
           [providerId, productId, publicationId],
         )
         : await client.query<DbRow>(
           `UPDATE experience_product_publication_states
-              SET current_publication_id=$3,self_stopped_at=NULL,owner_resume_required=false,
+              SET current_publication_id=$3,booking_publication_id=$3,self_stopped_at=NULL,owner_resume_required=false,
                   first_published_at=(SELECT published_at FROM experience_product_publications WHERE id=$3),
                   version=version+1,updated_at=clock_timestamp()
             WHERE provider_id=$1 AND product_id=$2 AND version=$4 AND current_publication_id IS NULL
               AND first_published_at IS NULL AND operations_suspended_at IS NULL
-            RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+            RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
               operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
           [providerId, productId, publicationId, state.version],
         );
       if (!published.rows[0]) throw new StoreConflictError("Publication state changed while publishing.");
+      await recordBookingEvent(client, stateFromRow(published.rows[0]), publicationId, "OPENED", "ADMIN_PROXY_OPENED", actor.nihoUserId);
       await client.query(
         `INSERT INTO admin_proxy_publication_audit_events
            (publication_id,provider_id,product_id,draft_version,sale_terms_version,consent_version,
@@ -2017,6 +2101,8 @@ export class ExperiencePublicationRepository {
     productId: string,
     checks: ExperiencePublicationContentChecks,
     consentVersion: string | null,
+    /** "PAGE": only the reasons that stop the public page; "ALL" (default): the page plus starting bookings (#705). */
+    scope: "PAGE" | "ALL" = "ALL",
   ): Promise<readonly ExperiencePublicationBlocker[]> {
     assertStoreIdentifier(productId, "productId");
     validateChecks(checks);
@@ -2029,7 +2115,7 @@ export class ExperiencePublicationRepository {
       );
       if (!productResult.rows[0]) throw new StoreNotFoundError("product");
       const state = await lockedState(client, actor.providerId, productId);
-      return blockers(client, productFromRow(productResult.rows[0]), checks, consentVersion, state);
+      return blockers(client, productFromRow(productResult.rows[0]), checks, consentVersion, state, undefined, scope);
     });
   }
 
@@ -2584,12 +2670,13 @@ export class ExperiencePublicationRepository {
       if (!writtenTerms) throw new StoreConflictError("Sale terms disappeared while saving.");
 
       let consentVersion: string | null = null;
-      if (state?.currentPublicationId !== null && state?.currentPublicationId !== undefined) {
-        const current = await client.query<DbRow>("SELECT consent_version FROM experience_product_publications WHERE id=$1", [state.currentPublicationId]);
+      // Sale terms are part of the SALE version only: a page without bookings is not republished for them (#705).
+      if (state?.bookingPublicationId !== null && state?.bookingPublicationId !== undefined) {
+        const current = await client.query<DbRow>("SELECT consent_version FROM experience_product_publications WHERE id=$1", [state.bookingPublicationId]);
         consentVersion = current.rows[0] ? String(current.rows[0].consent_version) : null;
       }
       const blocked = await blockers(client, product, input.checks, consentVersion, state);
-      const active = state !== null && state.currentPublicationId !== null && state.selfStoppedAtUtc === null
+      const active = state !== null && state.bookingPublicationId !== null && state.selfStoppedAtUtc === null
         && state.operationsSuspendedAtUtc === null && !state.ownerResumeRequired;
       if (!active || blocked.length > 0 || consentVersion === null) {
         return {
@@ -2602,16 +2689,19 @@ export class ExperiencePublicationRepository {
         };
       }
 
-      const publicationId = await insertOrFindPublication(client, product, consentVersion, actor.nihoUserId);
+      const publicationId = await insertOrFindSalePublication(client, product, consentVersion, actor.nihoUserId);
       const updatedState = await client.query<DbRow>(
         `UPDATE experience_product_publication_states
-            SET current_publication_id=$3,version=version+1,updated_at=clock_timestamp()
+            SET current_publication_id=$3,booking_publication_id=$3,version=version+1,updated_at=clock_timestamp()
           WHERE provider_id=$1 AND product_id=$2 AND version=$4
-          RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+          RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
             operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
         [actor.providerId, productId, publicationId, state.version],
       );
       if (!updatedState.rows[0]) throw new StoreConflictError("Publication state version mismatch.");
+      if (state.bookingPublicationId !== publicationId) {
+        await recordBookingEvent(client, { providerId: actor.providerId, productId, version: stateFromRow(updatedState.rows[0]).version }, publicationId, "OPENED", "OWNER_REPUBLISHED", actor.nihoUserId);
+      }
       return {
         draftVersion: product.version,
         stateVersion: stateFromRow(updatedState.rows[0]).version,
@@ -2703,44 +2793,72 @@ export class ExperiencePublicationRepository {
       if ((state?.version ?? null) !== expectedStateVersion) {
         throw new StoreConflictError("Publication state version mismatch: read the state again.");
       }
+      // While bookings are open the page and the terms it is sold on move together; otherwise only the page moves.
+      const withBooking = state !== null && state.bookingPublicationId !== null;
       let consent: string | null = null;
-      if (state?.currentPublicationId !== null && state?.currentPublicationId !== undefined) {
-        const current = await client.query<DbRow>("SELECT consent_version FROM experience_product_publications WHERE id=$1", [state.currentPublicationId]);
+      if (withBooking) {
+        const current = await client.query<DbRow>("SELECT consent_version FROM experience_product_publications WHERE id=$1", [state.bookingPublicationId]);
         consent = current.rows[0] ? String(current.rows[0].consent_version) : null;
       }
-      const blocked = await blockers(client, draft, checks, consent, state);
+      const blocked = await blockers(client, draft, checks, consent, state, undefined, withBooking ? "ALL" : "PAGE");
       const active = state !== null && state.currentPublicationId !== null && state.selfStoppedAtUtc === null
         && state.operationsSuspendedAtUtc === null && !state.ownerResumeRequired;
       if (!active || blocked.length > 0) return { draft, publicationUpdated: false, blockers: blocked };
-      const publicationId = await insertOrFindPublication(client, draft, consent!, actor.nihoUserId);
-      const changed = await client.query(
+      const publicationId = withBooking
+        ? await insertOrFindSalePublication(client, draft, consent!, actor.nihoUserId)
+        : await insertOrFindPagePublication(client, draft, actor.nihoUserId);
+      const changed = await client.query<DbRow>(
         `UPDATE experience_product_publication_states
-            SET current_publication_id=$3,version=version+1,updated_at=clock_timestamp()
-          WHERE provider_id=$1 AND product_id=$2 AND version=$4`,
-        [actor.providerId, input.id, publicationId, state.version],
+            SET current_publication_id=$3,booking_publication_id=CASE WHEN $5::boolean THEN $3::bigint ELSE NULL END,
+                version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND product_id=$2 AND version=$4
+          RETURNING provider_id,product_id,version`,
+        [actor.providerId, input.id, publicationId, state.version, withBooking],
       );
       if (changed.rowCount !== 1) throw new StoreConflictError("Publication state version mismatch.");
+      if (withBooking && state.bookingPublicationId !== publicationId) {
+        await recordBookingEvent(client, { providerId: actor.providerId, productId: input.id, version: Number(changed.rows[0]!.version) }, publicationId, "OPENED", "OWNER_REPUBLISHED", actor.nihoUserId);
+      }
       return { draft, publicationUpdated: true, blockers: [] };
     });
   }
 
-  async publish(
+  /**
+   * Publishes the page and starts bookings (what "publish" meant before #705): the page blockers plus the booking
+   * blockers, one SALE version that is both the page and the booking version. Existing callers keep this behaviour.
+   */
+  async publish(actor: HostActor, productId: string, input: PublishInput): Promise<ExperiencePublicationState> {
+    return this.#publish(actor, productId, input, "BOOKING");
+  }
+
+  /** Same as `publish`; the name the host's "start taking bookings" step uses (#705). */
+  async openBooking(actor: HostActor, productId: string, input: PublishInput): Promise<ExperiencePublicationState> {
+    return this.#publish(actor, productId, input, "BOOKING");
+  }
+
+  /**
+   * Publishes the PAGE only: the page blockers (no seller, payout account, fee settings or schedule needed). The product
+   * stays DRAFT, so nothing that sells sees it. If bookings are currently open the new page content is sold as shown:
+   * it must also pass the booking blockers (`consentVersion` is then needed) and moves the sale version with it; if it
+   * cannot, the call is refused with those blockers (the host can stop bookings first).
+   */
+  async publishPage(actor: HostActor, productId: string, input: Omit<PublishInput, "consentVersion"> & { readonly consentVersion?: string | null }): Promise<ExperiencePublicationState> {
+    return this.#publish(actor, productId, input, "PAGE");
+  }
+
+  async #publish(
     actor: HostActor,
     productId: string,
-    input: {
-      readonly expectedDraftVersion: number;
-      readonly expectedStateVersion: number | null;
-      /** When supplied by a host API CAS token, publish only the terms the owner just reviewed. */
-      readonly expectedSaleTermsVersion?: number | null;
-      readonly consentVersion: string;
-      readonly checks: ExperiencePublicationContentChecks;
-    },
+    input: Omit<PublishInput, "consentVersion"> & { readonly consentVersion?: string | null },
+    requested: "PAGE" | "BOOKING",
   ): Promise<ExperiencePublicationState> {
     assertStoreIdentifier(productId, "productId");
     validateExpectedVersion(input.expectedDraftVersion, "expectedDraftVersion");
     validateExpectedVersion(input.expectedStateVersion, "expectedStateVersion");
     if (input.expectedSaleTermsVersion !== undefined) validateExpectedVersion(input.expectedSaleTermsVersion, "expectedSaleTermsVersion");
-    assertNonEmptyText(input.consentVersion, "consentVersion", 160);
+    if (requested === "BOOKING" || (input.consentVersion !== undefined && input.consentVersion !== null)) {
+      assertNonEmptyText(input.consentVersion as string, "consentVersion", 160);
+    }
     validateChecks(input.checks);
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
@@ -2762,31 +2880,90 @@ export class ExperiencePublicationRepository {
           throw new StoreConflictError("Sale terms version mismatch: read the terms again.");
         }
       }
-      const blocked = await blockers(client, product, input.checks, input.consentVersion, state);
+      const bookingWasOpen = state !== null && state.bookingPublicationId !== null;
+      const withBooking = requested === "BOOKING" || bookingWasOpen;
+      let consentVersion: string | null = input.consentVersion ?? null;
+      if (consentVersion === null && bookingWasOpen) {
+        const standing = await client.query<DbRow>("SELECT consent_version FROM experience_product_publications WHERE id=$1", [state.bookingPublicationId]);
+        consentVersion = standing.rows[0] ? String(standing.rows[0].consent_version) : null;
+      }
+      const blocked = await blockers(client, product, input.checks, withBooking ? consentVersion : null, state, undefined, withBooking ? "ALL" : "PAGE");
       if (blocked.length > 0) throw new ExperiencePublicationBlockedError(blocked);
-      await client.query(
-        "UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2 AND status='DRAFT'",
-        [actor.providerId, productId],
-      );
-      const publicationId = await insertOrFindPublication(client, product, input.consentVersion, actor.nihoUserId);
+      let publicationId: number;
+      if (withBooking) {
+        // Bookings open only on the sale version; status PUBLISHED is the gate every sale reader filters on.
+        await client.query(
+          "UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2 AND status='DRAFT'",
+          [actor.providerId, productId],
+        );
+        publicationId = await insertOrFindSalePublication(client, product, consentVersion!, actor.nihoUserId);
+      } else {
+        publicationId = await insertOrFindPagePublication(client, product, actor.nihoUserId);
+      }
       const result = state === null
         ? await client.query<DbRow>(
           `INSERT INTO experience_product_publication_states
-             (provider_id,product_id,current_publication_id,first_published_at)
-           SELECT $1,$2,$3,published_at FROM experience_product_publications WHERE id=$3
-           RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+             (provider_id,product_id,current_publication_id,booking_publication_id,first_published_at)
+           SELECT $1,$2,$3,CASE WHEN $4::boolean THEN $3::bigint ELSE NULL END,published_at FROM experience_product_publications WHERE id=$3
+           RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
              operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
-          [actor.providerId, productId, publicationId])
+          [actor.providerId, productId, publicationId, withBooking])
         : await client.query<DbRow>(
           `UPDATE experience_product_publication_states
-              SET current_publication_id=$3,self_stopped_at=NULL,owner_resume_required=false,
+              SET current_publication_id=$3,booking_publication_id=CASE WHEN $5::boolean THEN $3::bigint ELSE NULL END,
+                  self_stopped_at=NULL,owner_resume_required=false,
+                  first_published_at=COALESCE(first_published_at,(SELECT published_at FROM experience_product_publications WHERE id=$3)),
                   version=version+1,updated_at=clock_timestamp()
             WHERE provider_id=$1 AND product_id=$2 AND version=$4 AND operations_suspended_at IS NULL
-            RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+            RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
               operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
-          [actor.providerId, productId, publicationId, state.version]);
+          [actor.providerId, productId, publicationId, state.version, withBooking]);
       if (!result.rows[0]) throw new StoreConflictError("Publication state changed while publishing.");
-      return stateFromRow(result.rows[0]);
+      const published = stateFromRow(result.rows[0]);
+      if (withBooking) {
+        // Written even when the sale version is the same row: re-opening after a stop or a suspension is a (re)start of selling.
+        const resumed = state !== null && (state.selfStoppedAtUtc !== null || state.ownerResumeRequired);
+        await recordBookingEvent(client, published, publicationId, "OPENED",
+          resumed ? "OWNER_RESUMED" : bookingWasOpen ? "OWNER_REPUBLISHED" : "OWNER_OPENED", actor.nihoUserId);
+        await requestChannelReconciliation(client, actor.providerId, "booking_opened");
+      }
+      return published;
+    });
+  }
+
+  /**
+   * Stops bookings only: the sale version is dropped and the product goes back to DRAFT (every sale reader filters on
+   * PUBLISHED), the page stays public on its page version, and the stop is appended to the event log (#705).
+   */
+  async stopBooking(actor: HostActor, productId: string, expectedStateVersion: number): Promise<ExperiencePublicationState> {
+    assertStoreIdentifier(productId, "productId");
+    validateExpectedVersion(expectedStateVersion, "expectedStateVersion");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, actor.providerId);
+      await requireMembership(client, actor, ["OWNER"]);
+      const before = await lockedState(client, actor.providerId, productId);
+      if (!before || before.version !== expectedStateVersion || before.bookingPublicationId === null) {
+        throw new StoreConflictError("Publication state version mismatch or bookings are not open.");
+      }
+      const result = await client.query<DbRow>(
+        `UPDATE experience_product_publication_states
+            SET booking_publication_id=NULL,version=version+1,updated_at=clock_timestamp()
+          WHERE provider_id=$1 AND product_id=$2 AND version=$3
+          RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
+            operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
+        [actor.providerId, productId, expectedStateVersion],
+      );
+      if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or bookings are not open.");
+      await client.query(
+        "UPDATE experience_products SET status='DRAFT' WHERE provider_id=$1 AND id=$2 AND status='PUBLISHED'",
+        [actor.providerId, productId],
+      );
+      const stopped = stateFromRow(result.rows[0]);
+      // A product already closed by a self-stop or an operations suspension recorded its STOPPED then: no second one.
+      if (isSelling(before)) await recordBookingEvent(client, stopped, before.bookingPublicationId, "STOPPED", "OWNER_STOPPED", actor.nihoUserId);
+      // Close the external channel slots too: the DRAFT product is no longer reconciled as open (see ChannelRepository).
+      await requestChannelReconciliation(client, actor.providerId, "booking_stopped");
+      return stopped;
     });
   }
 
@@ -2796,16 +2973,22 @@ export class ExperiencePublicationRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER"]);
+      const before = await lockedState(client, actor.providerId, productId);
       const result = await client.query<DbRow>(
         `UPDATE experience_product_publication_states
             SET self_stopped_at=COALESCE(self_stopped_at,clock_timestamp()),version=version+1,updated_at=clock_timestamp()
           WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND current_publication_id IS NOT NULL
-          RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+          RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
             operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
         [actor.providerId, productId, expectedStateVersion],
       );
       if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or publication not found.");
-      return stateFromRow(result.rows[0]);
+      const stopped = stateFromRow(result.rows[0]);
+      if (before?.bookingPublicationId != null) {
+        if (isSelling(before)) await recordBookingEvent(client, stopped, before.bookingPublicationId, "STOPPED", "OWNER_SELF_STOPPED", actor.nihoUserId);
+        await requestChannelReconciliation(client, actor.providerId, "listing_stopped");
+      }
+      return stopped;
     });
   }
 
@@ -2839,19 +3022,25 @@ export class ExperiencePublicationRepository {
         "SELECT operations_suspended_at IS NOT NULL AS suspended FROM experience_product_publication_states WHERE provider_id=$1 AND product_id=$2",
         [providerId, productId],
       );
+      const beforeState = await lockedState(client, providerId, productId);
       const result = await client.query<DbRow>(
         `UPDATE experience_product_publication_states
             SET operations_suspended_at=clock_timestamp(),operations_suspension_code=$4,
                 operations_suspended_by_niho_user_id=$5,owner_resume_required=true,
                 version=version+1,updated_at=clock_timestamp()
           WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND current_publication_id IS NOT NULL
-          RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+          RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
             operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
         [providerId, productId, expectedStateVersion, reasonCode, actor.nihoUserId],
       );
       if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or publication not found.");
       if (before.rows[0]?.suspended !== true) await notifyListingSuspension(client, result.rows[0], "SUSPENDED");
-      return stateFromRow(result.rows[0]);
+      const suspended = stateFromRow(result.rows[0]);
+      if (beforeState?.bookingPublicationId != null) {
+        if (isSelling(beforeState)) await recordBookingEvent(client, suspended, beforeState.bookingPublicationId, "STOPPED", "OPERATIONS_SUSPENDED", actor.nihoUserId);
+        await requestChannelReconciliation(client, providerId, "operations_suspended");
+      }
+      return suspended;
     });
   }
 
@@ -2872,7 +3061,7 @@ export class ExperiencePublicationRepository {
             SET operations_suspended_at=NULL,operations_suspension_code=NULL,
                 operations_suspended_by_niho_user_id=NULL,version=version+1,updated_at=clock_timestamp()
           WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND operations_suspended_at IS NOT NULL
-          RETURNING provider_id,product_id,current_publication_id,self_stopped_at,operations_suspended_at,
+          RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
             operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
         [providerId, productId, expectedStateVersion],
       );
@@ -2903,7 +3092,7 @@ export class ExperiencePublicationRepository {
              LEFT JOIN experience_product_sale_terms terms ON terms.provider_id=product.provider_id AND terms.product_id=product.id
             WHERE state.provider_id=$1 AND state.product_id=$2
               AND (publication.draft_version<>product.version
-                OR publication.sale_terms_version IS DISTINCT FROM terms.version)
+                OR (publication.seller_niho_account_ref IS NOT NULL AND publication.sale_terms_version IS DISTINCT FROM terms.version))
          ) AS pending`,
         [actor.providerId, productId],
       );

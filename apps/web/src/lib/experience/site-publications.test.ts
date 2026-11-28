@@ -24,7 +24,7 @@ vi.mock("@/lib/experience/store-server", () => ({
   memberProfileRepository: () => mocks.members,
 }));
 
-import { getSitePublicExperience, publicExperienceRouteAllowedForSlug, listSitePublicExperiences } from "./site-publications";
+import { getSitePublicExperience, bookingRouteAllowedForSlug, listSitePublicExperiences } from "./site-publications";
 
 const publication = {
   slug: "local-seller-experience",
@@ -33,6 +33,7 @@ const publication = {
   currency: "JPY",
   unitAmount: 4_000,
   sellerDisplayName: "Synthetic seller",
+  bookingAvailable: true,
   meetingOverview: null,
   meetingPointDisclosure: "AFTER_BOOKING",
   meetingPoint: null,
@@ -142,7 +143,7 @@ describe("Experience site publication selection", () => {
       expect(await getSitePublicExperience("ja-first", "en")).toEqual({ kind: "reserved" });
       expect((await getSitePublicExperience("ja-first", "ja"))?.kind).toBe("published");
       // Sale endpoints (availability, checkout) keep working: the Japanese booking uses them.
-      expect(await publicExperienceRouteAllowedForSlug("ja-first")).toBe(true);
+      expect(await bookingRouteAllowedForSlug("ja-first")).toBe(true);
     });
 
     it("is out of the English catalog but in the Japanese one, and its slug stays claimed", async () => {
@@ -165,7 +166,24 @@ describe("Experience site publication selection", () => {
     mocks.bookings.publicBookingTerms.mockResolvedValue({ ...terms, conditionsVersion: "c0".repeat(32) });
     const result = await getSitePublicExperience(publication.slug);
     expect(result?.kind === "published" ? result.item.saleTerms : undefined).toBeNull();
-    expect(await publicExperienceRouteAllowedForSlug(publication.slug)).toBe(false);
+    expect(await bookingRouteAllowedForSlug(publication.slug)).toBe(false);
+  });
+
+  it("shows a page whose bookings are not open and keeps every booking route closed to it (#705)", async () => {
+    const page = { ...publication, sellerDisplayName: null, bookingAvailable: false };
+    mocks.publications.getPublicBySlug.mockResolvedValue(page);
+    mocks.publications.listPublic.mockResolvedValue([page]);
+    // Even if a sale read answered (it must not), the page's own flag keeps the guard closed: two independent locks.
+    expect(await bookingRouteAllowedForSlug(page.slug)).toBe(false);
+    mocks.bookings.publicBookingTerms.mockResolvedValue(null);
+    const detail = await getSitePublicExperience(page.slug);
+    expect(detail?.kind === "published" ? detail.item.publication.bookingAvailable : undefined).toBe(false);
+    expect(detail?.kind === "published" ? detail.item.saleTerms : undefined).toBeNull();
+    expect(detail?.kind === "published" ? detail.item.sellerDisclosure : undefined).toBeNull();
+    const catalog = await listSitePublicExperiences();
+    expect(catalog.experiences.map((entry) => entry.publication.slug)).toEqual([page.slug]);
+    expect(catalog.experiences[0]?.saleTerms).toBeNull();
+    expect(await bookingRouteAllowedForSlug(page.slug)).toBe(false);
   });
 
   it("does not consult Experience in mock or disabled publication mode", async () => {
@@ -181,8 +199,8 @@ describe("Experience site publication selection", () => {
     expect(await getSitePublicExperience("stopped-experience")).toEqual({ kind: "reserved" });
     expect((await listSitePublicExperiences()).experiences).toHaveLength(0);
     mocks.publications.getPublicBySlug.mockResolvedValueOnce(null);
-    expect(await publicExperienceRouteAllowedForSlug("sample-tea")).toBe(false);
-    expect(await publicExperienceRouteAllowedForSlug(publication.slug)).toBe(false);
+    expect(await bookingRouteAllowedForSlug("sample-tea")).toBe(false);
+    expect(await bookingRouteAllowedForSlug(publication.slug)).toBe(false);
   });
 });
 
@@ -191,7 +209,7 @@ it("closes publication-off detail, catalog and sale paths without a legacy fallb
   mocks.config.experiencePublicationsEnabled = false;
   expect(await getSitePublicExperience(publication.slug)).toEqual({ kind: "reserved" });
   expect(await listSitePublicExperiences()).toEqual({ experiences: [], claimedSlugs: [] });
-  expect(await publicExperienceRouteAllowedForSlug(publication.slug)).toBe(false);
+  expect(await bookingRouteAllowedForSlug(publication.slug)).toBe(false);
   expect(mocks.publications.getPublicBySlug).not.toHaveBeenCalled();
   expect(mocks.publications.listPublic).not.toHaveBeenCalled();
   expect(mocks.bookings.publicBookingTerms).not.toHaveBeenCalled();

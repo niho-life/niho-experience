@@ -46,7 +46,7 @@ export async function assertManagedBookingPublicationOpen(client: PoolClient, pr
   const open = await client.query(
     `SELECT 1 FROM experience_products p
        JOIN experience_product_publication_states s ON s.provider_id=p.provider_id AND s.product_id=p.id
-      WHERE p.provider_id=$1 AND p.id=$2 AND p.status='PUBLISHED' AND s.current_publication_id IS NOT NULL
+      WHERE p.provider_id=$1 AND p.id=$2 AND p.status='PUBLISHED' AND s.booking_publication_id IS NOT NULL
         AND s.self_stopped_at IS NULL AND s.operations_suspended_at IS NULL AND s.owner_resume_required=false
       FOR SHARE OF p,s`, [providerId, productId],
   );

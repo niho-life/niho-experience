@@ -2,7 +2,7 @@ import type { SitePublicExperience } from "./site-publications";
 
 export function siteSellerDisplayName(item: SitePublicExperience, locale: "en" | "ja"): string {
   const { publication, saleTerms, sellerDisclosure } = item;
-  const name = saleTerms?.sellerDisplayName ?? sellerDisclosure?.sellerDisplayName ?? publication.sellerDisplayName;
+  const name = saleTerms?.sellerDisplayName ?? sellerDisclosure?.sellerDisplayName ?? publication.sellerDisplayName ?? "";
   // Official English name: https://holdings.panasonic/jp/corporate/phd/profile.html
   if (locale === "en" && name.replace(/\s/g, "") === "パナソニックホールディングス株式会社") {
     return "Panasonic Holdings Corporation";

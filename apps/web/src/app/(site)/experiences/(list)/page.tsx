@@ -62,7 +62,7 @@ export default async function ExperiencesPage({ searchParams }: { searchParams: 
   const items = filterExperienceSummaries(catalog, searchQuery);
   const legacyCards = buildCardModels(items, await loadDetails(api, items, config.publicApiVersion !== "1.0"), isPilotPreview);
   const nativeCards = native
-    .filter(({ publication }) => !theme && matchesExperienceQuery(`${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${providerNameFor(publication, "ja") ?? ""} ${publication.sellerDisplayName} ${NATIVE_REGION_NAME}`, searchQuery))
+    .filter(({ publication }) => !theme && matchesExperienceQuery(`${publication.slug} ${publication.publicTitle} ${publication.content.lead} ${publication.providerPublicNameEn ?? ""} ${providerNameFor(publication, "ja") ?? ""} ${publication.sellerDisplayName ?? ""} ${NATIVE_REGION_NAME}`, searchQuery))
     .map((entry) => sitePublicationCard(entry));
   const bySlug = await loadCategoryBySlug();
   const { available: categories, selected: category } = resolveCategories(

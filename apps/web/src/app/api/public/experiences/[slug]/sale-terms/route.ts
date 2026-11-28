@@ -1,6 +1,6 @@
 import { config } from "@/lib/config";
 import { publicEmpty, publicJson } from "@/lib/experience/public-http";
-import { publicExperienceRouteAllowedForSlug } from "@/lib/experience/site-publications";
+import { bookingRouteAllowedForSlug } from "@/lib/experience/site-publications";
 import { guestBookingRepository } from "@/lib/experience/store-server";
 import { projectSitePublicSaleTerms } from "@/lib/experience/site-publications";
 
@@ -14,7 +14,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
   const { slug } = await params;
   if (slug.length < 1 || slug.length > 160) return publicEmpty(404);
   try {
-    if (!await publicExperienceRouteAllowedForSlug(slug)) return publicEmpty(404);
+    if (!await bookingRouteAllowedForSlug(slug)) return publicEmpty(404);
   } catch {
     return publicEmpty(503);
   }

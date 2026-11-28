@@ -34,7 +34,7 @@ const offer = (over: Record<string, unknown> = {}) => ({ ...SAMPLE_TERMS.offers[
 const item = (over: { offers?: unknown[]; english?: Record<string, unknown>; ja?: Record<string, unknown>; publication?: Record<string, unknown>; members?: PublicMemberProfile[]; seller?: boolean } = {}): SitePublicExperience => ({
   sellerDisclosure: over.seller ? { method: "NATIVE", sellerKind: "BUSINESS", sellerDisplayName: "Seller", representativeName: "Rep", publicAddress: "Addr", publicPhone: "0300000000", publicEmail: "a@example.test" } : null, hostBio: null, memberProfiles: over.members ?? [],
   publication: {
-    slug: "detail-sample", publicTitle: "Detail sample", sellerDisplayName: "Seller", providerPublicName: "Sample Host", providerKind: "PERSON",
+    slug: "detail-sample", publicTitle: "Detail sample", sellerDisplayName: "Seller", bookingAvailable: true, providerPublicName: "Sample Host", providerKind: "PERSON",
     content: { lead: "Lead", description: "Description", facts: { language: "English" }, highlights: [], included: ["Materials"], notIncluded: ["Transport"], knowBeforeYouGo: [], notSuitableFor: [], timeline: [], faq: [], ...over.english },
     japanese: { ...japanese, ...over.ja },
     photos: [], providerPhoto: null, businessLogo: null, meetingOverview: "Meet at the gate.", meetingPointDisclosure: "AFTER_BOOKING", meetingPoint: null,

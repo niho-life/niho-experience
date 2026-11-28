@@ -35,7 +35,7 @@ export default async function EmbedBookPage(props: Props) {
   const siteOrigin = new URL(config.siteUrl).origin;
   const [{ slug }, searchParams] = await Promise.all([props.params, props.searchParams]);
   const local = await getSitePublicExperience(slug).catch(() => null);
-  if (local?.kind !== "published") return <EmbedBookingUnavailable siteOrigin={siteOrigin} />;
+  if (local?.kind !== "published" || !local.item.publication.bookingAvailable) return <EmbedBookingUnavailable siteOrigin={siteOrigin} />;
   return <SitePublicationBooking
     layout="embed"
     item={local.item}

@@ -1,6 +1,7 @@
 import "server-only";
 import {
   ExperiencePublicationBlockedError,
+  isSelling,
   StoreAccessDeniedError,
   StoreConflictError,
   StoreNotFoundError,
@@ -48,7 +49,7 @@ type ProductDraftBody = {
   readonly currency: string;
   readonly unitAmount: number;
 };
-type Action = "read" | "save" | "publish" | "stop" | "readSaleTerms" | "saveSaleTerms" | "readBookingGuide" | "saveBookingGuide" | "readClassification" | "saveClassification";
+type Action = "read" | "save" | "publish" | "publishPage" | "openBooking" | "stopBooking" | "stop" | "readSaleTerms" | "saveSaleTerms" | "readBookingGuide" | "saveBookingGuide" | "readClassification" | "saveClassification";
 const BODY_LIMIT = 256 * 1024;
 const NOT_FOUND = { code: "NOT_FOUND", status: 404 } as const;
 const PRODUCT_ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$/;
@@ -220,6 +221,13 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
     checksFor(product.content, photosReady, product.publicTitle),
     config.experiencePublicationConsentVersion,
   );
+  const pageBlockers = await repository.getPublicationBlockers(
+    actor,
+    productId,
+    checksFor(product.content, photosReady, product.publicTitle),
+    null,
+    "PAGE",
+  );
   const revision: ProductRevision = {
     draft: product.version,
     state: state?.version ?? null,
@@ -231,6 +239,11 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
     status: publicationStatus(state),
     publicationNeedsUpdate,
     publicationBlockers,
+    // The same reasons split in two (#705): what stops the public page, and what only stops bookings from opening.
+    pageBlockers,
+    bookingBlockers: publicationBlockers.filter((blocker) => !pageBlockers.includes(blocker)),
+    // Actually taking bookings: a booking version and the listing is not stopped, suspended or awaiting restart.
+    bookingOpen: isSelling(state),
     draft: {
       slug: product.slug,
       publicTitle: product.publicTitle,
@@ -281,11 +294,15 @@ function checksFor(content: Readonly<Record<string, unknown>>, photosReady: bool
  */
 function actionSales(action: Action): "readiness" | "optional" | "none" {
   if (action === "readClassification" || action === "saveClassification" || action === "readBookingGuide" || action === "saveBookingGuide") return "none";
-  return action === "publish" || action === "stop" ? "readiness" : "optional";
+  // The page alone needs no seller (#705): the readiness is read only when there is a seller profile. Stopping bookings
+  // must work while Stripe is down, so it asks for no readiness at all.
+  if (action === "publishPage") return "optional";
+  if (action === "stopBooking") return "none";
+  return action === "publish" || action === "openBooking" || action === "stop" ? "readiness" : "optional";
 }
 
 function actionOperation(action: Action): "READ" | "EDIT" | "OWNER" {
-  if (action === "publish" || action === "stop" || action === "readBookingGuide" || action === "saveBookingGuide" || action === "readClassification" || action === "saveClassification") return "OWNER";
+  if (action === "publish" || action === "publishPage" || action === "openBooking" || action === "stopBooking" || action === "stop" || action === "readBookingGuide" || action === "saveBookingGuide" || action === "readClassification" || action === "saveClassification") return "OWNER";
   if (action === "save" || action === "saveSaleTerms") return "EDIT";
   return "READ";
 }
@@ -300,8 +317,8 @@ function validActionBody(action: Action, body: RecordValue): ProductRevision | n
     try { validSaleTerms(body.saleTerms); return decodeRevision(body.version); }
     catch { return null; }
   }
-  if (action === "stop") return exactKeys(body, ["version"]) ? decodeRevision(body.version) : null;
-  if (action === "publish") {
+  if (action === "stop" || action === "stopBooking" || action === "publishPage") return exactKeys(body, ["version"]) ? decodeRevision(body.version) : null;
+  if (action === "publish" || action === "openBooking") {
     return exactKeys(body, ["version", "consentVersion", "accepted"])
       && typeof body.consentVersion === "string" && body.consentVersion.length >= 1 && body.consentVersion.length <= 160
       && typeof body.accepted === "boolean"
@@ -366,7 +383,7 @@ export async function publicationRequest(request: Request, context: PublicationP
       revision = validActionBody(action, body);
       if (!revision) return responseError("INVALID_INPUT", 400);
     }
-    if (action === "publish") {
+    if (action === "publish" || action === "openBooking") {
       if (body.accepted !== true) return responseError("PUBLICATION_BLOCKED", 422, { blockers: ["CONSENT_REQUIRED"] });
       if (body.consentVersion !== config.experiencePublicationConsentVersion) {
         return responseError("PUBLICATION_BLOCKED", 422, { blockers: ["CONSENT_OUTDATED"] });
@@ -430,17 +447,35 @@ export async function publicationRequest(request: Request, context: PublicationP
         blockers: result.blockers,
       });
     }
-    if (action === "publish") {
+    if (action === "publish" || action === "openBooking") {
       if (!prepared.context.readiness?.connectReady) return responseError("PUBLICATION_BLOCKED", 422, { blockers: ["CONNECT_NOT_READY"] });
       const currentTermsVersion = terms.saleTerms?.version ?? null;
       if (currentTermsVersion !== revision!.saleTerms) return responseError("VERSION_CONFLICT", 409);
-      await repository.publish(actor, productId, {
+      await (action === "openBooking" ? repository.openBooking : repository.publish).call(repository, actor, productId, {
         expectedDraftVersion: revision!.draft,
         expectedStateVersion: revision!.state,
         expectedSaleTermsVersion: revision!.saleTerms,
         consentVersion: config.experiencePublicationConsentVersion,
         checks,
       });
+      return noStoreJson({ product: await productDto(repository, actor, productId) });
+    }
+    if (action === "publishPage") {
+      // The page alone (#705): no seller or payout account needed. While bookings are open the store also checks the
+      // booking blockers and moves the sale version with the page.
+      const currentTermsVersion = terms.saleTerms?.version ?? null;
+      if (currentTermsVersion !== revision!.saleTerms) return responseError("VERSION_CONFLICT", 409);
+      await repository.publishPage(actor, productId, {
+        expectedDraftVersion: revision!.draft,
+        expectedStateVersion: revision!.state,
+        expectedSaleTermsVersion: revision!.saleTerms,
+        checks,
+      });
+      return noStoreJson({ product: await productDto(repository, actor, productId) });
+    }
+    if (action === "stopBooking") {
+      if (state?.version !== revision!.state) return responseError("VERSION_CONFLICT", 409);
+      await repository.stopBooking(actor, productId, state.version);
       return noStoreJson({ product: await productDto(repository, actor, productId) });
     }
     if (action === "stop") {

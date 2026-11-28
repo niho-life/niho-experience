@@ -21,7 +21,7 @@ function summaryOf(publication: PublicExperiencePublication, terms: PublicBookin
     priceFrom: { amountYen: prices.length ? Math.min(...prices) : publication.unitAmount, taxIncluded: true, unit: "PER_ADULT" },
     provider: {
       kind: providerKindFor(publication, disclosure?.sellerKind) === "PERSON" ? "INDIVIDUAL" : "BUSINESS",
-      name: providerNameFor(publication, locale) ?? publication.sellerDisplayName,
+      name: providerNameFor(publication, locale) ?? publication.sellerDisplayName ?? "",
     },
     region: { key: "kamakura", name: "Kamakura" },
     slug: publication.slug,
@@ -87,7 +87,7 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
   const photos = publication.photos.map(localizedPhoto);
   const providerPhoto = publication.providerPhoto ? localizedPhoto(publication.providerPhoto) : null;
   const businessLogo = publication.businessLogo ? localizedPhoto(publication.businessLogo) : null;
-  const providerName = providerNameFor(publication, locale) ?? publication.sellerDisplayName;
+  const providerName = providerNameFor(publication, locale) ?? publication.sellerDisplayName ?? "";
   const providerKind = providerKindFor(publication, disclosure?.sellerKind);
   const hostAvatar = providerPhoto ?? (publication.providerPublicName && providerKind === "BUSINESS" ? businessLogo : null);
   const canonicalUrl = `${config.siteUrl}${locale === "ja" ? "/ja" : ""}/experiences/${encodeURIComponent(publication.slug)}`;
@@ -95,7 +95,7 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
     ?? (disclosure?.method === "NATIVE" ? `${config.siteUrl}${locale === "ja" ? "/ja" : ""}/experiences/${encodeURIComponent(publication.slug)}/seller` : "");
   return {
     booking: {
-      checkoutAvailable: Boolean(terms?.offers.length && config.guestBookingEnabled),
+      checkoutAvailable: Boolean(publication.bookingAvailable && terms?.offers.length && config.guestBookingEnabled),
       consentVersion: config.guestBookingConsentVersion,
       ...(terms?.salesPlanRevision === undefined ? {} : { salesPlanRevision: terms.salesPlanRevision }),
       currency: "JPY",
@@ -130,7 +130,7 @@ function detailOf(publication: PublicExperiencePublication, terms: PublicBooking
       logo: !publication.providerPublicName || providerKind === "BUSINESS" ? businessLogo : null,
     },
     region: { key: "kamakura", name: "Kamakura" },
-    seller: { displayName: publication.sellerDisplayName, legalNoticeUrl: sellerLegalUrl },
+    seller: { displayName: publication.sellerDisplayName ?? "", legalNoticeUrl: sellerLegalUrl },
     slug: publication.slug,
     timeline: [...content.timeline],
     title: content.title,

@@ -20,7 +20,7 @@ describe("public Experience sale terms", () => {
     vi.clearAllMocks();
     Object.assign(mocks.config, { apiMode: "http", experiencePublicationsEnabled: true });
     mocks.config.guestBookingEnabled = true;
-    mocks.publications.getPublicBySlug.mockResolvedValue({ slug: "workshop" });
+    mocks.publications.getPublicBySlug.mockResolvedValue({ slug: "workshop", bookingAvailable: true });
     mocks.bookings.publicBookingTerms.mockResolvedValue({
       providerId: "private-provider",
       productId: "private-product",
@@ -63,6 +63,14 @@ describe("public Experience sale terms", () => {
     expect((await GET(new Request("https://experience.example/api/public/experiences/missing/sale-terms"), { params: Promise.resolve({ slug: "missing" }) })).status).toBe(404);
     mocks.config.guestBookingEnabled = false;
     expect((await GET(new Request("https://experience.example/api/public/experiences/workshop/sale-terms"), { params: Promise.resolve({ slug: "workshop" }) })).status).toBe(404);
+  });
+
+  it("hides the terms of a page that is up but takes no bookings (#705)", async () => {
+    mocks.publications.getPublicBySlug.mockResolvedValue({ slug: "workshop", bookingAvailable: false });
+    const response = await GET(new Request("https://experience.example/api/public/experiences/workshop/sale-terms"), { params: Promise.resolve({ slug: "workshop" }) });
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("");
+    expect(mocks.bookings.publicBookingTerms).not.toHaveBeenCalled();
   });
 
   it("keeps an unpublished slug private regardless of the old publication switch", async () => {

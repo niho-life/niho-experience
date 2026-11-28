@@ -365,3 +365,7 @@ flag が `true` でこれらが欠けていると、サーバーは起動しな�
 ### 予約プレビューの正本
 
 通常のmockログインも `?mock=site-bookings` も、同じ提供者単位のExperience予約fixtureを使う。ホーム・予約一覧・開催回・メッセージ・予約通訳のdeep linkは同じpublic booking IDを指す。予約・返金・出欠は読み取り専用、メッセージのプレビュー返信は画面内だけで保持し、実メールや決済へ送らない。旧NIHO予約の承認・取消を模した画面テストはこの経路の受入に使わない。
+
+## 予約を受けられる版（#705）
+
+予約の条件・checkout・販売可能 slug は、公開ページの版（`current_publication_id`）ではなく、予約が開いている間だけ入る販売版（`booking_publication_id`）と `status='PUBLISHED'` を読む。ページだけを公開した体験（販売者なし）は、条件が `null`、販売可能 slug に入らず、checkout は `StoreNotFoundError` で断る。HTTP の `bookingRouteAllowedForSlug` はその前の二つ目の鍵。詳しくは [host-publication.md](host-publication.md)。

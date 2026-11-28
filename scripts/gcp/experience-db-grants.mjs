@@ -70,6 +70,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_product_publications: { write: I },
   experience_product_booking_guides: { write: IU },
   experience_product_publication_states: { write: IU },
+  // When bookings of a published page opened and stopped (#705): append-only, the state row is the truth.
+  experience_product_booking_events: { write: I },
   experience_products: { write: IU },
   // Support case content is private to current Admins; its event ledger stores only actor/action/outcome metadata.
   experience_support_cases: { write: IU },

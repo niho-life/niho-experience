@@ -82,10 +82,10 @@ export async function seedTestPublications(pool: Pool): Promise<void> {
 
     await pool.query(
       `INSERT INTO experience_product_publication_states
-         (provider_id,product_id,current_publication_id,first_published_at)
-       SELECT $1,$2,$3,published_at FROM experience_product_publications WHERE id=$3
+         (provider_id,product_id,current_publication_id,booking_publication_id,first_published_at)
+       SELECT $1,$2,$3,$3,published_at FROM experience_product_publications WHERE id=$3
        ON CONFLICT (provider_id,product_id) DO UPDATE
-         SET current_publication_id=EXCLUDED.current_publication_id,
+         SET current_publication_id=EXCLUDED.current_publication_id,booking_publication_id=EXCLUDED.booking_publication_id,
              first_published_at=COALESCE(experience_product_publication_states.first_published_at,EXCLUDED.first_published_at),
              version=experience_product_publication_states.version+1,updated_at=clock_timestamp()
        WHERE experience_product_publication_states.self_stopped_at IS NULL
