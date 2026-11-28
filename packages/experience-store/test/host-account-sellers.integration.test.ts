@@ -227,7 +227,7 @@ describe("moving a seller mapped to NIHO onto host accounts", { skip }, () => {
         assert.equal((await pool.query("SELECT legacy_provider_id FROM experience_host_seller_profiles WHERE provider_id='provider-blocked'")).rows[0]!.legacy_provider_id, "legacy-provider-blocked");
         assert.equal((await pool.query("SELECT seller_niho_account_ref FROM experience_products WHERE id='synthetic-blocked-draft'")).rows[0]!.seller_niho_account_ref, "niho-user-blocked");
       };
-      // A suspended account, an EDITOR of the provider, the OWNER of another provider: refused, the seller stays as it was.
+      // A suspended account, an EDITOR of the provider, an account already the OWNER of 3 providers: refused, the seller stays as it was.
       const suspended = await provision(pool, "suspended-owner@example.test");
       await new HostAccounts(pool).suspendHostAccount({ hostAccountId: suspended, nowUtc: at(1) });
       await assert.rejects(() => move(suspended), StoreConflictError);
@@ -237,6 +237,10 @@ describe("moving a seller mapped to NIHO onto host accounts", { skip }, () => {
       await unchanged();
       await nihoSeller(pool, "provider-other", "niho-user-other", OTHER_ACCOUNT);
       const elsewhere = await hostMember(pool, "provider-other", "owner-elsewhere@example.test", "OWNER");
+      for (const extra of ["provider-other-2", "provider-other-3"]) {
+        await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", [extra]);
+        await pool.query("INSERT INTO provider_memberships (provider_id, niho_user_id, role, active) VALUES ($1, $2, 'OWNER', true)", [extra, elsewhere.nihoUserId]);
+      }
       await assert.rejects(() => move(elsewhere.nihoUserId), StoreConflictError);
       await unchanged();
 

@@ -118,11 +118,17 @@ export type GrantProviderOwnerResult =
       | "host-account-not-active"
       /** The account already has another role on this provider, or an inactive membership: changed by hand only. */
       | "membership-conflict"
-      /** The account is already the OWNER of another provider (the host screens resolve exactly one). */
-      | "owner-of-another-provider"
+      /** The account is already the active OWNER of HOST_PROVIDER_OWNER_LIMIT providers. */
+      | "owner-limit-reached"
       /** Another host account is already this provider's OWNER: this path registers the first one only. */
       | "provider-has-host-owner";
   };
+
+/**
+ * How many providers one host account may be the active OWNER of (Epic #700). Counted under the account's owner lock by
+ * grantProviderOwnerIn, the one place that decides; migration 0093's trigger repeats the number for direct writes.
+ */
+export const HOST_PROVIDER_OWNER_LIMIT = 3;
 
 const HOST_ACCOUNT_ID = /^hst_[0-9a-f]{32}$/;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
@@ -529,7 +535,7 @@ export class HostAccounts {
    * Admin/ops: makes an ACTIVE host account the OWNER of a provider, as the first-login binding does for a NIHO user
    * (ExperiencePublicationRepository.ensureMappedOwnerMembership): under the same per-identity lock, an existing
    * membership of this account is never changed (another role or an inactive one is a conflict), and an account is
-   * the OWNER of one provider at most. This path also registers the first host-account OWNER only: a provider whose
+   * the OWNER of HOST_PROVIDER_OWNER_LIMIT providers at most. This path also registers the first host-account OWNER only: a provider whose
    * active OWNER is already another host account is refused. A NIHO user's OWNER membership stays as it is.
    */
   async grantProviderOwner(input: { readonly providerId: string; readonly hostAccountId: string; readonly nowUtc: string }): Promise<GrantProviderOwnerResult> {
@@ -565,6 +571,11 @@ export async function openHostSessionIn(
   return { kind: "ok", sessionToken, sessionRef, hostAccountId: input.hostAccountId, absoluteExpiresAtUtc: isoValue(opened.rows[0]!, "absolute_expires_at") };
 }
 
+/** One host account's OWNER memberships take turns (the key ensureMappedOwnerMembership and migration 0093's trigger use). */
+export async function lockHostOwnerIn(client: PoolClient, hostAccountId: string): Promise<void> {
+  await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${OWNER_LOCK_SEED}))`, [`experience-host-owner:${hostAccountId}`]);
+}
+
 /**
  * HostAccounts.grantProviderOwner inside the caller's transaction (inputs already validated), so that another write of the
  * same transaction (moving a seller from NIHO, SiteSaleRegistration.convertNihoSellerToHostAccounts) commits only with
@@ -576,7 +587,7 @@ export async function grantProviderOwnerIn(
 ): Promise<GrantProviderOwnerResult> {
   const { providerId, hostAccountId: account, nowUtc: at } = input;
   // The same key as ensureMappedOwnerMembership's: one identity's OWNER bindings take turns, whatever path writes them.
-  await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${OWNER_LOCK_SEED}))`, [`experience-host-owner:${account}`]);
+  await lockHostOwnerIn(client, account);
   await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${PROVIDER_HOST_OWNER_LOCK_SEED}))`, [`experience-provider-host-owner:${providerId}`]);
   const provider = await client.query("SELECT 1 FROM experience_providers WHERE id = $1", [providerId]);
   if ((provider.rowCount ?? 0) === 0) return { kind: "provider-not-found" } as const;
@@ -591,11 +602,11 @@ export async function grantProviderOwnerIn(
       ? { kind: "already-owner" } as const
       : { kind: "membership-conflict" } as const;
   }
-  const elsewhere = await client.query(
-    "SELECT 1 FROM provider_memberships WHERE niho_user_id = $1 AND active AND role = 'OWNER' LIMIT 1",
+  const owned = await client.query<DbRow>(
+    "SELECT count(*)::int AS owned FROM provider_memberships WHERE niho_user_id = $1 AND active AND role = 'OWNER'",
     [account],
   );
-  if ((elsewhere.rowCount ?? 0) > 0) return { kind: "owner-of-another-provider" } as const;
+  if (Number(owned.rows[0]?.owned ?? 0) >= HOST_PROVIDER_OWNER_LIMIT) return { kind: "owner-limit-reached" } as const;
   const hostOwner = await client.query(
     "SELECT 1 FROM provider_memberships WHERE provider_id = $1 AND active AND role = 'OWNER' AND niho_user_id ~ '^hst_[0-9a-f]{32}$' LIMIT 1",
     [providerId],

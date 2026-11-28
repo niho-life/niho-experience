@@ -54,6 +54,8 @@ preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock
 
 結び付けの Store（`HostAccountIdentities`、migration `0083`）は `packages/experience-store/README.md`。1 つの `hst_` に有効な NIHO user ID は 1 つ、同じ NIHO user ID は 1 つの `hst_` だけ。結び付け・解除・拒否は `host_account_identity_events` に残る。設定での結び付け・解除と再ログインは #595、招待リンクと既存 OWNER の移行は #596。
 
+自分でホスト登録する Store（#707、migration `0093`。画面と flag `EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED` は #708 以降）：`HostAccountIdentities.registerHostSelf` は、まだどの `hst_` にも結び付いていない NIHO アカウントから、メールの無い `hst_`（`linked_via='SELF_REGISTRATION'`）・ホスト・オーナー・本人が同意した公開名（`consent_source='OWNER'`）・規約の同意の記録・確認待ちの連絡用アドレス・セッションを 1 transaction で作る。`registerHostSelfForAccount` は既存の `hst_` にホストを足す。1 つの `hst_` が有効なオーナーになれるのは 3 つまで（`HOST_PROVIDER_OWNER_LIMIT`。`grantProviderOwnerIn` が owner lock の下で数え、DB の trigger も守る）。入力したメールは確認が済むまで宛先にならず、`login_email` にも保存しない。掲載名は NIHO（単語として）・事務局を含められない（Admin の登録には適用しない）。
+
 ## 流れ
 
 1. 「メールでログイン」（`/host/auth/login` は `/host/auth/sign-in` へ送る）でメールアドレスを入れる。
@@ -96,7 +98,7 @@ preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock
 | 判定 | 出どころ |
 | --- | --- |
 | 本人 | セッションのホストアカウント（`hst_`） |
-| 販売者 | そのアカウントが有効な OWNER である提供者（ちょうど 1 つ）と、その提供者に Admin/ops が登録したホストアカウント用の販売者 profile（`ExperiencePublicationRepository.currentHostAccountSellerProfile`）。無い → `403 FORBIDDEN`、2 つ以上 → `409 SELLER_PROFILE_AMBIGUOUS`、profile が無い（または NIHO 用の profile）→ `409 SELLER_SETUP_REQUIRED` |
+| 販売者 | そのアカウントが有効な OWNER である提供者（1 つ。1 アカウントは 3 つまで持てるが、複数のときの選択は #709 まで未対応）と、その提供者に Admin/ops が登録したホストアカウント用の販売者 profile（`ExperiencePublicationRepository.currentHostAccountSellerProfile`）。無い → `403 FORBIDDEN`、2 つ以上 → `409 SELLER_PROFILE_AMBIGUOUS`、profile が無い（または NIHO 用の profile）→ `409 SELLER_SETUP_REQUIRED` |
 | `accountUsable` | ホストアカウントが `ACTIVE` か |
 | `connectReady` | Stripe へ直接照会（`retrieveConnectedAccount`、プラットフォームのキー）。profile の口座で、決済・入金が有効、登録情報の提出済み、国が JP、通貨が JPY |
 | 支払いの同意 | Experience の利用同意（下）。版が `EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION` と同じで、profile の口座に対するものだけ |
@@ -191,7 +193,7 @@ NIHO ログインの時期に登録した販売者（NIHO の key を持つも�
 - NIHO の key を外し、`sel_` の参照を新しく作る。提供者の商品（下書き）は新しい参照に移り、`version` が上がる。
 - 公開済みの版は書き換えられない（DB の trigger で固定）。そのため、NIHO の時期に公開した版の上に掲載（公開中・停止中）が立っている提供者は、移さずに止める（移すと公開の販売者ページとホスト紹介が販売者を見つけられなくなるため）。
 - Stripe への照会はしない（口座は変わらず、公開のたびに照会する）。Stripe のキーは要らない。migration の identity で実行する。
-- NIHO の OWNER の権限はそのまま残る。`email` のホストアカウントを、移行と同じトランザクションで OWNER にする。OWNER にできないとき（停止中、この提供者の別の権限、別の提供者の OWNER、別のホストアカウントの OWNER がいる）は、何も移さない。口座の利用同意は、その OWNER が改めて記録する。
+- NIHO の OWNER の権限はそのまま残る。`email` のホストアカウントを、移行と同じトランザクションで OWNER にする。OWNER にできないとき（停止中、この提供者の別の権限、すでに有効な OWNER が 3 つの提供者（`HOST_PROVIDER_OWNER_LIMIT`）、別のホストアカウントの OWNER がいる）は、何も移さない。口座の利用同意は、その OWNER が改めて記録する。
 
 ### 最初の販売者（コミュニティディナー）
 

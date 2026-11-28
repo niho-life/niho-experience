@@ -1,7 +1,14 @@
 import { randomBytes } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import { StoreConflictError, StoreError, StoreValidationError } from "./errors.ts";
+import { StoreConflictError, StoreError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { HOST_ACCOUNT_LIMITS, isHostAccountId, openHostSessionIn, type HostLoginResult } from "./host-accounts.ts";
+import {
+  SelfRegistrationRefused,
+  createSelfRegisteredProviderIn,
+  validateSelfRegistrationInput,
+  type SelfRegisteredProvider,
+  type SelfRegistrationInput,
+} from "./host-self-registration.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import { assertCanonicalInstant } from "./validation.ts";
@@ -25,7 +32,7 @@ import { assertCanonicalInstant } from "./validation.ts";
  * Every time is the caller's `nowUtc` (a canonical UTC instant), as in HostAccounts.
  */
 
-export type NihoIdentityRoute = "INVITATION" | "SETTINGS" | "OPS" | "WRITER";
+export type NihoIdentityRoute = "INVITATION" | "SETTINGS" | "OPS" | "WRITER" | "SELF_REGISTRATION";
 
 /** What allows a binding or an unbinding: the host's own session in 設定, or Admin/ops by hand. */
 export type NihoIdentityLinkProof =
@@ -72,6 +79,17 @@ export type NihoSessionResult =
   | { readonly kind: "not-linked" }
   /** Bound to a host account that is suspended. */
   | { readonly kind: "account-suspended" };
+
+/** A person who registered as a host: the new provider and, for a NIHO sign-in, the session it opened. */
+export type RegisterHostSelfResult =
+  | (Omit<Extract<HostLoginResult, { readonly kind: "ok" }>, "kind"> & Extract<SelfRegisteredProvider, { readonly kind: "registered" }>)
+  /** The NIHO account already has a host account: nothing was written; the web layer signs it in as usual. */
+  | { readonly kind: "already-linked" }
+  | Exclude<SelfRegisteredProvider, { readonly kind: "registered" }>;
+
+export type RegisterHostSelfForAccountResult =
+  | Extract<SelfRegisteredProvider, { readonly kind: "registered" }>
+  | Exclude<SelfRegisteredProvider, { readonly kind: "registered" }>;
 
 /** The active binding of a host account as 設定 shows it. The NIHO user ID is not part of it. */
 export interface NihoIdentityStatus {
@@ -122,7 +140,7 @@ function text(row: DbRow, key: string): string {
 
 function routeOf(row: DbRow): NihoIdentityRoute {
   const via = row.linked_via;
-  if (via !== "INVITATION" && via !== "SETTINGS" && via !== "OPS" && via !== "WRITER") throw new StoreError("Database returned an invalid linked_via.");
+  if (via !== "INVITATION" && via !== "SETTINGS" && via !== "OPS" && via !== "WRITER" && via !== "SELF_REGISTRATION") throw new StoreError("Database returned an invalid linked_via.");
   return via;
 }
 
@@ -486,6 +504,81 @@ export class HostAccountIdentities {
         authenticatedAtUtc: input.authenticatedAtUtc,
       });
     });
+  }
+
+  /**
+   * 自分でホスト登録する (#707). For a NIHO account no host account is bound to yet (the web layer has just proven it), in one
+   * transaction: an email-less `hst_` bound to it (`SELF_REGISTRATION`, with its LINKED event), the provider with its
+   * OWNER, the public name the new OWNER consented to, the terms acceptance and the notification address awaiting its
+   * confirmation (never saved as a sign-in address), and the first session. Either all of it or none: a rate-limited
+   * confirmation email or any refusal leaves no `hst_` and no provider. `already-linked` writes nothing. `authenticatedAtUtc`
+   * and the locks are those of startWriterSessionForNihoIdentity: the NIHO account, then the new host account's bindings,
+   * then its owner lock. Names (with the reserved words), terms version and address are checked first (StoreValidationError).
+   */
+  async registerHostSelf(input: SelfRegistrationInput & { readonly nihoUserId: string; readonly authenticatedAtUtc: string; readonly nowUtc: string }): Promise<RegisterHostSelfResult> {
+    const subject = subjectOf(input?.nihoUserId);
+    const at = nowOf(input.nowUtc);
+    if (typeof input.authenticatedAtUtc !== "string") throw new StoreValidationError("authenticatedAtUtc must be a canonical UTC instant.");
+    assertCanonicalInstant(input.authenticatedAtUtc, "authenticatedAtUtc");
+    const authenticated = Date.parse(input.authenticatedAtUtc);
+    const current = Date.parse(at);
+    if (authenticated > current || authenticated < current - NIHO_AUTH_MAX_AGE_DAYS * 86_400_000) {
+      throw new StoreValidationError("authenticatedAtUtc must not be in the future or older than 400 days.");
+    }
+    const details = validateSelfRegistrationInput(input);
+    try {
+      return await withTransaction(this.#pool, async (client) => {
+        await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${SUBJECT_LOCK_SEED}))`, [`niho-identity-subject:${subject}`]);
+        const bound = "SELECT 1 FROM host_account_identities WHERE provider = 'NIHO' AND subject = $1 AND unlinked_at IS NULL";
+        if (((await client.query(bound, [subject])).rowCount ?? 0) > 0) return { kind: "already-linked" } as const;
+        const hostAccountId = `hst_${randomBytes(16).toString("hex")}`;
+        await lockBindings(client, hostAccountId, subject);
+        if (((await client.query(bound, [subject])).rowCount ?? 0) > 0) return { kind: "already-linked" } as const;
+        await client.query(
+          `INSERT INTO host_accounts (id,email,email_key,created_at,updated_at)
+           VALUES ($1,NULL,NULL,$2::timestamptz,$2::timestamptz)`,
+          [hostAccountId, at],
+        );
+        await client.query(
+          `INSERT INTO host_account_identities (host_account_id,provider,subject,linked_via,linked_at,last_login_at)
+           VALUES ($1,'NIHO',$2,'SELF_REGISTRATION',$3::timestamptz,$3::timestamptz)`,
+          [hostAccountId, subject, at],
+        );
+        await recordEvent(client, { hostAccountId, kind: "LINKED", subject, via: "SELF_REGISTRATION", at });
+        const provider = await createSelfRegisteredProviderIn(client, { hostAccountId, input: details, at });
+        if (provider.kind !== "registered") throw new SelfRegistrationRefused(provider);
+        const { kind: _opened, ...session } = await openHostSessionIn(client, { hostAccountId, sessionVersion: 1, createdAtUtc: at, authenticatedAtUtc: input.authenticatedAtUtc });
+        return { ...session, ...provider };
+      });
+    } catch (error) {
+      if (error instanceof SelfRegistrationRefused) return error.result;
+      throw error;
+    }
+  }
+
+  /**
+   * 自分でホスト登録する, for a person who already has a host account (a writer, a member of another host): one more
+   * provider, its OWNER, public name, terms acceptance and notification address, in one transaction (the same rows as
+   * registerHostSelf, no session). `owner-limit-reached` at HOST_PROVIDER_OWNER_LIMIT providers (decided under the account's
+   * owner lock, so two at once cannot pass the last place together), `account-suspended` for a suspended account; both leave
+   * nothing behind. StoreNotFoundError for no such account.
+   */
+  async registerHostSelfForAccount(input: SelfRegistrationInput & { readonly hostAccountId: string; readonly nowUtc: string }): Promise<RegisterHostSelfForAccountResult> {
+    const hostAccountId = accountOf(input?.hostAccountId);
+    const at = nowOf(input.nowUtc);
+    const details = validateSelfRegistrationInput(input);
+    try {
+      return await withTransaction(this.#pool, async (client) => {
+        const known = await client.query("SELECT 1 FROM host_accounts WHERE id = $1", [hostAccountId]);
+        if ((known.rowCount ?? 0) === 0) throw new StoreNotFoundError("Host account");
+        const provider = await createSelfRegisteredProviderIn(client, { hostAccountId, input: details, at });
+        if (provider.kind !== "registered") throw new SelfRegistrationRefused(provider);
+        return provider;
+      });
+    } catch (error) {
+      if (error instanceof SelfRegistrationRefused) return error.result;
+      throw error;
+    }
   }
 
   /** Trusted server-side resolution for NIHO S2S calls. The NIHO subject never enters a browser projection. */

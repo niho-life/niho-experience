@@ -247,7 +247,7 @@ export type {
   GuestRefundView,
   OpenedBookingSession,
 } from "./booking-access.ts";
-export { HOST_ACCOUNT_LIMITS, HostAccounts, isHostAccountId, normalizeHostEmail } from "./host-accounts.ts";
+export { HOST_ACCOUNT_LIMITS, HOST_PROVIDER_OWNER_LIMIT, HostAccounts, isHostAccountId, normalizeHostEmail } from "./host-accounts.ts";
 export { HostAccountIdentities } from "./host-account-identities.ts";
 export { NIHO_ACCOUNT_STATUS_CHECK_INTERVAL_SECONDS, NihoAccountStatusStore } from "./niho-account-status.ts";
 export type { ApplyNihoAccountStatusResult, NihoAccountStatus, NihoAccountStatusCheck, NihoAccountStatusSessionKind } from "./niho-account-status.ts";
@@ -264,6 +264,10 @@ export type {
 export { TRAVELER_ACCOUNT_LIMITS, TravelerAccounts, isTravelerAccountId } from "./traveler-accounts.ts";
 export type { TravelerSession, TravelerSignInResult } from "./traveler-accounts.ts";
 export type { AcceptHostInvitationResult, CreateHostInvitationResult, HostInvitationLinkIssue, OpenHostInvitationResult } from "./host-invitations.ts";
+export type { RegisterHostSelfForAccountResult, RegisterHostSelfResult } from "./host-account-identities.ts";
+export type { SelfRegisteredProvider, SelfRegistrationInput, SelfRegistrationProviderKind } from "./host-self-registration.ts";
+export { PROVIDER_PUBLIC_NAME_MAX, ProviderPublicNameError, assertSelfRegistrationPublicName, isReservedProviderPublicName } from "./provider-public-name.ts";
+export type { ProviderPublicNameProblem } from "./provider-public-name.ts";
 export type {
   LinkNihoIdentityResult,
   NihoIdentityLinkProof,
