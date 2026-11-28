@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   csrf: true, enabled: true, load: vi.fn(),
-  list: vi.fn(), suspend: vi.fn(), clear: vi.fn(), suspendAccount: vi.fn(), reactivateAccount: vi.fn(),
+  list: vi.fn(), get: vi.fn(), suspend: vi.fn(), clear: vi.fn(), suspendAccount: vi.fn(), reactivateAccount: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ config: { get experiencePublicationsEnabled() { return mocks.enabled; } } }));
@@ -12,12 +12,13 @@ vi.mock("@/lib/admin/server", async () => {
     adminJson: (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "cache-control": "private, no-store" } }) };
 });
 vi.mock("@/lib/experience/store-server", () => ({
-  experiencePublicationRepository: () => ({ listAdminHosts: mocks.list, suspendProviderByOperations: mocks.suspend, clearProviderOperationsSuspension: mocks.clear }),
+  experiencePublicationRepository: () => ({ listAdminHosts: mocks.list, getAdminHost: mocks.get, suspendProviderByOperations: mocks.suspend, clearProviderOperationsSuspension: mocks.clear }),
   adminHostAccounts: () => ({ suspendHostAccount: mocks.suspendAccount, reactivateHostAccount: mocks.reactivateAccount }),
 }));
 
 import { StoreNotFoundError, ExperiencePublicationBlockedError } from "@niho-experience/experience-store";
 import { GET } from "./route";
+import { GET as getHost } from "./[providerId]/route";
 import { POST as suspend } from "./[providerId]/suspend/route";
 import { POST as clear } from "./[providerId]/clear-suspension/route";
 import { POST as suspendAccount } from "./accounts/[accountId]/suspend/route";
@@ -52,6 +53,20 @@ describe("Admin hosts API (#711)", () => {
     expect((await GET(new Request("https://experience.example/admin/api/hosts"))).status).toBe(503);
     mocks.enabled = false;
     expect((await GET(new Request("https://experience.example/admin/api/hosts"))).status).toBe(404);
+  });
+
+  it("reads one host by its ID (so a host older than the newest 500 is found), and says 404 for an unknown one", async () => {
+    mocks.get.mockResolvedValue({ providerId: "prv_1" });
+    const found = await getHost(new Request("https://experience.example/admin/api/hosts/prv_1"), ctx({ providerId: "prv_1" }));
+    expect(found.status).toBe(200);
+    expect(await found.json()).toEqual({ host: { providerId: "prv_1" } });
+    expect(mocks.get).toHaveBeenCalledWith({ nihoUserId: "admin-a" }, "prv_1");
+    mocks.get.mockResolvedValue(null);
+    expect((await getHost(new Request("https://experience.example/admin/api/hosts/prv_9"), ctx({ providerId: "prv_9" }))).status).toBe(404);
+    expect((await getHost(new Request("https://experience.example/admin/api/hosts/%20"), ctx({ providerId: " " }))).status).toBe(400);
+    expect((await getHost(new Request("https://experience.example/admin/api/hosts/prv_1?x=1"), ctx({ providerId: "prv_1" }))).status).toBe(400);
+    mocks.load.mockResolvedValue({ status: "signed-out" });
+    expect((await getHost(new Request("https://experience.example/admin/api/hosts/prv_1"), ctx({ providerId: "prv_1" }))).status).toBe(401);
   });
 
   it("suspends a host with a machine reason code, same origin and JSON only", async () => {

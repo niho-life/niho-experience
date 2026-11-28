@@ -12,7 +12,7 @@ const ACCOUNT = `hst_${"b".repeat(32)}`;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = Record<string, any>;
 
-function fakeApi() {
+function fakeApi(options: { readonly listIsNewestOnly?: boolean } = {}) {
   let suspended: string | null = null;
   let accountStatus = "ACTIVE";
   const sent: Array<{ method: string; path: string; body: unknown; operationId: string }> = [];
@@ -23,7 +23,12 @@ function fakeApi() {
   }];
   const api: Api = {
     env: "stg", aiKind: "claude-code",
-    async get(path) { return path === "/admin/api/hosts" ? { status: 200, body: { hosts: hosts() } } : { status: 404, body: {} }; },
+    async get(path) {
+      // The list is the newest 500: `prv_1` can be older than that and absent from it, yet still be found by its own ID.
+      if (path === "/admin/api/hosts") return { status: 200, body: { hosts: options.listIsNewestOnly ? [] : hosts() } };
+      if (path === "/admin/api/hosts/prv_1") return { status: 200, body: { host: hosts()[0] } };
+      return { status: 404, body: {} };
+    },
     async send(method, path, body, operationId): Promise<ApiResponse> {
       sent.push({ method, path, body, operationId });
       if (path === "/admin/api/hosts/prv_1/suspend") { suspended = (body as Loose).reasonCode; return { status: 200, body: { providerId: "prv_1", changed: true, suspendedProducts: 2 } }; }
@@ -59,6 +64,13 @@ describe("provider hosts / suspend / clear-suspension", () => {
     expect(fake.sent[0]).toMatchObject({ method: "POST", path: "/admin/api/hosts/prv_1/suspend", body: { reasonCode: "UNDER_REVIEW" } });
     expect(out(await exec(fake.api, ["provider", "suspend", "--provider", "prv_1", "--reason", "UNDER_REVIEW", "--yes"])).result.status).toBe("unchanged");
     expect(fake.sent).toHaveLength(1);
+  });
+
+  it("finds the host by its own ID, so one older than the newest 500 of the list can still be suspended and lifted", async () => {
+    const fake = fakeApi({ listIsNewestOnly: true });
+    expect(out(await exec(fake.api, ["provider", "hosts"])).result.hosts).toHaveLength(0);
+    expect(out(await exec(fake.api, ["provider", "suspend", "--provider", "prv_1", "--reason", "UNDER_REVIEW", "--yes"])).result.status).toBe("applied");
+    expect(out(await exec(fake.api, ["provider", "clear-suspension", "--provider", "prv_1", "--yes"])).result.status).toBe("applied");
   });
 
   it("refuses a missing or malformed reason, a missing provider and an unknown provider", async () => {

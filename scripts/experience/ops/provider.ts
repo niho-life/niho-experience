@@ -167,9 +167,13 @@ async function readHosts(context: Context, action: string): Promise<readonly Hos
 }
 
 async function readHost(context: Context, providerId: string, action: string): Promise<HostRow> {
-  const found = (await readHosts(context, action)).find((host) => host.providerId === providerId);
-  if (!found) throw new OpsError("not_found", `No provider ${providerId}.`, EXIT.failed);
-  return found;
+  // By its ID, not by looking through the newest 500 of the list: a host older than that is still found.
+  const response = await context.api.get(`${HOSTS}/${encodeURIComponent(providerId)}`);
+  if (response.status === 404) throw new OpsError("not_found", `No provider ${providerId}.`, EXIT.failed);
+  if (response.status !== 200) throw failureOf(response, action);
+  const host = (response.body as { host?: HostRow } | null)?.host;
+  if (!host || host.providerId !== providerId) throw new OpsError("not_found", `No provider ${providerId}.`, EXIT.failed);
+  return host;
 }
 
 const hosts: Action = {

@@ -356,15 +356,22 @@ describe("the host list (#711)", { skip }, () => {
       const accounts = new HostAccounts(pool);
       const { hostAccountId } = await accounts.provisionHostAccount({ email: "self@example.test", nowUtc: new Date().toISOString() });
       await pool.query("INSERT INTO experience_provider_self_registrations (provider_id,host_account_id,host_terms_version,host_terms_accepted_at) VALUES ('provider-self',$1,'terms-v1',clock_timestamp())", [hostAccountId]);
+      // "Public" is what the public site shows: the page the office suspended one by one (c) is not counted.
+      const before = (await publications.listAdminHosts(OPS)).find((host) => host.providerId === PROVIDER)!;
+      assert.equal(before.publicPages, 2, "a suspended page is not a public page");
+      assert.equal(before.sellingPages, 1);
       await publications.suspendProviderByOperations(OPS, PROVIDER, "UNDER_REVIEW");
       const hosts = await publications.listAdminHosts(OPS);
       const main = hosts.find((host) => host.providerId === PROVIDER)!;
+      // One host is read by its own ID (a host older than the newest 500 is still found); an unknown ID is null.
+      assert.deepEqual(await publications.getAdminHost(OPS, PROVIDER), main);
+      assert.equal(await publications.getAdminHost(OPS, "provider-unknown"), null);
       const self = hosts.find((host) => host.providerId === "provider-self")!;
       assert.equal(main.route, "OFFICE");
       assert.equal(main.publicDisplayName, "合成の会");
       assert.equal(main.consentSource, "ADMIN");
       assert.deepEqual(main.owners.map((o) => ({ id: o.hostAccountId, status: o.status, email: o.email })), [{ id: owner.nihoUserId, status: "ACTIVE", email: "page-booking@example.test" }]);
-      assert.equal(main.publicPages, 3);
+      assert.equal(main.publicPages, 0, "a suspended host has no public page, whatever its current versions");
       assert.equal(main.sellingPages, 0, "suspended: nothing is selling");
       assert.ok(main.firstPublishedAtUtc);
       assert.ok(main.firstBookingOpenedAtUtc);

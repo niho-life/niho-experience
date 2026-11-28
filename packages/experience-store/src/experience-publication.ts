@@ -3238,6 +3238,17 @@ export class ExperiencePublicationRepository {
    */
   async listAdminHosts(actor: PublicationOperationsActor): Promise<readonly ExperienceAdminHost[]> {
     assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
+    return this.#adminHosts(null);
+  }
+
+  /** One host of the office's list, found by its ID and not by its place in the newest 500, or null when there is none (#711). */
+  async getAdminHost(actor: PublicationOperationsActor, providerId: string): Promise<ExperienceAdminHost | null> {
+    assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
+    assertStoreIdentifier(providerId, "providerId");
+    return (await this.#adminHosts(providerId))[0] ?? null;
+  }
+
+  async #adminHosts(providerId: string | null): Promise<readonly ExperienceAdminHost[]> {
     const result = await this.#pool.query<DbRow>(
       `SELECT provider.id AS provider_id,provider.created_at,provider.operations_suspended_at,provider.operations_suspension_code,
               profile.public_display_name,profile.public_display_name_en,profile.provider_kind,profile.consent_source,
@@ -3251,19 +3262,31 @@ export class ExperiencePublicationRepository {
               EXISTS (SELECT 1 FROM provider_memberships membership
                        WHERE membership.provider_id=provider.id AND membership.role='OWNER' AND membership.active=true
                          AND membership.niho_user_id !~ '^hst_[0-9a-f]{32}$') AS has_other_owner,
+              -- "Public" is what the public site shows (VISIBLE_PUBLICATIONS_CTE): a page that is self-stopped, suspended, waiting
+              -- for its owner's restart, archived or with a photo that is not ready is not public, whatever its current version.
               (SELECT count(*) FROM experience_product_publication_states state
-                WHERE state.provider_id=provider.id AND state.current_publication_id IS NOT NULL)::int AS public_pages,
+                JOIN experience_products product ON product.provider_id=state.provider_id AND product.id=state.product_id
+                WHERE state.provider_id=provider.id AND state.current_publication_id IS NOT NULL
+                  AND state.self_stopped_at IS NULL AND state.operations_suspended_at IS NULL AND NOT state.owner_resume_required
+                  AND product.status<>'ARCHIVED'
+                  AND NOT EXISTS (SELECT 1 FROM experience_product_publication_media media
+                                    JOIN experience_product_media_assets asset ON asset.id=media.asset_id
+                                   WHERE media.publication_id=state.current_publication_id AND asset.state<>'READY'))::int AS public_pages,
               (SELECT count(*) FROM experience_product_publication_states state
+                JOIN experience_products product ON product.provider_id=state.provider_id AND product.id=state.product_id
                 WHERE state.provider_id=provider.id AND state.booking_publication_id IS NOT NULL AND state.current_publication_id IS NOT NULL
-                  AND state.self_stopped_at IS NULL AND state.operations_suspended_at IS NULL AND NOT state.owner_resume_required)::int AS selling_pages,
+                  AND state.self_stopped_at IS NULL AND state.operations_suspended_at IS NULL AND NOT state.owner_resume_required
+                  AND product.status<>'ARCHIVED')::int AS selling_pages,
               (SELECT min(state.first_published_at) FROM experience_product_publication_states state WHERE state.provider_id=provider.id) AS first_published_at,
               (SELECT min(event.created_at) FROM experience_product_booking_events event
                 WHERE event.provider_id=provider.id AND event.kind='OPENED' AND event.reason<>'BACKFILL') AS first_booking_opened_at
          FROM experience_providers provider
          LEFT JOIN experience_provider_public_profiles profile ON profile.provider_id=provider.id
          LEFT JOIN experience_provider_self_registrations registration ON registration.provider_id=provider.id
+        WHERE ($1::text IS NULL OR provider.id=$1)
         ORDER BY provider.created_at DESC,provider.id COLLATE "C"
         LIMIT 500`,
+      [providerId],
     );
     return result.rows.map((row) => {
       const owners = (Array.isArray(row.owners) ? row.owners : []) as Array<{ accountId: string; status: string; email: string | null }>;

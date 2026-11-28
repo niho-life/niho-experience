@@ -4,7 +4,7 @@
 
 ## 一覧（`/admin/hosts`、運営 CLI `provider hosts`）
 
-読み取りだけ（500 件まで、登録が新しい順）。ホストごとに、公開名（日英）・種別・公開名に同意した人（`ADMIN`＝事務局、`OWNER`＝本人）・登録の経路（`experience_provider_self_registrations` があれば「自分で登録」、なければ「事務局」）・登録日・オーナー（`hst_` の ID・アカウントの状態・メールアドレス。NIHO の user ID は出さない）・公開中のページ数・予約受付中の数・最初のページ公開日（`first_published_at` の最小）・最初の予約受付日・ホスト単位の停止。
+読み取りだけ（500 件まで、登録が新しい順）。ホストごとに、公開名（日英）・種別・公開名に同意した人（`ADMIN`＝事務局、`OWNER`＝本人）・登録の経路（`experience_provider_self_registrations` があれば「自分で登録」、なければ「事務局」）・登録日・オーナー（`hst_` の ID・アカウントの状態・メールアドレス。NIHO の user ID は出さない）・公開中のページ数（公開サイトに見えるもの。自主停止・運営停止・再開待ち・アーカイブ・写真が未処理のページは数えない）・予約受付中の数・最初のページ公開日（`first_published_at` の最小）・最初の予約受付日・ホスト単位の停止。
 
 - **最初の予約受付日**は `experience_product_booking_events` の最初の `OPENED` のうち `BACKFILL`（migration 0092 が、すでに販売中だった体験に書いた行。日付は移行の日で実際の受付日ではない）を除いた日。`BACKFILL` だけのホストは「なし」になる。
 - 予約受付中の数は `isSelling` と同じ条件（予約版があり、自主停止・運営停止・再開待ちでない）。
@@ -30,7 +30,8 @@ Admin のセッションを毎回確認し、変更は同一 origin（CLI は pr
 
 | メソッド・パス | 内容 |
 | --- | --- |
-| `GET /admin/api/hosts` | 一覧 |
+| `GET /admin/api/hosts` | 一覧（新しい順に最大 500） |
+| `GET /admin/api/hosts/<providerId>` | 1 件（ID で引く。500 件より古いホストも見つかる。CLI の `provider suspend` / `clear-suspension` はここで対象を確かめる） |
 | `POST /admin/api/hosts/<providerId>/suspend` `{ "reasonCode": "UNDER_REVIEW" }` | ホストの運営停止（`^[A-Z0-9_]{1,80}$`） |
 | `POST /admin/api/hosts/<providerId>/clear-suspension` | 解除 |
 | `POST /admin/api/hosts/accounts/<hst_…>/suspend`・`/reactivate` | アカウントの停止・解除 |
