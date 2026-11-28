@@ -981,9 +981,13 @@ export function HostPublicationWorkspace({
       const publishBody = adminDraft
         ? { version: product.version, accepted: true, sellerConfirmationMethod, photoRightsConfirmed: true, consentVersion }
         : { version: product.version, consentVersion, accepted: true };
+      // While bookings are open, a change to the page is sold as shown: it goes the way of 予約の受付を始める (the same call the
+      // store treats as a re-publish of the open sale), so the current conditions are agreed to; the page alone would reuse the
+      // consent given earlier and be refused with CONSENT_OUTDATED once the conditions have moved on.
+      const wire: "publish" | PublicationAction = action === "publish-page" && (product.bookingOpen ?? product.status === "PUBLISHED") && !adminDraft ? "open-booking" : action;
       // 予約の受付を始める takes the same consent as the old one-step publish; the page alone and the stops take only the version.
-      const body_ = action === "publish" ? publishBody : action === "open-booking" ? { version: product.version, consentVersion, accepted: true } : { version: product.version };
-      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/${action === "publish" ? "publish" : PUBLICATION_ACTION_PATH[action]}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body_) });
+      const body_ = wire === "publish" ? publishBody : wire === "open-booking" ? { version: product.version, consentVersion, accepted: true } : { version: product.version };
+      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/${wire === "publish" ? "publish" : PUBLICATION_ACTION_PATH[wire]}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body_) });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       if (adminDraft) {
@@ -1850,7 +1854,7 @@ export function HostPublicationWorkspace({
           </div> : null}
         </div> : null}
       </form>
-      {stateConfirm && stateConfirm !== "publish" ? <HostConfirmDialog title={publicationConfirmCopy(stateConfirm, product.status).title} description={publicationConfirmCopy(stateConfirm, product.status).description} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>{publicationConfirmCopy(stateConfirm, product.status).confirm}</button>} onConfirm={() => { const action = stateConfirm; void runStateChange(action); }} onClose={() => setStateConfirm(null)} /> : null}
+      {stateConfirm && stateConfirm !== "publish" ? <HostConfirmDialog title={publicationConfirmCopy(stateConfirm, product.status, bookingIsOpen).title} description={publicationConfirmCopy(stateConfirm, product.status, bookingIsOpen).description} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>{publicationConfirmCopy(stateConfirm, product.status, bookingIsOpen).confirm}</button>} onConfirm={() => { const action = stateConfirm; void runStateChange(action); }} onClose={() => setStateConfirm(null)} /> : null}
       {translateConfirm ? <HostConfirmDialog title={`今の${NAME[translateConfirm]}を置き換えますか？`} description={`${translateConfirm === "en" ? "日本語" : "英語"}の原稿から翻訳し直します。${NAME[translateConfirm]}に手で書いた内容は消えます。`} focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>置き換える</button>} onConfirm={() => void (translateConfirm === "en" ? generateEnglish() : generateJapanese())} onClose={() => setTranslateConfirm(null)} /> : null}
       {discardConfirm ? <HostConfirmDialog title="変更を元に戻しますか？" description="保存していない入力は消えて、最後に保存した内容に戻ります。" focusRef={stateConfirmStay} stayRef={stateConfirmStay} confirm={<button type="submit" className={consoleButtonClass("primary")}>元に戻す</button>} onConfirm={() => void discardToLatest()} onClose={() => setDiscardConfirm(false)} /> : null}
       <EditorDialog open={blockerDialog} onClose={() => setBlockerDialog(false)} title={`${blockerGoal}には、あと${dialogBlockers.length}つ必要です`}>
