@@ -13,7 +13,7 @@ import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";
 import { anthropicTranslator } from "@/lib/translation/anthropic";
 import { hostBioToEnglish } from "@/lib/translation/prompts";
 import { publicationHostBoundary, publicationHostMutationAllowed } from "./publication-host-boundary";
-import { hostMemberActor } from "./member-profile-http";
+import { requestedProviderId } from "./provider-context";
 import { providerHostBioRepository } from "./store-server";
 
 /*
@@ -49,22 +49,15 @@ function storeError(caught: unknown): Response {
 }
 
 async function prepared(request: Request) {
-  const query = new URL(request.url).searchParams;
-  if (query.size > 1 || (query.size === 1 && !query.get("providerId"))) return { ok: false as const, response: error("INVALID_INPUT", 400) };
-  const providerId = query.get("providerId");
-  let actor;
-  if (providerId) {
-    const member = await hostMemberActor(providerId, true);
-    if (member instanceof Response) return { ok: false as const, response: member };
-    actor = { providerId: member.providerId, nihoUserId: member.memberId };
-  } else {
-    // The bio is the provider's own text: membership only, no seller and no Stripe.
-    const boundary = await publicationHostBoundary("OWNER", { sales: "none" });
-    if (!boundary.ok) return boundary;
-    actor = boundary.value.actor;
-  }
+  // `?providerId=` is the one query these APIs take: checked by the same boundary as every other host API (#709), so an
+  // unknown id is 422, a provider the account does not own 403, and no id with two or more hosts 409 PROVIDER_REQUIRED.
+  const requested = requestedProviderId(request, { code: "INVALID_INPUT", status: 400 });
+  if (!requested.ok) return requested;
+  // The bio is the provider's own text: membership only, no seller and no Stripe.
+  const boundary = await publicationHostBoundary("OWNER", { providerId: requested.providerId, sales: "none" });
+  if (!boundary.ok) return boundary;
   const repository = providerHostBioRepository();
-  return repository ? { ok: true as const, actor, repository } : { ok: false as const, response: error("UNAVAILABLE", 503) };
+  return repository ? { ok: true as const, actor: boundary.value.actor, repository } : { ok: false as const, response: error("UNAVAILABLE", 503) };
 }
 
 export async function getHostBio(request: Request): Promise<Response> {

@@ -14,18 +14,18 @@ describe("Experience owner-product routes", () => {
   it("uses the new Experience product workspace for list, create and edit", async () => {
     mocks.hostPageContext.mockResolvedValue({ provider: { id: "provider-123" }, linkProviderId: "provider-123" });
     const list = await HostExperiencesPage({ searchParams: Promise.resolve({ providerId: "provider-123" }) });
-    const create = NewHostExperiencePage();
+    const create = await NewHostExperiencePage({ searchParams: Promise.resolve({ providerId: "provider-123" }) });
     const edit = await HostExperiencePage({ params: Promise.resolve({ id: "product-123" }), searchParams: Promise.resolve({ providerId: "provider-123" }) });
-    expect(isValidElement(list) && list.props).toEqual({ bookingGuideHref: "/host/booking-guides?providerId=provider-123", publicSiteOrigin: "https://experience.example" });
-    expect(isValidElement(create) && create.props).toEqual({ create: true });
-    expect(isValidElement(edit) && edit.props).toEqual({ productId: "product-123", paymentConsentHref: "https://niho.example/connect/experience-payments" });
+    expect(isValidElement(list) && list.props).toEqual({ providerId: "provider-123", bookingGuideHref: "/host/booking-guides?providerId=provider-123", publicSiteOrigin: "https://experience.example" });
+    expect(isValidElement(create) && create.props).toEqual({ create: true, providerId: "provider-123" });
+    expect(isValidElement(edit) && edit.props).toEqual({ productId: "product-123", providerId: "provider-123", paymentConsentHref: "https://niho.example/connect/experience-payments" });
   });
 
   it("sends the OWNER to 設定 › 受取口座 for the payment consent with Experience host accounts (ADR 0003 slice 3)", async () => {
     mocks.config.hostAccountsEnabled = true;
     try {
       const edit = await HostExperiencePage({ params: Promise.resolve({ id: "product-123" }), searchParams: Promise.resolve({}) });
-      expect(isValidElement(edit) && edit.props).toEqual({ productId: "product-123", paymentConsentHref: "/host/settings#settings-payout", paymentConsentLabel: "受取口座の同意へ" });
+      expect(isValidElement(edit) && edit.props).toEqual({ productId: "product-123", providerId: "provider-123", paymentConsentHref: "/host/settings?providerId=provider-123#settings-payout", paymentConsentLabel: "受取口座の同意へ" });
     } finally {
       mocks.config.hostAccountsEnabled = false;
     }

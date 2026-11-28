@@ -10,6 +10,9 @@ import { MapboxLocationMap, type MapArea, type MapCoordinate } from "@/component
 import { HostPageBody, PageHead } from "./ui";
 import { HostSharedPhotoOffer } from "./HostSharedPhoto";
 import { HostConfirmDialog } from "./HostConfirmDialog";
+import { HostErrorMessage } from "./HostProviderRequired";
+import { withProvider } from "@/lib/host/routes";
+import { PROVIDER_REQUIRED_CODE, PROVIDER_REQUIRED_MESSAGE, hostApiPath } from "@/lib/host/api-path";
 import {
   asPublicationPrice,
   publicationTermsForm,
@@ -88,6 +91,11 @@ type TimelineItem = { time: string; title: string; text: string; photoIndex: num
 type LocaleManuscript = { title: string; lead: string; description: string; language: string; highlights: string[]; included: string[]; notIncluded: string[]; knowBeforeYouGo: string[]; notSuitableFor: string[]; timeline: TimelineItem[]; faq?: PublicationFaqRow[] };
 type Props = {
   membersProviderId?: string;
+  /**
+   * The host this screen is for (#709). Sent as `?providerId=` on every host API call (lib/host/api-path.ts), so an owner of two
+   * or more hosts never gets 409. Not set in admin-draft (the admin API names the provider in its path).
+   */
+  providerId?: string | null;
   productId?: string;
   create?: boolean;
   bookingGuideHref?: string;
@@ -113,6 +121,7 @@ const blankJapanese: LocaleManuscript = { title: "", lead: "", description: "", 
 const emptyTerms = publicationTermsForm(null, []);
 const STATUS_COPY: Record<Status, string> = { DRAFT: "下書き", PUBLISHED: "公開中", STOPPED: "停止中", RESTART_REQUIRED: "再公開が必要", SUSPENDED: "運営停止中" };
 const readError: Record<string, string> = {
+  [PROVIDER_REQUIRED_CODE]: PROVIDER_REQUIRED_MESSAGE,
   SESSION_ENDED: "ログイン状態が切れました。入力はこのブラウザーに保持しています。再ログインして再読み込みしてください。",
   SESSION_REFRESH_REQUIRED: "ログイン状態を更新できませんでした。入力を保持しました。再読み込みしてください。",
   FORBIDDEN: "この商品を操作する権限がありません。入力は保持しています。",
@@ -333,6 +342,7 @@ function MeetingCoordinatesEditor({ value, onChange, radius, onRadiusChange, app
 export function HostPublicationWorkspace({
   productId,
   membersProviderId,
+  providerId = null,
   create = false,
   bookingGuideHref,
   paymentConsentHref,
@@ -345,11 +355,15 @@ export function HostPublicationWorkspace({
   embedEnabled = false,
 }: Props) {
   const router = useRouter();
+  const api = useCallback((path: string) => hostApiPath(path, providerId), [providerId]);
+  /** A link to another host screen keeps the host this one is for (the address carries `?providerId=`). */
+  const page = useCallback((path: string) => withProvider(path, providerId), [providerId]);
   const adminDraft = mode === "admin-draft";
   /** The 代理登録 form. A host creates from the dialog on the list instead. */
   const adminCreate = create && adminDraft;
   const hostCreate = create && !adminDraft;
-  const storageNamespace = adminDraft ? `admin-product-draft:${apiBase}` : "experience-product-draft";
+  // A host's unsent work is kept per host (#709): a new experience typed for one host never comes back under another.
+  const storageNamespace = adminDraft ? `admin-product-draft:${apiBase}` : providerId ? `experience-product-draft:${providerId}` : "experience-product-draft";
   const [products, setProducts] = useState<Product[]>([]);
   const [product, setProduct] = useState<Product | null>(null);
   const [consentVersion, setConsentVersion] = useState("");
@@ -442,7 +456,7 @@ export function HostPublicationWorkspace({
   const mediaDirty = mediaEdited || (!!product && effectiveMedia !== mediaDraft);
   const providerMediaDirty = providerMediaEdited || (!adminDraft && !!product && effectiveProviderMedia !== providerMediaDraft);
   // 分類 is saved on its own route, but the host edits it with the page: it counts as one of the unsaved changes.
-  const classification = useProductClassification(!adminDraft && productId ? { kind: "host", productId } : null);
+  const classification = useProductClassification(!adminDraft && productId ? { kind: "host", productId, providerId } : null);
   const classificationDirty = !adminDraft && !!product && classification.dirty;
   const dirty = adminCreate ? Boolean(slug || title || unitAmount) : !!product && (draftDirty || termsDirty || mediaEdited || providerMediaEdited || classificationDirty);
   const needsSave = dirty || mediaDirty || providerMediaDirty;
@@ -539,7 +553,7 @@ export function HostPublicationWorkspace({
   }
 
   const refresh = useCallback(async (restoreLocal = true, preserveEditorDraft = false) => {
-    const response = await fetch(`${apiBase}/${encodeURIComponent(productId ?? "")}`, { cache: "no-store", credentials: "same-origin" });
+    const response = await fetch(api(`${apiBase}/${encodeURIComponent(productId ?? "")}`), { cache: "no-store", credentials: "same-origin" });
     const body: unknown = await response.json().catch(() => null);
     if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
     const result = body as ProductResponse;
@@ -554,7 +568,7 @@ export function HostPublicationWorkspace({
     let currentProviderMedia: ProviderMedia[] = [];
     let providerVersion: number | null = null;
     if (!adminDraft) {
-      const providerResponse = await fetch("/host/api/provider-media", { cache: "no-store", credentials: "same-origin" });
+      const providerResponse = await fetch(api("/host/api/provider-media"), { cache: "no-store", credentials: "same-origin" });
       const providerBody: unknown = await providerResponse.json().catch(() => null);
       if (!providerResponse.ok) throw new Error(apiErrorMessage(providerBody, providerResponse.status));
       if (!isRecord(providerBody) || !isRecord(providerBody.providerMedia) || !Array.isArray(providerBody.providerMedia.assets)
@@ -596,7 +610,7 @@ export function HostPublicationWorkspace({
     }
     setError(""); setConflictProduct(null);
     return current;
-  }, [adminDraft, apiBase, productId, storageNamespace]);
+  }, [adminDraft, api, apiBase, productId, storageNamespace]);
 
   useEffect(() => {
     if (create) return;
@@ -641,7 +655,7 @@ export function HostPublicationWorkspace({
   useEffect(() => {
     if (adminCreate) {
       let active = true;
-      queueMicrotask(() => { if (active) void fetch(apiBase, { cache: "no-store", credentials: "same-origin" }).then(async (response) => {
+      queueMicrotask(() => { if (active) void fetch(api(apiBase), { cache: "no-store", credentials: "same-origin" }).then(async (response) => {
         const body = await response.json().catch(() => null);
         if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
         if (active && isRecord(body)) {
@@ -653,13 +667,13 @@ export function HostPublicationWorkspace({
     }
     if (productId) return;
     let active = true;
-    queueMicrotask(() => { if (active) void fetch(apiBase, { cache: "no-store", credentials: "same-origin" }).then(async (response) => {
+    queueMicrotask(() => { if (active) void fetch(api(apiBase), { cache: "no-store", credentials: "same-origin" }).then(async (response) => {
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       if (active && isRecord(body) && Array.isArray(body.products)) setProducts(body.products as Product[]);
     }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "商品を読み込めませんでした。"); }); });
     return () => { active = false; };
-  }, [adminCreate, apiBase, productId]);
+  }, [adminCreate, api, apiBase, productId]);
 
   useEffect(() => {
     if (dirty && product) saveLocal(storageNamespace, product.id, { slug, title, unitAmount, content, terms, media: mediaDraft, providerMedia: providerMediaDraft });
@@ -705,24 +719,24 @@ export function HostPublicationWorkspace({
           sellerConfirmationMethod: "WRITTEN",
         }
         : undefined;
-      const response = await fetch(apiBase, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: slug.trim(), publicTitle: title.trim(), content: draftContent, currency: "JPY", unitAmount: asPublicationPrice(unitAmount), ...(managedSales ? { managedSales } : {}) }) });
+      const response = await fetch(api(apiBase), { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: slug.trim(), publicTitle: title.trim(), content: draftContent, currency: "JPY", unitAmount: asPublicationPrice(unitAmount), ...(managedSales ? { managedSales } : {}) }) });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       const created = (body as ProductResponse).product;
       saveLocal(storageNamespace, created.id, { slug, title, unitAmount, content: draftContent, terms, media: [] });
       try { window.sessionStorage.removeItem(`${storageNamespace}:new`); } catch { /* Best effort. */ }
-      router.replace(`${experiencesBase}/${encodeURIComponent(created.id)}`);
+      router.replace(page(`${experiencesBase}/${encodeURIComponent(created.id)}`));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "作成結果を確認できませんでした。入力を保持しています。");
       // A lost response can still have created the product. Reconcile by the unique seller slug before retry.
       try {
-        const listResponse = await fetch(apiBase, { cache: "no-store", credentials: "same-origin" });
+        const listResponse = await fetch(api(apiBase), { cache: "no-store", credentials: "same-origin" });
         const listBody = await listResponse.json().catch(() => null);
         const found = isRecord(listBody) && Array.isArray(listBody.products) ? (listBody.products as Product[]).find((item) => item.draft.slug === slug.trim()) : undefined;
         if (found) {
           saveLocal(storageNamespace, found.id, { slug, title, unitAmount, content: draftContent, terms, media: found.media });
           try { window.sessionStorage.removeItem(`${storageNamespace}:new`); } catch { /* Best effort. */ }
-          router.replace(`${experiencesBase}/${encodeURIComponent(found.id)}`);
+          router.replace(page(`${experiencesBase}/${encodeURIComponent(found.id)}`));
         }
       } catch { /* Keep the entered form; an explicit retry can reconcile again. */ }
     } finally { setBusy(false); }
@@ -759,7 +773,7 @@ export function HostPublicationWorkspace({
       let publicationUpdated = false;
       if (mediaDirty) {
         shouldReconcile = true;
-        const mediaResponse = await fetch(`${apiBase}/${encodeURIComponent(current.id)}/media`, {
+        const mediaResponse = await fetch(api(`${apiBase}/${encodeURIComponent(current.id)}/media`), {
           method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
           body: JSON.stringify({ version: current.version, media: mediaForm(effectiveMedia) }),
         });
@@ -801,7 +815,7 @@ export function HostPublicationWorkspace({
         const draft = { slug: slug.trim(), publicTitle: title.trim(), content: draftContent, currency: "JPY", unitAmount: amount! };
         savedContent = draftContent;
         shouldReconcile = true;
-        const response = await fetch(`${apiBase}/${encodeURIComponent(current.id)}`, { method: "PATCH", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: current.version, draft }) });
+        const response = await fetch(api(`${apiBase}/${encodeURIComponent(current.id)}`), { method: "PATCH", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: current.version, draft }) });
         const body: unknown = await response.json().catch(() => null);
         if (!response.ok) {
           shouldReconcile = writeOutcomeNeedsReconciliation(response.status);
@@ -824,7 +838,7 @@ export function HostPublicationWorkspace({
       let savedProviderMedia = providerMediaDraft;
       if (termsDirty && saleTerms) {
         shouldReconcile = true;
-        const termsResponse = await fetch(`${apiBase}/${encodeURIComponent(saved.id)}/sale-terms`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: saved.version, saleTerms }) });
+        const termsResponse = await fetch(api(`${apiBase}/${encodeURIComponent(saved.id)}/sale-terms`), { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: saved.version, saleTerms }) });
         const termsBody: unknown = await termsResponse.json().catch(() => null);
         if (!termsResponse.ok) {
           shouldReconcile = writeOutcomeNeedsReconciliation(termsResponse.status);
@@ -840,7 +854,7 @@ export function HostPublicationWorkspace({
       if (providerMediaDirty) {
         if (providerMediaVersion === null) throw new Error("販売者プロフィールの保存版がありません。再読み込みしてください。");
         shouldReconcile = true;
-        const profileResponse = await fetch("/host/api/provider-media", {
+        const profileResponse = await fetch(api("/host/api/provider-media"), {
           method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
           body: JSON.stringify({ version: providerMediaVersion, media: providerMediaForm(effectiveProviderMedia) }),
         });
@@ -891,7 +905,7 @@ export function HostPublicationWorkspace({
     setError("");
     setNotice("");
     try {
-      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}`, { cache: "no-store", credentials: "same-origin" });
+      const response = await fetch(api(`${apiBase}/${encodeURIComponent(product.id)}`), { cache: "no-store", credentials: "same-origin" });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       if (!isRecord(body) || !isRecord(body.product)) throw new Error("最新の商品状態を読み込めませんでした。");
@@ -899,7 +913,7 @@ export function HostPublicationWorkspace({
       let latestProviderMedia: ProviderMedia[] = [];
       let latestProviderVersion: number | null = null;
       if (!adminDraft) {
-        const providerResponse = await fetch("/host/api/provider-media", { cache: "no-store", credentials: "same-origin" });
+        const providerResponse = await fetch(api("/host/api/provider-media"), { cache: "no-store", credentials: "same-origin" });
         const providerBody: unknown = await providerResponse.json().catch(() => null);
         if (!providerResponse.ok) throw new Error(apiErrorMessage(providerBody, providerResponse.status));
         if (!isRecord(providerBody) || !isRecord(providerBody.providerMedia) || !Array.isArray(providerBody.providerMedia.assets)
@@ -988,12 +1002,12 @@ export function HostPublicationWorkspace({
       const wire: "publish" | PublicationAction = action === "publish-page" && (product.bookingOpen ?? product.status === "PUBLISHED") && !adminDraft ? "open-booking" : action;
       // 予約の受付を始める takes the same consent as the old one-step publish; the page alone and the stops take only the version.
       const body_ = wire === "publish" ? publishBody : wire === "open-booking" ? { version: product.version, consentVersion, accepted: true } : { version: product.version };
-      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/${wire === "publish" ? "publish" : PUBLICATION_ACTION_PATH[wire]}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body_) });
+      const response = await fetch(api(`${apiBase}/${encodeURIComponent(product.id)}/${wire === "publish" ? "publish" : PUBLICATION_ACTION_PATH[wire]}`), { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body_) });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       if (adminDraft) {
         setNotice("事務局の代理公開として公開しました。");
-        router.push(experiencesBase);
+        router.push(page(experiencesBase));
         router.refresh();
         return;
       }
@@ -1014,7 +1028,7 @@ export function HostPublicationWorkspace({
     }
     setBusy(true); setError(""); setNotice("");
     try {
-      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/english-review`, {
+      const response = await fetch(api(`${apiBase}/${encodeURIComponent(product.id)}/english-review`), {
         method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
         body: JSON.stringify({ version: product.version, reviewed: true }),
       });
@@ -1039,7 +1053,7 @@ export function HostPublicationWorkspace({
     setTranslationBusy(true); setError(""); setNotice("");
     try {
       if (adminDraft) throw new Error("代理登録では英語原稿を手入力し、事務局レビューとして確認してください。");
-      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/translation`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ japanese }) });
+      const response = await fetch(api(`${apiBase}/${encodeURIComponent(product.id)}/translation`), { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ japanese }) });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       const result = body as { sourceFingerprint?: unknown; english?: unknown };
@@ -1082,7 +1096,7 @@ export function HostPublicationWorkspace({
     const currentEnglish = () => canonicalJson(englishPublicationManuscript(englishDraftRef.current.title.trim(), withoutEmptyRowsIn(englishDraftRef.current.content)));
     setTranslationBusy(true); setError(""); setNotice("");
     try {
-      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/translation`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ english }) });
+      const response = await fetch(api(`${apiBase}/${encodeURIComponent(product.id)}/translation`), { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ english }) });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       const result = body as { sourceFingerprint?: unknown; japanese?: unknown };
@@ -1126,21 +1140,21 @@ export function HostPublicationWorkspace({
       ? { ...blankContent, ...(createListing.en ? {} : { japaneseOnly: true }), ja: { ...blankJapanese, title: name } }
       : { ...blankContent, englishOnly: true };
     let address = publicationSlugFromTitle(name);
-    const post = (slugValue: string) => fetch(apiBase, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: slugValue, publicTitle: name, content: draftContent, currency: "JPY", unitAmount: price }) });
+    const post = (slugValue: string) => fetch(api(apiBase), { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: slugValue, publicTitle: name, content: draftContent, currency: "JPY", unitAmount: price }) });
     try {
       let response = await post(address);
       if (response.status === 409) { address = publicationSlugRetry(address); response = await post(address); }
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
-      router.replace(`${experiencesBase}/${encodeURIComponent((body as ProductResponse).product.id)}`);
+      router.replace(page(`${experiencesBase}/${encodeURIComponent((body as ProductResponse).product.id)}`));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "作成結果を確認できませんでした。入力を保持しています。");
       // A lost response can still have created the product. Reconcile by the unique seller slug before retry.
       try {
-        const listResponse = await fetch(apiBase, { cache: "no-store", credentials: "same-origin" });
+        const listResponse = await fetch(api(apiBase), { cache: "no-store", credentials: "same-origin" });
         const listBody = await listResponse.json().catch(() => null);
         const found = isRecord(listBody) && Array.isArray(listBody.products) ? (listBody.products as Product[]).find((item) => item.draft.slug === address) : undefined;
-        if (found) router.replace(`${experiencesBase}/${encodeURIComponent(found.id)}`);
+        if (found) router.replace(page(`${experiencesBase}/${encodeURIComponent(found.id)}`));
       } catch { /* Keep the entered form; an explicit retry can reconcile again. */ }
     } finally { setBusy(false); }
   }
@@ -1148,7 +1162,7 @@ export function HostPublicationWorkspace({
   function closeCreateDialog() {
     if (!createOpen) return;
     setCreateOpen(false);
-    if (hostCreate) router.replace(experiencesBase);
+    if (hostCreate) router.replace(page(experiencesBase));
   }
 
   /**
@@ -1200,7 +1214,7 @@ export function HostPublicationWorkspace({
     };
     setSalesPlanCommandId(commandId); setBusy(true); setError(""); setNotice("");
     try {
-      const response = await fetch(`${apiBase}/${encodeURIComponent(product.id)}/sales-plan`, {
+      const response = await fetch(api(`${apiBase}/${encodeURIComponent(product.id)}/sales-plan`), {
         method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
         body: JSON.stringify({ commandId, expectedVersion: state.version, plan: targetPlan, agreementVersion }),
       });
@@ -1222,7 +1236,7 @@ export function HostPublicationWorkspace({
       const altEnglish = !adminDraft && !listing.en ? photoAltJa : photoAlt;
       const profileAsset = !adminDraft && photoPlacement !== "GALLERY";
       if (profileAsset && providerMediaVersion === null) throw new Error("販売者プロフィールの保存版がありません。再読み込みしてください。");
-      const response = await fetch(profileAsset ? "/host/api/provider-media/upload" : `${apiBase}/${encodeURIComponent(product.id)}/media`, { method: "POST", credentials: "same-origin", headers: { "content-type": selectedPhoto.type, "x-experience-photo-rights-confirmed": "true", "x-experience-photo-alt-text-utf8-base64url": base64UrlUtf8(altEnglish), "x-experience-photo-alt-text-ja-utf8-base64url": base64UrlUtf8(!adminDraft && !listing.ja ? photoAlt : photoAltJa), "x-experience-media-placement": adminDraft ? "GALLERY" : photoPlacement, ...(profileAsset ? { "x-experience-provider-media-version": String(providerMediaVersion) } : {}), ...(photoCredit.trim() ? { "x-experience-photo-credit-utf8-base64url": base64UrlUtf8(photoCredit.trim()) } : {}) }, body: selectedPhoto });
+      const response = await fetch(api(profileAsset ? "/host/api/provider-media/upload" : `${apiBase}/${encodeURIComponent(product.id)}/media`), { method: "POST", credentials: "same-origin", headers: { "content-type": selectedPhoto.type, "x-experience-photo-rights-confirmed": "true", "x-experience-photo-alt-text-utf8-base64url": base64UrlUtf8(altEnglish), "x-experience-photo-alt-text-ja-utf8-base64url": base64UrlUtf8(!adminDraft && !listing.ja ? photoAlt : photoAltJa), "x-experience-media-placement": adminDraft ? "GALLERY" : photoPlacement, ...(profileAsset ? { "x-experience-provider-media-version": String(providerMediaVersion) } : {}), ...(photoCredit.trim() ? { "x-experience-photo-credit-utf8-base64url": base64UrlUtf8(photoCredit.trim()) } : {}) }, body: selectedPhoto });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
       if (profileAsset) {
@@ -1249,7 +1263,7 @@ export function HostPublicationWorkspace({
     if (!asset || !window.confirm(asset.placement === "PROVIDER_PHOTO" ? "販売中のすべての体験から提供者写真を削除しますか？" : "販売中のすべての体験から事業者ロゴを削除しますか？")) return;
     setBusy(true); setError(""); setNotice("");
     try {
-      const response = await fetch(`/host/api/provider-media/${encodeURIComponent(asset.id)}`, {
+      const response = await fetch(api(`/host/api/provider-media/${encodeURIComponent(asset.id)}`), {
         method: "DELETE", credentials: "same-origin", headers: { "content-type": "application/json" },
         body: JSON.stringify({ version: providerMediaVersion }),
       });
@@ -1267,7 +1281,7 @@ export function HostPublicationWorkspace({
 
   if (adminCreate) return <HostPageBody><PageHead title="商品の代理登録" /><form onSubmit={createProduct} className={`${HOST_SURFACE} space-y-5 p-4 md:p-6`}>
     <p className="text-sm text-ink-soft">{adminDraft ? "選択した運営登録済み販売者へ、非公開の商品下書きを作成します。販売者へ確認後、通常公開と同じ条件を満たす未公開draftだけを事務局判断で代理公開できます。" : "新しい商品をExperienceに下書き保存します。公開前の入力は公開されません。"}</p>
-    {error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : null}
+    {error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-900"><HostErrorMessage text={error} /></p> : null}
     <Field label="公開URL用の英数字slug" value={slug} onChange={setSlug} placeholder="kamakura-community-dinner" />
     <Field label="商品名（公開用）" value={title} onChange={setTitle} />
     <Field label="大人1人の基本料金（税込・円）" value={unitAmount} onChange={setUnitAmount} />
@@ -1308,8 +1322,8 @@ export function HostPublicationWorkspace({
 
   if (!productId) return <HostPageBody><PageHead title={adminDraft ? "代理登録の商品" : "体験"}>{bookingGuideHref ? <Link className={consoleButtonClass("secondary")} href={bookingGuideHref}>予約後の集合案内</Link> : null}</PageHead><section className={`${HOST_SURFACE} p-4 md:p-6`}>
     <div className="mb-4 flex items-center justify-between gap-3"><p className="text-ink-soft">{adminDraft ? "事務局が作成した、一度も公開していない下書き" : "あなたが販売する体験"}</p>{adminDraft ? <Link className={consoleButtonClass("primary")} href={createHref}>商品を代理登録</Link> : <button type="button" className={consoleButtonClass("primary")} onClick={() => setCreateOpen(true)}>体験を作成</button>}</div>
-    {error && !(createOpen && !adminDraft) ? <p role="alert" className={`mb-3 rounded-xl p-3 ${adminDraft ? "bg-rose-50 text-rose-900" : "bg-danger-pale text-danger"}`}>{error}</p> : null}
-    {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={`${experiencesBase}/${encodeURIComponent(item.id)}`}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p>{!adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) ? <HostBookingLinkCopy slug={item.draft.slug} origin={publicSiteOrigin} japaneseOnly={item.draft.content.japaneseOnly === true} /> : null}{embedEnabled && !adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) && item.draft.content.japaneseOnly !== true ? <p className="mt-1.5"><Link className="text-sm font-bold text-moss underline underline-offset-4" href={`${experiencesBase}/${encodeURIComponent(item.id)}/embed`}>自分のサイトに貼る</Link></p> : null}</div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}
+    {error && !(createOpen && !adminDraft) ? <p role="alert" className={`mb-3 rounded-xl p-3 ${adminDraft ? "bg-rose-50 text-rose-900" : "bg-danger-pale text-danger"}`}><HostErrorMessage text={error} /></p> : null}
+    {products.length ? <ul className="divide-y divide-line">{products.map((item) => <li key={item.id} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0"><Link className="font-extrabold underline-offset-2 hover:underline" href={page(`${experiencesBase}/${encodeURIComponent(item.id)}`)}>{item.draft.publicTitle || "題名なし"}</Link><p className="text-sm text-muted">{item.draft.slug}</p>{!adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) ? <HostBookingLinkCopy slug={item.draft.slug} origin={publicSiteOrigin} japaneseOnly={item.draft.content.japaneseOnly === true} /> : null}{embedEnabled && !adminDraft && publicSiteOrigin && providerBookingLinkAvailable(item) && item.draft.content.japaneseOnly !== true ? <p className="mt-1.5"><Link className="text-sm font-bold text-moss underline underline-offset-4" href={page(`${experiencesBase}/${encodeURIComponent(item.id)}/embed`)}>自分のサイトに貼る</Link></p> : null}</div><span className="rounded-full bg-sand px-2.5 py-1 text-xs font-extrabold">{STATUS_COPY[item.status]}</span></li>)}</ul> : <p className="py-6 text-center text-muted">{error ? "商品を読み込めませんでした。" : "まだ商品がありません。"}</p>}
   </section>
   {!adminDraft ? <EditorDialog open={createOpen} onClose={closeCreateDialog} title="体験を作成">
     <form onSubmit={(event) => void createHostProduct(event)} className="space-y-1">
@@ -1319,7 +1333,7 @@ export function HostPublicationWorkspace({
       {listingNotice ? <p role="status" className="text-sm font-bold text-warn">{listingNotice}</p> : null}
       <EditorField label="体験名" value={createTitle} onChange={setCreateTitle} autoFocus />
       <EditorField label="大人1人の料金（税込・円）" value={createPrice} onChange={setCreatePrice} inputMode="numeric" info="無料の体験は0円にします。有料は50円以上にしてください。" />
-      {error ? <p role="alert" className="rounded-xl bg-danger-pale p-3 text-danger">{error}</p> : null}
+      {error ? <p role="alert" className="rounded-xl bg-danger-pale p-3 text-danger"><HostErrorMessage text={error} /></p> : null}
       <div className="flex justify-end gap-2 pt-4">
         <button type="button" className={consoleButtonClass("secondary")} onClick={closeCreateDialog}>やめる</button>
         <button type="submit" disabled={busy || !createTitle.trim() || asPublicationPrice(createPrice) === null} className={consoleButtonClass("primary")}>{busy ? "作成中…" : "作成"}</button>
@@ -1328,12 +1342,12 @@ export function HostPublicationWorkspace({
   </EditorDialog> : null}
   </HostPageBody>;
 
-  if (!product) return <HostPageBody><PageHead title="体験を読み込み中" />{error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-900">{error}</p> : <p>商品を読み込んでいます…</p>}<button type="button" className={consoleButtonClass("secondary")} onClick={() => void refresh().catch((reason) => setError(reason instanceof Error ? reason.message : "読み込みに失敗しました。"))}>再読み込み</button></HostPageBody>;
+  if (!product) return <HostPageBody><PageHead title="体験を読み込み中" />{error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-900"><HostErrorMessage text={error} /></p> : <p>商品を読み込んでいます…</p>}<button type="button" className={consoleButtonClass("secondary")} onClick={() => void refresh().catch((reason) => setError(reason instanceof Error ? reason.message : "読み込みに失敗しました。"))}>再読み込み</button></HostPageBody>;
 
   const textField = (key: string, label: string, value: string, rows = 3) => <Field label={label} value={value} multiline rows={rows} onChange={(next) => updateEnglishContent(key, next)} />;
   const listField = (key: string, label: string) => <Field label={label} value={lines(content[key])} multiline rows={3} onChange={(next) => updateEnglishContent(key, next.split("\n").filter((item) => item.trim().length > 0))} />;
   const galleryMedia = mediaDraft.filter((item) => item.placement === "GALLERY");
-  const calendarHref = adminDraft ? `${experiencesBase}/${encodeURIComponent(product.id)}/calendar` : `/host/calendar?experience=${encodeURIComponent(product.id)}`;
+  const calendarHref = adminDraft ? `${experiencesBase}/${encodeURIComponent(product.id)}/calendar` : page(`/host/calendar?experience=${encodeURIComponent(product.id)}`);
   const savedBlockers = product.publicationBlockers ?? [];
   /** The two buttons (#706): what is shown, what can be pressed, and why not. */
   const stages = publicationStages({
@@ -1362,7 +1376,7 @@ export function HostPublicationWorkspace({
           : nextAction === "PHOTOS"
             ? <button type="button" className={consoleButtonClass("primary")} onClick={() => setWorkspaceSection("page")}>写真を追加</button>
             : nextAction === "SUPPORT"
-              ? <Link className={consoleButtonClass("primary")} href="/host/settings#settings-support">サポート・手数料の条件を確認</Link>
+              ? <Link className={consoleButtonClass("primary")} href={page("/host/settings#settings-support")}>サポート・手数料の条件を確認</Link>
             : nextAction === "PAYMENT_CONSENT" && paymentConsentHref
               ? <a className={consoleButtonClass("primary")} href={paymentConsentHref} referrerPolicy="no-referrer">{paymentConsentLabel}</a>
             : nextAction === "PUBLISH"
@@ -1811,7 +1825,7 @@ export function HostPublicationWorkspace({
     const photoDialogOpen = photoDialog !== null;
     const uploadReady = !!selectedPhoto && rightsConfirmed && !busy && !conflictProduct && (!listing.ja || photoAltJa.trim().length > 0) && (!listing.en || photoAlt.trim().length > 0);
     return <HostPageBody>
-      <Link href={experiencesBase} className="mb-1.5 inline-flex items-center gap-1 text-[0.8125rem] font-bold text-muted hover:text-ink">‹ 体験</Link>
+      <Link href={page(experiencesBase)} className="mb-1.5 inline-flex items-center gap-1 text-[0.8125rem] font-bold text-muted hover:text-ink">‹ 体験</Link>
       <div className="mb-3.5 flex flex-col gap-3 md:flex-row md:items-start">
         <h1 className="min-w-0 flex-1 font-display text-[1.375rem] leading-[1.35] font-medium tracking-[-0.01em] [overflow-wrap:anywhere] md:text-[1.625rem]">
           {titleText}
@@ -1823,7 +1837,7 @@ export function HostPublicationWorkspace({
           {product.status === "PUBLISHED" ? <button type="button" aria-label="そのほかの操作" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((current) => !current)} className={consoleButtonClass("secondary", "md", "w-[38px] px-0 text-lg tracking-[1px]")}>⋯</button> : null}
           {menuOpen ? <div role="menu" className="absolute top-12 right-0 z-20 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-canvas p-1.5 shadow-[0_10px_30px_rgb(28_28_26/0.12)]">
             {publicSiteOrigin && providerBookingLinkAvailable(product) ? <div className="px-3 py-2"><HostBookingLinkCopy slug={product.draft.slug} origin={publicSiteOrigin} japaneseOnly={japaneseOnly} /></div> : null}
-            {embedEnabled && publicHref && !japaneseOnly ? <Link role="menuitem" href={`${experiencesBase}/${encodeURIComponent(product.id)}/embed`} onClick={() => setMenuOpen(false)} className="block w-full rounded-[9px] px-3 py-2 text-left text-[0.8125rem] font-bold text-ink hover:bg-sand">自分のサイトに貼る</Link> : null}
+            {embedEnabled && publicHref && !japaneseOnly ? <Link role="menuitem" href={page(`${experiencesBase}/${encodeURIComponent(product.id)}/embed`)} onClick={() => setMenuOpen(false)} className="block w-full rounded-[9px] px-3 py-2 text-left text-[0.8125rem] font-bold text-ink hover:bg-sand">自分のサイトに貼る</Link> : null}
             <button type="button" role="menuitem" disabled={busy || dirty || !!conflictProduct} onClick={() => { setMenuOpen(false); void changeState("stop"); }} className="block w-full rounded-[9px] px-3 py-2 text-left text-[0.8125rem] font-bold text-danger hover:bg-sand disabled:opacity-45">ページを止める（予約も止まります）</button>
           </div> : null}
         </div>
@@ -1833,7 +1847,7 @@ export function HostPublicationWorkspace({
         onRun={(action) => { if (action === "stop-booking") void changeState("stop-booking"); else void requestPublish(action); }}
         onShowBlockers={(scope) => { setBlockerScope(scope); setBlockersShown(true); setBlockerDialog(true); }}
       />
-      {(error && !photoDialog) || conflictProduct ? <div role="alert" className="mb-3 rounded-xl bg-danger-pale p-3 text-danger">{error && !photoDialog ? <p>{error}</p> : null}{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
+      {(error && !photoDialog) || conflictProduct ? <div role="alert" className="mb-3 rounded-xl bg-danger-pale p-3 text-danger">{error && !photoDialog ? <p><HostErrorMessage text={error} /></p> : null}{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
       {product.status === "SUSPENDED" ? <p className="mb-3 rounded-xl bg-warn-pale p-3 text-warn">運営停止中です。入力と下書きは保存できますが、再開は運営の停止解除後に行えます。</p> : null}
       <div role="tablist" aria-label="体験の編集" className="mb-5 flex gap-6 overflow-x-auto border-b border-line">
         {tabs.map(([id, label]) => <button key={id} type="button" role="tab" id={`publication-tab-${id}`} aria-selected={workspaceSection === id} aria-controls="publication-tabpanel" onClick={() => setWorkspaceSection(id)} className={`-mb-px h-11 shrink-0 border-b-2 text-sm font-bold ${workspaceSection === id ? "border-ink text-ink" : "border-transparent text-muted"}`}>{label}{markedTabs.has(id) ? <span role="img" aria-label="確認が必要" className="ml-1.5 inline-block size-[7px] rounded-full bg-warn align-middle" /> : null}</button>)}
@@ -1888,7 +1902,7 @@ export function HostPublicationWorkspace({
           {sharedPhotoName && selectedPhoto ? <p className="text-sm text-ink-soft">共有された写真を選択中: <span className="[overflow-wrap:anywhere]">{sharedPhotoName}</span></p> : null}
           <label className="flex items-start gap-2 pt-3 text-sm"><input type="checkbox" className="mt-1 accent-moss" checked={rightsConfirmed} disabled={busy || !selectedPhoto} onChange={(event) => setPhotoRights(event.target.checked && selectedPhoto ? { file: selectedPhoto, productId: product.id, placement: photoPlacement } : null)} /><span>この写真を「{photoPlacement === "GALLERY" ? "この体験の写真" : photoPlacement === "PROVIDER_PHOTO" ? "提供者写真" : "事業者ロゴ"}」として{photoPlacement === "GALLERY" ? "この商品" : "販売者のすべての商品"}に公開する権利があり、権利者と写っている方から明示的な許諾を得ています。</span></label>
         </div>
-        {error ? <p role="alert" className="mt-3 rounded-xl bg-danger-pale p-3 text-danger">{error}</p> : null}
+        {error ? <p role="alert" className="mt-3 rounded-xl bg-danger-pale p-3 text-danger"><HostErrorMessage text={error} /></p> : null}
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" className={consoleButtonClass("secondary")} onClick={() => setPhotoDialog(null)}>閉じる</button>
           <button type="button" disabled={!uploadReady} className={consoleButtonClass("primary")} onClick={() => void uploadPhoto().then((added) => { if (added) setPhotoDialog(null); })}>写真を追加・差し替え</button>
@@ -1940,7 +1954,7 @@ export function HostPublicationWorkspace({
     </section> : null}
     {dirty ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">未保存の変更があります。公開・停止は保存後に実行できます。</p> : null}
     {product.publicationNeedsUpdate ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950" role="status">現在の掲載版を維持しています。公開条件を満たす変更を反映すると、確認後に新しい掲載版へ切り替わります。</p> : null}
-    {error || conflictProduct ? <div role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error ? <p>{error}</p> : null}{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
+    {error || conflictProduct ? <div role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-rose-900">{error ? <p><HostErrorMessage text={error} /></p> : null}{conflictProduct ? <><p className="mt-2 text-sm">サーバーの最新状態: {conflictProduct.draft.publicTitle}（{STATUS_COPY[conflictProduct.status]}・version {conflictProduct.version}）</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={busy} className={consoleButtonClass("secondary")} onClick={() => void replaceDraftWithLatest()}>入力を破棄して最新を読み込む</button><button type="button" disabled={busy} className={consoleButtonClass("primary")} onClick={() => void reapplyDraftOnLatest()}>自分の入力を残して続ける</button></div></> : null}</div> : null}
     {notice ? <p role="status" className="mb-3 rounded-xl bg-green-50 p-3 text-green-900">{notice}</p> : null}
     {product.status === "SUSPENDED" ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-amber-950">運営停止中です。入力と下書きは保存できますが、再開は運営の停止解除後に行えます。</p> : null}
     <form id="product-editor" aria-busy={busy} onSubmit={(event) => void saveAll(event)} className="scroll-mt-24 space-y-4">

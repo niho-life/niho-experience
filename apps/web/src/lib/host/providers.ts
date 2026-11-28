@@ -72,3 +72,16 @@ export function selectProvider<T extends { id: string }>(providers: readonly T[]
   const requested = requestedId ? providers.find((provider) => provider.id === requestedId) : undefined;
   return { provider: requested ?? providers[0] ?? null, requestedMissing: Boolean(requestedId) && !requested };
 }
+
+/**
+ * 「ホストを追加」(#709, EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED): what 「あなたのアカウント」 offers. The count is only for what the
+ * screen shows: whether one more host may be made is the store's (`owner-limit-reached`), asked again when the form is sent.
+ * `hidden` without the flag; `limit` when the account already owns `limit` hosts; else `available`.
+ */
+export type AddHostState = "hidden" | "available" | "limit";
+
+export function addHostState(providers: readonly Pick<HostProvider, "memberRole">[], options: { readonly enabled: boolean; readonly limit: number }): AddHostState {
+  if (!options.enabled) return "hidden";
+  const owned = providers.filter((provider) => provider.memberRole === "OWNER").length;
+  return owned >= options.limit ? "limit" : "available";
+}

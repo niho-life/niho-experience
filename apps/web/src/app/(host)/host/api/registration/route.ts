@@ -68,7 +68,8 @@ function storeFailure(error: unknown): NextResponse {
  * - the sealed registration cookie NIHO's return left → HostAccountIdentities.registerHostSelf makes the host account, its NIHO binding,
  *   the host (provider), its OWNER, the agreed name, the terms acceptance, the contact address (waiting for its confirmation email)
  *   and the session in one transaction; this answer sets the session cookie as a NIHO sign-in does and clears the registration cookie;
- * - else the session of a writer or member (no host of their own yet) → registerHostSelfForAccount adds the host to that account.
+ * - else the signed-in account (a writer, a member, or someone who already owns hosts) → registerHostSelfForAccount adds the host to that
+ *   account; the store refuses past HOST_PROVIDER_OWNER_LIMIT (409 OWNER_LIMIT_REACHED). The answer's redirect opens the new host (`?providerId=`).
  *
  * 200 `{ ok: true, redirect }` (the console's home, for the new host). Failures are `{ error: { code, field?, limit? } }`: the codes of
  * RegistrationErrorCode (self-registration-form.ts) and the status that goes with each. No NIHO user ID, address or name is logged.
@@ -86,7 +87,6 @@ export async function POST(request: NextRequest) {
   try { source = await readRegistrationSource({ registration: request.cookies.get(REGISTRATION_COOKIE)?.value, session: request.cookies.get(ACCOUNT_SESSION_COOKIE)?.value }); }
   catch { return failure("UNAVAILABLE", 503); }
   if (!source) return failure("REGISTRATION_EXPIRED", 401);
-  if (source.kind === "owner") return failure("ALREADY_REGISTERED", 409);
 
   // The preview keeps nothing: it only walks the screen to a synthetic signed-in host.
   if (isHostMock()) {

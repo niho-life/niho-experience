@@ -31,7 +31,7 @@ export function experiencePayoutLoadOf(read: HostPayoutAccountRead, providerId: 
 export async function loadExperiencePayout(session: Pick<ExperienceHostSession, "hostAccountId">, provider: Pick<HostProvider, "id" | "memberRole">): Promise<ExperiencePayoutLoad> {
   if (provider.memberRole !== "OWNER") return { status: "not-owner" };
   try {
-    return experiencePayoutLoadOf(await readHostPayoutAccount(session.hostAccountId), provider.id, config.experiencePayoutAccountConsentVersion);
+    return experiencePayoutLoadOf(await readHostPayoutAccount(session.hostAccountId, undefined, provider.id), provider.id, config.experiencePayoutAccountConsentVersion);
   } catch {
     return { status: "error" };
   }
