@@ -9,6 +9,7 @@ import { HOST_SURFACE, consoleButtonClass } from "./host-ui";
 import { MapboxLocationMap, type MapArea, type MapCoordinate } from "@/components/MapboxLocationMap";
 import { HostPageBody, PageHead } from "./ui";
 import { HostAgentSalesSection } from "./HostAgentSalesSection";
+import { HostIndependentSalesSection } from "./HostIndependentSalesSection";
 import { HostSharedPhotoOffer } from "./HostSharedPhoto";
 import { HostConfirmDialog } from "./HostConfirmDialog";
 import { HostErrorMessage } from "./HostProviderRequired";
@@ -86,6 +87,7 @@ type Product = {
   ownerSalesPlanAgreementVersion: string | null;
   /** 代理受領 (#725): present while the flag is on and the host has no seller profile. */
   agentSales?: import("./HostAgentSalesSection").AgentSalesOffer | null;
+  independentSales?: import("./HostIndependentSalesSection").IndependentSalesOffer | null;
   offers: { id: string; localStartTime: string; durationMinutes: number; capacity: number; recurrence: { kind: string; weekdays?: readonly string[] } }[];
   media: Media[];
 };
@@ -138,6 +140,8 @@ const readError: Record<string, string> = {
   PAYOUT_CHECK_UNAVAILABLE: "Stripeで販売者の受取口座を確認できませんでした。時間をおいて再度お試しください。",
   READINESS_UNAVAILABLE: "Stripeの状態を確認できませんでした。時間をおいて再度お試しください。",
   SELLER_EXISTS: "販売者プロフィールがあるホストは、この選択はできません。",
+  CONNECT_NOT_READY: "自分の Stripe アカウントの状態を確認できませんでした。設定の受取口座を確認してください。",
+  SELLER_MISMATCH: "この体験の販売者が、登録した販売者と一致しません。",
   SELLER_DISCLOSURE_REQUIRED: "先に「販売者表示」で、特定商取引法に基づく表記を保存してください。",
   CONSENT_OUTDATED: "同意の内容が更新されました。ページを読み込み直して、もう一度ご確認ください。",
   CONSENT_REQUIRED: "同意にチェックを入れてください。",
@@ -166,6 +170,7 @@ const BLOCKER_COPY: Record<string, string> = {
   SCHEDULE_REQUIRED: "販売できる開催枠をカレンダーに追加してください。",
   SELLER_MISMATCH: "販売者情報と受取口座が、登録されている販売者と一致しません。",
   SELLER_REQUIRED: "予約を受けるには、受取口座の登録が必要です。",
+  SALES_PLAN_REQUIRED: "「料金・予約」で、「独立 10%（自分の Stripe で販売）」を選んでください。",
   SLUG_IN_USE: "この公開URLはすでに使われています。別のURLを入力してください。",
 };
 
@@ -443,6 +448,8 @@ export function HostPublicationWorkspace({
   const [salesPlanCommandId, setSalesPlanCommandId] = useState<string | null>(null);
   const [agentConsentAccepted, setAgentConsentAccepted] = useState(false);
   const [agentCommandId, setAgentCommandId] = useState<string | null>(null);
+  const [independentConsentAccepted, setIndependentConsentAccepted] = useState(false);
+  const [independentCommandId, setIndependentCommandId] = useState<string | null>(null);
   const [createDraftRestored, setCreateDraftRestored] = useState(false);
   /** 公開・停止 waiting for its confirmation in the page's dialog. */
   const [stateConfirm, setStateConfirm] = useState<"publish" | PublicationAction | null>(null);
@@ -1266,6 +1273,34 @@ export function HostPublicationWorkspace({
     } finally { setBusy(false); }
   }
 
+  /** 「独立 10%（自分の Stripe で販売）」を選ぶ・代理受領から切り替える (3c-2, #726). The same command ID is kept until the result is read back. */
+  async function chooseIndependentSales() {
+    const offer = product?.independentSales;
+    const stopped = product?.salesPlan?.pending?.plan === "INDEPENDENT_10" && product.salesPlan.transitionCommandId !== null && product.salesPlan.phase !== "ACTIVE";
+    if (!product || !offer || busy || (!stopped && !independentConsentAccepted)) return;
+    // A switch that stopped half way is finished with its own command and the terms it began with; a new choice keeps one command until it is read back.
+    const commandId = (stopped ? product.salesPlan?.transitionCommandId : null) ?? independentCommandId ?? crypto.randomUUID();
+    const agreementVersion = stopped ? product.salesPlan!.pending!.agreementVersion : offer.agreementVersion;
+    setIndependentCommandId(commandId); setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(api(`${apiBase}/${encodeURIComponent(product.id)}/independent-sales`), {
+        method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ commandId, expectedStateVersion: product.salesPlan?.version ?? null, agreementVersion, accepted: true }),
+      });
+      const body: unknown = await response.json().catch(() => null);
+      if (response.status === 401 && typeof body === "object" && body !== null && (body as { error?: { code?: unknown; href?: unknown } }).error?.code === "REAUTH_REQUIRED") {
+        const href = (body as { error: { href?: unknown } }).error.href;
+        if (typeof href === "string" && href.startsWith("/")) { window.location.assign(href); return; }
+      }
+      if (!response.ok) { if (response.status !== 408 && response.status < 500) setIndependentCommandId(null); throw new Error(apiErrorMessage(body, response.status)); }
+      setIndependentCommandId(null); setIndependentConsentAccepted(false);
+      await refresh(false, dirty);
+      setNotice("「独立 10%（自分の Stripe で販売）」を選びました。予約の受付は、公開の手順から始められます。");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "結果を確認できませんでした。もう一度お試しください。");
+    } finally { setBusy(false); }
+  }
+
   async function uploadPhoto(): Promise<boolean> {
     if (!product || !selectedPhoto || !rightsConfirmed || busy || conflictProduct) return false;
     setBusy(true); setError(""); setNotice("");
@@ -1773,6 +1808,7 @@ export function HostPublicationWorkspace({
 
     const pricingTab = <div className="grid max-w-[720px] gap-4">
       <HostAgentSalesSection product={product} busy={busy} dirty={dirty} accepted={agentConsentAccepted} onAccept={setAgentConsentAccepted} retrying={agentCommandId !== null} onChoose={() => void chooseAgentSales()} sellerHref={api("/host/seller")} />
+      <HostIndependentSalesSection product={product} busy={busy} dirty={dirty} accepted={independentConsentAccepted} onAccept={setIndependentConsentAccepted} retrying={independentCommandId !== null} onChoose={() => void chooseIndependentSales()} />
       <section id="publication-price" className={sectionClass} aria-labelledby="publication-price-title">
         <h2 id="publication-price-title" className={headingClass}>料金{tag("page", ["PRICE_REQUIRED"])}</h2>
         <EditorUnitField label="大人1人" small="税込" prefix="¥" info="無料の体験は0円にします。有料は50円以上にしてください。" value={unitAmount} onChange={setUnitAmount} />
@@ -1980,7 +2016,7 @@ export function HostPublicationWorkspace({
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={sellerConfirmed} onChange={(event) => setSellerConfirmed(event.target.checked)} className="mt-1" /><span>販売者へ現在の公開内容・販売条件・掲載条件を確認済みです。</span></label>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={publicationPhotoRightsConfirmed} onChange={(event) => setPublicationPhotoRightsConfirmed(event.target.checked)} className="mt-1" /><span>公開対象の写真について掲載権利を確認済みです。</span></label>
     </section> : null}
-    {!adminDraft && product.salesPlan && !(product.salesPlan.current.chargeMode === "PLATFORM" && product.salesPlan.current.sellerParty === "PROVIDER") ? <section className={`${HOST_SURFACE} mb-4 space-y-3 p-4 md:p-5`} aria-labelledby="owner-sales-plan-title">
+    {!adminDraft && product.salesPlan && !(product.salesPlan.current.chargeMode === "PLATFORM" && product.salesPlan.current.sellerParty === "PROVIDER") && !(product.independentSales && product.salesPlan.current.plan === "INDEPENDENT_10") ? <section className={`${HOST_SURFACE} mb-4 space-y-3 p-4 md:p-5`} aria-labelledby="owner-sales-plan-title">
       <h2 id="owner-sales-plan-title" className="font-extrabold">{product.salesPlan.current.plan === "MANAGED_20" ? "NIHO完全代行から本人販売へ切り替える" : "本人販売のプランを変更する"}</h2>
       <p className="text-sm text-ink-soft">この体験だけを切り替えます。公開URL・商品・開催枠・在庫は変わりません。切替中は新しい受付を止め、残っている旧条件の決済を元のStripeアカウントで失効または照合してから新条件へ切り替えます。</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm"><dt>現在</dt><dd>{product.salesPlan.current.plan === "MANAGED_20" ? "完全代行 20%" : product.salesPlan.current.plan === "SUPPORTED_15" ? "本人販売＋サポート 15%" : "本人販売 10%"}（版 {product.salesPlan.current.revision}）</dd><dt>切替状態</dt><dd>{product.salesPlan.phase === "ACTIVE" ? "受付中" : "旧決済の照合中（新規受付停止）"}</dd></dl>

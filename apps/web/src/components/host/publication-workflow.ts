@@ -35,6 +35,7 @@ export type PublicationBlockerDestination =
 export function publicationBlockerDestination(blocker: string): PublicationBlockerDestination | null {
   switch (blocker) {
     case "SCHEDULE_REQUIRED": return { kind: "calendar" };
+    case "SALES_PLAN_REQUIRED": return { kind: "tab", tab: "pricing" };
     case "PRICE_REQUIRED":
     case "CANCELLATION_TERMS_REQUIRED": return { kind: "tab", tab: "pricing" };
     case "MANUSCRIPT_REQUIRED":

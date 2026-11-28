@@ -563,8 +563,14 @@ describe("admin support console settings", () => {
     expect(() => resolveConfig({ ...connect, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "" })).toThrow("EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY");
     expect(() => resolveConfig({ ...connect, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
     // 自分の Stripe アカウント (#726, 3c-1): off by default; http needs the accounts, the publication API, the DB and the platform Stripe key; the preview never has it.
-    const standard = { ...on, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_synthetic", EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true", EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED: "true" };
+    const standard = { ...on, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_synthetic", EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true", EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED: "true", EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION: "independent-sales-v1" };
     expect(resolveConfig(connect).hostStandardOnboardingEnabled).toBe(false);
+    // 独立 10% (3c-2): the consent version is a required setting, and empty with the flag off.
+    expect(resolveConfig(standard).hostIndependentSalesAgreementVersion).toBe("independent-sales-v1");
+    expect(resolveConfig(connect).hostIndependentSalesAgreementVersion).toBe("");
+    for (const bad of ["", " ", "has space", "x".repeat(161)]) {
+      expect(() => resolveConfig({ ...standard, EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION: bad }), JSON.stringify(bad)).toThrow("EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED=true needs EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION");
+    }
     expect(resolveConfig(standard).hostStandardOnboardingEnabled).toBe(true);
     expect(resolveConfig({ ...standard, EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED: "1" }).hostStandardOnboardingEnabled).toBe(false);
     expect(resolveConfig({ EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED: "true" }).hostStandardOnboardingEnabled).toBe(false);

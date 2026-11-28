@@ -1,5 +1,4 @@
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError, type SalesPlanState } from "@niho-experience/experience-store";
-import { expireDirectCheckout, expirePlatformCheckout } from "@niho-experience/experience-payments";
 import { config } from "@/lib/config";
 import { noStoreJson } from "@/lib/host/server";
 import { readBoundedJson } from "@/lib/read-bounded-json";
@@ -12,6 +11,7 @@ import {
 } from "@/lib/experience/store-server";
 import { publicationHostBoundary, publicationHostMutationAllowed } from "@/lib/experience/publication-host-boundary";
 import { requestedProviderId } from "@/lib/experience/provider-context";
+import { completeSalesPlanSwitch } from "@/lib/experience/sales-plan-switch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -87,6 +87,9 @@ export async function POST(request: Request, context: Context): Promise<Response
     const resuming = state?.transitionCommandId === body.commandId
       && state.pending?.plan === body.plan && state.pending.agreementVersion === body.agreementVersion;
     if (!resuming) {
+      // A host whose seller is its own Stripe account (3c) sells with 独立 10% only, chosen on the independent-sales route: no Direct 15%, and no
+      // switch of an agent-sales product on this route's consent version. A switch that has begun can still be resumed.
+      if (await repository.hasOwnStripeSeller(boundary.value.actor.providerId)) return noStoreJson({ error: { code: "PLAN_NOT_AVAILABLE" } }, 409);
       if (process.env.EXPERIENCE_MANAGED_SALES_ENABLED !== "true") return noStoreJson({ error: { code: "NOT_FOUND" } }, 404);
       if (body.agreementVersion !== process.env.EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION) {
         return noStoreJson({ error: { code: "CONSENT_OUTDATED" } }, 409);
@@ -96,29 +99,12 @@ export async function POST(request: Request, context: Context): Promise<Response
     const disclosure = (await disclosures.getForOwner(boundary.value.actor)).disclosure;
     if (!disclosure || disclosure.method !== "NATIVE" || disclosure.sellerDisplayName !== boundary.value.provider.sellerDisplayName) throw new StoreConflictError("Seller disclosure is not current.");
     const sellerDisclosureUrl = `${config.siteUrl}/experiences/${encodeURIComponent(product.slug)}/seller`;
-    let transition = await repository.beginOwnerSwitch(boundary.value.actor, productId, {
+    const transition = await repository.beginOwnerSwitch(boundary.value.actor, productId, {
       commandId: body.commandId, expectedVersion: body.expectedVersion as number, plan: body.plan,
       agreementVersion: body.agreementVersion, agreementConfirmedAtUtc: new Date().toISOString(),
       sellerDisclosureUrl, stripeReady: true,
     });
-    for (const checkout of transition.openCheckouts) {
-      const booking = await bookings.getBooking(boundary.value.actor, checkout.publicBookingId);
-      const expireCheckout = booking.sellerSnapshot.chargeMode === "PLATFORM" ? expirePlatformCheckout : expireDirectCheckout;
-      const outcome = await expireCheckout({
-        booking, checkoutSessionId: checkout.checkoutSessionRef,
-        platformStripeKey: process.env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY,
-      });
-      if (outcome === "expired") await releases.expireGuestHoldForSalesPlanSwitch(boundary.value.actor, checkout.publicBookingId, checkout.checkoutSessionRef);
-      transition = {
-        state: await repository.recordCheckoutOutcome(boundary.value.actor, productId, body.commandId, checkout.checkoutSessionRef,
-          outcome === "paid" ? "PAID" : outcome === "expired" ? "EXPIRED" : "UNKNOWN"),
-        openCheckouts: [],
-      };
-    }
-    if (transition.state.phase !== "ACTIVE") {
-      const finalized = await repository.finalizeSwitch(boundary.value.actor, productId, body.commandId, transition.state.version);
-      return noStoreJson({ salesPlan: salesPlanDto(finalized), switched: true });
-    }
-    return noStoreJson({ salesPlan: salesPlanDto(transition.state), switched: false });
+    const completed = await completeSalesPlanSwitch({ repository, bookings, releases }, boundary.value.actor, productId, body.commandId, transition);
+    return noStoreJson({ salesPlan: salesPlanDto(completed.state), switched: completed.switched });
   } catch (error) { return failure(error); }
 }

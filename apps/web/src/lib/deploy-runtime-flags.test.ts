@@ -550,22 +550,24 @@ describe("the deploy workflows' feature flags", () => {
     }
   });
 
-  it("opens the host's own Stripe account in staging only; production refuses it until 3c-2", () => {
+  it("opens the host's own Stripe account and 独立 10% in staging and production, with the consent version as a required setting", () => {
     const id = "EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED";
     const flag = byId.get(id)!;
     expect(flag.needs).toEqual(["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_PUBLICATION_API_ENABLED"]);
-    expect(flag.stagingOnly).toBe(true);
-    expect(flag.settings ?? []).toEqual([]);
-    const stg = resolve("stg", closure("stg", id));
-    expect(stg.problems).toEqual([]);
-    expect(resolveConfig(revision("stg", stg)).hostStandardOnboardingEnabled).toBe(true);
-    // Production refuses it even with everything it needs, and only it (the flags it needs are allowed).
-    expect(resolve("prod", closure("prod", id)).problems).toEqual([`${id} (PROD_HOST_STANDARD_ONBOARDING_ENABLED) is not allowed in production yet`]);
+    expect(flag.stagingOnly).toBeUndefined();
+    expect((flag.settings ?? []).map((setting) => setting.env)).toEqual(["EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION"]);
     for (const target of ["stg", "prod"] as const) {
+      const on = resolve(target, closure(target, id));
+      expect(on.problems).toEqual([]);
+      expect(resolveConfig(revision(target, on)).hostStandardOnboardingEnabled).toBe(true);
+      expect(resolveConfig(revision(target, on)).hostIndependentSalesAgreementVersion).toBe(SETTING.consentVersion);
+      // Without the setting the deploy refuses it, and so does the server at start-up.
+      const missing = Object.fromEntries(Object.entries(closure(target, id)).filter(([name]) => !name.includes("HOST_INDEPENDENT_SALES_AGREEMENT_VERSION")));
+      expect(resolve(target, missing).problems.join(" ")).toContain(`${PREFIX[target]}_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION`);
       expect(resolveConfig(revision(target, resolve(target, {}))).hostStandardOnboardingEnabled).toBe(false);
     }
-    // Nothing else is staging-only.
-    expect(FLAGS.filter((other) => other.stagingOnly).map(flagId)).toEqual([id]);
+    // Nothing is staging-only any more.
+    expect(FLAGS.filter((other) => other.stagingOnly).map(flagId)).toEqual([]);
   });
 
   it("every need and prodNeed is a capability or a flag of the table (a misspelling fails)", () => {

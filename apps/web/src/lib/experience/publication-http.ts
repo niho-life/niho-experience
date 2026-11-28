@@ -29,7 +29,7 @@ import { config } from "@/lib/config";
 import { noStoreJson } from "@/lib/host/server";
 import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";
 import { retrievePlatformAccount } from "@niho-experience/experience-payments";
-import { experiencePublicationRepository, guestMeetingGuideRepository, managedExperienceSalesRepository, productClassificationRepository, providerAgentSales, providerSellerDisclosureRepository } from "./store-server";
+import { experiencePublicationRepository, guestMeetingGuideRepository, managedExperienceSalesRepository, productClassificationRepository, providerAgentSales, providerSellerDisclosureRepository, directSellers } from "./store-server";
 import {
   publicationHostBoundary,
   publicationHostMutationAllowed,
@@ -228,6 +228,7 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
   const gallery = media.filter((asset) => asset.placement === "GALLERY");
   const photosReady = gallery.length > 0 && gallery.every((asset) => asset.altText.trim() !== "" && asset.altTextJa.trim() !== "");
   const agentSales = await agentSalesOffer(repository, actor, salesPlan);
+  const independentSales = await independentSalesOffer(actor);
   const publicationBlockers = await repository.getPublicationBlockers(
     actor,
     productId,
@@ -280,6 +281,8 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
     ownerSalesPlanAgreementVersion: process.env.EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION ?? null,
     // 代理受領 (#725): what the "サポート 15%（NIHO が代金を受け取る）" choice shows. Null with the flag off, and for a host with a seller profile.
     agentSales,
+    // 独立 10% (3c-2, #726): the choice for a host whose seller is its own Stripe account. Null with the flag off and for any other host.
+    independentSales,
     offers,
     media: media.map((asset) => ({
       ...asset,
@@ -312,6 +315,17 @@ async function agentSalesOffer(repository: NonNullable<ReturnType<typeof experie
     ...(isAgentPlan ? { planSellerName: salesPlan.current.sellerDisplayName } : {}),
     ...(consentCounted === undefined ? {} : { consentCounted }),
   };
+}
+
+/**
+ * The choice of 独立 10% (3c-2, #726) as the host screen shows it: the configured agreement version and the seller name the product would be sold under.
+ * Null while the flag is off, and for a host whose seller profile is not its own Stripe account.
+ */
+async function independentSalesOffer(actor: PublicationHostContext["actor"]) {
+  if (!config.hostStandardOnboardingEnabled || !config.hostAccountsEnabled) return null;
+  const sellerName = await directSellers()?.ownStripeSellerName(actor.providerId).catch(() => null) ?? null;
+  if (sellerName === null) return null;
+  return { agreementVersion: config.hostIndependentSalesAgreementVersion, sellerName };
 }
 
 async function providerMediaDto(repository: NonNullable<ReturnType<typeof experiencePublicationRepository>>, actor: PublicationHostContext["actor"]) {

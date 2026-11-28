@@ -23,7 +23,7 @@ import { isHostAccountId } from "./host-accounts.ts";
 import { ownerMailDestinationMissing } from "./host-mail-shared.ts";
 import { adminPayoutConsentIsCurrent, payoutConsentStillCounts } from "./payout-account-consents.ts";
 import { countingAgentConsent, nativeDisclosureName } from "./agent-consent.ts";
-import { salesKindOf } from "./sales-kind.ts";
+import { hasOwnStripeSeller, salesKindOf } from "./sales-kind.ts";
 import { enqueueListingSuspensionNotification, type ListingSuspensionChange } from "./host-notification-outbox.ts";
 import { isHostSellerRef } from "./host-sellers.ts";
 import {
@@ -78,6 +78,8 @@ export type ExperiencePublicationBlocker =
   | "SELLER_DISCLOSURE_REQUIRED"
   /** The product has no seller (its provider has no seller profile yet, #704): it can be edited, not sold. */
   | "SELLER_REQUIRED"
+  /** 独立 10% (3c-2, #726): the host sells with its own Stripe account and the product has no sales plan yet (the OWNER chooses 独立 10%). */
+  | "SALES_PLAN_REQUIRED"
   | "SLUG_IN_USE";
 
 /** What publishing, or starting bookings, needs from the host's request (#705). */
@@ -1145,7 +1147,13 @@ async function blockers(
   // A product with no seller gets SELLER_REQUIRED in place of the fee setting, readiness and payout reasons. Its content
   // reasons (manuscript, photos, terms, schedule, price, slug) stay, since the host still has to finish them (#704).
   const seller = product.seller;
+  // 独立 10% (3c-2, #726): a host whose seller profile is its own Stripe account (connect_account_id) sells on a sales-plan revision, never on
+  // fee settings. The host without that column (the Admin-registered Direct host) is checked exactly as before.
+  const ownStripeSeller = seller !== null && !managed && !agent && await hasOwnStripeSeller(client, product.providerId);
+  const independent = ownStripeSeller && managedPlan.rows[0]?.plan === "INDEPENDENT_10" && managedPlan.rows[0]?.charge_mode === "CONNECT_DIRECT";
+  const planRequired = ownStripeSeller && managedPlan.rows[0] === undefined;
   if (page) { /* fee settings and support consent only matter for bookings */ }
+  else if (independent || planRequired) { /* a sales-plan revision, not fee settings, decides (below) */ }
   else if (!managed && !agent && seller !== null && !feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
   else if (!managed && !agent && seller !== null && (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
     || feeSettings.rows[0].support_agreement_revision === null)) result.push("SUPPORT_CONSENT_REQUIRED");
@@ -1193,6 +1201,21 @@ async function blockers(
         || !Number.isFinite(checkedAt) || checkedAt > now || now - checkedAt >= 5 * 60_000) result.push("CONNECT_NOT_READY");
     }
     return result;
+  }
+
+  if (planRequired) {
+    result.push("SALES_PLAN_REQUIRED");
+    return result;
+  }
+
+  if (independent) {
+    const plan = managedPlan.rows[0]!;
+    if (plan.phase !== "ACTIVE" || plan.seller_display_name !== seller.sellerDisplayName
+      || plan.seller_niho_account_ref !== seller.sellerNihoAccountRef
+      || plan.stripe_account_ref !== seller.stripeConnectAccountRef) result.push("SELLER_MISMATCH");
+    const disclosureName = await nativeDisclosureName(client, product.providerId, true);
+    if (disclosureName === null || disclosureName !== plan.seller_display_name) result.push("SELLER_DISCLOSURE_REQUIRED");
+    // …then the same readiness (account usable, payout account, consent, seller match) a Direct sale has, below.
   }
 
   if (managed) {

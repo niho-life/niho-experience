@@ -121,7 +121,7 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED` | `HOST_TEAM_INVITATIONS_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストチーム・ホストの NIHO ログイン・ホストメール | — | — | — |
 | `EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED` | `HOST_SELF_REGISTRATION_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストの NIHO ログイン・ホストメール | — | — | — |
 | `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED` | `HOST_CONNECT_ONBOARDING_ENABLED` | ホストの画面・DB・Experienceホストアカウント（Stripe のキーは `HOST_ACCOUNTS_ENABLED` と同じ参照）。**本番では 3b（#725）が入るまで OFF**。[host-payouts.md](host-payouts.md) | — | — | — |
-| `EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED` | `HOST_STANDARD_ONBOARDING_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホスト公開API（Stripe のキーは `HOST_ACCOUNTS_ENABLED` と同じ参照）。**本番では ON にできない（`stagingOnly`。deploy の検査が拒む。3c-2 で外す）**。**migration `0098` と `0099` とその runtime grants を先に適用**。[host-payouts.md](host-payouts.md) | — | — | — |
+| `EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED` | `HOST_STANDARD_ONBOARDING_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホスト公開API（Stripe のキーは `HOST_ACCOUNTS_ENABLED` と同じ参照）。**migration `0098` と `0099` とその runtime grants を先に適用**（3c-2 で `stagingOnly` を外し、本番でも ON にできる）。[host-payouts.md](host-payouts.md) | `HOST_INDEPENDENT_SALES_AGREEMENT_VERSION`（独立 10% の同意の版。必須） | — | — |
 | `EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED` | `HOST_AGENT_PAYOUTS_ENABLED` | ホストの画面・DB・Experienceホストアカウント・受取口座の登録・ホストメール。送金の job・ホストの売上の「NIHO からの送金」・事務局の操作。販売の flag とは独立で、送金だけを止める非常停止になる。**migration `0097` とその runtime grants を先に適用**。[host-payouts.md](host-payouts.md) | — | — | — |
 | `EXPERIENCE_HOST_AGENT_SALES_ENABLED` | `HOST_AGENT_SALES_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストメール・ゲストメール・ホスト公開API・プラットフォームの Webhook（`MANAGED_SALES_WEBHOOKS_ENABLED`）・受取口座の登録。**本番はさらに送金の flag `EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED`**。[host-payouts.md](host-payouts.md) | `HOST_AGENT_SALES_AGREEMENT_VERSION`、`HOST_AGENT_RECEIVER_NAME`（受領者の正式名）、`HOST_AGENT_PAYOUT_DELAY_DAYS`（1〜30、省略で 3）。プラットフォームの口座は `MANAGED_PLATFORM_ACCOUNT_ID` | — | — |
 | `EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED` | `OCCURRENCE_ASSIGNMENT_ENABLED` | ホストの画面・DB・完全代行の販売 | — | — | — |
@@ -286,7 +286,7 @@ ADR 0002・0003への移行後は、成立済み予約・返金・精算をExper
 
 ## ホストの自分の Stripe アカウント（Standard、3c-1、#726）の前提
 
-`EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED` は既定 OFF。**本番は 3c-2 が入るまで ON にできない**（deploy の検査が拒む。表の `stagingOnly`。3c-2 で外す）。
+`EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED` は既定 OFF。3c-2（独立 10% で売る）が入ったので、本番でも ON にできる（`stagingOnly` は外した）。**設定 `EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION`（変数 `HOST_INDEPENDENT_SALES_AGREEMENT_VERSION`。独立 10% の同意の文言の版）が必須で、無いと deploy の検査と起動が拒む。** 文言（販売者はあなた・代金はあなたの Stripe で直接受け取る・料率 10%・損失はあなた・規約）を法務が確認してから、版を決めて ON にする。stg の test mode で、口座をつなぐ → 独立 10% を選ぶ → 受付を始める → 予約（Direct charge）、代理受領の商品の切り替えまでを確かめてから本番へ進む。
 
 **flag が OFF でも効く変更**（混在の修正。すでに代理受領を使うホストのため、flag の裏に置かない）：(1) 受取口座の利用同意の取消が、今の版が代理受領の掲載を止めない、(2) `reserve(PAYOUT)` が有効な PAYOUT の行をそのまま返し、新しい行は「販売者プロフィールが無い、または代理受領の同意の履歴がある」ときに作る、(3) 設定 › 受取口座の Express の段と「Stripe で見る」の出し分け（販売者プロフィールがあるホストでも、PAYOUT の行か代理受領の履歴があれば Express の段）、(4) `agentSalesOffer` の `choosable:false`（販売者プロフィールがあるホストの、代理受領の商品）。migration `0098` と `0099` は、コードより先に適用する（0099 の `connect_account_id` 列を (3) が読む）。
 
