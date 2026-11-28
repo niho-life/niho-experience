@@ -20,7 +20,7 @@ describe("public Experience sale terms", () => {
     vi.clearAllMocks();
     Object.assign(mocks.config, { apiMode: "http", experiencePublicationsEnabled: true });
     mocks.config.guestBookingEnabled = true;
-    mocks.publications.getPublicBySlug.mockResolvedValue({ slug: "workshop" });
+    mocks.publications.getPublicBySlug.mockResolvedValue({ slug: "workshop", bookingAvailable: true });
     mocks.bookings.publicBookingTerms.mockResolvedValue({
       providerId: "private-provider",
       productId: "private-product",
