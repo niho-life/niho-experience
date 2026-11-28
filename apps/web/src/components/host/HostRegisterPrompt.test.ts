@@ -46,6 +46,15 @@ describe("HostRegisterPrompt (#695)", () => {
     expect(hrefs(html).some((href) => href.includes("/inquiry"))).toBe(false);
   });
 
+  it("offers 「ホストとして登録」 first, to /host/start, only with self-registration on (#708)", () => {
+    expect(hrefs(renderToStaticMarkup(createElement(HostNoHostGuide, { title: "ホーム" })))).not.toContain("/host/start");
+    state.config = { groupInquiryEnabled: true, nihoWriterEnabled: false, hostSelfRegistrationEnabled: true };
+    const html = renderToStaticMarkup(createElement(HostNoHostGuide, { title: "ホーム" }));
+    expect(html).toContain("ホストとして登録");
+    expect(hrefs(html)[0]).toBe("/host/start");
+    expect(hrefs(html)).toContain("/ja/inquiry?type=listing&from=listing");
+  });
+
   it("keeps the registration prompt in the preview", () => {
     state.mock = true;
     const html = renderToStaticMarkup(createElement(HostRegisterPrompt, { title: "ホーム" }));

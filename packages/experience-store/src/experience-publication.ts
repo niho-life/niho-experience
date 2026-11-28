@@ -20,6 +20,7 @@ import {
 } from "./guest-bookings.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreValidationError } from "./errors.ts";
 import { isHostAccountId } from "./host-accounts.ts";
+import { ownerMailDestinationMissing } from "./host-mail-shared.ts";
 import { adminPayoutConsentIsCurrent, payoutConsentStillCounts } from "./payout-account-consents.ts";
 import { enqueueListingSuspensionNotification, type ListingSuspensionChange } from "./host-notification-outbox.ts";
 import { isHostSellerRef } from "./host-sellers.ts";
@@ -54,6 +55,8 @@ export type ExperiencePublicationBlocker =
   | "FEE_SETTINGS_REQUIRED"
   | "SUPPORT_CONSENT_REQUIRED"
   | "MANUSCRIPT_REQUIRED"
+  /** The provider has an OWNER and none has an address the host emails reach (a confirmed one, or the sign-in's) (#708). */
+  | "NOTIFICATION_ADDRESS_REQUIRED"
   | "OPERATIONS_SUSPENDED"
   | "OWNER_NOT_CURRENT"
   | "PAYMENT_REUSE_CONSENT_REQUIRED"
@@ -1033,6 +1036,8 @@ async function blockers(
   }
   if (facts.rows[0]?.slug_in_use === true) result.push("SLUG_IN_USE");
   if (state?.operationsSuspendedAtUtc !== null && state?.operationsSuspendedAtUtc !== undefined) result.push("OPERATIONS_SUSPENDED");
+  // Every publish asks for it (a page, or a page with bookings): a page that is already public is not stopped, its next publish is (#708).
+  if (await ownerMailDestinationMissing(client, product.providerId)) result.push("NOTIFICATION_ADDRESS_REQUIRED");
 
   if (page) {
     result.push(...await pageOwnerBlockers(client, product.providerId));

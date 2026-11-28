@@ -2,7 +2,7 @@ import Link from "next/link";
 import { config } from "@/lib/config";
 import { inquiryHref } from "@/lib/group-inquiry-entry";
 import { groupInquiryOpen } from "@/lib/group-inquiry-links";
-import { HOST_REGISTER_PATH, HOST_SUPPORT_PATH } from "@/lib/host/routes";
+import { HOST_REGISTER_PATH, HOST_START_PATH, HOST_SUPPORT_PATH } from "@/lib/host/routes";
 import { isHostMock } from "@/lib/host/server";
 import { isHostSupportSettingsEnabled } from "@/lib/host/support-settings-server";
 import { consoleButtonClass, HOST_HEADING, HOST_SURFACE } from "./host-ui";
@@ -14,10 +14,13 @@ const LISTING_MAIL_HREF = "mailto:info@niho.life?subject=NIHO%20Travel%20%E4%BD%
 /**
  * An account that belongs to no host, against the real API (#695): the old registration screen needs NIHO's former API and
  * can only fail, so the person is pointed to the inquiry form (or the writer screen) until hosts can register themselves.
+ * With EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED (#708) the first button is 「ホストとして登録」 (/host/start, which adds the host to
+ * the account that is signed in) and the inquiry stays beside it.
  */
 export function HostNoHostGuide({ title }: { title: string }) {
   const listingHref = groupInquiryOpen() ? inquiryHref("ja", { type: "LISTING", from: "LISTING" }) : LISTING_MAIL_HREF;
   const supportUsable = isHostSupportSettingsEnabled();
+  const selfRegistration = config.hostSelfRegistrationEnabled;
   return (
     <HostPageBody>
       <PageHead title={title} />
@@ -25,9 +28,11 @@ export function HostNoHostGuide({ title }: { title: string }) {
         <h2 id="no-host-heading" className={`${HOST_HEADING} text-lg leading-snug`}>
           まだどのホストにも属していません
         </h2>
-        <p className="mt-2 text-ink-soft">体験を載せたいときは、まず相談してください。</p>
+        <p className="mt-2 text-ink-soft">{selfRegistration ? "体験を載せたいときは、ホストとして登録してください。" : "体験を載せたいときは、まず相談してください。"}</p>
         <p className="mt-5 flex flex-wrap gap-2">
-          <a href={listingHref} className={consoleButtonClass("primary", "lg")}>体験の掲載を相談する</a>
+          {/* A plain link: the next screen reads the cookies and may send the person on to sign in. */}
+          {selfRegistration ? <a href={HOST_START_PATH} className={consoleButtonClass("primary", "lg")}>ホストとして登録</a> : null}
+          <a href={listingHref} className={consoleButtonClass(selfRegistration ? "secondary" : "primary", "lg")}>体験の掲載を相談する</a>
           {config.nihoWriterEnabled ? <Link href="/write" className={consoleButtonClass("secondary", "lg")}>記事を書く</Link> : null}
           {supportUsable ? <Link href={HOST_SUPPORT_PATH} className={consoleButtonClass("secondary", "lg")}>NIHOサポート設定</Link> : null}
         </p>

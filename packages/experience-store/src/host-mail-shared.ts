@@ -60,6 +60,35 @@ export const sameEmail = (a: string | null | undefined, b: string | null | undef
 export const HOST_ACCOUNT_USABLE = (user: string) =>
   `(${user} !~ '^hst_[0-9a-f]{32}$' OR EXISTS (SELECT 1 FROM host_accounts ha WHERE ha.id=${user} AND ha.status='ACTIVE'))`;
 
+/**
+ * SQL: the address row `row` (host_notification_addresses) holds somewhere this site's emails can go for the user (an expression
+ * for a NIHO user ID or host account ID): a sign-in address or a CONFIRMED choice (a request waiting for its link is in another
+ * table and does not count), and the user may still get this site's emails. The one place that says it: the booking mails'
+ * recipients and the page publish's NOTIFICATION_ADDRESS_REQUIRED (#708) both read it.
+ */
+export const HOST_MAIL_DESTINATION_READY = (row: string, user: string) =>
+  `(COALESCE(${row}.override_email, ${row}.login_email) IS NOT NULL AND ${HOST_ACCOUNT_USABLE(user)})`;
+
+/**
+ * The provider has an active OWNER, and none of them has an address the host emails reach (a usable account with a sign-in address
+ * or a confirmed choice; a confirmation still waiting for its link is not one). Then nothing about a booking or a question would reach
+ * the host, so the page is not published (NOTIFICATION_ADDRESS_REQUIRED, #708). A provider with no OWNER at all (one NIHO's
+ * staff registered and publishes for, with NIHO as the seller) has nobody to notify: the rule does not apply to it.
+ */
+export async function ownerMailDestinationMissing(client: PoolClient, providerId: string): Promise<boolean> {
+  assertStoreIdentifier(providerId, "providerId");
+  const result = await client.query<{ missing: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM provider_memberships o WHERE o.provider_id = $1 AND o.active AND o.role = 'OWNER')
+        AND NOT EXISTS (
+          SELECT 1 FROM provider_memberships m
+            JOIN host_notification_addresses a ON a.niho_user_id = m.niho_user_id
+           WHERE m.provider_id = $1 AND m.active AND m.role = 'OWNER' AND ${HOST_MAIL_DESTINATION_READY("a", "m.niho_user_id")}
+        ) AS missing`,
+    [providerId],
+  );
+  return result.rows[0]?.missing === true;
+}
+
 export const HAS_HOST_ACCESS = (user: string) =>
   `(${HOST_ACCOUNT_USABLE(user)} AND (EXISTS (SELECT 1 FROM provider_memberships hm WHERE hm.niho_user_id = ${user} AND hm.active)
     OR EXISTS (SELECT 1 FROM product_operator_grants hg WHERE hg.niho_user_id = ${user} AND hg.active
@@ -113,7 +142,7 @@ export async function enqueueHostBookingMails(
               WHERE $7::text IS NOT NULL AND g.provider_id = $1 AND g.product_id = $7 AND g.active
                 AND (g.expires_at IS NULL OR g.expires_at > clock_timestamp())) r
        JOIN host_notification_addresses a ON a.niho_user_id = r.niho_user_id
-      WHERE COALESCE(a.override_email, a.login_email) IS NOT NULL AND ${HOST_ACCOUNT_USABLE("r.niho_user_id")}
+      WHERE ${HOST_MAIL_DESTINATION_READY("a", "r.niho_user_id")}
       -- One order whatever the collation, so the rows (and their emails) come in the same order every time.
       ORDER BY r.niho_user_id COLLATE "C"
      ON CONFLICT (provider_id, deduplication_key) DO NOTHING`,

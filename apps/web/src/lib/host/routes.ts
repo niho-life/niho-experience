@@ -2,6 +2,14 @@
 export const HOST_INTRO_PATH = "/host";
 export const HOST_HOME_PATH = "/host/home";
 export const HOST_REGISTER_PATH = "/host/register";
+/**
+ * 自分でホスト登録する (Epic #700, #708, EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED): the registration screen, the host terms it asks
+ * the person to agree to, where the form posts, and the NIHO sign-in that leads to it (`intent=register`).
+ */
+export const HOST_START_PATH = "/host/start";
+export const HOST_TERMS_PATH = "/host/terms";
+export const HOST_REGISTRATION_API_PATH = "/host/api/registration";
+export const HOST_REGISTER_LOGIN_PATH = "/host/auth/login?intent=register";
 export const HOST_LOGIN_PATH = "/host/auth/login";
 /** The NIHO sign-in a returning host's browser starts by itself when the console finds no session (#632, returning-host.ts). */
 export const HOST_AUTO_LOGIN_PATH = `${HOST_LOGIN_PATH}?auto=1`;

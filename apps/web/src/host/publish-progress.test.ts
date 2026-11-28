@@ -27,6 +27,17 @@ describe("ホームの「公開までの道のり」 (#706)", () => {
     expect(row(list, "stage2", "open-booking").next).toBe(false);
   });
 
+  it("shows the contact address's confirmation only while the server still lists it as a reason for the page (#708)", () => {
+    const withReason = publishChecklist([product({ pageBlockers: ["NOTIFICATION_ADDRESS_REQUIRED"], publicationBlockers: ["NOTIFICATION_ADDRESS_REQUIRED"] })], "ホスト", "prov-1")!;
+    expect(row(withReason, "stage1", "notification")).toMatchObject({ done: false, title: "連絡用メールアドレスの確認", href: "/host/settings?providerId=prov-1#settings-notification", action: "確認する", next: false });
+    expect(row(withReason, "stage1", "publish-page")).toMatchObject({ done: false, detail: "上の項目がそろうと公開できます" });
+    // The page's content row stays the one primary step; the address does not turn the page's content rows unfinished.
+    expect(row(withReason, "stage1", "page").done).toBe(true);
+    const without = publishChecklist([product()], "ホスト", null)!;
+    expect(without.stage1.rows.map((entry) => entry.key)).toEqual(["host", "page", "publish-page"]);
+    expect(publishChecklist([], "ホスト", null)!.stage1.rows.map((entry) => entry.key)).toEqual(["host", "page", "publish-page"]);
+  });
+
   it("the page is ready: publishing is the next step, and the page needs no payout account", () => {
     const list = publishChecklist([product({ bookingBlockers: ["CONNECT_NOT_READY", "SCHEDULE_REQUIRED"] })], "ホスト", null)!;
     expect(row(list, "stage1", "page")).toMatchObject({ done: true, detail: "題と説明・写真・料金・取消条件がそろいました" });

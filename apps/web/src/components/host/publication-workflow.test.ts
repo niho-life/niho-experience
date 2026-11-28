@@ -38,6 +38,7 @@ describe("publication blocker destination", () => {
     expect(publicationBlockerDestination("CANCELLATION_TERMS_REQUIRED")).toEqual({ kind: "tab", tab: "pricing" });
     for (const blocker of ["MANUSCRIPT_REQUIRED", "PUBLIC_CONTENT_INVALID", "PHOTOS_REQUIRED"]) expect(publicationBlockerDestination(blocker)).toEqual({ kind: "tab", tab: "page" });
     expect(publicationBlockerDestination("SLUG_IN_USE")).toEqual({ kind: "tab", tab: "settings" });
+    expect(publicationBlockerDestination("NOTIFICATION_ADDRESS_REQUIRED")).toEqual({ kind: "href", href: "/host/settings#settings-notification" });
     expect(publicationBlockerDestination("SUPPORT_CONSENT_REQUIRED")).toEqual({ kind: "href", href: "/host/settings#settings-support" });
     expect(publicationBlockerDestination("PAYMENT_REUSE_CONSENT_REQUIRED")).toEqual({ kind: "payment-consent" });
   });

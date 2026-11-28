@@ -545,6 +545,15 @@ describe("admin support console settings", () => {
     for (const missing of ["EXPERIENCE_HOST_TEAM_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"]) {
       expect(() => resolveConfig({ ...invitations, [missing]: "false", EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "true" })).toThrow(`EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED=true needs ${missing}=true`);
     }
+    // 自分でホスト登録する (#708): off by default; the preview needs the console and the NIHO login; http also needs the accounts and the mail.
+    const registration = { ...on, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", EXPERIENCE_HOST_MAIL_ENABLED: "true", NIHO_EXPERIENCE_HOST_COMMON_CONTRACT_AUDIENCE: "https://api.niho.example.test", EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "true" };
+    expect(resolveConfig({ ...registration, EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "false" }).hostSelfRegistrationEnabled).toBe(false);
+    expect(resolveConfig(registration).hostSelfRegistrationEnabled).toBe(true);
+    expect(resolveConfig({ ...registration, EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "1" }).hostSelfRegistrationEnabled).toBe(false);
+    expect(() => resolveConfig({ EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
+    expect(resolveConfig({ HOST_CONSOLE_ENABLED: "true", EXPERIENCE_HOST_NIHO_LOGIN_ENABLED: "true", EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "true" }).hostSelfRegistrationEnabled).toBe(true);
+    expect(() => resolveConfig({ HOST_CONSOLE_ENABLED: "true", EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "true" })).toThrow("EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED=true needs EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true");
+    expect(() => resolveConfig({ ...registration, EXPERIENCE_HOST_MAIL_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED=true needs EXPERIENCE_HOST_MAIL_ENABLED=true");
     expect(() => resolveConfig({ ...on, HOST_CONSOLE_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
     expect(() => resolveConfig({ ...host, EXPERIENCE_API_MODE: "http", EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }))
       .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_DATABASE_URL");

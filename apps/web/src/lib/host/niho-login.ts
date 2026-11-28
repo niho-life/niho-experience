@@ -11,12 +11,12 @@ import { loginStatesMatch, createLoginState, createPkceVerifier, pkceChallenge }
 import { nihoIdOrNull } from "./providers";
 import { forgetHostPushConnection } from "./push/server";
 import { clearReturningHostCookie, setReturningHostCookie } from "./returning-host";
-import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, hostAccountSettingsPath, hostInvitationPath, hostReturnPathOrNull, invitationIdOrNull, withProvider, withQuery, type LoginErrorReason } from "./routes";
-import { clearLoginCookie, hostNotFound, loginSealer, lookupNihoIdentity, nihoAuthDeps, seeOther, setLoginCookie, siteOrigin } from "./server";
+import { HOST_AUTH_ERROR_PATH, HOST_HOME_PATH, HOST_START_PATH, hostAccountSettingsPath, hostInvitationPath, hostReturnPathOrNull, invitationIdOrNull, withProvider, withQuery, type LoginErrorReason } from "./routes";
+import { clearLoginCookie, hostNotFound, loginSealer, lookupNihoIdentity, nihoAuthDeps, seeOther, setLoginCookie, setRegistrationCookie, siteOrigin } from "./server";
 import { TRAVELER_HOME_PATH, TRAVELER_SIGN_IN_PATH, type TravelerLoginError } from "@/lib/traveler/paths";
 import { TRAVELER_LOGIN_HINT_COOKIE, TRAVELER_SESSION_COOKIE } from "@/lib/traveler/session";
 import { clearTravelerLoginHint, isTravelerSessionToken, setTravelerLoginHint, setTravelerSessionCookie } from "@/lib/traveler/server";
-import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_COOKIE, LOGIN_MAX_AGE_SECONDS, TEAM_INVITE_BINDING_COOKIE, type HostLoginState } from "./session";
+import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_COOKIE, LOGIN_MAX_AGE_SECONDS, REGISTRATION_MAX_AGE_SECONDS, TEAM_INVITE_BINDING_COOKIE, type HostLoginState } from "./session";
 
 /*
  * 「NIHO アカウントでログイン」 (Epic #591, #594, EXPERIENCE_HOST_NIHO_LOGIN_ENABLED): NIHO only proves who the host is.
@@ -44,6 +44,9 @@ import { ACCOUNT_SESSION_COOKIE, decodeLoginState, INVITE_BINDING_COOKIE, LOGIN_
  * - team invitation (`purpose: "team-invite"`, #636): a person opened an invitation of a provider's OWNER. The return finds or
  *   makes their host account, adds it to the team as COHOST and uses the invitation up in one transaction (the invitation
  *   belongs to the browser that opened it), then opens that account's session at the provider's home.
+ * - registration (`intent=register`, `purpose: "register"`, #708, EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED): the same sign-in. A NIHO
+ *   account no host account is bound to (with the flag on, from any host sign-in, not only this intent) is not turned away:
+ *   what NIHO proved goes into a sealed 30-minute cookie and the host goes on to /host/start. Nothing is created until the form is sent.
  * - traveler (`purpose: "traveler"`, #597): a traveler logs in or signs up with Google, Apple or LINE (`audience=guest`, a
  *   `method`): NIHO goes straight to that provider and makes the NIHO account on the way. The return opens the traveler's
  *   own account and session (another table and cookie than a host's), never a host account's, and failures go to the
@@ -78,7 +81,9 @@ export function startNihoLogin(request: NextRequest): NextResponse {
   const returnPath = hostReturnPathOrNull(request.nextUrl.searchParams.get("returnTo"));
   const providerId = nihoIdOrNull(request.nextUrl.searchParams.get("providerId"));
   const reauth = request.nextUrl.searchParams.get("reauth") === "1";
-  return nihoRoundTrip({ providerId, ...(invitationId ? { invitationId } : {}), ...(returnPath ? { returnPath } : {}) }, reauth, hostTarget(request));
+  // 「ホストとして登録」 (#708): the sign-in is the same; the intent only says where a NIHO account with no host account goes. Without the flag it means nothing.
+  const register = config.hostSelfRegistrationEnabled && request.nextUrl.searchParams.get("intent") === "register";
+  return nihoRoundTrip({ providerId, ...(invitationId ? { invitationId } : {}), ...(returnPath ? { returnPath } : {}), ...(register ? { purpose: "register" as const } : {}) }, reauth, hostTarget(request));
 }
 
 /** The host's audience, with NIHO's account choice asked for when 「別の方法でやり直す」 sent the host here (#632). */
@@ -146,13 +151,21 @@ function signedInAt(authTimeMs: number, now: number): string {
   return nowUtc(Math.min(now, authTimeMs));
 }
 
+/**
+ * What NIHO says about the person besides who they are: the name the app-connect exchange returns (null from the identity login,
+ * whose ID token has none). Used for the registration form's first value only; it is never logged, counted or kept beyond the cookie.
+ */
+interface NihoProfile {
+  readonly displayName: string | null;
+}
+
 type Verified<T> = { ok: true; value: T } | { ok: false; reason: "rejected" | "unavailable" | "unverified" };
 
 /**
  * Only the verified stable user ID and sign-in time reach the Experience session and binding code.
  * The feature flag selects the protocol for the entire round trip, including after a rejected exchange.
  */
-async function withNihoIdentity<T>(code: string, login: HostLoginState, run: (nihoUserId: string, authTimeMs: number) => Promise<T>): Promise<Verified<T>> {
+async function withNihoIdentity<T>(code: string, login: HostLoginState, run: (nihoUserId: string, authTimeMs: number, profile: NihoProfile) => Promise<T>): Promise<Verified<T>> {
   const deps = nihoAuthDeps();
   if (config.nihoIdentityLoginEnabled) {
     if (!login.nihoIdentity) return { ok: false, reason: "unverified" };
@@ -160,18 +173,18 @@ async function withNihoIdentity<T>(code: string, login: HostLoginState, run: (ni
       ...login.nihoIdentity, code, verifier: login.verifier, redirectUri: nihoIdentityRedirectUri(siteOrigin()),
     });
     if (!verified.ok) return verified;
-    return { ok: true, value: await run(verified.value.nihoUserId, verified.value.authTimeMs) };
+    return { ok: true, value: await run(verified.value.nihoUserId, verified.value.authTimeMs, { displayName: null }) };
   }
   if (login.nihoIdentity) return { ok: false, reason: "unverified" };
   const exchanged = await exchangeCode(deps, { code, codeVerifier: login.verifier });
   if (!exchanged.ok) return exchanged;
-  const { accessToken, connectionId, authTimeUtc } = exchanged.value;
+  const { accessToken, connectionId, authTimeUtc, displayName } = exchanged.value;
   try {
     const authTimeMs = authTimeUtc === null ? Number.NaN : Date.parse(authTimeUtc);
     if (!Number.isFinite(authTimeMs)) return { ok: false, reason: "unverified" };
     const identity = await lookupNihoIdentity(accessToken);
     if (!identity.ok) return identity;
-    return { ok: true, value: await run(identity.nihoUserId, authTimeMs) };
+    return { ok: true, value: await run(identity.nihoUserId, authTimeMs, { displayName: displayName || null }) };
   } finally {
     // The connection only proved who the person is: end it now (best effort; NIHO's own expiry is the backstop).
     await deleteConnection(deps, connectionId, accessToken, { reason: null });
@@ -216,8 +229,10 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
   const accounts = hostAccounts();
   if (!identities || !accounts) return failed("unavailable", login);
 
-  const verified = await withNihoIdentity(code, login, async (nihoUserId, authTimeMs) => {
+  const verified = await withNihoIdentity(code, login, async (nihoUserId, authTimeMs, profile) => {
     const now = Date.now();
+    // What a NIHO account with no host account takes to the registration (#708); only used when the flag is on and nothing is bound.
+    const registration = { nihoUserId, authTimeMs, displayName: profile.displayName };
     try {
       // The session's `authenticated_at` is when the person signed in at NIHO (`authTime`), so the sensitive changes that
       // ask for a recent sign-in read NIHO's time, not the time of this return.
@@ -229,11 +244,11 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
           const { checkNihoArticleAuthority } = await import("@/lib/article-authority/server");
           authority = await checkNihoArticleAuthority(nihoUserId, []);
         }
-        catch { return { now, opened, writerFailure: "writer-unavailable" as const }; }
-        if (!authority.writer) return { now, opened, writerFailure: "writer-revoked" as const };
+        catch { return { now, opened, registration, writerFailure: "writer-unavailable" as const }; }
+        if (!authority.writer) return { now, opened, registration, writerFailure: "writer-revoked" as const };
         opened = await identities.startWriterSessionForNihoIdentity({ nihoUserId, authenticatedAtUtc: signedInAt(authTimeMs, now), nowUtc: nowUtc(now) });
       }
-      return { now, opened };
+      return { now, opened, registration };
     } catch (error) {
       console.error(`[host-auth] NIHO sign-in not opened: ${error instanceof Error ? error.name : "unknown error"}`);
       return null;
@@ -242,10 +257,28 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
   if (!verified.ok) return failed(verified.reason, login);
   if (verified.value === null) return failed("unavailable", login);
   if ("writerFailure" in verified.value && verified.value.writerFailure) return failed(verified.value.writerFailure, login);
-  const { now, opened } = verified.value;
-  if (opened.kind === "not-linked") return failed("unregistered", login);
+  const { now, opened, registration } = verified.value;
+  if (opened.kind === "not-linked") return config.hostSelfRegistrationEnabled ? startRegistration(registration, now) : failed("unregistered", login);
   if (opened.kind === "account-suspended") return failed("suspended", login);
   return signedIn(request, login, accounts, opened, now);
+}
+
+/**
+ * 「ホストとして登録」 (#708): NIHO verified the person and no host account is bound to them. Nothing is created; what NIHO proved
+ * (the user ID, when they signed in there, the name it gave) goes into a sealed 30-minute cookie and the host goes on to the
+ * registration screen. No session is opened and the returning-host mark is not set: only the registration makes them a host.
+ */
+function startRegistration(registration: { nihoUserId: string; authTimeMs: number; displayName: string | null }, now: number): NextResponse {
+  const response = seeOther(HOST_START_PATH);
+  clearLoginCookie(response);
+  setRegistrationCookie(response, {
+    nihoUserId: registration.nihoUserId,
+    // Never later than the return: the store reads it as the time of the sign-in.
+    authTimeMs: Math.min(now, registration.authTimeMs),
+    displayName: registration.displayName,
+    expiresAt: now + REGISTRATION_MAX_AGE_SECONDS * 1000,
+  });
+  return response;
 }
 
 /**
@@ -253,6 +286,16 @@ async function completeSignIn(request: NextRequest, login: HostLoginState, code:
  * the same host signing in again; best effort, the new session is open either way), and the host goes where the sign-in was for.
  */
 async function signedIn(request: NextRequest, login: HostLoginState, accounts: NonNullable<ReturnType<typeof hostAccounts>>, opened: Extract<NihoSessionResult, { kind: "ok" }>, now: number): Promise<NextResponse> {
+  await endPreviousSession(request, accounts, opened, now);
+  const returnPath = hostReturnPathOrNull(login.returnPath);
+  const response = seeOther(login.invitationId ? hostInvitationPath(login.invitationId) : returnPath ?? withProvider(HOST_HOME_PATH, login.providerId));
+  clearLoginCookie(response);
+  setSignedInCookies(response, opened, now);
+  return response;
+}
+
+/** The session this browser held before ends, with its devices' push (another account on a shared device, or the same host again; best effort). */
+export async function endPreviousSession(request: NextRequest, accounts: NonNullable<ReturnType<typeof hostAccounts>>, opened: Pick<Extract<NihoSessionResult, { kind: "ok" }>, "sessionToken">, now: number): Promise<void> {
   const previous = request.cookies.get(ACCOUNT_SESSION_COOKIE)?.value;
   if (isOpaqueSecret(previous) && previous !== opened.sessionToken) {
     try {
@@ -263,15 +306,14 @@ async function signedIn(request: NextRequest, login: HostLoginState, accounts: N
       // It ends on its own (14 idle days at most).
     }
   }
+}
 
-  const returnPath = hostReturnPathOrNull(login.returnPath);
-  const response = seeOther(login.invitationId ? hostInvitationPath(login.invitationId) : returnPath ?? withProvider(HOST_HOME_PATH, login.providerId));
-  clearLoginCookie(response);
+/** The new session's cookie, and the returning-host mark. */
+export function setSignedInCookies(response: NextResponse, opened: Pick<Extract<NihoSessionResult, { kind: "ok" }>, "sessionToken" | "absoluteExpiresAtUtc">, now: number): void {
   setAccountSessionCookie(response, opened.sessionToken, opened.absoluteExpiresAtUtc, now);
   // When this session runs out, the console signs the host in again by itself (#632). Writers get the mark too: their
   // console pages use the same Experience host account session.
   setReturningHostCookie(response);
-  return response;
 }
 
 /**

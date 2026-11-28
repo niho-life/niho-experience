@@ -9,6 +9,7 @@ import { ProviderPayoutAccountConsents } from "../src/payout-account-consents.ts
 import { ExperienceStore } from "../src/repository.ts";
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
+import { seedNotificationAddresses } from "./helpers/notification-address.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const publicationConsent = "publication-consent-synthetic-v1";
@@ -28,6 +29,7 @@ describe("Admin product draft handoff (#169)", { skip: databaseUrl === undefined
         ? (await accounts.provisionHostAccount({ email: "synthetic-owner@example.test", nowUtc: new Date().toISOString() })).hostAccountId
         : "owner-assisted-synthetic";
       const owner = { providerId, nihoUserId: ownerId };
+      await seedNotificationAddresses(pool, ownerId);
       await pool.query(
         `INSERT INTO experience_host_seller_profiles
            (provider_id,legacy_provider_id,provider_display_name,seller_niho_account_ref,stripe_connect_account_ref,seller_display_name)

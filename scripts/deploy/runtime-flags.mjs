@@ -384,6 +384,14 @@ export const FLAGS = Object.freeze([
     variable: "HOST_TEAM_INVITATIONS_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_TEAM_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"],
   },
+  // 自分でホスト登録する (Epic #700, #708, docs/host-self-registration.md): a NIHO account with no host account registers itself on /host/start.
+  // Needs the NIHO login (the sign-in it continues), the host accounts and the host mail (the contact address's confirmation). Migration 0093 first.
+  // Opened for everyone only in stage 5 of the epic, after the host terms' wording is fixed by legal.
+  {
+    env: "EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED",
+    variable: "HOST_SELF_REGISTRATION_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"],
+  },
   // 開催回の担当 (#535 v0, docs/occurrence-assignments.md): 承認後決済の開催回に1人の内部担当。報酬の計算・送金はしない。
   {
     env: "EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED",
