@@ -212,6 +212,33 @@ describe("page and bookings are separate states (#705)", { skip }, () => {
     });
   });
 
+  it("publishing the page again after a stop does not restart bookings; only openBooking does (#706)", async () => {
+    await withDb(async (pool) => {
+      const owner = await sellerlessOwner(pool);
+      const { publications, draft: first } = await pageReadyDraft(pool, owner, "page-after-stop");
+      const pageState = await publications.publishPage(owner, first.id, { expectedDraftVersion: first.version, expectedStateVersion: null, checks: CHECKS });
+      await becomeSeller(pool, owner, first.id);
+      const draft = await publications.getProduct(owner, first.id);
+      const opened = await publications.openBooking(owner, draft.id, { expectedDraftVersion: draft.version, expectedStateVersion: pageState.version, consentVersion: CONSENT, checks: CHECKS });
+      // 「ページを止める」 keeps the sale version behind, so the page's "publish again" must not pick it up.
+      const stopped = await publications.stop(owner, draft.id, opened.version);
+      assert.equal(isSelling(stopped), false);
+      const republished = await publications.publishPage(owner, draft.id, { expectedDraftVersion: draft.version, expectedStateVersion: stopped.version, checks: CHECKS });
+      assert.equal(isSelling(republished), false);
+      assert.equal(republished.bookingPublicationId, null, "the stopped sale version is dropped, not resumed");
+      assert.equal(republished.selfStoppedAtUtc, null, "the page is public again");
+      assert.equal(await statusOf(pool, draft.id), "DRAFT");
+      const page = await publications.getPublicBySlug(draft.slug);
+      assert.ok(page, "the page is public");
+      assert.equal(page.bookingAvailable, false);
+      await assertSaleClosed(pool, draft.slug, rule.id);
+      // Bookings start again only when the owner starts them (with the consent that goes with it).
+      const reopened = await publications.openBooking(owner, draft.id, { expectedDraftVersion: draft.version, expectedStateVersion: republished.version, consentVersion: CONSENT, checks: CHECKS });
+      assert.equal(isSelling(reopened), true);
+      assert.deepEqual(await eventsOf(pool, draft.id), ["OPENED:OWNER_OPENED", "STOPPED:OWNER_SELF_STOPPED", "OPENED:OWNER_OPENED"]);
+    });
+  });
+
   it("moves page and sale version together while bookings are open, or refuses with the booking blockers", async () => {
     await withDb(async (pool) => {
       const owner = await sellerlessOwner(pool);

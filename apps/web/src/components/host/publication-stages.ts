@@ -149,9 +149,11 @@ export function publicationStages(input: StageInput): PublicationStages {
 }
 
 /** The confirmation of each action: what it does, and (for stopping) what stays. */
-export function publicationConfirmCopy(action: PublicationAction, status: PublicationStatus): { title: string; description: string; confirm: string } {
+export function publicationConfirmCopy(action: PublicationAction, status: PublicationStatus, bookingOpen = false): { title: string; description: string; confirm: string } {
   switch (action) {
     case "publish-page":
+      // While bookings are open the change is sold as shown, so it goes out with the conditions the host agrees to again.
+      if (bookingOpen) return { title: "変更を公開しますか？", description: "変更が旅行者に見えるようになります。予約の受付は、そのまま続きます。公開内容と販売条件に同意します。", confirm: "同意して公開する" };
       return { title: status === "PUBLISHED" ? "変更を公開しますか？" : "体験のページを公開しますか？", description: "このページが旅行者に見えるようになります。予約の受付は、別に始めます。", confirm: "公開する" };
     case "open-booking":
       return { title: status === "STOPPED" || status === "RESTART_REQUIRED" ? "予約の受付を再開しますか？" : "予約の受付を始めますか？", description: "掲載条件を確認し、予約の受付を始めます。ページが公開されていなければ、同時に公開します。公開内容と販売条件に同意します。", confirm: "同意して始める" };

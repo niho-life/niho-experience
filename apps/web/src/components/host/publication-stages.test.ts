@@ -99,6 +99,11 @@ describe("the confirmations", () => {
   it("publishing the page and starting bookings say what else happens", () => {
     expect(publicationConfirmCopy("publish-page", "DRAFT").description).toContain("予約の受付は、別に始めます");
     expect(publicationConfirmCopy("publish-page", "PUBLISHED").title).toBe("変更を公開しますか？");
+    // While bookings are open the change is sold as shown, so the press asks for the agreement again.
+    const whileSelling = publicationConfirmCopy("publish-page", "PUBLISHED", true);
+    expect(whileSelling.description).toContain("販売条件に同意します");
+    expect(whileSelling.confirm).toBe("同意して公開する");
+    expect(publicationConfirmCopy("publish-page", "PUBLISHED", false).confirm).toBe("公開する");
     expect(publicationConfirmCopy("open-booking", "DRAFT").description).toContain("同時に公開します");
     expect(publicationConfirmCopy("open-booking", "STOPPED").title).toBe("予約の受付を再開しますか？");
     expect(publicationConfirmCopy("stop", "PUBLISHED").description).toContain("新しい予約も止まります");
