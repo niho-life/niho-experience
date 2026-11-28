@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { DATE_LONG, REFUND_TIMING, calendarDate, cancellationWords, cancelledBy, money, party, zoneName, zonedMoment } from "@/lib/booking-words";
 import { REFUND_TIMING_JA, calendarDateJa, cancellationWordsJa, cancelledByJa, moneyJa, partyJa, zoneNameJa, zonedMomentJa } from "@/lib/booking-words-ja";
 import { BookingCancel } from "./BookingCancel";
+import { BookingChange } from "./BookingChange";
 import { BookingMessages } from "./BookingMessages";
 import { BookingSignOut } from "./BookingSignOut";
 import { FindBookingForm } from "./FindBookingForm";
@@ -112,7 +113,14 @@ function CancelSection({ booking, locale }: { booking: GuestBookingView; locale:
  * words and the host's English, and a box to write while the booking takes messages. `conversation` is null when the
  * messages could not be read (the rest of the page still shows).
  */
-export function GuestBookingDetails({ booking, now, conversation = null, translationNotice = false }: { booking: GuestBookingView; now: Date; conversation?: GuestBookingConversation | null; translationNotice?: boolean }) {
+export function GuestBookingDetails({ booking, now, conversation = null, translationNotice = false, changeable = false }: {
+  booking: GuestBookingView;
+  now: Date;
+  conversation?: GuestBookingConversation | null;
+  translationNotice?: boolean;
+  /** 予約の日時変更 (#720): the server found that this booking may be moved now (its flag on); the dates are read when asked. */
+  changeable?: boolean;
+}) {
   // The page speaks the language the booking was made in (#59); nothing else changes between the two.
   const locale: Locale = booking.guestLanguage === "JA" ? "ja" : "en";
   const ja = locale === "ja";
@@ -213,6 +221,13 @@ export function GuestBookingDetails({ booking, now, conversation = null, transla
           ]) : []}
         />
       </section>
+      {changeable && booking.status === "CONFIRMED" && !booking.experienceEnded ? (
+        <section aria-labelledby="booking-date-change" className="mt-8">
+          <h2 id="booking-date-change" className="font-sans text-sm font-extrabold tracking-[0.04em] text-muted uppercase">{ja ? "日付の変更" : "Change date"}</h2>
+          <p className="mt-3 text-[0.9375rem] text-ink-soft">{ja ? "同じ体験の別の日付に、同じ人数・同じ料金で変更できます。" : "You can move this booking to another date of the same experience, for the same group and price."}</p>
+          <BookingChange publicBookingId={booking.publicBookingId} timeZone={booking.timeZone} locale={locale} />
+        </section>
+      ) : null}
       <CancelSection booking={booking} locale={locale} />
 
       <section aria-labelledby="booking-device" className="mt-10 border-t border-line pt-6">

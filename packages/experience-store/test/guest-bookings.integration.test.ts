@@ -1275,6 +1275,8 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
           bookingQuestionsFingerprint: nihoFingerprint(QUESTIONS), conditionsVersion: CONDITIONS, minimumAttendance: null,
         },
         platformFee: { supportEnabled: false, basisPoints: 1000, amount: 1000, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 1 },
+        // 予約の日時変更 (#720): free cancellation until 24 hours before, and the product's switch has no row (ON).
+        guestChange: { allowed: true, maxChanges: 2 },
       });
       assert.equal(family.booking.occurrenceSnapshot.seats, 3);
       const stored = await pool.query(
@@ -1300,6 +1302,7 @@ describe("PostgreSQL guest bookings (#285)", { skip: databaseUrl === undefined }
           bookingQuestionsFingerprint: nihoFingerprint([]), conditionsVersion: null, minimumAttendance: null,
         },
         platformFee: { supportEnabled: false, basisPoints: 1000, amount: 300, supportConsentVersion: EXPERIENCE_SUPPORT_CONSENT_VERSION, supportAgreementRevision: 1 },
+        guestChange: { allowed: true, maxChanges: 2 },
       });
 
       // The webhook compares the charge with the snapshot total, not unit price × seats.

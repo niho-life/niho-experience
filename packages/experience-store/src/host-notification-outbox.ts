@@ -18,6 +18,7 @@ export const HOST_NOTIFICATION_TOPICS = {
   newBooking: "host.notify.new_booking",
   assignmentRequest: "host.notify.assignment_request",
   cancellation: "host.notify.cancellation",
+  bookingChanged: "host.notify.booking_changed",
   bookingMessage: "host.notify.booking_message",
   googleCalendarAttention: "host.notify.google_calendar_attention",
   otaBooking: "host.notify.ota_booking",
@@ -98,6 +99,14 @@ export interface AssignmentRequestPayload {
  * a new booking. A host who cancels gets nothing for their own cancellation.
  */
 export type CancellationPayload = NewBookingPayload;
+
+/**
+ * A guest booking made on this site that its guest moved to another date of the same offer (予約の日時変更, #720): the
+ * facts of a new booking at its new time, and the time it moved from. Never who moved it or why.
+ */
+export interface BookingChangedPayload extends NewBookingPayload {
+  readonly previousStartsAt: string;
+}
 
 /** A new public review; no guest name, review body or booking identifier leaves the store. */
 export interface NewReviewPayload {
@@ -198,6 +207,7 @@ const QUESTION_KEYS = ["experienceTitle", "messageId", "threadId", "v"];
 const QUESTION_PERSON_KEYS = ["personName", "toMemberId"];
 const PERSON_NAME_MAX = 40;
 const NEW_BOOKING_KEYS = ["bookingId", "experienceTitle", "seats", "startsAt", "v"];
+const BOOKING_CHANGED_KEYS = ["bookingId", "experienceTitle", "previousStartsAt", "seats", "startsAt", "v"];
 const ASSIGNMENT_REQUEST_KEYS = ["bookingId", "experienceTitle", "occurrenceId", "productId", "seats", "startsAt", "v"];
 const BOOKING_MESSAGE_KEYS = ["experienceTitle", "messageId", "seats", "startsAt", "threadId", "v"];
 const GOOGLE_ATTENTION_KEYS = ["input", "reason", "v"];
@@ -284,6 +294,14 @@ export function parseAssignmentRequestPayload(value: unknown): AssignmentRequest
 
 export function parseCancellationPayload(value: unknown): CancellationPayload | null {
   return parseNewBookingPayload(value);
+}
+
+/** The moved booking's payload, or null for anything else (an unknown key, a wrong type, a move without its old time). */
+export function parseBookingChangedPayload(value: unknown): BookingChangedPayload | null {
+  if (!isRecord(value) || !hasExactKeys(value, BOOKING_CHANGED_KEYS) || value.v !== 1) return null;
+  const { bookingId, experienceTitle, startsAt, previousStartsAt, seats: count } = value;
+  if (!publicId(bookingId) || !title(experienceTitle) || !storedInstant(startsAt) || !storedInstant(previousStartsAt) || !seats(count)) return null;
+  return { v: 1, bookingId, experienceTitle, startsAt, previousStartsAt, seats: count };
 }
 
 export function parseNewReviewPayload(value: unknown): NewReviewPayload | null {
@@ -597,6 +615,33 @@ export async function enqueueCancellationNotification(client: PoolClient, input:
     deduplicationKey: `cancellation:${facts.bookingId}`, payload,
   });
   return added;
+}
+
+/**
+ * A guest booking made on this site was moved by its guest to another date (予約の日時変更, #720): one push per move
+ * (`changeId`, the booking_changes row), due now, counted as 設定 › 通知's 新しい予約・申込, which cannot be turned off.
+ * No email in stage 1. Called in the changing transaction. 1 when the push was added, 0 for a repeat.
+ */
+export async function enqueueBookingChangedNotification(
+  client: PoolClient,
+  input: BookingFacts & { readonly previousStartsAt: string; readonly changeId: string },
+): Promise<number> {
+  const facts = { ...input, experienceTitle: typeof input.experienceTitle === "string" ? clippedTitle(input.experienceTitle) : "" };
+  const { startsAt } = validBooking(facts);
+  const previousStartsAt = canonicalInstant(input.previousStartsAt);
+  if (previousStartsAt === null) throw new StoreValidationError("previousStartsAt must be an ISO 8601 instant.");
+  if (!publicId(input.changeId)) throw new StoreValidationError("changeId is invalid.");
+  const payload: BookingChangedPayload = {
+    v: 1, bookingId: facts.bookingId, experienceTitle: facts.experienceTitle, startsAt, previousStartsAt, seats: facts.seats,
+  };
+  return insertRow(client, {
+    providerId: facts.providerId,
+    bookingId: facts.bookingId,
+    topic: HOST_NOTIFICATION_TOPICS.bookingChanged,
+    deduplicationKey: `host-push:booking-changed:${input.changeId}`,
+    payload,
+    availableAt: null,
+  });
 }
 
 /**

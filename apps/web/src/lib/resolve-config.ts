@@ -1203,6 +1203,9 @@ export function resolveConfig(env: Env) {
     managedSalesWebhooksEnabled: apiMode === "http" && env.EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED === "true",
     // The terms version travelers agree to at checkout (consent.agreedVersion); empty while guest booking is off.
     guestBookingConsentVersion: guestBooking.consentVersion,
+    // 予約の日時変更 (#720, docs/guest-booking.md): the guest's "Change date" on their booking page. Off by default; it opens
+    // only in http mode with the booking page itself (booking on this site and the mail job), whose session it uses.
+    guestBookingChangeEnabled: apiMode === "http" && env.EXPERIENCE_GUEST_BOOKING_CHANGE_ENABLED === "true" && guestBooking.enabled && guestMail.enabled,
     experiencePublicationsEnabled: experiencePublication.enabled,
     experiencePublicationConsentVersion: experiencePublication.consentVersion,
     experienceHostPublicationApiEnabled: experiencePublication.hostApiEnabled,

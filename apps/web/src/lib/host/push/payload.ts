@@ -44,6 +44,11 @@ export interface HostPushEvent {
    * `previousStartsAt`). It sets the title; `kind` stays the 設定 › 通知 notification it counts as.
    */
   ota?: { site: string; change: "NEW" | "CANCELLED" | "RESCHEDULED"; previousStartsAt?: string };
+  /**
+   * 予約の日時変更 (#720): a booking made on this site that its guest moved to another date, from `previousStartsAt`. It sets
+   * the title; `kind` stays NEW_BOOKING (設定 › 通知's 新しい予約・申込, which cannot be turned off).
+   */
+  moved?: { previousStartsAt: string };
   /** The guest's name, with `ota` only. */
   guestName?: string;
   /** Only this product's people (its OWNER and operators) get it, instead of every member of the provider. */
@@ -123,6 +128,9 @@ export const HOST_PUSH_TITLES: Record<HostPushKind, string> = {
   GOOGLE_CALENDAR_ATTENTION: "Googleカレンダーを確認してください",
 };
 
+/** A booking made on this site that its guest moved to another date (#720). */
+export const HOST_PUSH_MOVED_TITLE = "予約の日時が変わりました";
+
 /** A request that needs someone to take it: said apart from a booking, because the host is asked to press 対応する. */
 export const HOST_PUSH_ASSIGNMENT_TITLE = "担当を募集中の申込";
 
@@ -179,7 +187,7 @@ function titleLine(title: string | undefined): string | null {
 /** "10/22（木）18:00 → 10/24（土）18:00" for a move, else the time alone. */
 function whenLine(event: HostPushEvent): string | null {
   const when = whenJa(event.startsAt);
-  const before = event.ota?.change === "RESCHEDULED" ? whenJa(event.ota.previousStartsAt) : null;
+  const before = event.ota?.change === "RESCHEDULED" ? whenJa(event.ota.previousStartsAt) : event.moved ? whenJa(event.moved.previousStartsAt) : null;
   return before && when ? `${before} → ${when}` : when;
 }
 
@@ -190,6 +198,7 @@ function whenLine(event: HostPushEvent): string | null {
 export function hostPushLines(event: HostPushEvent): { title: string; experience: string | null; when: string | null; guest: string | null; seats: string | null } {
   return {
     title: event.ota ? hostPushOtaTitle(event.ota)
+      : event.moved ? HOST_PUSH_MOVED_TITLE
       : event.assignment ? HOST_PUSH_ASSIGNMENT_TITLE
       : event.listing?.change === "CLEARED" ? HOST_PUSH_LISTING_CLEARED_TITLE
       : event.kind === "GUEST_MESSAGE" && event.question === true ? (event.person ? hostPushPersonMessageTitle(event.person.name) : event.experienceTitle === PERSON_THREAD_LABEL ? HOST_PUSH_PERSON_MESSAGE_TITLE : HOST_PUSH_QUESTION_TITLE) : HOST_PUSH_TITLES[event.kind],
