@@ -79,6 +79,11 @@ describe("Experience runtime grants", () => {
     assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_connect_accounts, { write: ["INSERT"], updateColumns: ["stripe_account_ref"] });
     // 代理受領の同意 (#725): inserted; a withdrawal marks the active row revoked, and nothing else moves.
     assert.deepEqual(RUNTIME_TABLE_GRANTS.provider_agent_sales_consents, { write: ["INSERT"], updateColumns: ["revoked_at", "revoked_by_host_account_id"] });
+    // 代理受領の送金 (#725, 3b-2): the ledger and its taking-backs move; the offsets and the events are append-only.
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_agent_payouts, { write: ["INSERT", "UPDATE"] });
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_agent_payout_adjustments, { write: ["INSERT", "UPDATE"] });
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_agent_payout_offsets, { write: ["INSERT"] });
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_agent_payout_events, { write: ["INSERT"] });
     const binding = RUNTIME_TABLE_GRANTS.google_channel_output_bindings!;
     assert.equal(updateAllowed(binding, "active=true,binding_version=binding_version+1,updated_at=clock_timestamp()"), true);
     assert.equal(updateAllowed(binding, "active=true,opaque_calendar_id=$1"), false);

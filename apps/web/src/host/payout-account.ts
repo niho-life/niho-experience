@@ -46,7 +46,7 @@ export const CONNECT_PAYOUT_STATES: Readonly<Record<ConnectPayoutState, { readon
   ACTION_REQUIRED: { pill: { label: "追加の情報が必要", tone: "wait" }, line: "Stripe で、追加の情報の入力が必要です。", action: { kind: "onboard", label: "Stripe で入力する" } },
   REJECTED: { pill: { label: "使えません", tone: "stop" }, line: "この口座は使えません。事務局にお問い合わせください。", action: null },
   // 3b が入るまでは、売上を受け取れるとは書かない。銀行口座の末尾は出さない。
-  READY: { pill: { label: "登録済み", tone: "ok" }, line: "受取口座の登録が済みました。", action: { kind: "dashboard", label: "Stripe で見る" } },
+  READY: { pill: { label: "登録済み", tone: "ok" }, line: "売上を受け取れます。", action: { kind: "dashboard", label: "Stripe で見る" } },
   unknown: { pill: { label: "確認が必要", tone: "wait" }, line: "Stripe から口座の状態を読み込めませんでした。時間をおいて、ページを読み込み直してください。", action: null },
 };
 

@@ -184,6 +184,23 @@ export function hostAddressConfirmationEmail(input: { readonly siteUrl: string; 
 }
 
 /**
+ * 「売上の送金に、受取口座が必要です」 (#725, docs/host-payouts.md): the host's share is due and there is no payout account that can receive it. It says
+ * only that, and where to register (設定 › 受取口座); never an amount or a booking.
+ */
+export function hostAgentPayoutAccountEmail(input: { readonly siteUrl: string; readonly providerId: string }): RenderedMail {
+  return mail("売上の送金に、受取口座の登録が必要です", [
+    { kind: "p", text: "体験が終わり、売上をお送りする時期になりました。送り先の受取口座が登録されていないか、まだ受け取れる状態ではありません。" },
+    {
+      kind: "link",
+      lead: "ホストの画面の「設定 › 受取口座」から登録を済ませてください。済み次第、お送りします。",
+      label: "受取口座を開く",
+      href: absolute(input.siteUrl, hostPayoutSettingsPath(input.providerId)),
+    },
+    REPLY,
+  ], "ja");
+}
+
+/**
  * 「受取口座に追加の情報が必要です」 (#710, docs/host-payouts.md): Stripe asks for more about the host's payout account. It says only
  * that, and where to go (設定 › 受取口座, which opens Stripe's pages); never what Stripe asked for, and no link into Stripe.
  */

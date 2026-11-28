@@ -401,11 +401,26 @@ export const FLAGS = Object.freeze([
     variable: "HOST_CONNECT_ONBOARDING_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
   },
+  // 代理受領の送金・3b-2 (Epic #700, #725, docs/host-payouts.md): the job that sends the host's share after the experience, and the office's tools for it. Migration
+  // 0097 and its runtime grants first; the production key needs Transfers and Transfer reversals (write) and PaymentIntents and Charges (read). Turning agent sales off
+  // does not stop the payouts of bookings already taken; this flag alone is the emergency stop. Uses the platform key HOST_ACCOUNTS already references.
+  {
+    env: "EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED",
+    variable: "HOST_AGENT_PAYOUTS_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"],
+  },
+  // 送金の一時停止 (#725, 3b-2): the payout job still recalculates and looks up an unknown transfer, but creates no Transfer and no reversal; the screens say "一時停止中".
+  // Needs no other flag, so it can be set alone in production (where agent sales needs the payout flag, which therefore cannot be turned off by itself): this is the emergency stop.
+  {
+    env: "EXPERIENCE_HOST_AGENT_PAYOUTS_PAUSED",
+    variable: "HOST_AGENT_PAYOUTS_PAUSED",
+    // Only what every runtime flag here has: the host console and its database. No other flag.
+    needs: ["HOST_CONSOLE", "DATABASE"],
+  },
   // サポート 15% を NIHO が代理で受領する・3b-1 (Epic #700, #725, docs/host-payouts.md): the host with no seller profile chooses "サポート 15%（NIHO が代金を
   // 受け取る）", opens bookings with no payout account, and the guest pays NIHO's platform account (the 20% path's webhook and refunds). Migration 0096 and its
   // runtime grants first. The platform account is MANAGED_PLATFORM_ACCOUNT_ID's. `prodNeeds`: needs of production only. **Production also needs the payout flag of
-  // 3b-2 (EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED), which no table entry defines yet, so it cannot be turned on there until 3b-2 adds it** (money NIHO took must have
-  // a way to be sent). Staging can run it, to check the flow with Stripe's test mode.
+  // 3b-2 (EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED)** (money NIHO took must have a way to be sent). Staging can run it alone, to check the flow with Stripe's test mode.
   {
     env: "EXPERIENCE_HOST_AGENT_SALES_ENABLED",
     variable: "HOST_AGENT_SALES_ENABLED",

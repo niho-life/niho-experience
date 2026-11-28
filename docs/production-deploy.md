@@ -120,7 +120,8 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED` | `HOST_TEAM_INVITATIONS_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストチーム・ホストの NIHO ログイン・ホストメール | — | — | — |
 | `EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED` | `HOST_SELF_REGISTRATION_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストの NIHO ログイン・ホストメール | — | — | — |
 | `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED` | `HOST_CONNECT_ONBOARDING_ENABLED` | ホストの画面・DB・Experienceホストアカウント（Stripe のキーは `HOST_ACCOUNTS_ENABLED` と同じ参照）。**本番では 3b（#725）が入るまで OFF**。[host-payouts.md](host-payouts.md) | — | — | — |
-| `EXPERIENCE_HOST_AGENT_SALES_ENABLED` | `HOST_AGENT_SALES_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストメール・ゲストメール・ホスト公開API・プラットフォームの Webhook（`MANAGED_SALES_WEBHOOKS_ENABLED`）・受取口座の登録。**本番はさらに送金の flag（3b-2。まだ表に無いので、それが入るまで本番では ON にできない。stg は ON にできる）**。[host-payouts.md](host-payouts.md) | `HOST_AGENT_SALES_AGREEMENT_VERSION`、`HOST_AGENT_RECEIVER_NAME`（受領者の正式名）、`HOST_AGENT_PAYOUT_DELAY_DAYS`（1〜30、省略で 3）。プラットフォームの口座は `MANAGED_PLATFORM_ACCOUNT_ID` | — | — |
+| `EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED` | `HOST_AGENT_PAYOUTS_ENABLED` | ホストの画面・DB・Experienceホストアカウント・受取口座の登録・ホストメール。送金の job・ホストの売上の「NIHO からの送金」・事務局の操作。販売の flag とは独立で、送金だけを止める非常停止になる。**migration `0097` とその runtime grants を先に適用**。[host-payouts.md](host-payouts.md) | — | — | — |
+| `EXPERIENCE_HOST_AGENT_SALES_ENABLED` | `HOST_AGENT_SALES_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストメール・ゲストメール・ホスト公開API・プラットフォームの Webhook（`MANAGED_SALES_WEBHOOKS_ENABLED`）・受取口座の登録。**本番はさらに送金の flag `EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED`**。[host-payouts.md](host-payouts.md) | `HOST_AGENT_SALES_AGREEMENT_VERSION`、`HOST_AGENT_RECEIVER_NAME`（受領者の正式名）、`HOST_AGENT_PAYOUT_DELAY_DAYS`（1〜30、省略で 3）。プラットフォームの口座は `MANAGED_PLATFORM_ACCOUNT_ID` | — | — |
 | `EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED` | `OCCURRENCE_ASSIGNMENT_ENABLED` | ホストの画面・DB・完全代行の販売 | — | — | — |
 | `EXPERIENCE_JAPANESE_SITE_ENABLED` | `JAPANESE_SITE_ENABLED` | ホストの画面・DB（配線のため。機能は公開サイト） | — | — | — |
 | `EXPERIENCE_CHANNEL_WATCHDOG_ENABLED` | `CHANNEL_WATCHDOG_ENABLED` | ホストの画面・DB | — | — | `EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE`＝サイトの URL、`EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL`＝`experience-ota-watchdog@<project>` |
@@ -283,9 +284,19 @@ ADR 0002・0003への移行後は、成立済み予約・返金・精算をExper
 
 ## サポート 15% の代理受領（3b-1、#725）の前提
 
-`EXPERIENCE_HOST_AGENT_SALES_ENABLED` は既定 OFF。**本番では、送金（3b-2）の flag が表に入るまで、deploy の検査が ON を拒む**（表の `prodNeeds` に `EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED` がある）。stg は ON にでき、stg の test mode で流れを確かめられる（その前に 0096 を適用する）。
+`EXPERIENCE_HOST_AGENT_SALES_ENABLED` は既定 OFF。**本番では、送金の flag（`EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED`、3b-2）も ON でないと、deploy の検査が ON を拒む**（表の `prodNeeds`）。stg は単独で ON にでき、stg の test mode で流れを確かめられる（その前に 0096 を適用する）。
 
 1. **migration `0096` は、コードより先に適用する（必須。flag が OFF でも）。** 販売の読み取り（`loadSellable`・`sellableSlugs`・受付の検査・販売プランの版の列）は flag に関係なく `seller_party` と `provider_agent_sales_consents` を読むので、0096 より先にコードが出ると、全商品の予約と一覧が 500 になる。その runtime grants（`provider_agent_sales_consents`：INSERT と `revoked_at`・`revoked_by_host_account_id` の UPDATE だけ）も同時に。0096 は版の表に列と CHECK を足すだけで、既存の行は変わらない。
 2. 20% の販売と同じく、プラットフォームの Webhook（`EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET`）・口座（`EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID`）・キーを使う。代理受領の Checkout は `payment_intent_data.transfer_group` を持つ（送金が決済を見つけるため）。
 3. 代理受領の規約（版は `EXPERIENCE_HOST_AGENT_SALES_AGREEMENT_VERSION`）と受領者の正式名は、法務の確認（host-payouts.md「本番で開く前の確認」）のあとに設定する。
 4. stg の test mode で、代理受領の予約を 1 件作り、Checkout の文言（販売者と受領者）・確認メール・返金が 20% の経路で通ることを確かめてから、3b-2 に進む。
+
+## サポート 15% の送金（3b-2、#725）の前提
+
+`EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED` は既定 OFF。
+
+1. **migration `0097` と、その runtime grants（`experience_agent_payouts`・`experience_agent_payout_adjustments` は INSERT と UPDATE、`experience_agent_payout_offsets`・`experience_agent_payout_events` は INSERT だけ）を、コードより先に適用する（必須）。** 取消の route（ホストの取消・この回を中止）と、返金・異議申立て・ホストの運営停止の更新が、0097 の表と trigger を使うため、0097 が無いコードは動かない。0097 は表と trigger を足すだけで、既存の行は変わらない。
+2. **本番キー（`EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY`、制限つきキー）の権限**：Transfers と Transfer reversals の書き込み、PaymentIntents と Charges の読み取り、Accounts の読み取り（3a から）。キーを替えたら、stg の test mode で Transfer と reversal が通ることを確かめてから本番へ。
+3. flag を ON にするのは、stg の test mode で次を確かめたあと：予定日前は送らない／受取口座が無いときは登録待ちとメール／送金が 1 件だけ作られる／返金が送金のあとに来たとき reversal か差し引きになる／事務局の操作。
+4. **送金を止めたいとき（非常停止）は、`EXPERIENCE_HOST_AGENT_PAYOUTS_PAUSED=true`（変数 `HOST_AGENT_PAYOUTS_PAUSED`）を設定する。** 本番では販売の flag が送金の flag を要る（`prodNeeds`）ので、送金の flag だけを OFF にはできない。一時停止は ON/OFF の flag とは別で、ほかの flag を要さない。ON の間、job は台帳の再計算と、結果不明の transfer の照合（一覧を読むだけ）しか行わず、送金先も Charge も読まず、Transfer も reversal も作らない。ホストの売上と事務局の画面には「一時停止中」と出る。止めている間も、返金・異議申立ては台帳に反映される。外すと、止めていた分は予定どおり次の drain から送られる。
+5. Stripe の仕様で stg に確かめるべき点は host-payouts.md「3b-2 の実装メモ」の最後。

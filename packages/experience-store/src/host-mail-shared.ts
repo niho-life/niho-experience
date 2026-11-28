@@ -28,9 +28,11 @@ export const HOST_MAIL_TOPICS = {
   addressConfirmation: "host.mail.address_confirmation",
   /** #710: the payout account needs more information from the OWNER (one row per account and need, no push). */
   payoutAccountAttention: "host.mail.payout_account_attention",
+  /** #725: an agent-sales payout is due and the host has no payout account that can receive it (one row per host, due date and reminder, no push). */
+  agentPayoutAccountNeeded: "host.mail.agent_payout_account_needed",
 } as const;
 export type HostMailTopic = (typeof HOST_MAIL_TOPICS)[keyof typeof HOST_MAIL_TOPICS];
-export type HostBookingMailTopic = Exclude<HostMailTopic, typeof HOST_MAIL_TOPICS.addressConfirmation | typeof HOST_MAIL_TOPICS.payoutAccountAttention>;
+export type HostBookingMailTopic = Exclude<HostMailTopic, typeof HOST_MAIL_TOPICS.addressConfirmation | typeof HOST_MAIL_TOPICS.payoutAccountAttention | typeof HOST_MAIL_TOPICS.agentPayoutAccountNeeded>;
 
 export const HOST_NOTIFICATION_ADDRESS_LIMITS = {
   /** A confirmation link works for this long after the host asked for it, and once. */
@@ -106,7 +108,7 @@ export async function enqueueHostBookingMails(
   client: PoolClient,
   input: {
     readonly providerId: string;
-    readonly topic: HostBookingMailTopic | typeof HOST_MAIL_TOPICS.payoutAccountAttention;
+    readonly topic: HostBookingMailTopic | typeof HOST_MAIL_TOPICS.payoutAccountAttention | typeof HOST_MAIL_TOPICS.agentPayoutAccountNeeded;
     readonly aggregateType: string;
     readonly aggregateId: string;
     /** The push's key; each person's row adds a digest of their ID to it. */

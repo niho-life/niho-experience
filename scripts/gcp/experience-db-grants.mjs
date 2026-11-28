@@ -97,6 +97,12 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // change, and DELETE); retiring is the office's act (connect-account-retirement.ts, operator-only). The last state read is replaced.
   experience_connect_accounts: { write: I, updateColumns: ["stripe_account_ref"] },
   experience_connect_account_snapshots: { write: IU },
+  // 代理受領の送金 (#725, 0097): one row per booking, moved by the payout job and the office's tools (a trigger refuses deleting and changing the
+  // facts); a taking-back after a payout is inserted and moved; the offsets and the events are append-only.
+  experience_agent_payouts: { write: IU },
+  experience_agent_payout_adjustments: { write: IU },
+  experience_agent_payout_offsets: { write: I },
+  experience_agent_payout_events: { write: I },
   // Notices to the office's mailbox (#711): one row per host and kind, claimed and reported by the mail job.
   experience_office_notices: { write: IU },
   // 出欠 of OTA bookings (#194 PR B, 0039): one row per reservation, its mark replaced when the host corrects it.

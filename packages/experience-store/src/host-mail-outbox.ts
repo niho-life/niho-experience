@@ -31,6 +31,7 @@ export const HOST_MAIL_NOTIFICATION_TOPICS: Readonly<Record<HostBookingMailTopic
 const BOOKING_TOPICS: readonly string[] = Object.keys(HOST_MAIL_NOTIFICATION_TOPICS);
 const CONFIRMATION_TOPICS: readonly string[] = [HOST_MAIL_TOPICS.addressConfirmation];
 const PAYOUT_ACCOUNT_TOPICS: readonly string[] = [HOST_MAIL_TOPICS.payoutAccountAttention];
+const AGENT_PAYOUT_TOPICS: readonly string[] = [HOST_MAIL_TOPICS.agentPayoutAccountNeeded];
 
 export const HOST_MAIL_LIMITS = {
   /** Claims of one email, the first included. Retries wait 2, 4, 8, 16, 32, 60 and 60 minutes, as a guest's. */
@@ -94,6 +95,20 @@ export interface ClaimedHostPayoutAccountMail {
 
 export interface HostPayoutAccountMailClaim {
   readonly mails: readonly ClaimedHostPayoutAccountMail[];
+  readonly abandoned: number;
+}
+
+/** One claimed "your payout is due and there is no account to send it to" email (#725). */
+export interface ClaimedHostAgentPayoutMail {
+  readonly id: string;
+  readonly attempts: number;
+  readonly providerId: string;
+  /** Where it goes, or null when it should not go: the payout no longer waits for an account, or the person is not an OWNER with an address any more. */
+  readonly to: string | null;
+}
+
+export interface HostAgentPayoutMailClaim {
+  readonly mails: readonly ClaimedHostAgentPayoutMail[];
   readonly abandoned: number;
 }
 
@@ -269,6 +284,35 @@ export class HostMailOutbox {
       return { id: String(row.id), attempts: count(row.attempts, "attempts"), providerId: row.provider_id, to: text(row.recipient_email) };
     }).sort(byId);
     return { mails, abandoned };
+  }
+
+  /** Up to `limit` due "payout waits for an account" emails (#725); each says nothing of the amount, only where to register the account. */
+  async claimAgentPayoutMails(options: { limit: number; leaseSeconds: number }): Promise<HostAgentPayoutMailClaim> {
+    const { rows, abandoned } = await this.#claim(
+      AGENT_PAYOUT_TOPICS,
+      options,
+      `SELECT c.id::text AS id, c.attempts, c.provider_id, c.topic, c.payload,
+              CASE WHEN ${STILL_RECIPIENT("c")} AND p.status = 'AWAITING_ACCOUNT'
+                   THEN COALESCE(a.override_email, a.login_email) END AS recipient_email
+         FROM claimed c
+         LEFT JOIN host_notification_addresses a ON a.niho_user_id = ${RECIPIENT("c")}
+         LEFT JOIN experience_agent_payouts p ON p.id = (CASE WHEN c.aggregate_id ~ ${UUID_TEXT} THEN c.aggregate_id::uuid END)`,
+    );
+    const mails = rows.map((row): ClaimedHostAgentPayoutMail => {
+      if (typeof row.provider_id !== "string") throw new StoreError("Database returned an invalid host email row.");
+      return { id: String(row.id), attempts: count(row.attempts, "attempts"), providerId: row.provider_id, to: text(row.recipient_email) };
+    }).sort(byId);
+    return { mails, abandoned };
+  }
+
+  /** As completeBookingMail, for a payout-waits-for-an-account email. */
+  async completeAgentPayoutMail(id: string): Promise<void> {
+    await this.#complete(AGENT_PAYOUT_TOPICS, id);
+  }
+
+  /** As retryBookingMail, for a payout-waits-for-an-account email. */
+  async retryAgentPayoutMail(id: string, attempts: number): Promise<HostMailRetry> {
+    return this.#retry(AGENT_PAYOUT_TOPICS, id, attempts);
   }
 
   /** As completeBookingMail, for a payout-account email. */

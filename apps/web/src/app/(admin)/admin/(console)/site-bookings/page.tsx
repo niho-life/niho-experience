@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
-import type { AdminAssignmentRow, ExperienceSettlementSummary, ExperienceSupportNotification, ManagedBookingApprovalPage, SupportEnabledBookingsPage, SupportQueue } from "@niho-experience/experience-store";
+import type { AdminAssignmentRow, AgentPayoutRepository, ExperienceSettlementSummary, ExperienceSupportNotification, ManagedBookingApprovalPage, SupportEnabledBookingsPage, SupportQueue } from "@niho-experience/experience-store";
+import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { adminSiteBookingsPreview } from "@/admin/site-bookings-preview";
 import { AdminSiteBookings } from "@/components/admin/AdminSiteBookings";
+import { AdminAgentPayoutAttention } from "@/components/admin/AdminAgentPayoutAttention";
 import { AdminBookingApprovals } from "@/components/admin/AdminBookingApprovals";
 import { AdminOccurrenceAssignments } from "@/components/admin/AdminOccurrenceAssignments";
 import { config } from "@/lib/config";
 import { isAdminHttp, isAdminPreview, loadAdminHttpSession } from "@/lib/admin/server";
-import { bookingCancellations, experienceSupportRepository, managedBookingApprovalRepository, occurrenceAssignmentRepository } from "@/lib/experience/store-server";
+import { agentPayoutRepository, bookingCancellations, experienceSupportRepository, managedBookingApprovalRepository, occurrenceAssignmentRepository } from "@/lib/experience/store-server";
 
 export const metadata: Metadata = { title: "予約 | NIHO 管理" };
 export const dynamic = "force-dynamic";
@@ -60,8 +62,18 @@ export default async function AdminSiteBookingsPage() {
   const assignments = assignmentRows ? <AdminOccurrenceAssignments initial={assignmentRows} /> : assignmentsEnabled ? <p role="alert">開催回の担当を読み込めませんでした。ページを再読み込みしてください。</p> : null;
   const approvals = approvalRequests ? <AdminBookingApprovals initial={approvalRequests} /> : approvalsEnabled ? <p role="alert">承認待ちの申込を読み込めませんでした。ページを再読み込みしてください。</p> : null;
   // 承認待ちと開催回の担当は「要対応」の先頭に入る (#542 S3)。それぞれが自分の件数を一覧へ知らせる (admin-todo-slot.tsx)。
-  const todoSlot = approvals || assignments ? <div className="grid gap-3 [&>section]:mt-0">{approvals}{assignments}</div> : null;
+  // 代理受領の送金 (#725, 3b-2): what needs a person, on its own flag; a read failure leaves the rest as it is.
+  let payoutItems: Awaited<ReturnType<AgentPayoutRepository["listAttention"]>> | null = null;
+  let payoutFailed = false;
+  if (config.hostAgentPayoutsEnabled) {
+    try { payoutItems = await agentPayoutRepository()?.listAttention() ?? []; }
+    catch { payoutFailed = true; }
+  }
+  const payoutAttention: ReactNode = payoutFailed
+    ? <p role="alert">ホストへの送金の確認一覧を読み込めませんでした。ページを再読み込みしてください。</p>
+    : payoutItems ? <AdminAgentPayoutAttention items={payoutItems} /> : null;
+  const todoSlot = approvals || assignments || payoutAttention ? <div className="grid gap-3 [&>section]:mt-0">{approvals}{assignments}{payoutAttention}</div> : null;
   const todoSlotCount = (approvalRequests?.requests.length ?? 0) + (assignmentRows?.filter((row) => row.status === "OPEN").length ?? 0);
   return <AdminSiteBookings initial={queue} supportBookings={supportBookings} notifications={notifications} settlements={settlements}
-    managedCompensationAvailable={config.managedSalesWebhooksEnabled} todoSlot={todoSlot} todoSlotCount={todoSlotCount} />;
+    managedCompensationAvailable={config.managedSalesWebhooksEnabled} agentPayoutsAvailable={config.hostAgentPayoutsEnabled} agentPayoutsPaused={config.hostAgentPayoutsPaused} todoSlot={todoSlot} todoSlotCount={todoSlotCount} />;
 }

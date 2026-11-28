@@ -929,6 +929,15 @@ const SUPPORT_ELIGIBLE_SQL = `((
 /** Paid bookings support may act on or answer for; holds and expired holds never were paid. */
 const SUPPORT_LIST_STATUSES = "b.status IN ('CONFIRMED', 'PAYMENT_REVIEW', 'CANCELLED')";
 
+/** 代理受領の送金 (#725): the booking's payout has a transfer command (being, or was, sent, or stopped for review), so only the office may cancel it. */
+async function payoutBegun(client: PoolClient, providerId: string, bookingRowId: string): Promise<boolean> {
+  const found = await client.query(
+    "SELECT 1 FROM experience_agent_payouts WHERE provider_id = $1 AND booking_id = $2::bigint AND command_id IS NOT NULL",
+    [providerId, bookingRowId],
+  );
+  return (found.rowCount ?? 0) > 0;
+}
+
 function queueBookingFromRow(row: DbRow): SupportQueueBooking {
   const occurrence = record(row.occurrence_snapshot);
   const pricing = record(row.pricing_snapshot);
@@ -1085,7 +1094,8 @@ export class BookingCancellations {
       if (previous) return { ...previous, repeated: true, refunds: await unsubmittedRefunds(client, commandId) };
       const booking = await lockBooking(client, "b.provider_id = $1 AND b.public_booking_id = $2::uuid", [actor.providerId, id]);
       if (!booking || booking.status === "HOLD" || booking.status === "EXPIRED") throw new StoreNotFoundError("guest booking");
-      if (booking.status !== "CONFIRMED") {
+      // 代理受領の送金 (#725): once NIHO has begun sending the host's share (a transfer command exists), the host cannot cancel by itself; the office does.
+      if (booking.status !== "CONFIRMED" || await payoutBegun(client, booking.providerId, booking.rowId)) {
         await recordResult(client, key, { outcome: "NOT_CANCELLABLE", bookingIds: [] });
         return { outcome: "NOT_CANCELLABLE", repeated: false, bookingIds: [], refunds: [] };
       }
@@ -1121,6 +1131,8 @@ export class BookingCancellations {
         `${BOOKING}
           WHERE b.provider_id = $1 AND b.status = 'CONFIRMED' AND b.product_id = $2
             AND b.occurrence_snapshot->>'ruleId' = $3 AND b.occurrence_snapshot->>'localDate' = $4 AND b.occurrence_snapshot->>'localStartTime' = $5
+            AND NOT EXISTS (SELECT 1 FROM experience_agent_payouts ap WHERE ap.provider_id = b.provider_id AND ap.booking_id = b.id
+                             AND ap.command_id IS NOT NULL)
           ORDER BY b.id
           LIMIT $6
           FOR UPDATE OF b`,

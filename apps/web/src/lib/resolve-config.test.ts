@@ -580,6 +580,22 @@ describe("admin support console settings", () => {
     ] as const) {
       expect(() => resolveConfig({ ...agent, [name]: "" }), name).toThrow(`EXPERIENCE_HOST_AGENT_SALES_ENABLED=true ${message}`);
     }
+    // 代理受領の送金 (#725, 3b-2): its own flag (the emergency stop of payouts), independent of agent sales.
+    const payouts = { ...on, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_synthetic", EXPERIENCE_HOST_MAIL_ENABLED: "true", EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED: "true" };
+    expect(resolveConfig(connect).hostAgentPayoutsEnabled).toBe(false);
+    expect(resolveConfig({ ...payouts, EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED: "1" }).hostAgentPayoutsEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED: "true" }).hostAgentPayoutsEnabled).toBe(false);
+    expect(resolveConfig(payouts)).toMatchObject({ hostAgentPayoutsEnabled: true, hostAgentSalesEnabled: false, hostAgentPayoutsPaused: false });
+    // The pause: "true" only, and it stands on its own.
+    expect(resolveConfig({ ...payouts, EXPERIENCE_HOST_AGENT_PAYOUTS_PAUSED: "true" }).hostAgentPayoutsPaused).toBe(true);
+    expect(resolveConfig({ ...payouts, EXPERIENCE_HOST_AGENT_PAYOUTS_PAUSED: "1" }).hostAgentPayoutsPaused).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_HOST_AGENT_PAYOUTS_PAUSED: "true" }).hostAgentPayoutsPaused).toBe(true);
+    for (const [name, message] of [
+      ["EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY"], ["EXPERIENCE_HOST_MAIL_ENABLED", "needs EXPERIENCE_HOST_MAIL_ENABLED=true"],
+      ["EXPERIENCE_HOST_ACCOUNTS_ENABLED", "needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true"],
+    ] as const) {
+      expect(() => resolveConfig({ ...payouts, [name]: name.endsWith("_ENABLED") ? "false" : "" }), name).toThrow(`EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED=true ${message}`);
+    }
     expect(() => resolveConfig({ ...on, HOST_CONSOLE_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
     expect(() => resolveConfig({ ...host, EXPERIENCE_API_MODE: "http", EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }))
       .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_DATABASE_URL");

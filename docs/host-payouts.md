@@ -76,7 +76,7 @@ flag `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED`（既定 OFF）。**本番で�
   - **確認中**（`pending_verification` がある、または `payouts_enabled=false`）：「Stripe で確認中です」
   - **追加の情報が必要**（`currently_due`・`past_due` がある）：「Stripe で入力する」
   - **止まっている**（`disabled_reason` が `rejected.*`）：「この口座は使えません。事務局にお問い合わせください」
-  - **登録済み**（payout-ready）：「受取口座の登録が済みました」と「Stripe で見る」（Express ダッシュボードのログインリンク）。3b が入るまでは「売上を受け取れます」とは書かない。銀行口座の末尾 4 桁は出さない（`external_accounts` を読む権限を増やさないため）。
+  - **登録済み**（payout-ready）：「売上を受け取れます」と「Stripe で見る」（Express ダッシュボードのログインリンク）。3b-2 で「受取口座の登録が済みました」から変えた。銀行口座の末尾 4 桁は出さない（`external_accounts` を読む権限を増やさないため）。
 - Express ダッシュボードのログインリンク（`stripe-login`）は、どの口座を開くかをサーバーが用途で選ぶ（Direct charge の販売者の口座か、受取口座か）。受取口座は `experience_connect_accounts` から取る。
 
 ### Webhook
@@ -183,7 +183,7 @@ flag `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED`（既定 OFF）。**本番で�
 - **置き場所**：判定 `salesKindOf`／`salesKindSql` は `packages/experience-store/src/sales-kind.ts`（payments は `@niho-experience/experience-store/sales-kind` で読む）。選ぶ store は `agent-sales.ts`（`ProviderAgentSales.choose`・`revokeConsent`）、受付と販売の判定に使う同意と NATIVE の読みは `agent-consent.ts`。route は `POST /host/api/products/{productId}/agent-sales?providerId=`（`lib/experience/agent-sales-http.ts`）。
 - **同意の版**：受付を始める検査（`openBooking`）だけ、有効な同意の版が設定の版と同じことを見る。販売（`loadSellable`）と下書きの保存は、同意が有効（撤回されていない・今の OWNER が与えた・版の `agt_…` と同じ）であれば続ける。版を上げても受付中の体験は続き、次の選択（受付を止めてから）から新しい版になる。
 - **command の再送**：版の `owner_switch_command_id` に command ID を入れる（Direct への切替と同じ列・同じ一意制約）。同じ command の再送は、その版が今の版なら同じ結果、そうでなければ 409。
-- **flag**：`EXPERIENCE_HOST_AGENT_SALES_ENABLED`。OFF なら route は 404、受付の boundary・特商法の route・予約の受付判定は今のまま。販売者が NIHO の予約は `managedSalesEnabled`、ホストの予約は `agentSalesEnabled`（`true` のときだけ）で止まり、2 つは独立。deploy の表は本番だけの `prodNeeds` に 3b-2 の flag（`EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED`）を持つので、それが表に入るまで本番では ON にできない（stg は ON にでき、test mode で確かめられる）。0096 はコードより先に適用する（flag が OFF でも、販売の読み取りが新しい列と表を読むため）。
+- **flag**：`EXPERIENCE_HOST_AGENT_SALES_ENABLED`。OFF なら route は 404、受付の boundary・特商法の route・予約の受付判定は今のまま。販売者が NIHO の予約は `managedSalesEnabled`、ホストの予約は `agentSalesEnabled`（`true` のときだけ）で止まり、2 つは独立。deploy の表は本番だけの `prodNeeds` に 3b-2 の flag（`EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED`）を持つので、本番では送金の flag も ON でないと ON にできない（stg は単独で ON にでき、test mode で確かめられる）。0096 はコードより先に適用する（flag が OFF でも、販売の読み取りが新しい列と表を読むため）。
 - **再ログイン**：選ぶ route は直近 30 分のログインを見て、古ければ 401 `REAUTH_REQUIRED`（`href` つき）を返す。画面は `href` へ移る。戻り先は 設定 の受取口座（体験の編集ではない）。
 - **撤回**：同意の撤回は store の `revokeConsent` だけ（画面と route は 3b-2 以降）。撤回すると販売・受付の判定と公開の販売者ページから外れる。
 
@@ -220,6 +220,22 @@ flag `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED`（既定 OFF）。**本番で�
 - **事務局の画面**：要確認の一覧（要確認・23 時間を過ぎた結果不明・期限を過ぎた登録待ち・長く残る取り戻し）と、予約ごとの操作。操作は再計算・送られていないことを確かめての作り直し・送らずに閉じる・差し引きに回す・損失として記録で、version の CAS をかける。
 - **ホストの取消**：送金の手続きに入った後は、ホスト自身では取り消せない（事務局が対応する）。
 
+#### 3b-2 の実装メモ（#725）
+
+- **置き場所**：台帳の store は `packages/experience-store/src/agent-payouts.ts`（`AgentPayoutRepository`）、migration は `0097_agent_payouts.sql`、Stripe は `packages/experience-payments` の `retrieveAgentPayoutCharge`・`submitAgentPayoutTransfer`・`reverseAgentPayoutTransfer`、job は `apps/web/src/lib/experience/agent-payouts.ts`（drain の `agentPayouts`。返金の再送の後、決済費用の照合の前）。メールは新しい topic `host.mail.agent_payout_account_needed`（`hostAgentPayoutMails`）。
+- **一時停止**：`EXPERIENCE_HOST_AGENT_PAYOUTS_PAUSED`（既定 false。ほかの flag を要さない）。本番の非常停止はこれ（販売の flag が送金の flag を要るので、送金の flag だけは OFF にできない）。ON の間、job は再計算と結果不明の transfer の照合（作らない）だけを行い、画面は「一時停止中」と出す。
+- **flag**：`EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED`（既定 OFF）。ON のときだけ、送金の job・ホストの売上の「NIHO からの送金」・事務局の route と画面が動く（OFF の route は 404）。販売の flag を止めても、受けた予約の送金は続く。送金だけを止める非常停止もこの flag。deploy の表では `HOST_CONSOLE`・DB・ホストアカウント・受取口座の登録・ホストメールが要り、`EXPERIENCE_HOST_AGENT_SALES_ENABLED` は本番でこの flag を要る（`prodNeeds`）。
+- **job の流れ**：初期化（AGENT_15 で決済済み・CONFIRMED か CANCELLED の予約に行を作る。PAYMENT_REVIEW は待つ）→ `FOR UPDATE SKIP LOCKED` と 5 分の lease で claim → `prepare`（再計算。保留・取消・予定日前は休ませる。TRANSFERRED の行は送金後の取り戻しを見る。SUBMITTING・RESULT_UNKNOWN は一覧から照合へ）→ 送金先（0095 の有効な PAYOUT の行を Stripe で読み、snapshot も保存。受け取れなければ `awaitAccount`）→ Charge を読む → `begin`（もう一度計算、差し引きの配分、command と送金額を固定して commit）→ Transfer → `recordTransfer`。最後に取り戻しの reversal と、90 日残った差し引き待ちの要確認化。
+- **ロック順**：在庫の advisory lock → 予約 → payout → adjustment（ホストの取消と同じ）。Stripe の呼び出しはどのロックの中でも行わない。
+- **額**：返金 = 成功した返金の合計、異議申立て = LOST の合計。NIHO の取り分 = 床（(決済 − 返金 − 負け) × 15%）、送金額 = それ以外。10,000 円で 2,000 円返金なら 1,200 円と 6,800 円。返金中（REQUESTED・PENDING）・失敗して閉じていない返金・異議申立て中・ホストの運営停止は、予定の行を `hold_reason` つきで止める。送金額 0 は CANCELLED。送金額 + 差し引き = 送金時の取り分。
+- **Transfer の冪等と照合**：`transfers.list({transfer_group: niho-experience-agent-payout:<予約>})` を先に読み、metadata（source・purpose・booking_id・payout_id）と額・送金先が合う 1 件があれば採用。ほかの transfer が 1 件でもあれば、重複・切り詰めと同じく要確認。無ければ `source_transaction`・transfer_group・metadata を付けて、冪等キー `experience-agent-payout:<command_id>` で作る。command から 23 時間を過ぎた未確定は作り直さず要確認。例外は RESULT_UNKNOWN にして、次の回は一覧から照合する。`niho-experience-settlement:` の group は拒む。transfers の capability が無い拒否は登録待ちへ、ほかの拒否は要確認。
+- **取り戻し（reversal）**：送金のあとの返金・異議申立ての負けで「送った額 + 差し引いた額 − 新しい取り分 − すでに扱った額」が正なら adjustment を作る。Transfer の残りの範囲で `transfers.listReversals` を先に読み（metadata の adjustment_id）、無ければ `createReversal`（冪等キー `experience-agent-payout-reversal:<id>`）。残高不足は OFFSET_PENDING（次の送金から古い順に差し引き、`offsets` に配分を追記）。90 日残る・ほかの拒否は REVIEW_REQUIRED。
+- **ホストの画面**：売上に、OWNER だけの「NIHO からの送金」（体験日・決済額・返金等・NIHO の手数料・送金額・予定日・状態〔予定・登録待ち・送金済み・確認中・取消〕、取り戻し・差し引き）。他のホストの行は出ない（`providerId` で分ける）。受取口座の「登録済み」は「売上を受け取れます」。
+- **事務局**：予約の面（AGENT_15）の「ホストへの送金」で、再計算して再開（命令の無い行）・送られていないことを確かめて作り直す・送らずに閉じる（メモ必須。差し引きを使った行は不可）・差し引きに回す・NIHO の損失として記録（メモ必須）・取り消しを再開。`expectedVersion` の CAS、actor はイベントに残る。要確認の一覧は 要確認・23 時間を過ぎた結果不明・登録待ちが予定日から 30 日を超えたもの・30 日残る取り戻し。route は `/admin/api/site-bookings/agent-payout/{publicBookingId}`。
+- **レビュー後の補強**：Charge に DB に無い返金（`amount_refunded` が成功した返金の合計を超える。Dashboard の返金など）か異議申立て（`disputed`）があれば送らず要確認。送金先は `begin` の lock の中でもう一度（そのホストの・退役していない・PAYOUT・同じ口座 ID）確かめ、違えば登録待ち。差し引きを使った行が送金額 0 になったら取消にせず要確認。一部だけ取り消せた取り戻しは、取り消しを再開せず、差し引きに回しても取り消し済みを数え直さない。結果不明の送金の作り直し・閉じるは command から 23 時間のあと、job が claim 中の行と、job が持つ取り戻し（REVERSAL_PENDING）には事務局は触れない。差し引き待ちの 90 日は OFFSET_PENDING になった時刻から（事務局が戻したら新しく）。送金済みの行は、返金・異議申立て・運営停止の trigger が起こすときだけ見直す。job は他の段と同じ時間の予算（`sendBudgetMs`。Stripe を呼ぶ前にも見る）で止まる。Stripe の `charge.disputed` は決着後も true のままなので、台帳に異議申立ての行が 1 つも無いときだけ送金を止める（行があれば、LOST の合計を引き、開いている間は hold する計算に任せる）。lease は 300 秒で、Stripe を呼ぶ直前に行ごとに（claim の token つきで）延ばし、version も上げる。延ばせなかった行（別の run や事務局が取った）は Stripe を呼ばない。送金・取り消しの Stripe client は timeout 20 秒・再試行 1 回で、1 行の最悪は約 90 秒（lease の 1/3 以下）。
+- **ホストの取消**：送金の command ができた（SUBMITTING 以降、要確認で止まった行も含む）予約は、ホスト自身の取消（この回を中止も）の対象から外れる（事務局が対応）。
+- **確かめられていないこと（Stripe の仕様）**：transfers の capability 不足のエラーコード（`insufficient_capabilities_for_transfer`・`transfers_not_allowed` を想定）、Express の残高不足のときの reversal のエラーコード（`balance_insufficient`・`insufficient_funds` を想定）、`source_transaction` つきで Transfer の額が Charge から返金を引いた残りを超えられるか。stg の test mode で確かめ、違えば `submitAgentPayoutTransfer`・`reverseAgentPayoutTransfer` の分類を直す。
+
 ### 決めた既定値（オーナー「他の論点は推奨で」2026-11-28）
 
 - 送金までの日数：体験の終了から 3 日。版に固定する。
@@ -248,6 +264,7 @@ flag `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED`（既定 OFF）。**本番で�
   - PaymentIntent と Transfer の `transfer_group`・`source_transaction` を同時に渡せるか。
   - Express の残高不足のときの reversal のエラー。
   - 本番キーの権限：Transfers・Transfer reversals の書き込み、PaymentIntents・Charges の読み取り。
+- **初回の送金の名義の確認**：今は仕組みを作っていない。法務が要るとした場合は、初回の送金の前に事務局が Express の名義と販売者名を照合する門（ホストごとの確認済みの印がないと `begin` しない）を足す。
 - **料金**：Connect の料金（口座ごとの月額・入金ごとの料金）を、15% でまかなえるか。
 - `experience-sales-plans.md` の「15% と 10% は同じ口座」と、`glossary.md`（代理受領）を直す。
 
