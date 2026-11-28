@@ -31,6 +31,15 @@ describe("what the editor says about the page and the start of bookings (#706)",
     expect(blockerNames(["READINESS_EXPIRED", "READINESS_MISSING", "SOMETHING_NEW"])).toEqual(["受取口座の最新の確認", "公開の条件"]);
   });
 
+  it("a missing contact address stops the page (not only the bookings), and says what to do (#708)", () => {
+    const stages = publicationStages(input({ pageBlockers: ["NOTIFICATION_ADDRESS_REQUIRED"], bookingBlockers: [], publicationBlockers: ["NOTIFICATION_ADDRESS_REQUIRED"] }));
+    expect(stages.page.enabled).toBe(false);
+    expect(stages.page.reason).toBe("ページの公開には、連絡用メールアドレスの確認が必要です。");
+    expect(stages.page.blockers).toEqual(["NOTIFICATION_ADDRESS_REQUIRED"]);
+    // A server that does not send the split still files it under the page.
+    expect(splitBlockers({ publicationBlockers: ["NOTIFICATION_ADDRESS_REQUIRED", "SCHEDULE_REQUIRED"] })).toEqual({ page: ["NOTIFICATION_ADDRESS_REQUIRED"], booking: ["SCHEDULE_REQUIRED"] });
+  });
+
   it("page published, bookings not open: 「公開中・予約の受付は準備中」, the page button is gone (nothing to publish), booking is the next step", () => {
     const stages = publicationStages(input({ status: "PUBLISHED", pageBlockers: [], bookingBlockers: [], bookingOpen: false }));
     expect(stages.statusLabel).toBe("公開中・予約の受付は準備中");

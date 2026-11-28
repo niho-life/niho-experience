@@ -15,7 +15,9 @@ import { listExperienceHostProviders, readExperienceHostSession } from "./accoun
 import {
   ACCOUNT_SESSION_COOKIE,
   decodeSession,
+  decodeRegistration,
   encodeLoginState,
+  encodeRegistration,
   encodeSession,
   hostCookieOptions,
   accessTokenUsable,
@@ -23,11 +25,15 @@ import {
   LOGIN_COOKIE_PATH,
   LOGIN_MAX_AGE_SECONDS,
   LEGACY_SESSION_COOKIE_PATH,
+  REGISTRATION_COOKIE,
+  REGISTRATION_COOKIE_PATH,
+  REGISTRATION_MAX_AGE_SECONDS,
   SESSION_COOKIE,
   SESSION_COOKIE_PATH,
   sessionMaxAgeSeconds,
   startSession,
   type HostLoginState,
+  type HostRegistrationState,
   type HostSession,
   type NihoHostSession,
 } from "./session";
@@ -38,6 +44,7 @@ export const isHostMock = () => config.apiMode === "mock";
 export const siteOrigin = () => new URL(config.siteUrl).origin;
 export const sessionSealer = () => cookieSealer(config.hostSessionSecret, "session");
 export const loginSealer = () => cookieSealer(config.hostSessionSecret, "login");
+export const registrationSealer = () => cookieSealer(config.hostSessionSecret, "host-registration");
 
 /** Every host route and page is a 404 until HOST_CONSOLE_ENABLED=true. */
 export function requireHostConsole() {
@@ -320,4 +327,18 @@ export function setLoginCookie(response: NextResponse, login: HostLoginState) {
 
 export function clearLoginCookie(response: NextResponse) {
   response.cookies.set(LOGIN_COOKIE, "", hostCookieOptions(LOGIN_COOKIE_PATH, 0));
+}
+
+/** 自分でホスト登録する (#708): what NIHO proved, sealed for 30 minutes on /host only (REGISTRATION_COOKIE). Nothing is created yet. */
+export function setRegistrationCookie(response: NextResponse, registration: HostRegistrationState) {
+  response.cookies.set(REGISTRATION_COOKIE, encodeRegistration(registrationSealer(), registration), hostCookieOptions(REGISTRATION_COOKIE_PATH, REGISTRATION_MAX_AGE_SECONDS));
+}
+
+export function clearRegistrationCookie(response: NextResponse) {
+  response.cookies.set(REGISTRATION_COOKIE, "", hostCookieOptions(REGISTRATION_COOKIE_PATH, 0));
+}
+
+/** The registration a cookie value holds, or null for none, an old (over 30 minutes), forged or other-purpose one. */
+export function readRegistration(value: string | undefined, now = Date.now()): HostRegistrationState | null {
+  return decodeRegistration(registrationSealer(), value, now);
 }

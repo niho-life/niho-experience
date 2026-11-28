@@ -19,6 +19,8 @@ import {
   LINK_BINDING_COOKIE,
   LINK_BINDING_COOKIE_PATH,
   LINK_BINDING_MAX_AGE_SECONDS,
+  REGISTRATION_COOKIE,
+  REGISTRATION_COOKIE_PATH,
   RETURN_PATH_COOKIE,
   type ExperienceHostSession,
 } from "./session";
@@ -137,10 +139,15 @@ export async function readSmallForm(request: Request, fields: readonly string[],
   return required.every((name) => values.has(name)) ? { ok: true, values } : { ok: false, status: 400 };
 }
 
-/** The session cookie: the opaque token, HttpOnly, Secure, SameSite=Lax, Path=/, living no longer than the session. */
+/**
+ * The session cookie: the opaque token, HttpOnly, Secure, SameSite=Lax, Path=/, living no longer than the session.
+ * Whoever signs in, a registration that an earlier NIHO sign-in left in this browser (#708) ends with it (the logout ends it
+ * too): the registration always wins over the session, so a stale one must never outlive a newer sign-in.
+ */
 export function setAccountSessionCookie(response: NextResponse, sessionToken: string, absoluteExpiresAtUtc: string, now = Date.now()) {
   const maxAge = Math.max(0, Math.floor((Date.parse(absoluteExpiresAtUtc) - now) / 1000));
   response.cookies.set(ACCOUNT_SESSION_COOKIE, sessionToken, hostCookieOptions(ACCOUNT_SESSION_COOKIE_PATH, maxAge));
+  response.cookies.set(REGISTRATION_COOKIE, "", hostCookieOptions(REGISTRATION_COOKIE_PATH, 0));
 }
 
 export function clearAccountSessionCookie(response: NextResponse) {

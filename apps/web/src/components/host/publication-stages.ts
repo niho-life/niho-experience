@@ -14,7 +14,7 @@ export type PublicationAction = "publish-page" | "open-booking" | "stop-booking"
 /** What stops the public page. The server sends the split; this is the fallback for a server that does not. */
 export const PAGE_BLOCKER_CODES: ReadonlySet<string> = new Set([
   "MANUSCRIPT_REQUIRED", "PUBLIC_CONTENT_INVALID", "PHOTOS_REQUIRED", "PRICE_REQUIRED", "CANCELLATION_TERMS_REQUIRED",
-  "SLUG_IN_USE", "OPERATIONS_SUSPENDED", "OWNER_NOT_CURRENT", "ACCOUNT_NOT_USABLE",
+  "SLUG_IN_USE", "OPERATIONS_SUSPENDED", "OWNER_NOT_CURRENT", "ACCOUNT_NOT_USABLE", "NOTIFICATION_ADDRESS_REQUIRED",
 ]);
 
 /** A short name for what is missing, in the order a host would do it. Unknown codes are said as 「公開の条件」. */
@@ -25,6 +25,7 @@ const NAMES: readonly (readonly [string, string])[] = [
   ["PRICE_REQUIRED", "料金"],
   ["CANCELLATION_TERMS_REQUIRED", "取消条件"],
   ["SLUG_IN_USE", "別のページのアドレス"],
+  ["NOTIFICATION_ADDRESS_REQUIRED", "連絡用メールアドレスの確認"],
   ["OWNER_NOT_CURRENT", "ログインし直すこと"],
   ["ACCOUNT_NOT_USABLE", "アカウントの確認"],
   ["OPERATIONS_SUSPENDED", "運営の停止の解除"],

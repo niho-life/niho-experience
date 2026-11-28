@@ -216,6 +216,8 @@ describe("NIHO Host API v1 → Experience owner publication → booking (synthet
       });
       expect(await pool.query("SELECT role,active FROM provider_memberships WHERE provider_id=$1 AND niho_user_id=$2", [EXPERIENCE_PROVIDER_ID, NIHO_USER_ID]))
         .toMatchObject({ rows: [{ role: "OWNER", active: true }] });
+      // A page is published only when the OWNER has an address the host emails reach (NOTIFICATION_ADDRESS_REQUIRED, #708).
+      await pool.query("INSERT INTO host_notification_addresses (niho_user_id,login_email,login_email_at) VALUES ($1,'owner-contract@example.test',clock_timestamp())", [NIHO_USER_ID]);
       const confirmation = await confirmPublicationEnglish(() => ({ japanese, english }));
       const createResponse = await publicationCollectionRequest(new Request("https://experience.example.test/host/api/products", {
         method: "POST",

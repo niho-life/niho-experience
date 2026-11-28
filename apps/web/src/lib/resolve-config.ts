@@ -372,6 +372,30 @@ function hostTeamInvitationsSetting(
 }
 
 /**
+ * 自分でホスト登録する (Epic #700, #708, docs/host-self-registration.md): a NIHO account that no host account is bound to registers itself as
+ * a host (a provider of its own, 個人 or 会社・お店・団体) on `/host/start`, with no operator in between. It builds on the NIHO login (it
+ * is that sign-in's continuation), the host accounts (the experience DB holds the registration) and the host mail (the confirmation of
+ * the contact address is sent by the mail job), so in http mode it refuses to start when one is missing. The preview (mock) needs the
+ * console and the NIHO login only: it walks a synthetic NIHO account and keeps nothing. Off by default; with it off nothing about the
+ * sign-in, the pages or the publish rules of the console changes.
+ */
+function hostSelfRegistrationSetting(
+  apiMode: "mock" | "http",
+  env: Env,
+  needs: { readonly hostConsoleEnabled: boolean; readonly hostAccountsEnabled: boolean; readonly hostNihoLoginEnabled: boolean; readonly hostMailEnabled: boolean },
+): boolean {
+  const name = "EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED";
+  if (env[name] !== "true") return false;
+  if (!needs.hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true`);
+  if (!needs.hostNihoLoginEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_NIHO_LOGIN_ENABLED=true`);
+  if (apiMode !== "http") return true;
+  if (!needs.hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
+  if (!needs.hostMailEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_MAIL_ENABLED=true in http mode`);
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error(`${name}=true needs EXPERIENCE_DATABASE_URL in http mode`);
+  return true;
+}
+
+/**
  * The flags whose code sends the signed-in admin's NIHO admin token (NIHO's Admin session) to NIHO. With the Google
  * login (ADR 0003 decision 4) there is no such token, so none of them may be on at the same time. The fee summary is
  * here for its Admin side (it is one gate for Admin and /host).
@@ -959,6 +983,7 @@ export function resolveConfig(env: Env) {
   const hostTeamEnabled = hostTeamSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const hostNihoLoginEnabled = hostNihoLoginSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const hostTeamInvitationsEnabled = hostTeamInvitationsSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostTeamEnabled, hostNihoLoginEnabled, hostMailEnabled });
+  const hostSelfRegistrationEnabled = hostSelfRegistrationSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostNihoLoginEnabled, hostMailEnabled });
   const travelerAccountsEnabled = travelerAccountsSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const nihoLoginPromptEnabled = nihoLoginPromptSetting(env, hostNihoLoginEnabled);
   const nihoAccountStatusCheckEnabled = nihoAccountStatusCheckSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
@@ -1163,6 +1188,8 @@ export function resolveConfig(env: Env) {
     // Experience-native COHOST membership, independent from the legacy provider-operations consumer.
     hostTeamEnabled,
     hostTeamInvitationsEnabled,
+    // 自分でホスト登録する (Epic #700, #708): /host/start and the sign-in's continuation into it. Opened for everyone in stage 5.
+    hostSelfRegistrationEnabled,
     occurrenceAssignmentEnabled,
     googleBusySyncEnabled: googleCalendarJobs.busySyncEnabled,
     googleBookingEventsEnabled: googleCalendarJobs.bookingEventsEnabled,

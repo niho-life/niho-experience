@@ -42,6 +42,7 @@ export function publicationBlockerDestination(blocker: string): PublicationBlock
     case "PHOTOS_REQUIRED": return { kind: "tab", tab: "page" };
     case "SLUG_IN_USE": return { kind: "tab", tab: "settings" };
     case "SUPPORT_CONSENT_REQUIRED": return { kind: "href", href: "/host/settings#settings-support" };
+    case "NOTIFICATION_ADDRESS_REQUIRED": return { kind: "href", href: "/host/settings#settings-notification" };
     case "PAYMENT_REUSE_CONSENT_REQUIRED": return { kind: "payment-consent" };
     default: return null;
   }

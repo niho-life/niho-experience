@@ -120,6 +120,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_TRAVELER_LINE_ENABLED: "travelerLineEnabled",
   EXPERIENCE_HOST_TEAM_ENABLED: "hostTeamEnabled",
   EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "hostTeamInvitationsEnabled",
+  EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "hostSelfRegistrationEnabled",
   EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED: "occurrenceAssignmentEnabled",
   EXPERIENCE_JAPANESE_SITE_ENABLED: "japaneseSiteEnabled",
   EXPERIENCE_CHANNEL_WATCHDOG_ENABLED: "channelWatchdogEnabled",

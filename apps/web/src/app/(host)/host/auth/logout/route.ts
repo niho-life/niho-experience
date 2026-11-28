@@ -7,7 +7,7 @@ import { forgetHostPushConnection } from "@/lib/host/push/server";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
 import { clearReturningHostCookie } from "@/lib/host/returning-host";
 import { HOST_INTRO_PATH, HOST_LAUNCH_PATH } from "@/lib/host/routes";
-import { clearLoginCookie, clearSessionCookie, hostNotFound, isHostMock, nihoAuthDeps, noStoreJson, renewSession, seeOther, sessionSealer, siteOrigin } from "@/lib/host/server";
+import { clearLoginCookie, clearRegistrationCookie, clearSessionCookie, hostNotFound, isHostMock, nihoAuthDeps, noStoreJson, renewSession, seeOther, sessionSealer, siteOrigin } from "@/lib/host/server";
 import { accessTokenUsable, ACCOUNT_SESSION_COOKIE, decodeSession, SESSION_COOKIE } from "@/lib/host/session";
 
 /**
@@ -34,6 +34,8 @@ async function logoutExperienceSession(request: NextRequest) {
   clearReturningHostCookie(response);
   clearLinkBindingCookie(response);
   clearLoginCookie(response);
+  // A registration a NIHO sign-in left here (#708) is not for whoever uses this browser next.
+  clearRegistrationCookie(response);
   // A NIHO login's cookies from before the switch go too.
   clearSessionCookie(response);
   return response;

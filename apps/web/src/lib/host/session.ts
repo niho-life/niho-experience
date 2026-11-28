@@ -20,6 +20,19 @@ export const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 export const LOGIN_MAX_AGE_SECONDS = 10 * 60;
 
 /**
+ * 自分でホスト登録する (Epic #700, #708, EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED): a NIHO account that no host account is bound
+ * to comes back from NIHO verified, and nothing is created yet. This sealed cookie carries what NIHO proved (the NIHO user ID, when
+ * the person signed in there, the name NIHO gave) from the return to the registration (`/host/start`, POST /host/api/registration)
+ * for 30 minutes. It holds no token and no address, never reaches the browser's JavaScript, and is cleared when the registration
+ * succeeds. Path=/host covers the two places that read it and no other part of the site.
+ */
+export const REGISTRATION_COOKIE = "__Secure-niho_host_registration";
+export const REGISTRATION_COOKIE_PATH = "/host";
+export const REGISTRATION_MAX_AGE_SECONDS = 30 * 60;
+/** What of NIHO's display name is kept: longer names are cut (the field in the form allows 100). */
+export const REGISTRATION_DISPLAY_NAME_MAX = 80;
+
+/**
  * Experience host accounts (ADR 0003, EXPERIENCE_HOST_ACCOUNTS_ENABLED, docs/host-accounts.md). The session cookie holds
  * the store's opaque session token as is (only its SHA-256 is stored server-side); `__Host-` pins it to this origin and
  * Path=/. The link cookie holds the random value whose SHA-256 binds an emailed link to the browser that asked for it,
@@ -150,8 +163,10 @@ export interface HostLoginState {
    * the return binds the NIHO account to the invited host account and opens its session. `traveler`: a traveler logs in or
    * signs up (Epic #591, #597): the return opens the traveler's own session, never a host account's. `team-invite`: a person
    * opened a provider's team invitation (#636): the return finds or makes their host account, adds it to the team and opens its session.
+   * `register`: the person pressed 「ホストとして登録」 (#708): the return is an ordinary sign-in, and a NIHO account with no host account
+   * goes on to the registration instead of the 「登録されていません」 page.
    */
-  purpose?: "link" | "invite" | "traveler" | "team-invite";
+  purpose?: "link" | "invite" | "traveler" | "team-invite" | "register";
   /**
    * `link` only: the host account that asked to bind (the session that was open when the round trip started). The return binds
    * to this one and no other: a session that changed meanwhile (another tab signed in as someone else) is refused.
@@ -187,7 +202,7 @@ interface LoginWire {
   ii?: string;
   rt?: string;
   sf?: 1;
-  lk?: 1 | 2 | 3 | 4;
+  lk?: 1 | 2 | 3 | 4 | 5;
   ha?: string;
   ni?: HostLoginState["nihoIdentity"];
   x: number;
@@ -319,7 +334,7 @@ export function decodeSession(sealer: CookieSealer, raw: string | undefined | nu
 }
 
 export function encodeLoginState(sealer: CookieSealer, login: HostLoginState): string {
-  const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}), ...(login.invitationId ? { ii: login.invitationId } : {}), ...(login.returnPath ? { rt: login.returnPath } : {}), ...(login.surface === "app" ? { sf: 1 as const } : {}), ...(login.purpose === "link" ? { lk: 1 as const } : login.purpose === "invite" ? { lk: 2 as const } : login.purpose === "traveler" ? { lk: 3 as const } : login.purpose === "team-invite" ? { lk: 4 as const } : {}), ...(login.hostAccountId ? { ha: login.hostAccountId } : {}) };
+  const wire: LoginWire = { v: 1, pv: login.verifier, s: login.state, x: login.expiresAt, ...(login.providerId ? { pid: login.providerId } : {}), ...(login.preparationCaseId ? { pc: login.preparationCaseId } : {}), ...(login.invitationId ? { ii: login.invitationId } : {}), ...(login.returnPath ? { rt: login.returnPath } : {}), ...(login.surface === "app" ? { sf: 1 as const } : {}), ...(login.purpose === "link" ? { lk: 1 as const } : login.purpose === "invite" ? { lk: 2 as const } : login.purpose === "traveler" ? { lk: 3 as const } : login.purpose === "team-invite" ? { lk: 4 as const } : login.purpose === "register" ? { lk: 5 as const } : {}), ...(login.hostAccountId ? { ha: login.hostAccountId } : {}) };
   if (login.nihoIdentity) wire.ni = login.nihoIdentity;
   return sealer.seal(wire);
 }
@@ -336,10 +351,44 @@ export function decodeLoginState(sealer: CookieSealer, raw: string | undefined |
   const preparationCaseId = typeof wire.pc === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(wire.pc) ? wire.pc : null;
   const invitationId = typeof wire.ii === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(wire.ii) ? wire.ii : null;
   if (preparationCaseId && invitationId) return null;
-  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(isString(wire.rt, 300) ? { returnPath: wire.rt } : {}), ...(wire.sf === 1 ? { surface: "app" as const } : {}), ...(wire.lk === 1 ? { purpose: "link" as const } : wire.lk === 2 ? { purpose: "invite" as const } : wire.lk === 3 ? { purpose: "traveler" as const } : wire.lk === 4 ? { purpose: "team-invite" as const } : {}), ...(typeof wire.ha === "string" && /^hst_[0-9a-f]{32}$/.test(wire.ha) ? { hostAccountId: wire.ha } : {}), ...(nihoIdentity ? { nihoIdentity } : {}), expiresAt: wire.x };
+  return { verifier: wire.pv, state: wire.s, providerId: isString(wire.pid, 64) ? wire.pid : null, preparationCaseId, ...(invitationId ? { invitationId } : {}), ...(isString(wire.rt, 300) ? { returnPath: wire.rt } : {}), ...(wire.sf === 1 ? { surface: "app" as const } : {}), ...(wire.lk === 1 ? { purpose: "link" as const } : wire.lk === 2 ? { purpose: "invite" as const } : wire.lk === 3 ? { purpose: "traveler" as const } : wire.lk === 4 ? { purpose: "team-invite" as const } : wire.lk === 5 ? { purpose: "register" as const } : {}), ...(typeof wire.ha === "string" && /^hst_[0-9a-f]{32}$/.test(wire.ha) ? { hostAccountId: wire.ha } : {}), ...(nihoIdentity ? { nihoIdentity } : {}), expiresAt: wire.x };
 }
 
 /** HttpOnly, Secure, SameSite=Lax; the caller supplies the narrowest compatible path. */
 export function hostCookieOptions(path: string, maxAge: number) {
   return { httpOnly: true, secure: true, sameSite: "lax" as const, path, maxAge };
+}
+
+/** What NIHO proved at the return, kept between it and the registration (REGISTRATION_COOKIE). */
+export interface HostRegistrationState {
+  /** NIHO's stable user ID: only ever in this sealed cookie and on its way to the store. */
+  nihoUserId: string;
+  /** When the person signed in at NIHO (epoch ms), never later than the return. The store judges how recent. */
+  authTimeMs: number;
+  /** The name NIHO gave (the app-connect exchange), cleaned and cut; null when it gave none (the identity login has no name). */
+  displayName: string | null;
+  /** Epoch ms; the cookie lives 30 minutes. */
+  expiresAt: number;
+}
+
+interface RegistrationWire {
+  v: 1;
+  u: string;
+  t: number;
+  n?: string;
+  x: number;
+}
+
+export function encodeRegistration(sealer: CookieSealer, registration: HostRegistrationState): string {
+  const name = cleanDisplayName(registration.displayName).slice(0, REGISTRATION_DISPLAY_NAME_MAX);
+  const wire: RegistrationWire = { v: 1, u: registration.nihoUserId, t: registration.authTimeMs, x: registration.expiresAt, ...(name ? { n: name } : {}) };
+  return sealer.seal(wire);
+}
+
+/** The registration the cookie holds, or null for none, a forged or old one. */
+export function decodeRegistration(sealer: CookieSealer, raw: string | undefined | null, now: number): HostRegistrationState | null {
+  const wire = sealer.open(raw) as Partial<RegistrationWire> | null;
+  if (!wire || typeof wire !== "object" || wire.v !== 1) return null;
+  if (!isString(wire.u, 256) || !isTime(wire.t) || !isTime(wire.x) || now >= wire.x) return null;
+  return { nihoUserId: wire.u, authTimeMs: wire.t, displayName: wire.n === undefined ? null : cleanDisplayName(wire.n).slice(0, REGISTRATION_DISPLAY_NAME_MAX) || null, expiresAt: wire.x };
 }

@@ -7,8 +7,8 @@ import { HOST_CALENDAR_PATH, HOST_EXPERIENCES_PATH, HOST_SELLER_PATH, HOST_SETTI
  * `bookingBlockers` and `bookingOpen` (the list API the 体験 screen reads). A row is done when none of its reasons is
  * left; each row links to the screen that does it. Nothing here asks the server anything new.
  *
- * Not in the list, on purpose: 「連絡用メールの確認」. The experience DB does not make publishing wait for it today
- * (the notification address is a destination, not a gate), so a row for it would promise a rule that does not exist.
+ * 「連絡用メールの確認」 (#708) is a row only while the server still lists NOTIFICATION_ADDRESS_REQUIRED for the page: a host whose
+ * address works sees no row (the list says nothing about it before the first experience exists, so there is none then either).
  */
 
 export interface ProgressProduct {
@@ -79,8 +79,13 @@ export function publishChecklist(products: readonly ProgressProduct[], hostName:
   const pageContentLeft = product === null || hasAny(page, PAGE_CONTENT);
   const pageReady = product !== null && page.length === 0;
 
+  const addressLeft = product !== null && page.includes("NOTIFICATION_ADDRESS_REQUIRED");
   const stage1Rows: ChecklistRow[] = [
     { key: "host", title: "ホストの情報", detail: hostName ? `${hostName} として登録しました` : "登録しました", done: true, href: link(HOST_SETTINGS_PATH), action: "見る", next: false },
+    ...(addressLeft ? [{
+      key: "notification", title: "連絡用メールアドレスの確認", detail: "確認のメールのリンクを開くと、ページを公開できます",
+      done: false, href: `${link(HOST_SETTINGS_PATH)}#settings-notification`, action: "確認する", next: false,
+    }] : []),
     {
       key: "page", title: "体験のページを作る",
       detail: product === null ? "題・写真・料金・取消条件を入れて、体験のページを作ります"

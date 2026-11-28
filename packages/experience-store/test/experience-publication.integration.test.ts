@@ -8,6 +8,7 @@ import { ExperienceStore } from "../src/repository.ts";
 import { HostNotificationOutbox } from "../src/host-notification-outbox.ts";
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
+import { seedNotificationAddresses } from "./helpers/notification-address.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const OWNER = { providerId: "provider-synthetic", nihoUserId: "owner-synthetic" } as const;
@@ -77,6 +78,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         "INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER'),($3,$4,'OWNER')",
         [firstOwner.providerId, firstOwner.nihoUserId, secondOwner.providerId, secondOwner.nihoUserId],
       );
+      await seedNotificationAddresses(pool, firstOwner.nihoUserId, secondOwner.nihoUserId);
       await pool.query(
         "INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points) VALUES ($1,false,1000),($2,false,1000)",
         [firstOwner.providerId, secondOwner.providerId],
@@ -181,6 +183,7 @@ describe("Experience publication persistence (#330 #369)", { skip: databaseUrl =
         "INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER'),($1,$3,'EDITOR')",
         [OWNER.providerId, OWNER.nihoUserId, EDITOR.nihoUserId],
       );
+      await seedNotificationAddresses(pool, OWNER.nihoUserId);
       await pool.query(
         "INSERT INTO provider_sale_settings (provider_id,support_enabled,platform_fee_basis_points) VALUES ($1,false,1000)",
         [OWNER.providerId],

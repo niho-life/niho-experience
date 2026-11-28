@@ -32,6 +32,16 @@ describe("the sign-in's error page", () => {
     expect(html).toContain('href="/host/auth/login?switch=1"');
   });
 
+  it("takes an unregistered NIHO account on to 「ホストとして登録」 only with self-registration on (#708)", async () => {
+    expect(await render({ reason: "unregistered" })).not.toContain("ホストとして登録");
+    Object.assign(state.config, { hostSelfRegistrationEnabled: true });
+    const html = await render({ reason: "unregistered" });
+    expect(html).toContain('href="/host/auth/login?intent=register"');
+    expect(html).toContain("ホストとして登録</a>");
+    expect(html).toContain("別の方法でやり直す");
+    delete (state.config as Record<string, unknown>).hostSelfRegistrationEnabled;
+  });
+
   it("asks for the account choice on an invitation whose NIHO account is bound elsewhere, and nowhere else", async () => {
     state.config.nihoLoginPromptEnabled = true;
     expect(await render({ reason: "invite-in-use" })).toContain('href="/host/auth/login?invite=1&amp;switch=1"');

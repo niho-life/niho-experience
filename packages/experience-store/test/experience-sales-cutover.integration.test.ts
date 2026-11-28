@@ -7,6 +7,7 @@ import { ExperiencePublicationRepository } from "../src/experience-publication.t
 import { EXPERIENCE_SUPPORT_CONSENT_VERSION, GuestBookingRepository } from "../src/guest-bookings.ts";
 import { ExperienceStore } from "../src/repository.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
+import { seedNotificationAddresses } from "./helpers/notification-address.ts";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const OWNER = { providerId: "provider-owner-seller-synthetic", nihoUserId: "owner-seller-synthetic" } as const;
@@ -28,6 +29,7 @@ describe("Experience owner publication is the only Experience checkout source", 
     try {
       await pool.query("INSERT INTO experience_providers (id) VALUES ($1)", [OWNER.providerId]);
       await pool.query("INSERT INTO provider_memberships (provider_id,niho_user_id,role) VALUES ($1,$2,'OWNER')", [OWNER.providerId, OWNER.nihoUserId]);
+      await seedNotificationAddresses(pool, OWNER.nihoUserId);
 
       const store = new ExperienceStore(pool);
       const publications = new ExperiencePublicationRepository(pool);

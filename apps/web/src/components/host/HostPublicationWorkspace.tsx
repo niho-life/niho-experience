@@ -134,6 +134,7 @@ const BLOCKER_COPY: Record<string, string> = {
   FEE_SETTINGS_REQUIRED: "運営側の手数料設定が完了するまで公開できません。",
   SUPPORT_CONSENT_REQUIRED: "NIHOサポートの利用範囲と合計手数料を確認し、現在の条件に同意してください。",
   MANUSCRIPT_REQUIRED: "日本語原稿と確認済みの英語原稿を完成させてください（日本語のみで公開する場合は、日本語原稿を完成させてください）。",
+  NOTIFICATION_ADDRESS_REQUIRED: "設定の通知で、連絡用メールアドレスを確認してください。確認のメールのリンクを開くと、公開できます。",
   OPERATIONS_SUSPENDED: "運営停止中のため再開できません。",
   OWNER_NOT_CURRENT: "最新のOWNER権限を確認できません。ログインし直してください。",
   PAYMENT_REUSE_CONSENT_REQUIRED: "受取口座で売上を受け取ることへの同意を確認してください。",

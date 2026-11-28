@@ -13,6 +13,7 @@ import { ExperienceStore } from "../src/repository.ts";
 import { SiteSaleRegistration } from "../src/site-sale-registration.ts";
 import type { HostActor } from "../src/types.ts";
 import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
+import { seedNotificationAddresses } from "./helpers/notification-address.ts";
 
 /*
  * #705 (host registration, stage 1b): the public PAGE and the START OF BOOKINGS are two states.
@@ -47,6 +48,7 @@ async function sellerlessOwner(pool: Pool): Promise<HostActor> {
   const { hostAccountId } = await accounts.provisionHostAccount({ email: "page-booking@example.test", nowUtc: new Date().toISOString() });
   const granted = await accounts.grantProviderOwner({ providerId: PROVIDER, hostAccountId, nowUtc: new Date().toISOString() });
   assert.equal(granted.kind, "granted");
+  await seedNotificationAddresses(pool, hostAccountId);
   return { providerId: PROVIDER, nihoUserId: hostAccountId };
 }
 

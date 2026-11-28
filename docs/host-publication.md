@@ -116,7 +116,7 @@ ExperienceはNIHO v1選別client、本人／local OWNER／exact Connect boundary
 
 | 操作 | 検査 | 動き |
 | --- | --- | --- |
-| `publishPage` | ページの検査だけ：`MANUSCRIPT_REQUIRED`・`PUBLIC_CONTENT_INVALID`・`PHOTOS_REQUIRED`・`PRICE_REQUIRED`・`CANCELLATION_TERMS_REQUIRED`・`SLUG_IN_USE`・`OPERATIONS_SUSPENDED`・`OWNER_NOT_CURRENT`・`ACCOUNT_NOT_USABLE`。`SELLER_REQUIRED`・手数料設定・readiness・開催枠は要らない。 | ページ版を作り（販売者なし）、ページ側だけを動かす。`status` は `DRAFT` のまま。**予約が開いている間**は、予約の検査も通し、ページと販売版を一緒に新しい販売版へ動かす（ページを見せたとおりに売る）。通らなければ、その予約の理由で断る（先に予約を止めればページだけを公開できる）。 |
+| `publishPage` | ページの検査だけ：`MANUSCRIPT_REQUIRED`・`PUBLIC_CONTENT_INVALID`・`PHOTOS_REQUIRED`・`PRICE_REQUIRED`・`CANCELLATION_TERMS_REQUIRED`・`SLUG_IN_USE`・`OPERATIONS_SUSPENDED`・`OWNER_NOT_CURRENT`・`ACCOUNT_NOT_USABLE`・`NOTIFICATION_ADDRESS_REQUIRED`（#708：ホストのオーナーがいて、誰にもホスト宛てのメールが届く宛先が無い。確認待ちの宛先は数えない。判定は `host-mail-shared.ts` の `ownerMailDestinationMissing`（オーナーがいて、その誰にも宛先が無いとき。オーナーが 1 人もいない代理登録のホストには適用しない）、メールの宛先を決める SQL と同じ条件の一か所）。`SELLER_REQUIRED`・手数料設定・readiness・開催枠は要らない。 | ページ版を作り（販売者なし）、ページ側だけを動かす。`status` は `DRAFT` のまま。**予約が開いている間**は、予約の検査も通し、ページと販売版を一緒に新しい販売版へ動かす（ページを見せたとおりに売る）。通らなければ、その予約の理由で断る（先に予約を止めればページだけを公開できる）。 |
 | `openBooking` | ページの検査＋予約の検査：`FEE_SETTINGS_REQUIRED`・`SUPPORT_CONSENT_REQUIRED`・`SCHEDULE_REQUIRED`・readiness（`CONNECT_NOT_READY`・`PAYMENT_REUSE_CONSENT_REQUIRED`・`READINESS_*`）・`SELLER_MISMATCH`・`CONSENT_OUTDATED`・`SELLER_REQUIRED`。 | 現在の下書きの販売版を作り（または見つけ）、2 本をそれに向け、`status='PUBLISHED'`、`OPENED` を記録。 |
 | `stopBooking` | 版の CAS と「予約が開いている」こと。 | `booking_publication_id` を NULL にし、`status` を `DRAFT` へ戻し、`STOPPED` を記録。ページは公開のまま。 |
 | `publish`（従来） | `openBooking` と同じ。 | 今までの呼び出し元は、ページ＋予約の受付を一度に行う（振る舞いは変わらない）。 |

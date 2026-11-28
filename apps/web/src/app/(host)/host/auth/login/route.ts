@@ -5,7 +5,7 @@ import { startNihoInvite, startNihoLogin, startNihoTeamInvite } from "@/lib/host
 import { createLoginState, createPkceVerifier, pkceChallenge } from "@/lib/host/pkce";
 import { autoLoginAllowed, markAutoLoginStarted } from "@/lib/host/returning-host";
 import { nihoIdOrNull } from "@/lib/host/providers";
-import { HOST_EMAIL_SIGN_IN_PATH, HOST_HOME_PATH, HOST_MOCK_LOGIN_PATH, hostInvitationPath, hostReturnPathOrNull, invitationIdOrNull, preparationCaseIdOrNull, withQuery } from "@/lib/host/routes";
+import { HOST_EMAIL_SIGN_IN_PATH, HOST_HOME_PATH, HOST_MOCK_LOGIN_PATH, HOST_START_PATH, hostInvitationPath, hostReturnPathOrNull, invitationIdOrNull, preparationCaseIdOrNull, withQuery } from "@/lib/host/routes";
 import { hostNotFound, isHostMock, noStoreJson, readHostSession, seeOther, setLoginCookie, siteOrigin } from "@/lib/host/server";
 import { LOGIN_MAX_AGE_SECONDS } from "@/lib/host/session";
 
@@ -14,19 +14,23 @@ import { LOGIN_MAX_AGE_SECONDS } from "@/lib/host/session";
  * `?surface=app` comes from the installed app's start page (#177); the session it ends in carries that mark.
  * With Experience host accounts (ADR 0003) every 「ログイン」 link lands here too, and goes on to the email form, or with the
  * NIHO account login (Epic #591) to NIHO, which only proves who the host is (niho-login.ts).
+ * `?intent=register` (#708, EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED): 「ホストとして登録」. The sign-in is the same; a NIHO account
+ * with no host account goes on to /host/start, and a host already signed in goes there at once. Without the flag it is ignored.
  */
 export async function GET(request: NextRequest) {
   if (!config.hostConsoleEnabled) return hostNotFound();
   const invitationId = invitationIdOrNull(request.nextUrl.searchParams.get("invitationId"));
   const returnPath = hostReturnPathOrNull(request.nextUrl.searchParams.get("returnTo"));
+  const register = config.hostSelfRegistrationEnabled && request.nextUrl.searchParams.get("intent") === "register";
   if (config.hostAccountsEnabled && config.hostNihoLoginEnabled) {
     // An invitation link opened in this browser (#596): the sign-in whose return binds the NIHO account to the invited host account.
     if (request.nextUrl.searchParams.get("invite") === "1") return startNihoInvite(request);
     // A provider's team invitation opened in this browser (#636). Without the flag the parameter means nothing.
     if (config.hostTeamInvitationsEnabled && request.nextUrl.searchParams.get("teaminvite") === "1") return startNihoTeamInvite(request);
     // Already signed in (an old link, a second tab): straight on to where the sign-in was for, with no trip to NIHO.
-    // A re-login (`reauth=1`, a sensitive change asked for a recent sign-in) always goes to NIHO.
-    if (request.nextUrl.searchParams.get("reauth") !== "1" && await readHostSession()) return seeOther(invitationId ? hostInvitationPath(invitationId) : returnPath ?? HOST_HOME_PATH);
+    // A re-login (`reauth=1`, a sensitive change asked for a recent sign-in) and 「別のアカウントで続ける」 (`switch=1`) always go to NIHO.
+    const toNiho = request.nextUrl.searchParams.get("reauth") === "1" || request.nextUrl.searchParams.get("switch") === "1";
+    if (!toNiho && await readHostSession()) return seeOther(invitationId ? hostInvitationPath(invitationId) : register ? HOST_START_PATH : returnPath ?? HOST_HOME_PATH);
     // The console sent a returning host's browser here by itself (#632, returning-host.ts). Once in a short while: a second
     // time goes to the entrance and its button, so a session that does not open after NIHO's return cannot loop.
     if (request.nextUrl.searchParams.get("auto") === "1") {
@@ -55,6 +59,7 @@ export async function GET(request: NextRequest) {
     const mock = request.nextUrl.searchParams.get("mock");
     if (mock === "empty" || mock === "unregistered") params.set("mock", mock);
     if (surface) params.set("surface", surface);
+    if (register) params.set("intent", "register");
     return seeOther(params.size ? `${HOST_MOCK_LOGIN_PATH}?${params}` : HOST_MOCK_LOGIN_PATH);
   }
 

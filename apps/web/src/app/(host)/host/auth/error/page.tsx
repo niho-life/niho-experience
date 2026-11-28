@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { HostLoginLink } from "@/components/host/HostAppWindow";
 import { hostButtonClass, HOST_HEADING } from "@/components/host/host-ui";
-import { HOST_EMAIL_SIGN_IN_PATH, HOST_INTRO_PATH, HOST_LOGIN_PATH, LOGIN_ERROR_REASONS, hostInvitationLoginPath, hostPreparationLoginPath, invitationIdOrNull, preparationCaseIdOrNull, withQuery, type LoginErrorReason } from "@/lib/host/routes";
+import { HOST_EMAIL_SIGN_IN_PATH, HOST_INTRO_PATH, HOST_LOGIN_PATH, HOST_REGISTER_LOGIN_PATH, LOGIN_ERROR_REASONS, hostInvitationLoginPath, hostPreparationLoginPath, invitationIdOrNull, preparationCaseIdOrNull, withQuery, type LoginErrorReason } from "@/lib/host/routes";
 import { config } from "@/lib/config";
 import { requireHostConsole } from "@/lib/host/server";
 
@@ -107,7 +107,9 @@ export default async function HostLoginErrorPage({ searchParams }: { searchParam
         </div>
         {/* Plain links: login is a route handler, and /host belongs to the traveler site's root. */}
         <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
-          <HostLoginLink href={withQuery(loginHref, { switch: switchAccount })} className={hostButtonClass("primary")}>別の方法でやり直す</HostLoginLink>
+          {/* 「ホストとして登録」 (#708): with the flag, the NIHO account that came back is taken on to register. */}
+          {config.hostSelfRegistrationEnabled ? <HostLoginLink href={HOST_REGISTER_LOGIN_PATH} className={hostButtonClass("primary")}>ホストとして登録</HostLoginLink> : null}
+          <HostLoginLink href={withQuery(loginHref, { switch: switchAccount })} className={hostButtonClass(config.hostSelfRegistrationEnabled ? "secondary" : "primary")}>別の方法でやり直す</HostLoginLink>
           <a href={SUPPORT_HREF} className="text-[0.875rem] font-bold text-ink-soft underline underline-offset-4 hover:text-ink">運営に問い合わせる</a>
         </div>
       </main>
