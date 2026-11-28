@@ -15,6 +15,11 @@ export function bookingPagesEnabled(): boolean {
   return config.guestBookingEnabled && config.guestMailEnabled;
 }
 
+/** 予約の日時変更 (#720): "Change date" opens with the booking page and its own flag. */
+export function bookingChangesEnabled(): boolean {
+  return bookingPagesEnabled() && config.guestBookingChangeEnabled;
+}
+
 /** Every body these routes take fits in this many bytes. */
 export const BOOKING_ACCESS_BODY_LIMIT = 4 * 1024;
 

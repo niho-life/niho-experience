@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
   HOST_NOTIFICATION_TOPICS,
   parseAssignmentRequestPayload,
+  parseBookingChangedPayload,
   parseBookingMessagePayload,
   parseCancellationPayload,
   parseDayBeforeSummaryPayload,
@@ -233,6 +234,27 @@ export function hostPushEventFromOutbox(message: ClaimedHostNotification, now: n
         // The bookings made on this site (#285 slice 8), with the cancelled one opened.
         url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, providerId }),
         tag: `cancellation-${payload.bookingId}`,
+      },
+    };
+  }
+  if (message.topic === HOST_NOTIFICATION_TOPICS.bookingChanged) {
+    const payload = parseBookingChangedPayload(message.payload);
+    if (!payload) return { ok: false, reason: "invalid" };
+    const stale = staleness(message, now);
+    if (stale) return stale;
+    return {
+      ok: true,
+      event: {
+        providerId,
+        // 予約の日時変更 (#720): counted as 新しい予約・申込, which always comes (as an OTA booking's move).
+        kind: "NEW_BOOKING",
+        experienceTitle: payload.experienceTitle,
+        startsAt: payload.startsAt,
+        seats: payload.seats,
+        moved: { previousStartsAt: payload.previousStartsAt },
+        url: withQuery(HOST_BOOKINGS_PATH, { booking: payload.bookingId, providerId }),
+        // A later move of the same booking replaces the earlier notification.
+        tag: `booking-changed-${payload.bookingId}`,
       },
     };
   }

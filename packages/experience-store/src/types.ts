@@ -284,6 +284,17 @@ export interface PricingSnapshot {
   readonly bookingTerms?: BookingTermsSnapshot;
   /** Guest bookings (#285) only: NIHO's fee fixed at booking, the Checkout Session's application fee. */
   readonly platformFee?: PlatformFeeSnapshot;
+  /**
+   * 予約の日時変更 (#720): the guest may move this booking to another date of the same offer, at most `maxChanges` times.
+   * Fixed at booking; absent on bookings made before it existed or whose terms did not allow it (never added later).
+   */
+  readonly guestChange?: GuestChangeSnapshot;
+}
+
+/** What a booking allows its guest to change, fixed at booking (#720). */
+export interface GuestChangeSnapshot {
+  readonly allowed: true;
+  readonly maxChanges: number;
 }
 
 /**

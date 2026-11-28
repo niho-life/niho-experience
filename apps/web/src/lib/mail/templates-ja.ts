@@ -1,5 +1,5 @@
 import type { BookingConfirmationEmail, BookingLinkEmail, BookingMeetingGuideEmail, BookingNoticeEmail, ClaimedBookingMessage, ClaimedSupportBookingMessage, ReviewInvitationEmail } from "@niho-experience/experience-store";
-import { REFUND_TIMING_JA, calendarDateJa, cancelledByJa, cancellationTermsWordsJa, moneyJa, partyJa, zoneNameJa } from "@/lib/booking-words-ja";
+import { REFUND_TIMING_JA, calendarDateJa, cancelledByJa, cancellationTermsWordsJa, moneyJa, partyJa, zoneNameJa, zonedMomentJa } from "@/lib/booking-words-ja";
 import { absolute, body, mail, oneLine, type MailBlock, type QuestionReplyMailInput, type RenderedMail } from "./templates";
 
 /**
@@ -116,6 +116,23 @@ export function bookingNoticeEmailJa(email: BookingNoticeEmail, options: { reado
       { kind: "p", text: cancelledByJa({ cancelledBy: email.cancelledBy, cancellationReason: email.reason, hostDisplayName: oneLine(email.hostDisplayName) }) },
       facts,
       { kind: "p", text: refund },
+      ...page,
+      support,
+    ]);
+  }
+  if (email.kind === "CHANGED") {
+    // 予約の日時変更（#720）：事実の欄は新しい日付。前の日付・料金が変わらないこと・新しい無料キャンセルの期限を文で言う。
+    const before = `${calendarDateJa(email.fromLocalDate)} ${email.fromLocalStartTime}（${zoneNameJa(email.fromTimeZone)}）`;
+    const after = `${calendarDateJa(email.localDate)} ${email.localStartTime}（${zoneNameJa(email.timeZone)}）`;
+    const price = email.totalAmount === 0 ? "引き続き無料です。" : `料金は ${moneyJa(email.totalAmount, email.currency)} のまま変わりません。追加のお支払いや返金はありません。`;
+    const deadline = email.freeCancellationUntilUtc
+      ? `${zonedMomentJa(Date.parse(email.freeCancellationUntilUtc), email.timeZone)}（${zoneNameJa(email.timeZone)}）まで無料でキャンセルできます。`
+      : "";
+    return japanMail(`ご予約の日付を変更しました：${experience}（${day}）`, [
+      greeting(email.guestName),
+      { kind: "p", text: `ご予約を${before}から${after}に変更しました。` },
+      facts,
+      { kind: "p", text: `${price}${deadline}` },
       ...page,
       support,
     ]);

@@ -8,7 +8,7 @@ import {
   type Occurrence,
 } from "@niho-experience/experience-domain";
 import { StoreValidationError } from "./errors.ts";
-import type { BookingTermsSnapshot, GuestCancellationPolicy, ManagedPaymentDuePolicy, PlatformFeeSnapshot, PricingBreakdown, PricingSnapshot, SellerSnapshot } from "./types.ts";
+import type { BookingTermsSnapshot, GuestCancellationPolicy, GuestChangeSnapshot, ManagedPaymentDuePolicy, PlatformFeeSnapshot, PricingBreakdown, PricingSnapshot, SellerSnapshot } from "./types.ts";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/;
 const CURRENCY = /^[A-Z]{3}$/;
@@ -81,6 +81,8 @@ export interface GuestPricingInput {
     readonly supportConsentVersion: string;
     readonly supportAgreementRevision: number;
   };
+  /** 予約の日時変更 (#720): present only when the guest may move the booking (fixed at booking, never added later). */
+  readonly guestChange?: GuestChangeSnapshot;
 }
 
 /**
@@ -171,6 +173,7 @@ export function buildSnapshots(
         cancellationPolicy: guest.cancellationPolicy,
         bookingTerms: guest.bookingTerms,
         platformFee: guestPlatformFee(guest.platformFee, totalAmount),
+        ...(guest.guestChange ? { guestChange: guest.guestChange } : {}),
       }),
     },
     sellerSnapshot: {

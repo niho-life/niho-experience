@@ -1,6 +1,6 @@
 import type { BookingConfirmationEmail, BookingLinkEmail, BookingMeetingGuideEmail, BookingNoticeEmail, ClaimedBookingMessage, ClaimedSupportBookingMessage, ManagedGuestMailEmail, ManagedOperationsMailEmail, ReviewInvitationEmail } from "@niho-experience/experience-store";
 import { bookingConfirmationEmailJa, bookingLinkEmailJa, bookingMeetingGuideEmailJa, bookingMessageEmailJa, bookingNoticeEmailJa, questionReplyEmailJa, reviewInvitationEmailJa, supportBookingMessageEmailJa } from "./templates-ja";
-import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationTermsWords, cancelledBy, money, party, zoneName } from "@/lib/booking-words";
+import { DATE_LONG, DATE_SHORT, REFUND_TIMING, calendarDate, cancellationTermsWords, cancelledBy, money, party, zoneName, zonedMoment } from "@/lib/booking-words";
 
 /**
  * The emails guests get from this site (#285 slice 5): plain English, a text part and a minimal HTML part
@@ -342,6 +342,23 @@ export function bookingNoticeEmail(email: BookingNoticeEmail, options: { readonl
       { kind: "p", text: cancelledBy({ cancelledBy: email.cancelledBy, cancellationReason: email.reason, hostDisplayName: host }) },
       facts,
       { kind: "p", text: refund },
+      ...page,
+      { kind: "p", text: "Questions? Reply to this email and NIHO support will help." },
+    ]);
+  }
+  if (email.kind === "CHANGED") {
+    // 予約の日時変更 (#720): the facts are the new date; the old one, the same price and the new deadline are said in words.
+    const before = `${calendarDate(email.fromLocalDate, DATE_LONG)}, ${email.fromLocalStartTime} ${zoneName(email.fromTimeZone)}`;
+    const after = `${calendarDate(email.localDate, DATE_LONG)}, ${email.localStartTime} ${zoneName(email.timeZone)}`;
+    const price = email.totalAmount === 0 ? "It is still free." : `The price stays ${money(email.totalAmount, email.currency)}: nothing more is charged and nothing is refunded.`;
+    const deadline = email.freeCancellationUntilUtc
+      ? `You can cancel for free until ${zonedMoment(Date.parse(email.freeCancellationUntilUtc), email.timeZone)} ${zoneName(email.timeZone)}.`
+      : null;
+    return mail(`Your booking date changed: ${experience}, ${when}`, [
+      greeting,
+      { kind: "p", text: `Your booking moved from ${before} to ${after}.` },
+      facts,
+      { kind: "p", text: deadline ? `${price} ${deadline}` : price },
       ...page,
       { kind: "p", text: "Questions? Reply to this email and NIHO support will help." },
     ]);

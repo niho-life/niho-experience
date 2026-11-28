@@ -6,7 +6,7 @@ import { HOST_NOTIFICATION_TOPICS } from "./host-notification-outbox.ts";
 import { enqueueHostBookingMails, HOST_MAIL_TOPICS } from "./host-mail-shared.ts";
 import { MANAGED_GUEST_MAIL_TOPICS, MANAGED_OPERATIONS_MAIL_TOPICS } from "./managed-booking-mail.ts";
 import { StoreError, StoreValidationError } from "./errors.ts";
-import { cancellationTermsOf } from "./cancellation-terms.ts";
+import { cancellationTermsOf, freeCancellationDeadlineUtc } from "./cancellation-terms.ts";
 import { validateGuestMeetingGuide } from "./guest-meeting-guides.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
@@ -209,7 +209,20 @@ export type BookingNoticeEmail =
       readonly currency: string;
     })
   | (BookingNoticeFacts & { readonly kind: "REFUNDED"; readonly amount: number; readonly currency: string })
-  | (BookingNoticeFacts & { readonly kind: "REQUEST_DECLINED"; readonly message: string });
+  | (BookingNoticeFacts & { readonly kind: "REQUEST_DECLINED"; readonly message: string })
+  /**
+   * 予約の日時変更 (#720): the guest moved the booking. The facts are its new date and time; `from*` the ones it moved from.
+   * The price stays what was paid; `freeCancellationUntilUtc` is the new free-cancellation deadline (null when none).
+   */
+  | (BookingNoticeFacts & {
+      readonly kind: "CHANGED";
+      readonly fromLocalDate: string;
+      readonly fromLocalStartTime: string;
+      readonly fromTimeZone: string;
+      readonly totalAmount: number;
+      readonly currency: string;
+      readonly freeCancellationUntilUtc: string | null;
+    });
 
 export interface ClaimedBookingNotice {
   readonly id: string;
@@ -517,6 +530,25 @@ function noticeFromRow(row: DbRow): BookingNoticeEmail | null {
   if (row.topic === GUEST_NOTICE_TOPICS.requestDeclined) {
     if (row.status !== "CONFIRMED" || typeof row.decline_message !== "string") return null;
     return { ...facts, kind: "REQUEST_DECLINED", message: row.decline_message };
+  }
+  if (row.topic === GUEST_NOTICE_TOPICS.changed) {
+    // A move a later one replaced, or a booking cancelled since, says nothing: the latest move's email tells the date.
+    if (row.status !== "CONFIRMED" || typeof row.change_to_occurrence_id !== "string" || row.change_to_occurrence_id !== row.occurrence_id) return null;
+    const from = record(row.change_from_snapshot);
+    const pricing = record(row.pricing_snapshot);
+    return {
+      ...facts,
+      kind: "CHANGED",
+      fromLocalDate: text(from.localDate, "booking_changes.from_snapshot.localDate"),
+      fromLocalStartTime: text(from.localStartTime, "booking_changes.from_snapshot.localStartTime"),
+      fromTimeZone: text(from.timeZone, "booking_changes.from_snapshot.timeZone"),
+      totalAmount: count(pricing.totalAmount, "pricing_snapshot.totalAmount"),
+      currency: text(pricing.currency, "pricing_snapshot.currency"),
+      freeCancellationUntilUtc: freeCancellationDeadlineUtc(
+        text(occurrence.startUtc, "occurrence_snapshot.startUtc"),
+        cancellationTermsOf(pricing).cancellationWindowMinutesBeforeStart,
+      ),
+    };
   }
   return null;
 }
@@ -1004,7 +1036,8 @@ export class GuestMailOutbox {
                 guide_snapshot.guide AS meeting_guide,
                 (SELECT COALESCE(sum(x.amount), 0)::text FROM booking_refunds x
                   WHERE x.provider_id = b.provider_id AND x.booking_id = b.id AND x.status <> 'FAILED') AS refunding_amount,
-                r.status AS refund_status, r.amount AS refund_amount, r.currency AS refund_currency, q.decline_message
+                r.status AS refund_status, r.amount AS refund_amount, r.currency AS refund_currency, q.decline_message,
+                b.occurrence_id, ch.to_occurrence_id AS change_to_occurrence_id, ch.from_snapshot AS change_from_snapshot
            FROM claimed c
            JOIN bookings b ON ${BOOKING_OF("c")}
            JOIN booking_guests g ON g.provider_id = b.provider_id AND g.booking_id = b.id
@@ -1018,7 +1051,9 @@ export class GuestMailOutbox {
            LEFT JOIN booking_refunds r ON r.provider_id = b.provider_id AND r.booking_id = b.id
                  AND r.id = (CASE WHEN c.payload->>'refundId' ~ ${UUID_TEXT} THEN (c.payload->>'refundId')::uuid END)
            LEFT JOIN booking_cancellation_requests q ON q.provider_id = b.provider_id AND q.booking_id = b.id
-                 AND q.id = (CASE WHEN c.payload->>'requestId' ~ ${UUID_TEXT} THEN (c.payload->>'requestId')::uuid END)`,
+                 AND q.id = (CASE WHEN c.payload->>'requestId' ~ ${UUID_TEXT} THEN (c.payload->>'requestId')::uuid END)
+           LEFT JOIN booking_changes ch ON ch.provider_id = b.provider_id AND ch.booking_id = b.id
+                 AND ch.id = (CASE WHEN c.payload->>'changeId' ~ ${UUID_TEXT} THEN (c.payload->>'changeId')::uuid END)`,
         [topics, maxAttempts, limit, leaseSeconds, BOOKING_ACCESS_LIMITS.daysAfterExperience],
       );
       return { rows: claimed.rows, abandoned: (abandoned.rowCount ?? 0) + (suppressed.rowCount ?? 0) };

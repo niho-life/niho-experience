@@ -47,6 +47,7 @@ import {
   type HostGuestSessionKey,
   type HostGuestSessionListOptions,
 } from "./host-guest-bookings.ts";
+import { guestChangeSnapshotFor } from "./guest-change-terms.ts";
 import { salesWindowOf, selectPayoutAccounts, selectSales, type HostSalesWindow, type HostSalesWindowOptions } from "./host-sales.ts";
 import { evaluateStoredInventories, lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
@@ -806,7 +807,7 @@ const SELLABLE_PRODUCT_COLUMNS = `
  * ever assumed), it is sold in JPY at a chargeable price whose fee Stripe accepts, and its ID fits the
  * guest idempotency key. Anything else is not for sale (fail closed).
  */
-async function loadSellable(client: Queryable, slug: string, lock: boolean): Promise<Sellable | null> {
+export async function loadSellable(client: Queryable, slug: string, lock: boolean): Promise<Sellable | null> {
   if (typeof slug !== "string" || slug.length < 1 || slug.length > 160) return null;
   const products = await client.query<DbRow>(
     `SELECT ${SELLABLE_PRODUCT_COLUMNS}, pub.id AS active_publication_id,
@@ -2079,6 +2080,12 @@ export class GuestBookingRepository {
         throw notScheduled("UNAVAILABLE");
       }
       const occurrenceForBooking = await materializeAndLockOccurrence(client, providerId, productId, occurrence.id);
+      // 予約の日時変更 (#720): whether the guest may move this booking is fixed now, with the rest of its terms.
+      const guestChange = await guestChangeSnapshotFor(client, {
+        providerId, productId,
+        cancellationPolicy: terms.cancellationPolicy,
+        cancellationWindowMinutesBeforeStart: terms.cancellationWindowMinutesBeforeStart,
+      });
 
       let placed: Awaited<ReturnType<typeof placeBookingHold>>;
       try {
@@ -2108,6 +2115,7 @@ export class GuestBookingRepository {
               supportAgreementRevision: settings.supportAgreementRevision!,
               ...(settings.salesPlan ? { salesPlan: settings.salesPlan } : {}),
             },
+            ...(guestChange ? { guestChange } : {}),
           },
         });
       } catch (error) {

@@ -4,8 +4,8 @@ import { notFound } from "next/navigation";
 import type { GuestBookingConversation, GuestBookingView } from "@niho-experience/experience-store";
 import { BookingNotOpen, BookingUnavailable, GuestBookingDetails } from "@/components/GuestBookingDetails";
 import { config } from "@/lib/config";
-import { accessSecret, bookingPagesEnabled, bookingSessionCookieName, publicBookingIdOrNull } from "@/lib/experience/booking-access-http";
-import { guestBookingAccess, guestBookingMessages } from "@/lib/experience/store-server";
+import { accessSecret, bookingChangesEnabled, bookingPagesEnabled, bookingSessionCookieName, publicBookingIdOrNull } from "@/lib/experience/booking-access-http";
+import { bookingChanges, guestBookingAccess, guestBookingMessages } from "@/lib/experience/store-server";
 import { translationNoticeShown } from "@/lib/translation-notice";
 
 // Never prerendered or cached: each request reads its own cookie. next.config.ts sends no-store and noindex for /bookings.
@@ -44,5 +44,14 @@ export default async function GuestBookingPage({ params, searchParams }: { param
   } catch {
     conversation = null;
   }
-  return <GuestBookingDetails booking={booking} now={new Date()} conversation={conversation} translationNotice={translationNoticeShown(config)} />;
+  // 予約の日時変更 (#720): "Change date" shows only when the store says this booking may be moved now; a failure hides it.
+  let changeable = false;
+  if (booking.status === "CONFIRMED" && bookingChangesEnabled()) {
+    try {
+      changeable = (await bookingChanges()?.isChangeable(sessionId, bookingId)) === true;
+    } catch {
+      changeable = false;
+    }
+  }
+  return <GuestBookingDetails booking={booking} now={new Date()} conversation={conversation} translationNotice={translationNoticeShown(config)} changeable={changeable} />;
 }
