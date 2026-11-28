@@ -2880,10 +2880,13 @@ export class ExperiencePublicationRepository {
           throw new StoreConflictError("Sale terms version mismatch: read the terms again.");
         }
       }
-      const bookingWasOpen = state !== null && state.bookingPublicationId !== null;
+      // Only bookings that are taking bookings now travel with the page. A sale version that a stop (or a suspension) left
+      // behind does not: publishing the page again must not restart selling; that is `openBooking`'s decision (#706).
+      const bookingWasOpen = isSelling(state);
       const withBooking = requested === "BOOKING" || bookingWasOpen;
+      const dropsStoppedSale = !withBooking && state !== null && state.bookingPublicationId !== null;
       let consentVersion: string | null = input.consentVersion ?? null;
-      if (consentVersion === null && bookingWasOpen) {
+      if (consentVersion === null && bookingWasOpen && state !== null) {
         const standing = await client.query<DbRow>("SELECT consent_version FROM experience_product_publications WHERE id=$1", [state.bookingPublicationId]);
         consentVersion = standing.rows[0] ? String(standing.rows[0].consent_version) : null;
       }
@@ -2920,6 +2923,15 @@ export class ExperiencePublicationRepository {
           [actor.providerId, productId, publicationId, state.version, withBooking]);
       if (!result.rows[0]) throw new StoreConflictError("Publication state changed while publishing.");
       const published = stateFromRow(result.rows[0]);
+      if (dropsStoppedSale) {
+        // The stopped sale version was dropped with the state above, so the product leaves PUBLISHED with it (status PUBLISHED
+        // means "bookings open"); its STOPPED was recorded when it stopped. The channels stay closed.
+        await client.query(
+          "UPDATE experience_products SET status='DRAFT' WHERE provider_id=$1 AND id=$2 AND status='PUBLISHED'",
+          [actor.providerId, productId],
+        );
+        await requestChannelReconciliation(client, actor.providerId, "booking_stopped");
+      }
       if (withBooking) {
         // Written even when the sale version is the same row: re-opening after a stop or a suspension is a (re)start of selling.
         const resumed = state !== null && (state.selfStoppedAtUtc !== null || state.ownerResumeRequired);
