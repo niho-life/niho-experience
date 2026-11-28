@@ -287,6 +287,7 @@ interface SyntheticEventOptions {
   paymentIntent?: string | null | { id: string };
   sessionId?: string;
   status?: string;
+  mode?: string;
 }
 
 function syntheticEvent(options: SyntheticEventOptions = {}): Record<string, unknown> {
@@ -304,7 +305,7 @@ function syntheticEvent(options: SyntheticEventOptions = {}): Record<string, unk
       object: {
         id: options.sessionId ?? "cs_test_synthetic",
         object: "checkout.session",
-        mode: "payment",
+        mode: options.mode ?? "payment",
         status: options.status ?? "complete",
         payment_status: options.paymentStatus ?? "paid",
         metadata: options.metadata === undefined ? { source: "niho-experience", booking_id: BOOKING_ID } : options.metadata,
@@ -440,6 +441,20 @@ describe("verifyDirectCheckoutWebhook", () => {
       publicBookingId: BOOKING_ID,
       checkoutSessionId: "cs_test_synthetic",
     });
+  });
+
+  it("ignores another service's Checkout Session whatever its mode, but still checks one carrying our mark", () => {
+    const subscription = (options: SyntheticEventOptions) => signedPayload(syntheticEvent({ mode: "subscription", ...options }));
+    assert.equal(verifyDirectCheckoutWebhook(subscription({ metadata: {} })), null);
+    assert.equal(verifyDirectCheckoutWebhook(subscription({ metadata: null })), null);
+    assert.equal(verifyDirectCheckoutWebhook(subscription({ metadata: { source: "another-service" } })), null);
+    assert.equal(verifyDirectCheckoutWebhook(signedPayload(syntheticEvent({ metadata: {} }))), null);
+    assert.equal(verifyDirectCheckoutWebhook(subscription({ type: "checkout.session.expired", status: "expired", paymentStatus: "unpaid", metadata: {} })), null);
+    assert.equal(verifyDirectCheckoutWebhook(subscription({ type: "checkout.session.async_payment_failed", paymentStatus: "unpaid", metadata: {} })), null);
+    assert.equal(verifyDirectCheckoutWebhook(subscription({ type: "checkout.session.async_payment_succeeded", metadata: {} })), null);
+    assert.throws(() => verifyDirectCheckoutWebhook(subscription({})), /payment Checkout Session/);
+    assert.throws(() => verifyDirectCheckoutWebhook(subscription({ type: "checkout.session.expired", paymentStatus: "unpaid" })), /payment Checkout Session/);
+    assert.equal(verifyDirectCheckoutWebhook(signedPayload(syntheticEvent()))?.publicBookingId, BOOKING_ID);
   });
 
   it("checks an ended Session as strictly as a paid one, and never ends a paid Session", () => {

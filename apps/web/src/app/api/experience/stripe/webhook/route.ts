@@ -17,6 +17,9 @@ function reply(status: number): Response {
  * guest's hold back (#285 slice 4, docs/guest-booking.md); a refund this service made moves its booking's
  * refund forward (refund.created / refund.updated / refund.failed, slice 7); account.updated of a host's own payout account
  * (Epic #700 stage 3a, #710) reads that account again and keeps its state. Payloads are never logged.
+ * An event unrelated to this service (another service's Checkout Session of any mode, a refund made elsewhere) is
+ * acknowledged with 204 and ignored: a 400 makes Stripe retry for days and may disable the endpoint, which would
+ * also stop this service's own payment confirmations.
  */
 export async function POST(request: NextRequest): Promise<Response> {
   const secret = process.env.EXPERIENCE_STRIPE_WEBHOOK_SECRET;
