@@ -115,7 +115,7 @@ describe("NOTIFICATION_ADDRESS_REQUIRED (#708)", { skip }, () => {
       assert.deepEqual(await pageBlockers(publications, owner, draft.id), []);
       const missing = async () => { const client = await pool.connect(); try { return await ownerMailDestinationMissing(client, PROVIDER); } finally { client.release(); } };
       assert.equal(await missing(), false);
-      assert.equal(await new HostAccounts(pool).suspendHostAccount({ hostAccountId: owner.nihoUserId, nowUtc: new Date().toISOString() }), "CHANGED");
+      assert.equal(await new HostAccounts(pool).suspendHostAccount({ actorId: "test-actor", hostAccountId: owner.nihoUserId, nowUtc: new Date().toISOString() }), "CHANGED");
       assert.equal(await missing(), true, "a suspended account's address is not a destination");
     });
   });

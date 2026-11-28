@@ -136,6 +136,7 @@ const BLOCKER_COPY: Record<string, string> = {
   MANUSCRIPT_REQUIRED: "日本語原稿と確認済みの英語原稿を完成させてください（日本語のみで公開する場合は、日本語原稿を完成させてください）。",
   NOTIFICATION_ADDRESS_REQUIRED: "設定の通知で、連絡用メールアドレスを確認してください。確認のメールのリンクを開くと、公開できます。",
   OPERATIONS_SUSPENDED: "運営停止中のため再開できません。",
+  PROVIDER_SUSPENDED: "運営がこのホストの公開と受付を止めています。運営が解除するまで、公開も再開もできません。",
   OWNER_NOT_CURRENT: "最新のOWNER権限を確認できません。ログインし直してください。",
   PAYMENT_REUSE_CONSENT_REQUIRED: "受取口座で売上を受け取ることへの同意を確認してください。",
   PHOTOS_REQUIRED: "商品写真を追加し、日本語と英語の説明を入力してください。",

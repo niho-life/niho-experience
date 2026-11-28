@@ -1324,7 +1324,19 @@ export class ExperienceStore {
         const pricing = booking.pricingSnapshot;
         const paymentMatches = pricing.totalAmount === input.amount && pricing.currency === currency;
         const holdIsActive = booking.status === "HOLD" && booking.holdExpiresAtUtc > nowUtc;
-        outcome = holdIsActive && paymentMatches ? "CONFIRMED" : "PAYMENT_REVIEW";
+        // A checkout that began before an operations suspension (the experience's or the whole host's, #711) must not be
+        // confirmed after it: it goes to PAYMENT_REVIEW like an expired hold. Lock order: provider inventory advisory lock
+        // (taken first, and by every suspend too, so they never interleave) -> booking FOR UPDATE -> provider row and
+        // state row FOR SHARE; a suspend takes advisory -> provider FOR UPDATE -> state FOR UPDATE, so no cycle. The owner's
+        // own stop of bookings is deliberately not checked: a payment in progress is still taken.
+        const suspension = await client.query<DbRow>(
+          `SELECT (SELECT operations_suspended_at IS NOT NULL FROM experience_providers WHERE id=$1 FOR SHARE) AS provider_suspended,
+                  COALESCE((SELECT true FROM experience_product_publication_states
+                             WHERE provider_id=$1 AND product_id=$2 AND operations_suspended_at IS NOT NULL FOR SHARE), false) AS product_suspended`,
+          [scope.providerId, booking.productId],
+        );
+        const suspended = suspension.rows[0]?.provider_suspended === true || suspension.rows[0]?.product_suspended === true;
+        outcome = holdIsActive && paymentMatches && !suspended ? "CONFIRMED" : "PAYMENT_REVIEW";
       }
 
       const eventInsert = await client.query<DbRow>(

@@ -33,6 +33,7 @@ import { productFromRow, type DbRow } from "./rows.ts";
 import { PRODUCT_COLUMNS, requireMembership } from "./repository.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import { recordBookingEvent, requestChannelReconciliation } from "./booking-status.ts";
+import { enqueueOfficeNotices, readHostFirsts } from "./office-notices.ts";
 import { CLAIMED_PUBLICATION_SLUGS_CTE, VISIBLE_PUBLICATIONS_CTE } from "./public-publication-scope.ts";
 import { withTransaction } from "./transaction.ts";
 import {
@@ -58,6 +59,8 @@ export type ExperiencePublicationBlocker =
   /** The provider has an OWNER and none has an address the host emails reach (a confirmed one, or the sign-in's) (#708). */
   | "NOTIFICATION_ADDRESS_REQUIRED"
   | "OPERATIONS_SUSPENDED"
+  /** The whole host is suspended by operations (#711): no new page, no new bookings, no restart until the office lifts it. */
+  | "PROVIDER_SUSPENDED"
   | "OWNER_NOT_CURRENT"
   | "PAYMENT_REUSE_CONSENT_REQUIRED"
   | "PHOTOS_REQUIRED"
@@ -888,6 +891,101 @@ async function notifyListingSuspension(client: PoolClient, row: DbRow, change: L
   });
 }
 
+/** The code a host-wide suspension puts on each experience it closes (#711): only these are lifted with the host's. */
+export const PROVIDER_SUSPENDED_CODE = "PROVIDER_SUSPENDED";
+
+export interface ProviderOperationsSuspensionResult {
+  /** false: nothing to do (already in that state). */
+  readonly changed: boolean;
+  /** How many experiences were suspended (or, for a lift, had their suspension lifted). */
+  readonly suspendedProducts: number;
+}
+
+export interface ExperienceAdminHostOwner {
+  readonly hostAccountId: string;
+  readonly status: "ACTIVE" | "SUSPENDED";
+  readonly email: string | null;
+}
+
+export interface ExperienceAdminHost {
+  readonly providerId: string;
+  readonly publicDisplayName: string | null;
+  readonly publicDisplayNameEn: string | null;
+  readonly providerKind: ExperienceProviderPublicKind | null;
+  /** Who consented to the public name: ADMIN (the office) or OWNER (the host). */
+  readonly consentSource: "ADMIN" | "OWNER" | null;
+  /** SELF: registered by the host; OFFICE: registered by the office. */
+  readonly route: "SELF" | "OFFICE";
+  readonly registeredAtUtc: string;
+  readonly owners: readonly ExperienceAdminHostOwner[];
+  /** An active OWNER that is not a host account (a NIHO user): its ID is never shown. */
+  readonly hasOtherOwner: boolean;
+  readonly publicPages: number;
+  readonly sellingPages: number;
+  readonly firstPublishedAtUtc: string | null;
+  /** The first OPENED that is not the migration's BACKFILL. */
+  readonly firstBookingOpenedAtUtc: string | null;
+  readonly operationsSuspendedAtUtc: string | null;
+  readonly operationsSuspensionCode: string | null;
+}
+
+/** The one place that asks whether a whole host is suspended by operations (#711). */
+async function providerOperationsSuspended(client: PoolClient, providerId: string): Promise<boolean> {
+  const result = await client.query<{ suspended: boolean }>("SELECT operations_suspended_at IS NOT NULL AS suspended FROM experience_providers WHERE id=$1", [providerId]);
+  return result.rows[0]?.suspended === true;
+}
+
+/** Suspends one published listing by operations, inside the caller's transaction (the provider inventory lock is held). */
+async function suspendListingIn(
+  client: PoolClient,
+  actor: PublicationOperationsActor,
+  providerId: string,
+  productId: string,
+  reasonCode: string,
+  expectedStateVersion: number,
+): Promise<ExperiencePublicationState> {
+  // A second suspension of a suspended listing (another reason code) is not news to the host.
+  const before = await client.query<{ suspended: boolean }>(
+    "SELECT operations_suspended_at IS NOT NULL AS suspended FROM experience_product_publication_states WHERE provider_id=$1 AND product_id=$2",
+    [providerId, productId],
+  );
+  const beforeState = await lockedState(client, providerId, productId);
+  const result = await client.query<DbRow>(
+    `UPDATE experience_product_publication_states
+        SET operations_suspended_at=clock_timestamp(),operations_suspension_code=$4,
+            operations_suspended_by_niho_user_id=$5,owner_resume_required=true,
+            version=version+1,updated_at=clock_timestamp()
+      WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND current_publication_id IS NOT NULL
+      RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
+        operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
+    [providerId, productId, expectedStateVersion, reasonCode, actor.nihoUserId],
+  );
+  if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or publication not found.");
+  if (before.rows[0]?.suspended !== true) await notifyListingSuspension(client, result.rows[0], "SUSPENDED");
+  const suspended = stateFromRow(result.rows[0]);
+  if (beforeState?.bookingPublicationId != null) {
+    if (isSelling(beforeState)) await recordBookingEvent(client, suspended, beforeState.bookingPublicationId, "STOPPED", "OPERATIONS_SUSPENDED", actor.nihoUserId);
+    await requestChannelReconciliation(client, providerId, "operations_suspended");
+  }
+  return suspended;
+}
+
+/** Lifts one listing's operations suspension, inside the caller's transaction. The owner still has to restart it. */
+async function clearListingSuspensionIn(client: PoolClient, providerId: string, productId: string, expectedStateVersion: number): Promise<ExperiencePublicationState> {
+  const result = await client.query<DbRow>(
+    `UPDATE experience_product_publication_states
+        SET operations_suspended_at=NULL,operations_suspension_code=NULL,
+            operations_suspended_by_niho_user_id=NULL,version=version+1,updated_at=clock_timestamp()
+      WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND operations_suspended_at IS NOT NULL
+      RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
+        operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
+    [providerId, productId, expectedStateVersion],
+  );
+  if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or operations suspension not found.");
+  await notifyListingSuspension(client, result.rows[0], "CLEARED");
+  return stateFromRow(result.rows[0]);
+}
+
 async function readinessRow(client: PoolClient, providerId: string, lock = false): Promise<DbRow | null> {
   const result = await client.query<DbRow>(
     `SELECT provider_id,owner_niho_user_id,account_usable,connect_ready,payment_reuse_consent_accepted,
@@ -1036,6 +1134,7 @@ async function blockers(
   }
   if (facts.rows[0]?.slug_in_use === true) result.push("SLUG_IN_USE");
   if (state?.operationsSuspendedAtUtc !== null && state?.operationsSuspendedAtUtc !== undefined) result.push("OPERATIONS_SUSPENDED");
+  if (await providerOperationsSuspended(client, product.providerId)) result.push("PROVIDER_SUSPENDED");
   // Every publish asks for it (a page, or a page with bookings): a page that is already public is not stopped, its next publish is (#708).
   if (await ownerMailDestinationMissing(client, product.providerId)) result.push("NOTIFICATION_ADDRESS_REQUIRED");
 
@@ -1531,6 +1630,7 @@ export class ExperiencePublicationRepository {
       }, input.consentVersion, state, { seller, payoutConsentVersion: input.payoutConsentVersion, accountCheck: input.accountCheck ?? null });
       if (blocked.length > 0) throw new ExperiencePublicationBlockedError(blocked);
       if (!review || !terms) throw new StoreConflictError("Publication review or sale terms changed while publishing.");
+      const firsts = await readHostFirsts(client, providerId);
       const changed = await client.query(
         "UPDATE experience_products SET status='PUBLISHED' WHERE provider_id=$1 AND id=$2 AND version=$3 AND status='DRAFT'",
         [providerId, productId, product.version],
@@ -1559,6 +1659,7 @@ export class ExperiencePublicationRepository {
         );
       if (!published.rows[0]) throw new StoreConflictError("Publication state changed while publishing.");
       await recordBookingEvent(client, stateFromRow(published.rows[0]), publicationId, "OPENED", "ADMIN_PROXY_OPENED", actor.nihoUserId);
+      await enqueueOfficeNotices(client, providerId, productId, firsts, true);
       await client.query(
         `INSERT INTO admin_proxy_publication_audit_events
            (publication_id,provider_id,product_id,draft_version,sale_terms_version,consent_version,
@@ -2899,6 +3000,8 @@ export class ExperiencePublicationRepository {
       }
       const blocked = await blockers(client, product, input.checks, withBooking ? consentVersion : null, state, undefined, withBooking ? "ALL" : "PAGE");
       if (blocked.length > 0) throw new ExperiencePublicationBlockedError(blocked);
+      // Read before anything is written: is this the host's first page / first bookings (#711)?
+      const firsts = await readHostFirsts(client, actor.providerId);
       let publicationId: number;
       if (withBooking) {
         // Bookings open only on the sale version; status PUBLISHED is the gate every sale reader filters on.
@@ -2946,6 +3049,7 @@ export class ExperiencePublicationRepository {
           resumed ? "OWNER_RESUMED" : bookingWasOpen ? "OWNER_REPUBLISHED" : "OWNER_OPENED", actor.nihoUserId);
         await requestChannelReconciliation(client, actor.providerId, "booking_opened");
       }
+      await enqueueOfficeNotices(client, actor.providerId, productId, firsts, withBooking);
       return published;
     });
   }
@@ -3033,33 +3137,12 @@ export class ExperiencePublicationRepository {
     assertStoreIdentifier(providerId, "providerId");
     assertStoreIdentifier(productId, "productId");
     if (!/^[A-Z0-9_]{1,80}$/.test(reasonCode)) throw new StoreValidationError("reasonCode must be an uppercase machine code.");
+    // Reserved for the host-wide suspension: its lift removes exactly the stops that carry this code (#711).
+    if (reasonCode === PROVIDER_SUSPENDED_CODE) throw new StoreValidationError("reasonCode PROVIDER_SUSPENDED is reserved for suspending a whole host.");
     validateExpectedVersion(expectedStateVersion, "expectedStateVersion");
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      // A second suspension of a suspended listing (another reason code) is not news to the host.
-      const before = await client.query<{ suspended: boolean }>(
-        "SELECT operations_suspended_at IS NOT NULL AS suspended FROM experience_product_publication_states WHERE provider_id=$1 AND product_id=$2",
-        [providerId, productId],
-      );
-      const beforeState = await lockedState(client, providerId, productId);
-      const result = await client.query<DbRow>(
-        `UPDATE experience_product_publication_states
-            SET operations_suspended_at=clock_timestamp(),operations_suspension_code=$4,
-                operations_suspended_by_niho_user_id=$5,owner_resume_required=true,
-                version=version+1,updated_at=clock_timestamp()
-          WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND current_publication_id IS NOT NULL
-          RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
-            operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
-        [providerId, productId, expectedStateVersion, reasonCode, actor.nihoUserId],
-      );
-      if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or publication not found.");
-      if (before.rows[0]?.suspended !== true) await notifyListingSuspension(client, result.rows[0], "SUSPENDED");
-      const suspended = stateFromRow(result.rows[0]);
-      if (beforeState?.bookingPublicationId != null) {
-        if (isSelling(beforeState)) await recordBookingEvent(client, suspended, beforeState.bookingPublicationId, "STOPPED", "OPERATIONS_SUSPENDED", actor.nihoUserId);
-        await requestChannelReconciliation(client, providerId, "operations_suspended");
-      }
-      return suspended;
+      return suspendListingIn(client, actor, providerId, productId, reasonCode, expectedStateVersion);
     });
   }
 
@@ -3075,18 +3158,132 @@ export class ExperiencePublicationRepository {
     validateExpectedVersion(expectedStateVersion, "expectedStateVersion");
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, providerId);
-      const result = await client.query<DbRow>(
-        `UPDATE experience_product_publication_states
-            SET operations_suspended_at=NULL,operations_suspension_code=NULL,
-                operations_suspended_by_niho_user_id=NULL,version=version+1,updated_at=clock_timestamp()
-          WHERE provider_id=$1 AND product_id=$2 AND version=$3 AND operations_suspended_at IS NOT NULL
-          RETURNING provider_id,product_id,current_publication_id,booking_publication_id,self_stopped_at,operations_suspended_at,
-            operations_suspension_code,owner_resume_required,first_published_at,version,updated_at`,
-        [providerId, productId, expectedStateVersion],
+      // While the whole host is suspended its experiences stay closed: lift the host's suspension first (#711).
+      if (await providerOperationsSuspended(client, providerId)) throw new ExperiencePublicationBlockedError(["PROVIDER_SUSPENDED"]);
+      return clearListingSuspensionIn(client, providerId, productId, expectedStateVersion);
+    });
+  }
+
+  /**
+   * Suspends a whole host (#711): the provider row first, then every public experience that is not already suspended, each
+   * exactly as `suspendByOperations` does it (code PROVIDER_SUSPENDED, STOPPED and a channel close for a selling one, the
+   * host's mail). One transaction under the provider's inventory lock. Already suspended: nothing changes (idempotent).
+   */
+  async suspendProviderByOperations(actor: PublicationOperationsActor, providerId: string, reasonCode: string): Promise<ProviderOperationsSuspensionResult> {
+    assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
+    assertStoreIdentifier(providerId, "providerId");
+    if (!/^[A-Z0-9_]{1,80}$/.test(reasonCode)) throw new StoreValidationError("reasonCode must be an uppercase machine code.");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      const provider = await client.query<DbRow>("SELECT operations_suspended_at FROM experience_providers WHERE id=$1 FOR UPDATE", [providerId]);
+      if (!provider.rows[0]) throw new StoreNotFoundError("provider");
+      if (provider.rows[0].operations_suspended_at !== null) return { changed: false, suspendedProducts: 0 };
+      await client.query(
+        `UPDATE experience_providers
+            SET operations_suspended_at=clock_timestamp(),operations_suspension_code=$2,operations_suspended_by_niho_user_id=$3
+          WHERE id=$1`,
+        [providerId, reasonCode, actor.nihoUserId],
       );
-      if (!result.rows[0]) throw new StoreConflictError("Publication state version mismatch or operations suspension not found.");
-      await notifyListingSuspension(client, result.rows[0], "CLEARED");
-      return stateFromRow(result.rows[0]);
+      await client.query(
+        "INSERT INTO experience_provider_operations_events (provider_id,kind,reason,actor_niho_user_id) VALUES ($1,'SUSPENDED',$2,$3)",
+        [providerId, reasonCode, actor.nihoUserId],
+      );
+      const open = await client.query<{ product_id: string; version: string | number }>(
+        `SELECT product_id,version FROM experience_product_publication_states
+          WHERE provider_id=$1 AND current_publication_id IS NOT NULL AND operations_suspended_at IS NULL
+          ORDER BY product_id COLLATE "C" FOR UPDATE`,
+        [providerId],
+      );
+      for (const row of open.rows) await suspendListingIn(client, actor, providerId, row.product_id, PROVIDER_SUSPENDED_CODE, safeInteger(row.version, "version"));
+      return { changed: true, suspendedProducts: open.rows.length };
+    });
+  }
+
+  /**
+   * Lifts a host's suspension (#711) and the per-experience suspensions it made (code PROVIDER_SUSPENDED); an experience
+   * stopped for another reason stays stopped. Each experience still waits for its owner's restart (owner_resume_required).
+   */
+  async clearProviderOperationsSuspension(actor: PublicationOperationsActor, providerId: string): Promise<ProviderOperationsSuspensionResult> {
+    assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
+    assertStoreIdentifier(providerId, "providerId");
+    return withTransaction(this.#pool, async (client) => {
+      await lockProviderInventory(client, providerId);
+      const provider = await client.query<DbRow>("SELECT operations_suspended_at,operations_suspension_code FROM experience_providers WHERE id=$1 FOR UPDATE", [providerId]);
+      if (!provider.rows[0]) throw new StoreNotFoundError("provider");
+      if (provider.rows[0].operations_suspended_at === null) return { changed: false, suspendedProducts: 0 };
+      await client.query(
+        `UPDATE experience_providers
+            SET operations_suspended_at=NULL,operations_suspension_code=NULL,operations_suspended_by_niho_user_id=NULL
+          WHERE id=$1`,
+        [providerId],
+      );
+      await client.query(
+        "INSERT INTO experience_provider_operations_events (provider_id,kind,reason,actor_niho_user_id) VALUES ($1,'CLEARED',$2,$3)",
+        [providerId, String(provider.rows[0].operations_suspension_code), actor.nihoUserId],
+      );
+      const held = await client.query<{ product_id: string; version: string | number }>(
+        `SELECT product_id,version FROM experience_product_publication_states
+          WHERE provider_id=$1 AND operations_suspended_at IS NOT NULL AND operations_suspension_code=$2
+          ORDER BY product_id COLLATE "C" FOR UPDATE`,
+        [providerId, PROVIDER_SUSPENDED_CODE],
+      );
+      for (const row of held.rows) await clearListingSuspensionIn(client, providerId, row.product_id, safeInteger(row.version, "version"));
+      return { changed: true, suspendedProducts: held.rows.length };
+    });
+  }
+
+  /**
+   * The office's list of hosts (#711), read only, up to 500: the route they came in by, the owners' accounts (a NIHO user ID
+   * is never returned), what is public and selling, the first publication and first bookings, and the host's suspension.
+   */
+  async listAdminHosts(actor: PublicationOperationsActor): Promise<readonly ExperienceAdminHost[]> {
+    assertStoreIdentifier(actor.nihoUserId, "actor.nihoUserId");
+    const result = await this.#pool.query<DbRow>(
+      `SELECT provider.id AS provider_id,provider.created_at,provider.operations_suspended_at,provider.operations_suspension_code,
+              profile.public_display_name,profile.public_display_name_en,profile.provider_kind,profile.consent_source,
+              (registration.provider_id IS NOT NULL) AS self_registered,
+              COALESCE((
+                SELECT jsonb_agg(jsonb_build_object('accountId',account.id,'status',account.status,'email',account.email) ORDER BY account.id)
+                  FROM provider_memberships membership
+                  JOIN host_accounts account ON account.id=membership.niho_user_id
+                 WHERE membership.provider_id=provider.id AND membership.role='OWNER' AND membership.active=true
+              ),'[]'::jsonb) AS owners,
+              EXISTS (SELECT 1 FROM provider_memberships membership
+                       WHERE membership.provider_id=provider.id AND membership.role='OWNER' AND membership.active=true
+                         AND membership.niho_user_id !~ '^hst_[0-9a-f]{32}$') AS has_other_owner,
+              (SELECT count(*) FROM experience_product_publication_states state
+                WHERE state.provider_id=provider.id AND state.current_publication_id IS NOT NULL)::int AS public_pages,
+              (SELECT count(*) FROM experience_product_publication_states state
+                WHERE state.provider_id=provider.id AND state.booking_publication_id IS NOT NULL AND state.current_publication_id IS NOT NULL
+                  AND state.self_stopped_at IS NULL AND state.operations_suspended_at IS NULL AND NOT state.owner_resume_required)::int AS selling_pages,
+              (SELECT min(state.first_published_at) FROM experience_product_publication_states state WHERE state.provider_id=provider.id) AS first_published_at,
+              (SELECT min(event.created_at) FROM experience_product_booking_events event
+                WHERE event.provider_id=provider.id AND event.kind='OPENED' AND event.reason<>'BACKFILL') AS first_booking_opened_at
+         FROM experience_providers provider
+         LEFT JOIN experience_provider_public_profiles profile ON profile.provider_id=provider.id
+         LEFT JOIN experience_provider_self_registrations registration ON registration.provider_id=provider.id
+        ORDER BY provider.created_at DESC,provider.id COLLATE "C"
+        LIMIT 500`,
+    );
+    return result.rows.map((row) => {
+      const owners = (Array.isArray(row.owners) ? row.owners : []) as Array<{ accountId: string; status: string; email: string | null }>;
+      return {
+        providerId: String(row.provider_id),
+        publicDisplayName: row.public_display_name === null ? null : String(row.public_display_name),
+        publicDisplayNameEn: typeof row.public_display_name_en === "string" ? row.public_display_name_en : null,
+        providerKind: row.provider_kind === "PERSON" || row.provider_kind === "BUSINESS" ? row.provider_kind : null,
+        consentSource: row.consent_source === "ADMIN" || row.consent_source === "OWNER" ? row.consent_source : null,
+        route: row.self_registered === true ? "SELF" : "OFFICE",
+        registeredAtUtc: iso(row.created_at, "created_at"),
+        owners: owners.map((owner) => ({ hostAccountId: owner.accountId, status: owner.status === "SUSPENDED" ? "SUSPENDED" as const : "ACTIVE" as const, email: owner.email })),
+        hasOtherOwner: row.has_other_owner === true,
+        publicPages: safeInteger(row.public_pages, "public_pages"),
+        sellingPages: safeInteger(row.selling_pages, "selling_pages"),
+        firstPublishedAtUtc: nullableIso(row.first_published_at, "first_published_at"),
+        firstBookingOpenedAtUtc: nullableIso(row.first_booking_opened_at, "first_booking_opened_at"),
+        operationsSuspendedAtUtc: nullableIso(row.operations_suspended_at, "operations_suspended_at"),
+        operationsSuspensionCode: row.operations_suspension_code === null ? null : String(row.operations_suspension_code),
+      };
     });
   }
 

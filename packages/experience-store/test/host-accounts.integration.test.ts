@@ -121,7 +121,7 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
     await withAccounts(async ({ pool, accounts }) => {
       const active = await provision(accounts, "active@example.com");
       const suspended = await provision(accounts, "suspended@example.com");
-      await accounts.suspendHostAccount({ hostAccountId: suspended, nowUtc: at(0) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: suspended, nowUtc: at(0) });
       const ask = (email: string, offsetMs: number) => accounts.requestLogin({ email, browserBindingHash: browser("a"), nowUtc: at(offsetMs) });
 
       const unknown = await ask("nobody@example.com", 0);
@@ -193,7 +193,7 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
       const other = await provision(accounts, "other@example.com");
       await accounts.requestLogin({ email: "other@example.com", browserBindingHash: browser("a"), nowUtc: at(21 * MINUTE) });
       const [suspendedRequest] = await accounts.listPendingLoginRequests({ nowUtc: at(21 * MINUTE), limit: 10 });
-      await accounts.suspendHostAccount({ hostAccountId: other, nowUtc: at(22 * MINUTE) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: other, nowUtc: at(22 * MINUTE) });
       assert.deepEqual(await accounts.listPendingLoginRequests({ nowUtc: at(22 * MINUTE), limit: 10 }), []);
       assert.deepEqual(await accounts.issueLoginLink({ requestId: suspendedRequest!, nowUtc: at(22 * MINUTE) }), { kind: "skip" });
 
@@ -246,9 +246,9 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
 
       // Suspended after the email went out: the link stays dead after a reactivation too.
       const beforeSuspension = await linkFor(accounts, "host@example.com", 2 * HOUR, "laptop");
-      assert.equal(await accounts.suspendHostAccount({ hostAccountId: id, nowUtc: at(2 * HOUR + MINUTE) }), "CHANGED");
+      assert.equal(await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: id, nowUtc: at(2 * HOUR + MINUTE) }), "CHANGED");
       assert.deepEqual(await open(beforeSuspension.token, "laptop", 2 * HOUR + 2 * MINUTE), { kind: "invalid" });
-      assert.equal(await accounts.reactivateHostAccount({ hostAccountId: id, nowUtc: at(2 * HOUR + 3 * MINUTE) }), "CHANGED");
+      assert.equal(await accounts.reactivateHostAccount({ actorId: "test-actor", hostAccountId: id, nowUtc: at(2 * HOUR + 3 * MINUTE) }), "CHANGED");
       assert.deepEqual(await open(beforeSuspension.token, "laptop", 2 * HOUR + 4 * MINUTE), { kind: "invalid" });
 
       // Signed out everywhere after the email went out.
@@ -341,23 +341,23 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
       const again = await signIn(accounts, "host@example.com", 20 * MINUTE);
       assert.notEqual(await read(again.sessionToken), null);
 
-      assert.equal(await accounts.suspendHostAccount({ hostAccountId: id, nowUtc: at(HOUR) }), "CHANGED");
-      assert.equal(await accounts.suspendHostAccount({ hostAccountId: id, nowUtc: at(HOUR) }), "UNCHANGED");
+      assert.equal(await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: id, nowUtc: at(HOUR) }), "CHANGED");
+      assert.equal(await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: id, nowUtc: at(HOUR) }), "UNCHANGED");
       assert.equal(await read(again.sessionToken, 2 * HOUR), null);
       // A suspended account gets no link, answered alike.
       assert.deepEqual(await accounts.requestLogin({ email: "host@example.com", browserBindingHash: browser("a"), nowUtc: at(2 * HOUR) }), { kind: "accepted" });
       assert.deepEqual(await accounts.listPendingLoginRequests({ nowUtc: at(2 * HOUR), limit: 10 }), []);
-      assert.equal(await accounts.reactivateHostAccount({ hostAccountId: id, nowUtc: at(3 * HOUR) }), "CHANGED");
-      assert.equal(await accounts.reactivateHostAccount({ hostAccountId: id, nowUtc: at(3 * HOUR) }), "UNCHANGED");
+      assert.equal(await accounts.reactivateHostAccount({ actorId: "test-actor", hostAccountId: id, nowUtc: at(3 * HOUR) }), "CHANGED");
+      assert.equal(await accounts.reactivateHostAccount({ actorId: "test-actor", hostAccountId: id, nowUtc: at(3 * HOUR) }), "UNCHANGED");
       assert.equal(await read(again.sessionToken, 3 * HOUR), null);
       const afterReactivation = await signIn(accounts, "host@example.com", 4 * HOUR);
       assert.equal((await read(afterReactivation.sessionToken, 5 * HOUR))?.hostAccountId, id);
 
       const unknown = `hst_${"0".repeat(32)}`;
       await assert.rejects(accounts.revokeAllSessions({ hostAccountId: unknown, nowUtc: at(0) }), StoreNotFoundError);
-      await assert.rejects(accounts.suspendHostAccount({ hostAccountId: unknown, nowUtc: at(0) }), StoreNotFoundError);
-      await assert.rejects(accounts.reactivateHostAccount({ hostAccountId: unknown, nowUtc: at(0) }), StoreNotFoundError);
-      await assert.rejects(accounts.suspendHostAccount({ hostAccountId: "niho-user-1", nowUtc: at(0) }), StoreValidationError);
+      await assert.rejects(accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: unknown, nowUtc: at(0) }), StoreNotFoundError);
+      await assert.rejects(accounts.reactivateHostAccount({ actorId: "test-actor", hostAccountId: unknown, nowUtc: at(0) }), StoreNotFoundError);
+      await assert.rejects(accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: "niho-user-1", nowUtc: at(0) }), StoreValidationError);
     });
   });
 
@@ -401,7 +401,7 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
       const second = await provision(accounts, "second@example.com");
       const editor = await provision(accounts, "editor@example.com");
       const suspended = await provision(accounts, "suspended@example.com");
-      await accounts.suspendHostAccount({ hostAccountId: suspended, nowUtc: at(0) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: suspended, nowUtc: at(0) });
       const grant = (providerId: string, hostAccountId: string) => accounts.grantProviderOwner({ providerId, hostAccountId, nowUtc: at(MINUTE) });
 
       assert.deepEqual(await grant("provider-a", first), { kind: "granted" });
@@ -457,7 +457,7 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
       ]);
       assert.deepEqual((await accounts.listProviderMemberships({ hostAccountId: other })).map((row) => row.providerId), ["provider-other"]);
       // A suspended or unknown account opens nothing; a NIHO user ID is not a host account ID.
-      await accounts.suspendHostAccount({ hostAccountId: host, nowUtc: at(MINUTE) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: host, nowUtc: at(MINUTE) });
       assert.deepEqual(await accounts.listProviderMemberships({ hostAccountId: host }), []);
       assert.deepEqual(await accounts.listProviderMemberships({ hostAccountId: `hst_${"0".repeat(32)}` }), []);
       await assert.rejects(accounts.listProviderMemberships({ hostAccountId: "niho-user-synthetic" }), StoreValidationError);
@@ -483,7 +483,7 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
       assert.deepEqual(await endpoints(), ["https://fcm.googleapis.com/fcm/send/synthetic-host-laptop"]);
 
       // A subscription left behind (written after the suspension's delete) still gets nothing while the account is suspended.
-      await accounts.suspendHostAccount({ hostAccountId: host, nowUtc: at(4 * MINUTE) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: host, nowUtc: at(4 * MINUTE) });
       assert.equal(Number((await pool.query("SELECT count(*)::int AS n FROM host_push_subscriptions WHERE niho_user_id = $1", [host])).rows[0]!.n), 0);
       await push.save({ nihoUserId: host, connectionId: laptop.sessionRef, endpoint: "https://fcm.googleapis.com/fcm/send/synthetic-host-laptop", ...keys, deviceLabel: "android" });
       assert.deepEqual(await endpoints(), []);
@@ -491,7 +491,7 @@ describe("PostgreSQL host accounts (ADR 0003)", { skip: databaseUrl === undefine
       assert.deepEqual(await push.productRecipients("provider-push", "product-synthetic", new Date(0)), []);
 
       // Signing out everywhere forgets every device of the account as well.
-      await accounts.reactivateHostAccount({ hostAccountId: host, nowUtc: at(5 * MINUTE) });
+      await accounts.reactivateHostAccount({ actorId: "test-actor", hostAccountId: host, nowUtc: at(5 * MINUTE) });
       assert.deepEqual(await endpoints(), ["https://fcm.googleapis.com/fcm/send/synthetic-host-laptop"]);
       await accounts.revokeAllSessions({ hostAccountId: host, nowUtc: at(6 * MINUTE) });
       assert.deepEqual(await endpoints(), []);

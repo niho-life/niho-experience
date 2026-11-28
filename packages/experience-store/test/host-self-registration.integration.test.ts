@@ -160,7 +160,7 @@ describe("host self-registration", { skip: databaseUrl === undefined }, () => {
       assert.deepEqual(await identities.registerHostSelfForAccount({ hostAccountId: first.hostAccountId, nowUtc: at(4 * MINUTE), ...form({ publicDisplayName: "四つ目" }) }), { kind: "owner-limit-reached" });
       assert.deepEqual(await snapshot(pool), before);
 
-      await accounts.suspendHostAccount({ hostAccountId: first.hostAccountId, nowUtc: at(5 * MINUTE) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: first.hostAccountId, nowUtc: at(5 * MINUTE) });
       assert.deepEqual(await identities.registerHostSelfForAccount({ hostAccountId: first.hostAccountId, nowUtc: at(6 * MINUTE), ...form() }), { kind: "account-suspended" });
       assert.deepEqual(await snapshot(pool), before);
       await assert.rejects(identities.registerHostSelfForAccount({ hostAccountId: `hst_${"0".repeat(32)}`, nowUtc: at(6 * MINUTE), ...form() }), StoreNotFoundError);

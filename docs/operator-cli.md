@@ -112,6 +112,9 @@ CLI --Bearer <Google ID トークン>--> src/proxy.ts --(sealed assertion, 60秒
 | `product` | `create`・`draft`・`review`・`calendar-add`・`photo-add` | edit |
 | `product` | `terms`（価格・販売条件） | terms |
 | `product` | `publish`・`suspend`・`resume` | publish |
+| `provider` | `hosts`（ホストの一覧：登録の経路・オーナーのアカウント・公開と受付の数・最初の公開と受付・運営停止。メールアドレスを含むので外に貼らない） | read |
+| `provider` | `suspend --provider … --reason <CODE>`・`clear-suspension --provider …`（ホスト単位の運営停止と解除。#711、`docs/host-operations.md`） | publish |
+| `host-account` | `suspend --account hst_…`・`reactivate --account hst_…`（ホストのログインアカウントの停止と解除） | publish |
 | `inquiry` | `list`（`--status`・`--id`） | read |
 | `inquiry` | `update --id <uuid> [--status] [--assignee] [--due] [--note]` | edit |
 | `assignment` | `list`（`--provider`・`--occurrence`） | read |
@@ -213,6 +216,7 @@ node scripts/experience/ops.mjs guide stop --id <articleId> --yes               
 
 ### まだ CLI に無いもの
 
+- ホスト単位の停止（`provider suspend`）は、そのホストの公開中のページと受付をすべて止める。`--yes` なしでは、止まる数（公開中・受付中）を見せるだけ。解除（`clear-suspension`）は運営停止だけを外し、各体験の再開は持ち主が行う。個別に別の理由で止めた体験は、ホストの解除で動かない。**本番は依頼した人の了承を取ってから `--yes`。**
 - **予約の取消・返金・精算・受取口座**：扱わない（領域に入れていない）。stg の合成データの片付けは、商品の `suspend` まで（予約の取消は返金を伴いうるので、画面で人が行う）。
 - 販売者（seller workspace）の新規登録：運用スクリプト `scripts/experience/provision-host-seller.mjs`。
 

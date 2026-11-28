@@ -462,8 +462,9 @@ export class HostAccounts {
    * Suspends an account: its sessions and unused links stop working at once and stay dead after a reactivation; it
    * gets no new link. Memberships stay as they are. StoreNotFoundError for no account.
    */
-  async suspendHostAccount(input: { readonly hostAccountId: string; readonly nowUtc: string }): Promise<HostAccountChange> {
+  async suspendHostAccount(input: { readonly hostAccountId: string; readonly nowUtc: string; /** Who did it (the Admin actor); recorded with the change. */ readonly actorId: string }): Promise<HostAccountChange> {
     const account = hostAccountId(input?.hostAccountId);
+    const actor = actorId(input?.actorId);
     const at = now(input.nowUtc);
     return withTransaction(this.#pool, async (client) => {
       const found = await client.query<DbRow>("SELECT status FROM host_accounts WHERE id = $1 FOR UPDATE", [account]);
@@ -478,13 +479,15 @@ export class HostAccounts {
       );
       await client.query(REVOKE_ACCOUNT_SESSIONS, [account, at]);
       await client.query(FORGET_ACCOUNT_PUSH, [account]);
+      await recordAccountOperation(client, account, "SUSPENDED", actor);
       return "CHANGED";
     });
   }
 
   /** Lets a suspended account ask for links again. Earlier sessions and links stay dead. StoreNotFoundError for no account. */
-  async reactivateHostAccount(input: { readonly hostAccountId: string; readonly nowUtc: string }): Promise<HostAccountChange> {
+  async reactivateHostAccount(input: { readonly hostAccountId: string; readonly nowUtc: string; /** Who did it (the Admin actor); recorded with the change. */ readonly actorId: string }): Promise<HostAccountChange> {
     const account = hostAccountId(input?.hostAccountId);
+    const actor = actorId(input?.actorId);
     const at = now(input.nowUtc);
     return withTransaction(this.#pool, async (client) => {
       const found = await client.query<DbRow>("SELECT status FROM host_accounts WHERE id = $1 FOR UPDATE", [account]);
@@ -495,6 +498,7 @@ export class HostAccounts {
           WHERE id = $1`,
         [account, at],
       );
+      await recordAccountOperation(client, account, "REACTIVATED", actor);
       return "CHANGED";
     });
   }
@@ -569,6 +573,16 @@ export async function openHostSessionIn(
     [digest(sessionToken), sessionRef, input.hostAccountId, input.sessionVersion, input.createdAtUtc, HOST_ACCOUNT_LIMITS.sessionIdleDays, HOST_ACCOUNT_LIMITS.sessionAbsoluteDays, input.authenticatedAtUtc],
   );
   return { kind: "ok", sessionToken, sessionRef, hostAccountId: input.hostAccountId, absoluteExpiresAtUtc: isoValue(opened.rows[0]!, "absolute_expires_at") };
+}
+
+function actorId(value: unknown): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 256) throw new StoreValidationError("actorId must be 1-256 characters.");
+  return value;
+}
+
+/** The append-only record of the office's suspension or reactivation of an account, in the change's transaction (#711). */
+async function recordAccountOperation(client: PoolClient, account: string, kind: "SUSPENDED" | "REACTIVATED", actor: string): Promise<void> {
+  await client.query("INSERT INTO host_account_operation_events (host_account_id,kind,actor_id) VALUES ($1,$2,$3)", [account, kind, actor]);
 }
 
 /** One host account's OWNER memberships take turns (the key ensureMappedOwnerMembership and migration 0093's trigger use). */

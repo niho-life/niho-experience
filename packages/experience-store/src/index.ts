@@ -23,7 +23,9 @@ export { ManagedBookingApprovalRepository } from "./managed-booking-approvals.ts
 export type { ApprovedManagedBookingRequest, ManagedBookingApprovalPage, ManagedBookingApprovalRequest } from "./managed-booking-approvals.ts";
 export { HOST_TEAM_CONTRACT_VERSION, HOST_TEAM_RESOLVE_LIMIT, HostTeamRepository, hostAccessFingerprint } from "./host-team.ts";
 export type { HostAccessProjection, HostTeamActor, HostTeamCandidate, HostTeamCommandReceipt, HostTeamMember, HostTeamMemberRole, HostTeamMutationResult, HostTeamOperation, HostTeamSnapshot } from "./host-team.ts";
-export { ExperiencePublicationBlockedError, ExperiencePublicationRepository, isSelling, publicationManuscriptReview } from "./experience-publication.ts";
+export { ExperiencePublicationBlockedError, ExperiencePublicationRepository, PROVIDER_SUSPENDED_CODE, isSelling, publicationManuscriptReview } from "./experience-publication.ts";
+export { OFFICE_NOTICE_KINDS, OfficeNotices } from "./office-notices.ts";
+export type { ClaimedOfficeNotice, OfficeNoticeKind, OfficeNoticeOutcome, OfficeNoticeStatus } from "./office-notices.ts";
 export { ProviderSellerDisclosureRepository, validateSellerDisclosureInput } from "./provider-seller-disclosures.ts";
 export { EMPTY_HOST_BIO_STATE, ProviderHostBioRepository, hostBioSourceFingerprint } from "./provider-host-bios.ts";
 export type { HostBioState, PublicHostBio, SaveHostBioCommand } from "./provider-host-bios.ts";
@@ -91,7 +93,10 @@ export type {
   ExperienceHostProviderMediaAsset,
   ExperienceHostProviderMediaAssetInput,
   ExperienceHostProviderMediaSelectionInput,
+  ExperienceAdminHost,
+  ExperienceAdminHostOwner,
   ExperienceProviderPublicKind,
+  ProviderOperationsSuspensionResult,
   ProviderPublicationReadiness,
   ProviderPublicationReadinessInput,
   PublicationOperationsActor,
