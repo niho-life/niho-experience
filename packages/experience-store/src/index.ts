@@ -16,6 +16,12 @@ export { ExperienceStore } from "./repository.ts";
 export { ManagedExperienceSalesRepository, validateManagedPlatformSellerConfig } from "./managed-sales.ts";
 export type { CheckoutTransitionOutcome, ManagedCompensation, ManagedPlatformSellerConfig, SalesPlanRevision, SalesPlanState, SalesPlanTransition } from "./managed-sales.ts";
 export { ProviderAgentSales } from "./agent-sales.ts";
+export { AGENT_PAYOUT_ADMIN_ACTIONS, AGENT_PAYOUT_LIMITS, AgentPayoutRepository, agentPayoutAmounts } from "./agent-payouts.ts";
+export type {
+  AgentAdjustmentReason, AgentAdjustmentStatus, AgentPayoutAdjustmentRecord, AgentPayoutAdminAction, AgentPayoutAdminInput, AgentPayoutAttentionItem,
+  AgentPayoutCommand, AgentPayoutDetail, AgentPayoutEventRecord, AgentPayoutHold, AgentPayoutPrepared, AgentPayoutRecord, AgentPayoutStatus,
+  AgentPayoutTransferAnswer, AgentReversalAnswer, ClaimedAgentReversal, HostAgentPayoutRow,
+} from "./agent-payouts.ts";
 export type { AgentSalesChoice, AgentSalesChoiceInput, AgentSalesConsent } from "./agent-sales.ts";
 export { agentPlanSql, countedAgentConsentSql, isAgentSellerRef, salesKindOf } from "./sales-kind.ts";
 export type { SalesKind, SalesKindInput } from "./sales-kind.ts";
@@ -174,7 +180,7 @@ export type {
 export { HOST_MAIL_TOPICS, HOST_NOTIFICATION_ADDRESS_LIMITS, isHostEmail } from "./host-mail-shared.ts";
 export type { HostBookingMailTopic, HostMailTopic } from "./host-mail-shared.ts";
 export { HOST_MAIL_LIMITS, HOST_MAIL_NOTIFICATION_TOPICS, HostMailOutbox } from "./host-mail-outbox.ts";
-export type { ClaimedHostPayoutAccountMail, HostPayoutAccountMailClaim } from "./host-mail-outbox.ts";
+export type { ClaimedHostAgentPayoutMail, ClaimedHostPayoutAccountMail, HostAgentPayoutMailClaim, HostPayoutAccountMailClaim } from "./host-mail-outbox.ts";
 export { CONNECT_ACCOUNT_STATES, ExperienceConnectAccounts } from "./connect-accounts.ts";
 export type {
   ConnectAccountPurpose, ConnectAccountRecord, ConnectAccountReservation, ConnectAccountSnapshot, ConnectAccountSnapshotInput,

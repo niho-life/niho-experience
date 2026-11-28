@@ -7,11 +7,12 @@ import { officeNoticeEmail } from "@/lib/mail/office-notice-templates";
 import { groupInquiryReceiptEmail, groupInquiryStaffEmail } from "@/lib/mail/group-inquiry-templates";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import type { HostPushKind } from "@/lib/host/push/payload";
-import { hostAddressConfirmationEmail, hostBookingEmail, hostPayoutAccountEmail, hostInvitationEmail, hostLoginLinkEmail, hostNotificationEmail, hostTeamInvitationEmail } from "@/lib/mail/host-templates";
+import { hostAddressConfirmationEmail, hostAgentPayoutAccountEmail, hostBookingEmail, hostPayoutAccountEmail, hostInvitationEmail, hostLoginLinkEmail, hostNotificationEmail, hostTeamInvitationEmail } from "@/lib/mail/host-templates";
 import { bookingConfirmationEmail, bookingLinkEmail, bookingMeetingGuideEmail, bookingMessageEmail, bookingNoticeEmail, managedGuestBookingEmail, managedOperationsBookingEmail, questionReplyEmail, reviewInvitationEmail, supportBookingMessageEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
 import { guestMessageToJapanese } from "@/lib/translation/prompts";
+import { runAgentPayouts, type AgentPayoutCounts, type AgentPayoutsDeps } from "@/lib/experience/agent-payouts";
 import { runSettlementReconciliation, type SettlementReconciliationCounts, type SettlementReconciliationDeps } from "@/lib/experience/settlement-reconciliation";
 
 /**
@@ -73,6 +74,7 @@ export const EXPERIENCE_JOB_LIMITS = {
   hostAddressConfirmations: 10,
   /** #710: "the payout account needs more information", one per account and need. */
   hostPayoutAccountMails: 10,
+  hostAgentPayoutMails: 10,
   hostMailLeaseSeconds: 120,
   /** People whose access ended, their addresses deleted per run. */
   hostAddressesPurgedPerStep: 200,
@@ -230,11 +232,15 @@ export interface ExperienceJobCounts {
   readonly hostBookingMails: HostMailCounts | StepOff | FailedStep;
   /** Only while the host mail is on and the payout accounts can be registered (EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED, #710). */
   readonly hostPayoutAccountMails?: HostMailCounts | FailedStep;
+  /** Only with the agent payout flag (EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED, #725): the "payout waits for an account" emails. */
+  readonly hostAgentPayoutMails?: HostMailCounts | FailedStep;
   /** The addresses of hosts with no membership or grant left (#194), deleted whatever the flag. */
   readonly hostAddressPurge: PurgeCounts | FailedStep;
   /** Off when public media storage is not configured; claims remain unfinished in that case. */
   readonly providerMediaCleanup: ProviderMediaCleanupCounts | StepOff | FailedStep;
   readonly settlementReconciliation?: SettlementReconciliationCounts | StepOff | FailedStep;
+  /** 代理受領の送金 (#725): present only with EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED. */
+  readonly agentPayouts?: AgentPayoutCounts | StepOff | FailedStep;
   /** Only with Experience host accounts (EXPERIENCE_HOST_ACCOUNTS_ENABLED): their sign-in links, then the purge. */
   readonly hostLoginLinks?: HostLoginLinkCounts | FailedStep;
   /** Only with the NIHO account login (EXPERIENCE_HOST_NIHO_LOGIN_ENABLED, #596): the invitation emails. */
@@ -298,7 +304,7 @@ export interface ExperienceJobDeps {
    */
   readonly hostMail: {
     readonly outbox: Pick<HostMailOutbox, "claimBookingMails" | "completeBookingMail" | "retryBookingMail" | "claimAddressConfirmations" | "issueAddressConfirmationToken" | "completeAddressConfirmation" | "retryAddressConfirmation">
-      & Partial<Pick<HostMailOutbox, "claimPayoutAccountMails" | "completePayoutAccountMail" | "retryPayoutAccountMail">>;
+      & Partial<Pick<HostMailOutbox, "claimPayoutAccountMails" | "completePayoutAccountMail" | "retryPayoutAccountMail" | "claimAgentPayoutMails" | "completeAgentPayoutMail" | "retryAgentPayoutMail">>;
     readonly allowed: (providerId: string, kind: HostPushKind) => Promise<boolean>;
     readonly summaries?: Pick<HostNotificationOutbox, "enqueueDueDayBeforeSummaries">;
   } | null;
@@ -307,6 +313,8 @@ export interface ExperienceJobDeps {
    * before migration 0095 never reads its tables.
    */
   readonly hostPayoutAccountMails?: boolean;
+  /** The "payout waits for an account" emails (#725), claimed only while EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED is on (migration 0097 first). */
+  readonly hostAgentPayoutMails?: boolean;
   /** Deletes the addresses of hosts whose access ended (#194), whatever the flag: what was kept while it was on still goes. */
   readonly hostAddresses: Pick<HostNotificationAddresses, "purge">;
   /** Present only when public media storage is configured. */
@@ -317,6 +325,8 @@ export interface ExperienceJobDeps {
   readonly now: () => Date;
   /** Actual Stripe fee/refund reconciliation and durable NIHO compensation transfers. */
   readonly settlementReconciliation?: SettlementReconciliationDeps;
+  /** 代理受領の送金 (#725): present only while EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED is on. */
+  readonly agentPayouts?: AgentPayoutsDeps;
   /**
    * Experience host accounts (ADR 0003), present only while EXPERIENCE_HOST_ACCOUNTS_ENABLED is on: the sign-in links to
    * send and the old requests and ended sessions to delete.
@@ -347,7 +357,8 @@ async function step<K extends keyof ExperienceJobCounts>(
   work: () => Promise<Exclude<ExperienceJobCounts[K], FailedStep>>,
 ): Promise<ExperienceJobCounts[K]> {
   try {
-    return await work();
+    // The counts union grew past what the compiler can relate to K; the signature keeps the two sides matched.
+    return await work() as unknown as ExperienceJobCounts[K];
   } catch (error) {
     deps.onStepError?.(name, error instanceof Error ? error.name : "unknown error");
     return { error: "unavailable" } as ExperienceJobCounts[K];
@@ -820,6 +831,37 @@ async function sendHostPayoutAccountMails(deps: ExperienceJobDeps, hostMail: Hos
   return counts;
 }
 
+/** 「送金の受取口座が必要です」 (#725): one claimed at a time; nothing is sent once the payout no longer waits for an account. */
+async function sendHostAgentPayoutMails(deps: ExperienceJobDeps, hostMail: HostMail): Promise<HostMailCounts> {
+  const outbox = hostMail.outbox;
+  const counts = { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 };
+  if (!outbox.claimAgentPayoutMails || !outbox.completeAgentPayoutMail || !outbox.retryAgentPayoutMail) return counts;
+  const startedAt = deps.now().getTime();
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.hostAgentPayoutMails)) {
+    const claim = await outbox.claimAgentPayoutMails({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.hostMailLeaseSeconds });
+    counts.abandoned += claim.abandoned;
+    const [row] = claim.mails;
+    if (!row) break;
+    counts.claimed += 1;
+    if (row.to === null) {
+      await outbox.completeAgentPayoutMail(row.id);
+      counts.skipped += 1;
+      continue;
+    }
+    const result = await deps.mailer.sendMail({ to: row.to, ...hostAgentPayoutAccountEmail({ siteUrl: deps.siteUrl, providerId: row.providerId }) });
+    if (result.ok || result.failure === "permanent") {
+      await outbox.completeAgentPayoutMail(row.id);
+      if (result.ok) counts.sent += 1;
+      else counts.failed += 1;
+    } else {
+      if (await outbox.retryAgentPayoutMail(row.id, row.attempts) === "FAILED") counts.failed += 1;
+      else counts.retried += 1;
+      break;
+    }
+  }
+  return counts;
+}
+
 /**
  * A host's emails about bookings (#194, owner decision 2026-11-01): this site's new and cancelled bookings to the OWNER, an OTA
  * booking that is new, cancelled or moved to the product's OWNER and operators, each to the address in use when it goes. The
@@ -1045,6 +1087,9 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const hostPayoutAccountMails = deps.hostPayoutAccountMails === true && hostMail?.outbox.claimPayoutAccountMails
     ? await step(deps, "hostPayoutAccountMails", () => sendHostPayoutAccountMails(deps, hostMail))
     : undefined;
+  const hostAgentPayoutMails = deps.hostAgentPayoutMails === true && hostMail?.outbox.claimAgentPayoutMails
+    ? await step(deps, "hostAgentPayoutMails", () => sendHostAgentPayoutMails(deps, hostMail))
+    : undefined;
   const access = deps.access;
   const bookingLinks: ExperienceJobCounts["bookingLinks"] = access
     ? await step(deps, "bookingLinks", () => sendBookingLinks(deps, access))
@@ -1092,6 +1137,10 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const hostAddressPurge = await step(deps, "hostAddressPurge", async () => ({
     purged: await deps.hostAddresses.purge({ limit: EXPERIENCE_JOB_LIMITS.hostAddressesPurgedPerStep }),
   }));
+  // After the refund resend and before the settlement: the host's share is sent once the refunds are known (#725). Off without its flag.
+  const agentPayouts = deps.agentPayouts
+    ? await step(deps, "agentPayouts", () => runAgentPayouts({ budgetMs: EXPERIENCE_JOB_LIMITS.sendBudgetMs, now: deps.now, ...deps.agentPayouts! }))
+    : undefined;
   const settlementReconciliation = deps.settlementReconciliation
     ? await step(deps, "settlementReconciliation", () => runSettlementReconciliation(deps.settlementReconciliation!))
     : { off: true } as const;
@@ -1111,6 +1160,8 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
     bookingAccessPurge, hostAddressConfirmations, hostBookingMails, hostAddressPurge, providerMediaCleanup,
     ...(deps.settlementReconciliation ? { settlementReconciliation } : {}),
     ...(hostPayoutAccountMails ? { hostPayoutAccountMails } : {}),
+    ...(hostAgentPayoutMails ? { hostAgentPayoutMails } : {}),
+    ...(agentPayouts ? { agentPayouts } : {}),
     ...(meetingGuideSnapshotPurge ? { meetingGuideSnapshotPurge } : {}),
     ...(reviewInvitations ? { reviewInvitations } : {}),
     ...(meetingGuides ? { meetingGuides } : {}),

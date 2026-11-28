@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { hostAddressConfirmationEmail, hostBookingEmail, hostPayoutAccountEmail, hostInvitationEmail, hostNotificationEmail, hostTeamInvitationEmail } from "./host-templates";
+import { hostAddressConfirmationEmail, hostAgentPayoutAccountEmail, hostBookingEmail, hostPayoutAccountEmail, hostInvitationEmail, hostNotificationEmail, hostTeamInvitationEmail } from "./host-templates";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import { HOST_NOTIFICATION_TOPICS } from "@niho-experience/experience-store";
 
@@ -137,6 +137,16 @@ describe("payout account email (#710)", () => {
     expect(mail.text).toContain("Stripe で、受取口座の追加の情報の入力が必要になりました。");
     expect(mail.text).toContain(`${SITE}/host/settings?providerId=provider-a#settings-payout`);
     expect(mail.text).not.toContain("stripe.com");
+    expect(mail.html).toContain('<html lang="ja">');
+  });
+});
+
+describe("agent payout account email (#725)", () => {
+  it("says a payout waits for an account and links to 設定 › 受取口座, with no amount, booking or Stripe link", () => {
+    const mail = hostAgentPayoutAccountEmail({ siteUrl: SITE, providerId: "provider-a" });
+    expect(mail.subject).toBe("売上の送金に、受取口座の登録が必要です");
+    expect(mail.text).toContain(`${SITE}/host/settings?providerId=provider-a#settings-payout`);
+    expect(mail.text).not.toMatch(/stripe\.com|円|¥/);
     expect(mail.html).toContain('<html lang="ja">');
   });
 });

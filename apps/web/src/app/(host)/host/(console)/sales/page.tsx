@@ -2,20 +2,21 @@ import type { Metadata } from "next";
 import { Suspense, type ReactNode } from "react";
 import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { SalesLines, SalesLoading, SalesMonthNav, SalesPayoutNoticeView, SalesPayoutsMessage, SalesPayoutsPanel, SalesScope, SalesSummaryPanel } from "@/components/host/HostSales";
+import { HostAgentPayouts } from "@/components/host/HostAgentPayouts";
 import { SettlementSummaryList } from "@/components/settlement/SettlementSummaryList";
 import { HOST_SURFACE } from "@/components/host/host-ui";
 import { HostPageBody, PageHead } from "@/components/host/ui";
 import { hostPageContext, loadHostPayout, loadHostSales } from "@/host/data";
 import { notFound } from "next/navigation";
 import { salesPayoutNotice } from "@/host/payout";
-import { salesPage, type SalesMonth, type SalesPage } from "@/host/sales";
+import { monthKey, salesPage, type SalesMonth, type SalesPage } from "@/host/sales";
 import { SITE_SALES_LOAD_FAILED_TEXT, SITE_SALES_SCOPE_TEXT } from "@/host/site-sales";
 import { SITE_PAYOUTS_LOADING_TEXT } from "@/host/site-sales-payouts";
 import { loadSitePayouts } from "@/host/site-sales-payouts-server";
 import { loadSiteSales } from "@/host/site-sales-server";
 import { ownerActor } from "@/host/site-bookings-server";
 import { config } from "@/lib/config";
-import { experienceSupportRepository, managedExperienceSalesRepository } from "@/lib/experience/store-server";
+import { agentPayoutRepository, experienceSupportRepository, managedExperienceSalesRepository } from "@/lib/experience/store-server";
 import type { HostProvider } from "@/lib/host/providers";
 import { HOST_SETTINGS_PATH, withProvider } from "@/lib/host/routes";
 import type { HostSession } from "@/lib/host/session";
@@ -90,6 +91,9 @@ async function HostSalesMonth({ provider, reader, month, linkProviderId }: Month
         {config.managedSalesWebhooksEnabled ? <Suspense fallback={<p role="status" className="mt-4 text-sm text-muted">事務局振込の状態を読み込んでいます…</p>}>
           <HostManagedCompensationPanel provider={provider} />
         </Suspense> : null}
+        {config.hostAgentPayoutsEnabled ? <Suspense fallback={<p role="status" className="mt-4 text-sm text-muted">NIHO からの送金を読み込んでいます…</p>}>
+          <HostAgentPayoutPanel provider={provider} month={site.page.month} settingsHref={`${withProvider(HOST_SETTINGS_PATH, linkProviderId)}#settings-payout`} />
+        </Suspense> : null}
         <Suspense fallback={<p role="status" className="mt-4 text-sm text-muted">決済費用の実費を読み込んでいます…</p>}>
           <HostExperienceSettlementPanel provider={provider} />
         </Suspense>
@@ -151,6 +155,15 @@ async function HostManagedCompensationPanel({ provider }: { provider: HostProvid
       <span className="text-muted">支払期日 {row.dueOn}</span><span className="font-bold">{status[row.status]}</span>
     </li>)}</ul>
   </section>;
+}
+
+/** The OWNER's payouts of this provider only (the store filters by `providerId`). */
+async function HostAgentPayoutPanel({ provider, month, settingsHref }: { provider: HostProvider; month: SalesMonth; settingsHref: string }) {
+  const repository = agentPayoutRepository();
+  if (!repository) return null;
+  const rows = await repository.listForHost(ownerActor(provider), { month: monthKey(month) }).catch(() => null);
+  if (rows === null) return <p role="alert" className="mt-4 rounded-xl bg-warn-pale p-3 text-sm text-warn">NIHO からの送金を読み込めませんでした。</p>;
+  return <HostAgentPayouts rows={rows} settingsHref={settingsHref} paused={config.hostAgentPayoutsPaused} />;
 }
 
 async function HostExperienceSettlementPanel({ provider }: { provider: HostProvider }) {

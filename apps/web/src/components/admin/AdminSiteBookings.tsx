@@ -10,6 +10,7 @@ import { HOST_SURFACE, LIST_ROW, LIST_ROW_DETAIL, LIST_ROW_TITLE, consoleButtonC
 import { HostPageBody, PageHead, StatusPill } from "@/components/host/ui";
 import { SettlementSummaryList } from "@/components/settlement/SettlementSummaryList";
 import type { StatusLabel } from "@/host/status";
+import { AdminAgentPayoutPanel } from "./AdminAgentPayoutPanel";
 import { DIALOG_BODY, DIALOG_FOOT, DIALOG_TITLE, ModalDialog } from "./AdminModalDialog";
 import { TodoSlotCountContext } from "./admin-todo-slot";
 import { siteBookingCommandRejected, siteBookingOutcome, siteBookingPreview, type SiteBookingPreview } from "./site-booking-outcome";
@@ -472,12 +473,15 @@ function ConfirmDialogFrame({ titleId, locked, onCancel, cancelDisabled, primary
   );
 }
 
-export function AdminSiteBookings({ initial, supportBookings, notifications = [], settlements = [], managedCompensationAvailable = false, todoSlot, todoSlotCount = 0 }: {
+export function AdminSiteBookings({ initial, supportBookings, notifications = [], settlements = [], managedCompensationAvailable = false, agentPayoutsAvailable = false, agentPayoutsPaused = false, todoSlot, todoSlotCount = 0 }: {
   initial: SupportQueue;
   supportBookings?: SupportEnabledBookingsPage;
   notifications?: ExperienceSupportNotification[];
   settlements?: ExperienceSettlementSummary[];
   managedCompensationAvailable?: boolean;
+  /** 代理受領の送金 (#725): EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED. */
+  agentPayoutsAvailable?: boolean;
+  agentPayoutsPaused?: boolean;
   /** What waits for a decision before the queues (承認待ちの申込), and how many of them there are. */
   todoSlot?: ReactNode;
   todoSlotCount?: number;
@@ -865,7 +869,9 @@ export function AdminSiteBookings({ initial, supportBookings, notifications = []
         </section>
         <SupportCasePanel booking={booking} operationLock={operationLock} onBeginContact={beginContact} onContactUnknown={contactUnknown} onReleaseContact={releaseContact} onSessionExpired={expireSession} />
         {/* 代理受領 (#725): the host's share is sent by NIHO after the experience (3b-2), not paid by the 20% manual compensation. */}
-        {booking.salesKind === "AGENT_15" ? null : compensationFace(booking.publicBookingId)}
+        {booking.salesKind === "AGENT_15"
+          ? (agentPayoutsAvailable ? <AdminAgentPayoutPanel publicBookingId={booking.publicBookingId} onSessionExpired={expireSession} paused={agentPayoutsPaused} /> : null)
+          : compensationFace(booking.publicBookingId)}
         {settlement ? <details className={FOLD}>
           <FoldSummary>決済費用</FoldSummary>
           <div className="border-t border-line px-4 pb-4 [&>section]:mt-3 [&>section]:rounded-none [&>section]:border-0 [&>section]:p-0">

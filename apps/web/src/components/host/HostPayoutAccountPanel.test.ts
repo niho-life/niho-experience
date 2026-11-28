@@ -39,13 +39,12 @@ describe("受取口座 of a host registering its own account", () => {
     expect(html).not.toContain("<button");
   });
 
-  it("says the registration is done, opens Stripe's dashboard, and never says sales can be received or shows the bank account", () => {
+  it("says sales can be received (3b-2), opens Stripe's dashboard, and never shows the bank account", () => {
     const html = render("READY");
-    expect(html).toContain("受取口座の登録が済みました");
+    expect(html).toContain("売上を受け取れます");
     expect(html).toContain("Stripe で見る");
     expect(html).toContain('action="/host/api/stripe-login"');
     expect(html).not.toContain(ONBOARD);
-    expect(html).not.toContain("売上を受け取れます");
     expect(html).not.toMatch(/末尾|acct_/);
   });
 

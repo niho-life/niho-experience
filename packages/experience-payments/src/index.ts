@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import Stripe from "stripe";
 import { salesKindOf } from "@niho-experience/experience-store/sales-kind";
-import type { BookingRecord, RefundSubmission, SettlementTransferCommand, StripeRefundAnswer, StripeRefundStatus, StripeSettlementEvidence } from "@niho-experience/experience-store";
+import type { AgentPayoutCommand, BookingRecord, RefundSubmission, SettlementTransferCommand, StripeRefundAnswer, StripeRefundStatus, StripeSettlementEvidence } from "@niho-experience/experience-store";
 
 const STRIPE_MINIMUM_EXPIRY_SECONDS = 30 * 60;
 const STRIPE_MAXIMUM_EXPIRY_SECONDS = 24 * 60 * 60;
@@ -964,6 +964,206 @@ export async function submitSettlementTransfer(input: SubmitSettlementTransferIn
     return { kind: "review_required", issueCode: "settlement_transfer_mismatch" };
   }
   return { kind: "transferred", stripeTransferRef: stripeReference(transfer.id, "tr_", "transfer.id") };
+}
+
+/* ---------- 代理受領の送金 (#725, Epic #700 stage 3b-2) ---------- */
+
+export type AgentPayoutStripeClient = Pick<Stripe, "paymentIntents" | "transfers">;
+
+const AGENT_PAYOUT_GROUP_PREFIX = "niho-experience-agent-payout:";
+const SETTLEMENT_GROUP_PREFIX = "niho-experience-settlement:";
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9_]{8,250}$/;
+const TRANSFER_ID = /^tr_[A-Za-z0-9_]{8,250}$/;
+/** Stripe keeps an idempotency key for 24 hours; a transfer is created again with the same key only within this window. */
+export const AGENT_PAYOUT_IDEMPOTENCY_WINDOW_MS = 23 * 60 * 60 * 1000;
+/** Stripe's codes for "the destination cannot receive transfers" (its capability is not active). Not verified against a live account: see docs/host-payouts.md. */
+const TRANSFER_CAPABILITY_REFUSALS: ReadonlySet<string> = new Set(["insufficient_capabilities_for_transfer", "transfers_not_allowed"]);
+const BALANCE_REFUSALS: ReadonlySet<string> = new Set(["balance_insufficient", "insufficient_funds"]);
+
+/**
+ * The payout job's own Stripe client (Transfers, reversals, the Charge read) is bounded so that one row's worst case stays far inside its lease
+ * (AGENT_PAYOUT_LIMITS.leaseSeconds = 300, extended right before the Stripe calls): a call is tried at most twice (1 retry) for 20 s each, about
+ * 45 s with the wait between; a transfer is a list and a create (about 90 s at worst), a reversal a list and a create, and the lease
+ * is 3 times that or more. The SDK's defaults (80 s, retries) could outlast a lease, and a transfer made while the office could already act on the row.
+ */
+export const AGENT_PAYOUT_STRIPE_TIMEOUT_MS = 20_000;
+export const AGENT_PAYOUT_STRIPE_RETRIES = 1;
+/** Calls of one row at worst (list, then create), each at most (retries + 1) tries of the timeout, plus a second each for the wait before a retry. */
+export const AGENT_PAYOUT_ROW_WORST_CASE_MS = 2 * ((AGENT_PAYOUT_STRIPE_RETRIES + 1) * AGENT_PAYOUT_STRIPE_TIMEOUT_MS + AGENT_PAYOUT_STRIPE_RETRIES * 5_000);
+
+function resolveAgentPayoutClient(key: string | undefined, injected: AgentPayoutStripeClient | undefined): AgentPayoutStripeClient {
+  if (injected !== undefined && key !== undefined) throw new ExperiencePaymentsValidationError("Provide either platformStripeKey or stripe, not both.");
+  if (injected !== undefined) return injected;
+  if (typeof key !== "string" || key.trim().length === 0) throw new ExperiencePaymentsValidationError("A platform Stripe key or injected Stripe client is required.");
+  return new Stripe(key, { timeout: AGENT_PAYOUT_STRIPE_TIMEOUT_MS, maxNetworkRetries: AGENT_PAYOUT_STRIPE_RETRIES });
+}
+
+export interface RetrieveAgentPayoutChargeInput {
+  readonly paymentIntentId: string;
+  readonly publicBookingId: string;
+  readonly expectedAmount: number;
+  /** What our own records say was refunded (succeeded refunds). A Charge refunded for more (say, from Stripe's Dashboard) is not sent from. */
+  readonly knownRefundedAmount: number;
+  /** How many disputes our ledger has for the booking, in any state (managed_booking_disputes). */
+  readonly knownDisputeCount: number;
+  readonly platformStripeKey?: string;
+  readonly stripe?: AgentPayoutStripeClient;
+}
+
+export type AgentPayoutChargeCheck =
+  | { readonly kind: "ok"; readonly chargeRef: string; readonly amount: number; readonly currency: string }
+  | { readonly kind: "mismatch"; readonly issueCode: string };
+
+/**
+ * Reads the booking's payment from Stripe (never from a stored copy) and checks that it is the captured, succeeded, JPY payment of the
+ * expected amount in the booking's transfer group. The Charge's ID is what the Transfer's source_transaction names.
+ */
+export async function retrieveAgentPayoutCharge(input: RetrieveAgentPayoutChargeInput): Promise<AgentPayoutChargeCheck> {
+  if (!PAYMENT_INTENT_ID.test(input.paymentIntentId) || !UUID_V4.test(input.publicBookingId)) throw new ExperiencePaymentsValidationError("The payment or booking ID is malformed.");
+  assertPositiveAmount(input.expectedAmount, "expectedAmount");
+  if (!Number.isSafeInteger(input.knownRefundedAmount) || input.knownRefundedAmount < 0) throw new ExperiencePaymentsValidationError("knownRefundedAmount is malformed.");
+  if (!Number.isSafeInteger(input.knownDisputeCount) || input.knownDisputeCount < 0) throw new ExperiencePaymentsValidationError("knownDisputeCount is malformed.");
+  const stripe = resolveAgentPayoutClient(input.platformStripeKey, input.stripe);
+  const intent = await stripe.paymentIntents.retrieve(input.paymentIntentId, { expand: ["latest_charge"] });
+  if (intent.id !== input.paymentIntentId) return { kind: "mismatch", issueCode: "agent_payout_payment_mismatch" };
+  const group = `${AGENT_PAYOUT_GROUP_PREFIX}${input.publicBookingId.toLowerCase()}`;
+  const charge = intent.latest_charge;
+  if (charge === null || charge === undefined || typeof charge === "string") return { kind: "mismatch", issueCode: "agent_payout_charge_missing" };
+  if (intent.status !== "succeeded" || charge.status !== "succeeded" || charge.paid !== true || charge.captured === false) return { kind: "mismatch", issueCode: "agent_payout_charge_not_succeeded" };
+  if (typeof charge.id !== "string" || !CHARGE_ID.test(charge.id)) return { kind: "mismatch", issueCode: "agent_payout_charge_missing" };
+  const chargeIntent = typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id;
+  if (chargeIntent !== input.paymentIntentId) return { kind: "mismatch", issueCode: "agent_payout_payment_mismatch" };
+  if (charge.amount !== input.expectedAmount || String(charge.currency).toLowerCase() !== "jpy") return { kind: "mismatch", issueCode: "agent_payout_charge_amount_mismatch" };
+  if (intent.transfer_group !== group || charge.transfer_group !== group) return { kind: "mismatch", issueCode: "agent_payout_transfer_group_mismatch" };
+  // A dispute we have no row for yet, or a refund made outside this service: the office looks before anything is sent. Stripe's `disputed` stays true
+  // after the dispute is decided, so it stops the payout only while our ledger knows of no dispute at all; with rows, the amount (lost disputes are
+  // taken off, open ones hold the payout) is the ledger's calculation.
+  if (charge.disputed === true && input.knownDisputeCount === 0) return { kind: "mismatch", issueCode: "agent_payout_charge_disputed" };
+  if (!Number.isSafeInteger(charge.amount_refunded) || charge.amount_refunded > input.knownRefundedAmount) return { kind: "mismatch", issueCode: "agent_payout_charge_refunded_outside" };
+  return { kind: "ok", chargeRef: charge.id, amount: charge.amount, currency: String(charge.currency).toUpperCase() };
+}
+
+export interface SubmitAgentPayoutTransferInput {
+  readonly command: AgentPayoutCommand;
+  readonly platformStripeKey?: string;
+  readonly stripe?: AgentPayoutStripeClient;
+  readonly now?: Date;
+  /** false (the job is paused): only look the transfer up; when none is found, answer `unknown` and create nothing. Default true. */
+  readonly create?: boolean;
+}
+
+export type AgentPayoutTransferAnswer =
+  | { readonly kind: "transferred"; readonly stripeTransferRef: string }
+  | { readonly kind: "already_transferred"; readonly stripeTransferRef: string }
+  | { readonly kind: "unknown" }
+  /** Stripe refused for want of the destination's transfers capability: nothing was sent. */
+  | { readonly kind: "account_not_ready"; readonly issueCode: string }
+  | { readonly kind: "review_required"; readonly issueCode: string };
+
+/**
+ * Sends the host's share as one Transfer funded by the booking's own Charge (source_transaction). It lists the booking's transfer group first: a
+ * matching transfer there is the answer (an unknown result is looked up, never sent again); anything else in the group is for the office. A
+ * transfer is created with the command's idempotency key only within 23 hours of the command; after that nothing is sent again by this function.
+ * It never uses the settlement's group (niho-experience-settlement:).
+ */
+export async function submitAgentPayoutTransfer(input: SubmitAgentPayoutTransferInput): Promise<AgentPayoutTransferAnswer> {
+  const command = input.command;
+  if (typeof command.transferGroup === "string" && command.transferGroup.startsWith(SETTLEMENT_GROUP_PREFIX)) {
+    throw new ExperiencePaymentsValidationError("An agent payout never uses the settlement's transfer group.");
+  }
+  if (!UUID.test(command.commandId) || !UUID.test(command.payoutId) || !UUID_V4.test(command.publicBookingId) || !CONNECTED_ACCOUNT_ID.test(command.destinationAccountId)
+    || !CHARGE_ID.test(command.chargeRef) || !Number.isSafeInteger(command.amount) || command.amount <= 0 || command.amount > MAXIMUM_AMOUNT || command.currency !== "JPY"
+    || command.transferGroup !== `${AGENT_PAYOUT_GROUP_PREFIX}${command.publicBookingId}`) throw new ExperiencePaymentsValidationError("Agent payout transfer command is malformed.");
+  const stripe = resolveAgentPayoutClient(input.platformStripeKey, input.stripe);
+  const bookingId = command.publicBookingId.toLowerCase();
+  const found = await stripe.transfers.list({ transfer_group: command.transferGroup, limit: 100 });
+  const groupTransfers = found.data.filter((transfer) => transfer.transfer_group === command.transferGroup);
+  const matching = groupTransfers.filter((transfer) => transfer.metadata?.source === "niho-experience" && transfer.metadata?.purpose === "agent_payout"
+    && transfer.metadata?.booking_id === bookingId);
+  if (groupTransfers.length !== matching.length) return { kind: "review_required", issueCode: "agent_payout_group_occupied" };
+  if (matching.length > 1) return { kind: "review_required", issueCode: "agent_payout_duplicate_transfers" };
+  const previous = matching[0];
+  if (previous) {
+    if (previous.amount !== command.amount || previous.currency.toLowerCase() !== "jpy" || stripeReference(previous.destination, "acct_", "transfer.destination") !== command.destinationAccountId
+      || previous.metadata?.payout_id !== command.payoutId.toLowerCase()) {
+      return { kind: "review_required", issueCode: "agent_payout_transfer_mismatch" };
+    }
+    return { kind: "already_transferred", stripeTransferRef: stripeReference(previous.id, "tr_", "transfer.id") };
+  }
+  if (found.has_more) return { kind: "review_required", issueCode: "agent_payout_history_truncated" };
+  if (input.create === false) return { kind: "unknown" };
+  const commandAge = (input.now ?? new Date()).getTime() - Date.parse(command.createdAtUtc);
+  if (!Number.isFinite(commandAge) || commandAge > AGENT_PAYOUT_IDEMPOTENCY_WINDOW_MS) return { kind: "review_required", issueCode: "agent_payout_idempotency_window_expired" };
+  let transfer: Stripe.Transfer;
+  try {
+    transfer = await stripe.transfers.create({
+      amount: command.amount,
+      currency: "jpy",
+      destination: command.destinationAccountId,
+      source_transaction: command.chargeRef,
+      transfer_group: command.transferGroup,
+      metadata: { source: "niho-experience", purpose: "agent_payout", booking_id: bookingId, payout_id: command.payoutId.toLowerCase(), command_id: command.commandId.toLowerCase() },
+    }, { idempotencyKey: `experience-agent-payout:${command.commandId.toLowerCase()}` });
+  } catch (error) {
+    const refusal = definitiveRefusal(error);
+    if (refusal !== null && TRANSFER_CAPABILITY_REFUSALS.has(refusal)) return { kind: "account_not_ready", issueCode: `agent_payout_${refusal}` };
+    if (refusal !== null) return { kind: "review_required", issueCode: `agent_payout_transfer_${refusal}` };
+    throw error;
+  }
+  if (transfer.amount !== command.amount || transfer.currency.toLowerCase() !== "jpy"
+    || stripeReference(transfer.destination, "acct_", "transfer.destination") !== command.destinationAccountId) {
+    return { kind: "review_required", issueCode: "agent_payout_transfer_mismatch" };
+  }
+  const ref = stripeReference(transfer.id, "tr_", "transfer.id");
+  if (!TRANSFER_ID.test(ref)) throw new ExperiencePaymentsValidationError("transfer.id is malformed.");
+  return { kind: "transferred", stripeTransferRef: ref };
+}
+
+export interface ReverseAgentPayoutTransferInput {
+  readonly transferRef: string;
+  readonly adjustmentId: string;
+  readonly amount: number;
+  readonly platformStripeKey?: string;
+  readonly stripe?: AgentPayoutStripeClient;
+}
+
+export type AgentPayoutReversalAnswer =
+  | { readonly kind: "reversed"; readonly stripeReversalRef: string }
+  /** The host's account has not enough balance to give it back: the amount waits for later payouts. */
+  | { readonly kind: "insufficient_balance" }
+  | { readonly kind: "review_required"; readonly issueCode: string };
+
+/**
+ * Takes back part of a sent transfer (a refund or a lost dispute that came later). It lists the transfer's reversals first and adopts the one
+ * whose metadata names this adjustment; otherwise it creates one with the adjustment's idempotency key. An unknown failure throws (the caller keeps
+ * the adjustment as unknown and looks it up next time).
+ */
+export async function reverseAgentPayoutTransfer(input: ReverseAgentPayoutTransferInput): Promise<AgentPayoutReversalAnswer> {
+  if (!TRANSFER_ID.test(input.transferRef) || !UUID.test(input.adjustmentId)) throw new ExperiencePaymentsValidationError("The transfer or adjustment ID is malformed.");
+  assertPositiveAmount(input.amount, "reversal amount");
+  const stripe = resolveAgentPayoutClient(input.platformStripeKey, input.stripe);
+  const adjustmentId = input.adjustmentId.toLowerCase();
+  const listed = await stripe.transfers.listReversals(input.transferRef, { limit: 100 });
+  const previous = listed.data.find((reversal) => reversal.metadata?.adjustment_id === adjustmentId);
+  if (previous) {
+    if (previous.amount !== input.amount) return { kind: "review_required", issueCode: "agent_payout_reversal_mismatch" };
+    return { kind: "reversed", stripeReversalRef: stripeReference(previous.id, "trr_", "reversal.id") };
+  }
+  if (listed.has_more) return { kind: "review_required", issueCode: "agent_payout_reversal_history_truncated" };
+  let reversal: Stripe.TransferReversal;
+  try {
+    reversal = await stripe.transfers.createReversal(input.transferRef, {
+      amount: input.amount,
+      metadata: { source: "niho-experience", purpose: "agent_payout_reversal", adjustment_id: adjustmentId },
+    }, { idempotencyKey: `experience-agent-payout-reversal:${adjustmentId}` });
+  } catch (error) {
+    const refusal = definitiveRefusal(error);
+    if (refusal !== null && BALANCE_REFUSALS.has(refusal)) return { kind: "insufficient_balance" };
+    if (refusal !== null) return { kind: "review_required", issueCode: `agent_payout_reversal_${refusal}` };
+    throw error;
+  }
+  if (reversal.amount !== input.amount) return { kind: "review_required", issueCode: "agent_payout_reversal_mismatch" };
+  return { kind: "reversed", stripeReversalRef: stripeReference(reversal.id, "trr_", "reversal.id") };
 }
 
 function asRecord(value: unknown, field: string): Record<string, unknown> {

@@ -55,6 +55,11 @@ mock の「入金予定・入金済み・口座入金」に当たるものを、
 - **出さないもの**：Stripe の ID（口座・入金。行のキーは入金 ID の SHA-256 の先頭 16 桁）、銀行の情報、明細の表記、失敗の理由の文。ログは失敗の種類（`StripeConnectionError` など、`unreachable`）だけで、Stripe の応答・メッセージは出さない。
 - **flag**：`HOST_SALES_PAYOUTS_ENABLED`。http mode で `HOST_SALES_LEDGER_ENABLED=true` と `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` が要り、無ければ起動失敗。既定 `false`（区画は出ない）。mock mode はプレビューの `?mock=site-sales` だけ、合成の入金（`MOCK_SITE_PAYOUTS`）で出す。
 
+## NIHO からの送金（サポート 15%・代理受領、#725 3b-2）
+
+- `EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED` が ON のとき、OWNER の売上に「NIHO からの送金」が出る（このホストの行だけ。複数ホストは `providerId` で分ける）。体験日・決済額・返金等・NIHO の手数料・送金額・予定日と、状態（予定・登録待ち〔「設定 › 受取口座 へ」〕・送金済み〔送った日。銀行への入金日は上の「この口座への入金」〕・確認中・取消）。送金のあとの返金などで取り戻した額と、前の取り戻しを差し引いた額も出る。Stripe の ID・内部の状態は出さない。
+- 取り分の考え方は [host-payouts.md](host-payouts.md)「3b-2 の実装メモ」。上の売上の明細は、この種の予約も決済額で出る（NIHO が受け取った分のうち、ホストに送る額はこの区画）。
+
 ## 受入（flag を入れる前）
 
 1. staging で、`0030`・`0031` まで適用した DB に合成の予約を作り、全額返金・一部返金・返金の失敗（取り消し）・確認待ちの支払いを通す。画面の売上・手数料・返金・受取額が Stripe（テストモード）の Connect 口座の残高の動きと合うことを確かめる。一部返金の手数料の戻りが Stripe の値と何円ずれるかを記録する。

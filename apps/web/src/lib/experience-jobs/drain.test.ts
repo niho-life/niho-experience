@@ -184,6 +184,18 @@ describe("runExperienceJobs", () => {
     expect(s.sent[0]?.text).toContain("Thank you for joining Synthetic walk");
   });
 
+  it("runs the agent payout step only with its deps, and its failure stays in its own step (#725)", async () => {
+    const run = vi.fn(async () => ({ initialized: 0, claimed: 0, transferred: 0, awaitingAccount: 0, attention: 0, reversalsClaimed: 0, reversed: 0, failed: 0 }));
+    const deps = { repository: { initializeMissing: run, claimDue: vi.fn(async () => []) } } as unknown as NonNullable<ExperienceJobDeps["agentPayouts"]>;
+    const off = await runExperienceJobs(s.deps);
+    expect("agentPayouts" in off).toBe(false);
+    const failing = await runExperienceJobs({ ...s.deps, agentPayouts: deps });
+    // The stub repository lacks the rest of its surface, so the step fails by itself, and the other steps still report.
+    expect(failing.agentPayouts).toEqual({ error: "unavailable" });
+    expect(failing.hostAddressPurge).toEqual({ purged: 0 });
+    expect(failing.bookingConfirmations).toMatchObject({ claimed: 0 });
+  });
+
   it("does nothing on an empty run, with each step's bounded claim and the erasure a year back", async () => {
     const counts = await runExperienceJobs(s.deps);
     expect(counts).toEqual({

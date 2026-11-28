@@ -447,6 +447,22 @@ function hostAgentSalesSetting(apiMode: "mock" | "http", env: Env, needs: { read
 }
 
 /**
+ * 代理受領の送金 (#725, 3b-2): the job that sends the host's share after the experience, and the office's tools for it. With the flag off no
+ * payout job runs and the office's route is a 404 (a payout already begun waits). Turning agent sales off does not stop the payouts of bookings
+ * already taken; this flag alone is the emergency stop of payouts. Needs the same pieces as agent sales' payment (the platform key and account).
+ */
+function hostAgentPayoutsSetting(apiMode: "mock" | "http", env: Env, needs: { readonly hostConsoleEnabled: boolean; readonly hostAccountsEnabled: boolean; readonly hostMailEnabled: boolean }): boolean {
+  const name = "EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED";
+  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (!needs.hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
+  if (!needs.hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
+  if (!needs.hostMailEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_MAIL_ENABLED=true in http mode`);
+  if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error(`${name}=true needs EXPERIENCE_DATABASE_URL in http mode`);
+  if (!env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY?.trim()) throw new Error(`${name}=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY in http mode`);
+  return true;
+}
+
+/**
  * The flags whose code sends the signed-in admin's NIHO admin token (NIHO's Admin session) to NIHO. With the Google
  * login (ADR 0003 decision 4) there is no such token, so none of them may be on at the same time. The fee summary is
  * here for its Admin side (it is one gate for Admin and /host).
@@ -1036,6 +1052,7 @@ export function resolveConfig(env: Env) {
   const hostTeamInvitationsEnabled = hostTeamInvitationsSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostTeamEnabled, hostNihoLoginEnabled, hostMailEnabled });
   const hostSelfRegistrationEnabled = hostSelfRegistrationSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostNihoLoginEnabled, hostMailEnabled });
   const hostConnectOnboardingEnabled = hostConnectOnboardingSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled });
+  const hostAgentPayoutsEnabled = hostAgentPayoutsSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostMailEnabled });
   const hostAgentSales = hostAgentSalesSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostMailEnabled });
   const travelerAccountsEnabled = travelerAccountsSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
   const nihoLoginPromptEnabled = nihoLoginPromptSetting(env, hostNihoLoginEnabled);
@@ -1250,6 +1267,10 @@ export function resolveConfig(env: Env) {
     hostConnectOnboardingEnabled,
     // サポート 15% の代理受領 (Epic #700, #725, 3b-1). Off until 3b-2's payout flag exists; see hostAgentSalesSetting.
     hostAgentSalesEnabled: hostAgentSales.enabled,
+    // 代理受領の送金 (#725, 3b-2): the payout job and the office's tools. Also the emergency stop of payouts.
+    hostAgentPayoutsEnabled,
+    // 送金の一時停止 (#725): the payout job only recalculates and looks up; no transfer or reversal is created. Needs nothing (it must be settable on its own).
+    hostAgentPayoutsPaused: env.EXPERIENCE_HOST_AGENT_PAYOUTS_PAUSED === "true",
     hostAgentSalesAgreementVersion: hostAgentSales.agreementVersion,
     hostAgentReceiverName: hostAgentSales.receiverName,
     hostAgentPayoutDelayDays: hostAgentSales.payoutDelayDays,
