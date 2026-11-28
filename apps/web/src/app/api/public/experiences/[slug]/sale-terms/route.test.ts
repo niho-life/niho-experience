@@ -65,6 +65,14 @@ describe("public Experience sale terms", () => {
     expect((await GET(new Request("https://experience.example/api/public/experiences/workshop/sale-terms"), { params: Promise.resolve({ slug: "workshop" }) })).status).toBe(404);
   });
 
+  it("hides the terms of a page that is up but takes no bookings (#705)", async () => {
+    mocks.publications.getPublicBySlug.mockResolvedValue({ slug: "workshop", bookingAvailable: false });
+    const response = await GET(new Request("https://experience.example/api/public/experiences/workshop/sale-terms"), { params: Promise.resolve({ slug: "workshop" }) });
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("");
+    expect(mocks.bookings.publicBookingTerms).not.toHaveBeenCalled();
+  });
+
   it("keeps an unpublished slug private regardless of the old publication switch", async () => {
     mocks.config.experiencePublicationsEnabled = false;
     mocks.publications.getPublicBySlug.mockResolvedValue(null);

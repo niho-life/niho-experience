@@ -1443,7 +1443,12 @@ export class ChannelRuntime {
             // A product that takes no bookings only gets slots CLOSED that were desired OPEN (or are being closed); it never
             // creates desired rows for the many occurrences it never opened.
             const known = await client.query("SELECT 1 FROM channel_desired_states WHERE listing_id=$1 AND occurrence_id=$2", [listing.id, occurrence.id]);
-            if (known.rows[0] === undefined) continue;
+            if (known.rows[0] === undefined) {
+              // The skip still used one slot of this page, so the cursor moves past it; otherwise a page spent only on skips
+              // returns no continuation and the occurrences after it (an OPEN slot to close) are never reached.
+              lastCursor = { listingId, ruleId: storedRule.rule.id, occurrenceId: occurrence.id };
+              continue;
+            }
           }
           const desired = await this.#upsertDesired(client, listing, occurrence, desiredState, availability.reason);
           jobCount += await this.#enqueueDesiredJob(client, listing, occurrence, desiredState, desired.desiredVersion);
