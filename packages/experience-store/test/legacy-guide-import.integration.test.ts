@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 import { GuideRepository } from "../src/guides.ts";
 import {
   importLegacyGuide,
@@ -17,16 +16,9 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 
 describe("legacy Guide ops import", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
   it("dry-runs, atomically imports one UNLISTED publication, verifies retries, and rechecks OWNER authority", async () => {
-    const { Pool } = await import("pg");
-    const schema = `legacy_guide_import_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 2, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "legacy_guide_import", { max: 2 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url)))
-        .filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const migration of migrations) {
-        await pool.query(await readFile(new URL(`../migrations/${migration}`, import.meta.url), "utf8"));
-      }
       await pool.query("INSERT INTO experience_providers (id) VALUES ('provider-import')");
       await pool.query(
         `INSERT INTO provider_memberships (provider_id,niho_user_id,role,active)
@@ -121,8 +113,7 @@ describe("legacy Guide ops import", { skip: databaseUrl === undefined ? "TEST_DA
         (error: unknown) => error instanceof LegacyGuideImportError && /current active OWNER/.test(error.message),
       );
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await pool.end();
+      await db.dispose();
     }
   });
 });

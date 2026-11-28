@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
+import { createIsolatedDatabase } from "./helpers/isolated-database.ts";
 import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "../src/errors.ts";
 import { HOST_BIO_CONSENT_VERSION } from "../src/host-bio-rules.ts";
 import { ProviderHostBioRepository, hostBioSourceFingerprint } from "../src/provider-host-bios.ts";
@@ -10,13 +9,9 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 
 describe("provider host bio persistence", { skip: databaseUrl === undefined ? "TEST_DATABASE_URL is not set" : false }, () => {
   it("lets only the current OWNER save/withdraw with CAS and publishes English only for the current Japanese text", async () => {
-    const { Pool } = await import("pg");
-    const schema = `host_bio_${randomUUID().replaceAll("-", "")}`;
-    const pool = new Pool({ connectionString: databaseUrl, max: 4, options: `-c search_path=${schema}` });
+    const db = await createIsolatedDatabase(databaseUrl, "host_bio", { max: 4 });
+    const pool = db.pool;
     try {
-      await pool.query(`CREATE SCHEMA "${schema}"`);
-      const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((name) => /^\d{4}.*\.sql$/.test(name)).sort();
-      for (const name of migrations) await pool.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
 
       const owner = { providerId: "provider-bio-synthetic", nihoUserId: "owner-bio-synthetic" } as const;
       const editor = { providerId: owner.providerId, nihoUserId: "editor-bio-synthetic" } as const;
@@ -160,8 +155,7 @@ describe("provider host bio persistence", { skip: databaseUrl === undefined ? "T
       await assert.rejects(() => repository.withdraw(owner, 4), StoreConflictError);
       assert.equal((await save(owner, "撤回後に書き直しました。", null, null)).version, 1);
     } finally {
-      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => {});
-      await pool.end();
+      await db.dispose();
     }
   });
 });
