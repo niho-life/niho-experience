@@ -435,14 +435,17 @@ export const FLAGS = Object.freeze([
       { env: "EXPERIENCE_HOST_AGENT_PAYOUT_DELAY_DAYS", variable: "HOST_AGENT_PAYOUT_DELAY_DAYS", shape: "payoutDelayDays", optional: true },
     ],
   },
-  // ホストが自分の Stripe アカウントをつなぐ・3c-1 (Epic #700, #726, docs/host-payouts.md「3c」): 設定 › 受取口座 の「自分の Stripe アカウントで販売する」、その route、
-  // Connect webhook の account.updated、READY のあとの販売者プロフィールの登録。Migration 0098 と 0099 とその runtime grants を先に適用する（コードより先）。
-  // `stagingOnly`: **本番では ON にできない**（deploy の検査が拒む）。3c-2（独立 10% で売る）が入るまで、本番で口座をつなげても売れないため。3c-2 でこの属性を外す。
+  // ホストが自分の Stripe アカウントをつなぐ・3c-1 と、独立 10% で売る・3c-2 (Epic #700, #726, docs/host-payouts.md「3c」): 設定 › 受取口座 の「自分の Stripe アカウントで販売する」、
+  // その route、Connect webhook の account.updated、READY のあとの販売者プロフィールの登録、体験の編集の「独立 10%（自分の Stripe で販売）」の選択と、
+  // 代理受領からの切り替え。Migration 0098 と 0099 とその runtime grants を先に適用する（コードより先）。3c-2 が入ったので本番でも ON にできる
+  // （受付を始めると、今の Direct charge の経路で売れる）。独立 10% の同意の版は設定で渡す。
   {
     env: "EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED",
     variable: "HOST_STANDARD_ONBOARDING_ENABLED",
-    stagingOnly: true,
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_PUBLICATION_API_ENABLED"],
+    settings: [
+      { env: "EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION", variable: "HOST_INDEPENDENT_SALES_AGREEMENT_VERSION", shape: "consentVersion" },
+    ],
   },
   // 開催回の担当 (#535 v0, docs/occurrence-assignments.md): 承認後決済の開催回に1人の内部担当。報酬の計算・送金はしない。
   {

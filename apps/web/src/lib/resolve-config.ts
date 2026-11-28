@@ -419,7 +419,7 @@ function hostConnectOnboardingSetting(
  * ホストが自分の Stripe アカウントをつなぐ・3c-1 (Epic #700, #726, docs/host-payouts.md「3c」): 設定 › 受取口座 の「自分の Stripe アカウントで販売する」、
  * その POST・戻り・販売者登録の route、Connect webhook の `account.updated`（用途で分ける）。ホストのアカウント・公開 API（特定商取引法の表示と
  * 商品の販売者の付け替え）・platform の Stripe キー（口座の作成と読み直し）・DB（migration 0098/0099）が要る。既定 OFF。OFF なら何も変わらない。
- * 本番では 3c-2 が入るまで ON にできない（scripts/deploy/runtime-flags.mjs の `stagingOnly`。3c-2 で外す）。
+ * 3c-2（独立 10% で売る）が入ったので本番でも ON にできる。設定 `EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION`（独立 10% の同意の版）が要る。
  * **この flag が OFF でも効く 3c-1 の変更**（混在の修正。flag の裏に置くと、すでに代理受領を使っているホストが壊れる）：受取口座の利用同意の取消が代理受領の掲載を止めない、
  * `reserve(PAYOUT)` が有効な行を返す・履歴で新しい行を作れる、設定 › 受取口座 の Express の段と「Stripe で見る」の出し分け（`ownerExtras`）、
  * `agentSalesOffer` の `choosable:false`。migration `0098` と `0099` はコードより先に適用する。
@@ -428,15 +428,19 @@ function hostStandardOnboardingSetting(
   apiMode: "mock" | "http",
   env: Env,
   needs: { readonly hostConsoleEnabled: boolean; readonly hostAccountsEnabled: boolean },
-): boolean {
+): { readonly enabled: boolean; readonly independentAgreementVersion: string } {
+  const off = { enabled: false, independentAgreementVersion: "" } as const;
   const name = "EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED";
-  if (apiMode !== "http" || env[name] !== "true") return false;
+  if (apiMode !== "http" || env[name] !== "true") return off;
   if (!needs.hostConsoleEnabled) throw new Error(`${name}=true needs HOST_CONSOLE_ENABLED=true in http mode`);
   if (!needs.hostAccountsEnabled) throw new Error(`${name}=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true in http mode`);
   if (env.EXPERIENCE_HOST_PUBLICATION_API_ENABLED !== "true") throw new Error(`${name}=true needs EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true in http mode`);
   if (!env.EXPERIENCE_DATABASE_URL?.trim()) throw new Error(`${name}=true needs EXPERIENCE_DATABASE_URL in http mode`);
   if (!env.EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY?.trim()) throw new Error(`${name}=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY in http mode`);
-  return true;
+  // 独立 10% (3c-2, #726): the version of the consent wording the OWNER agrees to when choosing it, never the browser's.
+  const independentAgreementVersion = env.EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION?.trim() ?? "";
+  if (!/^[\x21-\x7e]{1,160}$/.test(independentAgreementVersion)) throw new Error(`${name}=true needs EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION in http mode`);
+  return { enabled: true, independentAgreementVersion };
 }
 
 /**
@@ -1076,7 +1080,7 @@ export function resolveConfig(env: Env) {
   const hostTeamInvitationsEnabled = hostTeamInvitationsSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostTeamEnabled, hostNihoLoginEnabled, hostMailEnabled });
   const hostSelfRegistrationEnabled = hostSelfRegistrationSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostNihoLoginEnabled, hostMailEnabled });
   const hostConnectOnboardingEnabled = hostConnectOnboardingSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled });
-  const hostStandardOnboardingEnabled = hostStandardOnboardingSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled });
+  const hostStandardOnboarding = hostStandardOnboardingSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled });
   const hostAgentPayoutsEnabled = hostAgentPayoutsSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostMailEnabled });
   const hostAgentSales = hostAgentSalesSetting(apiMode, env, { hostConsoleEnabled, hostAccountsEnabled, hostMailEnabled });
   const travelerAccountsEnabled = travelerAccountsSetting(apiMode, env, hostConsoleEnabled, hostAccountsEnabled);
@@ -1291,7 +1295,8 @@ export function resolveConfig(env: Env) {
     // ホストが自分で受取口座（Express）を登録する (Epic #700, #710). Off in production until stage 3b.
     hostConnectOnboardingEnabled,
     // ホストが自分の Stripe アカウントをつなぐ (Epic #700, #726, 3c-1). Off in production until 3c-2.
-    hostStandardOnboardingEnabled,
+    hostStandardOnboardingEnabled: hostStandardOnboarding.enabled,
+    hostIndependentSalesAgreementVersion: hostStandardOnboarding.independentAgreementVersion,
     // サポート 15% の代理受領 (Epic #700, #725, 3b-1). Off until 3b-2's payout flag exists; see hostAgentSalesSetting.
     hostAgentSalesEnabled: hostAgentSales.enabled,
     // 代理受領の送金 (#725, 3b-2): the payout job and the office's tools. Also the emergency stop of payouts.

@@ -327,7 +327,7 @@ export type { OperatorAiKind, OperatorCliRequestInput, OperatorWriteMethod } fro
 export { isHostSellerRef } from "./host-sellers.ts";
 export { ProviderPayoutAccountConsents } from "./payout-account-consents.ts";
 export { DIRECT_ACCOUNT_READ_MAX_AGE_MS, ProviderDirectSellers } from "./direct-sellers.ts";
-export type { DirectSellerRegistration } from "./direct-sellers.ts";
+export type { DirectSellerRegistration, IndependentSalesChoice, IndependentSalesChoiceInput } from "./direct-sellers.ts";
 export type { PayoutAccountConsent, PayoutAccountConsentRecord, PayoutAccountConsentWithdrawal } from "./payout-account-consents.ts";
 export type {
   GrantProviderOwnerResult,

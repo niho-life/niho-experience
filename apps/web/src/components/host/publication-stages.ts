@@ -36,6 +36,7 @@ const NAMES: readonly (readonly [string, string])[] = [
   ["SELLER_MISMATCH", "販売者情報と受取口座の一致"],
   ["SELLER_DISCLOSURE_REQUIRED", "販売者表示（特定商取引法に基づく表記）"],
   ["AGENT_CONSENT_REQUIRED", "「サポート 15%（NIHO が代金を受け取る）」への同意"],
+  ["SALES_PLAN_REQUIRED", "販売プラン（独立 10%）の選択"],
   ["CONNECT_NOT_READY", "受取口座"],
   ["PAYMENT_REUSE_CONSENT_REQUIRED", "受取口座での売上の受け取りへの同意"],
   ["READINESS_MISSING", "受取口座の最新の確認"],

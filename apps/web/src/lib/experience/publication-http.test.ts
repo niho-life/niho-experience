@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   },
   meetingGuides: { readForProduct: vi.fn(), saveForProduct: vi.fn() },
   translator: vi.fn(),
+  ownStripe: vi.fn(),
   state: {} as Record<string, unknown>,
 }));
 
@@ -58,6 +59,7 @@ vi.mock("./store-server", () => ({
   managedExperienceSalesRepository: () => (mocks.config.hostAgentSalesEnabled === true ? { get: mocks.managedSalesGet } : null),
   providerSellerDisclosureRepository: () => ({ getForOwner: mocks.disclosureRead }),
   providerAgentSales: () => ({ consentCounts: mocks.consentCounts }),
+  directSellers: () => ({ ownStripeSellerName: mocks.ownStripe }),
 }));
 vi.mock("@niho-experience/experience-payments", () => ({ retrievePlatformAccount: mocks.platformAccount }));
 vi.mock("@/lib/translation/anthropic", () => ({ anthropicTranslator: () => mocks.translator }));
@@ -727,6 +729,20 @@ describe("Experience owner product API", () => {
         expect(mocks.boundary).toHaveBeenLastCalledWith("OWNER", { providerId: null });
         expect(mocks.platformAccount).not.toHaveBeenCalled();
         expect(mocks.repository.openBooking).toHaveBeenLastCalledWith(actor, product.id, expect.not.objectContaining({ agentCheck: expect.anything() }));
+      });
+
+      it("shows the 独立 10% choice only for a host whose seller is its own Stripe account, with the flag on", async () => {
+        const read = async () => (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.independentSales;
+        Object.assign(mocks.config, { hostStandardOnboardingEnabled: true, hostAccountsEnabled: true, hostIndependentSalesAgreementVersion: "independent-sales-v1" });
+        mocks.ownStripe.mockResolvedValue("Sample Host");
+        expect(await read()).toEqual({ agreementVersion: "independent-sales-v1", sellerName: "Sample Host" });
+        mocks.ownStripe.mockResolvedValue(null);
+        expect(await read()).toBeNull();
+        mocks.ownStripe.mockRejectedValue(new Error("down"));
+        expect(await read()).toBeNull();
+        mocks.ownStripe.mockResolvedValue("Sample Host");
+        mocks.config.hostStandardOnboardingEnabled = false;
+        expect(await read()).toBeNull();
       });
 
       it("shows the choice (and the plan's kind) to a host with no seller profile, and nothing to one that has it or with the flag off", async () => {

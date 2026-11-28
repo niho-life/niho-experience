@@ -9,7 +9,7 @@ import { withTransaction } from "./transaction.ts";
 import type { BookingAcceptanceMode, ExperienceChargeMode, ExperienceSalesPlan, HostActor, ManagedPaymentDuePolicy, PublicationAdminDraftActor } from "./types.ts";
 import { assertCanonicalInstant, assertStoreIdentifier } from "./validation.ts";
 import { tokyoDate } from "./guest-bookings.ts";
-import { salesKindOf } from "./sales-kind.ts";
+import { hasOwnStripeSeller, salesKindOf } from "./sales-kind.ts";
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACCOUNT = /^acct_[A-Za-z0-9]{8,}$/;
@@ -203,6 +203,12 @@ export class ManagedExperienceSalesRepository {
   readonly #pool: Pool;
   constructor(pool: Pool) { this.#pool = pool; }
 
+  /** Whether the provider's seller is its own Stripe account (3c): such a host switches plans only through the 独立 10% route. */
+  async hasOwnStripeSeller(providerId: string): Promise<boolean> {
+    assertStoreIdentifier(providerId, "providerId");
+    return hasOwnStripeSeller(this.#pool, providerId);
+  }
+
   async get(providerId: string, productId: string): Promise<SalesPlanState | null> {
     assertStoreIdentifier(providerId, "providerId"); assertStoreIdentifier(productId, "productId");
     return readSalesPlanState(this.#pool, providerId, productId);
@@ -258,7 +264,9 @@ export class ManagedExperienceSalesRepository {
   async beginOwnerSwitch(
     actor: HostActor,
     productId: string,
-    input: { readonly commandId: string; readonly expectedVersion: number; readonly plan: "SUPPORTED_15" | "INDEPENDENT_10"; readonly agreementVersion: string; readonly agreementConfirmedAtUtc: string; readonly sellerDisclosureUrl: string; readonly stripeReady: true },
+    input: { readonly commandId: string; readonly expectedVersion: number; readonly plan: "SUPPORTED_15" | "INDEPENDENT_10"; readonly agreementVersion: string; readonly agreementConfirmedAtUtc: string; readonly sellerDisclosureUrl: string; readonly stripeReady: true;
+      /** Only the 独立 10% route (3c-2) passes it: 代理受領 -> 独立 10% for a host whose seller is its own Stripe account. */
+      readonly allowAgentToIndependent?: true },
   ): Promise<SalesPlanTransition> {
     assertStoreIdentifier(productId, "productId");
     if (!UUID_V4.test(input.commandId) || !Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 1 || input.stripeReady !== true) throw new StoreValidationError("The switch command is invalid.");
@@ -285,14 +293,18 @@ export class ManagedExperienceSalesRepository {
       }
       if (state.version !== input.expectedVersion || state.phase !== "ACTIVE") throw new StoreConflictError("Sales plan version mismatch.");
       if (state.current.plan === input.plan) throw new StoreConflictError("The product already uses this sales plan.");
-      // 代理受領 (#725): NIHO takes this product's payments for the host and owes it a payout; moving to a Direct charge is not
-      // built until 3c.
-      if (salesKindOf({ chargeMode: state.current.chargeMode, salesPlan: state.current.plan, sellerParty: state.current.sellerParty,
-        feeBasisPoints: state.current.feeBasisPoints }) === "AGENT_15") throw new StoreConflictError("An agent-sales product cannot switch to a Direct charge.");
       const seller = await client.query<DbRow>(
         `SELECT seller_niho_account_ref,stripe_connect_account_ref,seller_display_name
            FROM experience_host_seller_profiles WHERE provider_id=$1 FOR SHARE`, [actor.providerId],
       );
+      // 代理受領 (#725): NIHO takes this product's payments for the host and owes it a payout. Moving to a Direct charge is allowed
+      // only to 独立 10% (3c-2, #726), only when the caller says so (the 独立 10% route), and only when the host's seller profile is its own
+      // Stripe account (connect_account_id).
+      if (salesKindOf({ chargeMode: state.current.chargeMode, salesPlan: state.current.plan, sellerParty: state.current.sellerParty,
+        feeBasisPoints: state.current.feeBasisPoints }) === "AGENT_15"
+        && !(input.plan === "INDEPENDENT_10" && input.allowAgentToIndependent === true && await hasOwnStripeSeller(client, actor.providerId))) {
+        throw new StoreConflictError("An agent-sales product cannot switch to a Direct charge.");
+      }
       const consent = await client.query<DbRow>(
         `SELECT 1 FROM provider_payout_account_consents
           WHERE provider_id=$1 AND stripe_connect_account_ref=$2 AND consented_by_niho_user_id=$3

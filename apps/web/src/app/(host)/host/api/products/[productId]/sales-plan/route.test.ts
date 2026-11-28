@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  read: vi.fn(), begin: vi.fn(), finalize: vi.fn(), disclosure: { method: "NATIVE" } as Record<string, unknown> | null,
+  read: vi.fn(), hasOwn: vi.fn(), begin: vi.fn(), finalize: vi.fn(), disclosure: { method: "NATIVE" } as Record<string, unknown> | null,
 }));
 
 vi.mock("server-only", () => ({}));
@@ -18,7 +18,7 @@ vi.mock("@/lib/experience/publication-host-boundary", () => ({
   }),
 }));
 vi.mock("@/lib/experience/store-server", () => ({
-  managedExperienceSalesRepository: () => ({ get: mocks.read, beginOwnerSwitch: mocks.begin, finalizeSwitch: mocks.finalize }),
+  managedExperienceSalesRepository: () => ({ get: mocks.read, hasOwnStripeSeller: mocks.hasOwn, beginOwnerSwitch: mocks.begin, finalizeSwitch: mocks.finalize }),
   experiencePublicationRepository: () => ({ getProduct: async () => ({ slug: "synthetic-experience" }) }),
   providerSellerDisclosureRepository: () => ({ getForOwner: async () => ({ disclosure: mocks.disclosure && { sellerDisplayName: "Synthetic Seller", ...mocks.disclosure } }) }),
   experienceStore: () => ({}),
@@ -41,6 +41,7 @@ beforeEach(() => {
   vi.stubEnv("EXPERIENCE_MANAGED_SALES_ENABLED", "false");
   vi.stubEnv("EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION", "owner-v2");
   mocks.read.mockResolvedValue(saved);
+  mocks.hasOwn.mockResolvedValue(false);
   mocks.begin.mockResolvedValue({ state: saved, openCheckouts: [] });
   mocks.finalize.mockResolvedValue(active);
 });
@@ -73,5 +74,27 @@ describe("OWNER sales plan reconciliation", () => {
       expect(response.status).toBeGreaterThanOrEqual(400);
     }
     expect(mocks.begin).not.toHaveBeenCalled();
+  });
+
+  const post = (body: Record<string, unknown>) => POST(new Request(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), context);
+  const fresh = { commandId: "223e4567-e89b-42d3-a456-426614174509", expectedVersion: 1, plan: "INDEPENDENT_10", agreementVersion: "owner-v2" };
+
+  it("refuses a new switch for a host whose seller is its own Stripe account (3c), and never passes the agent-to-independent permission", async () => {
+    vi.stubEnv("EXPERIENCE_MANAGED_SALES_ENABLED", "true");
+    mocks.read.mockResolvedValue({ ...active, version: 1 });
+    mocks.hasOwn.mockResolvedValue(true);
+    for (const plan of ["SUPPORTED_15", "INDEPENDENT_10"]) {
+      const response = await post({ ...fresh, plan });
+      expect([response.status, (await response.json()).error.code]).toEqual([409, "PLAN_NOT_AVAILABLE"]);
+    }
+    expect(mocks.begin).not.toHaveBeenCalled();
+    // A switch that began is still resumed, and an office-registered seller's switch is as before.
+    mocks.read.mockResolvedValue(saved);
+    expect((await post({ commandId, expectedVersion: 3, plan: pending.plan, agreementVersion: pending.agreementVersion })).status).toBe(200);
+    mocks.read.mockResolvedValue({ ...active, version: 1 });
+    mocks.hasOwn.mockResolvedValue(false);
+    mocks.begin.mockResolvedValue({ state: saved, openCheckouts: [] });
+    expect((await post({ ...fresh, plan: "SUPPORTED_15" })).status).toBe(200);
+    expect(mocks.begin.mock.calls.every((call) => call[2].allowAgentToIndependent === undefined)).toBe(true);
   });
 });

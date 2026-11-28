@@ -172,7 +172,7 @@ flag `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED`（既定 OFF）。**本番で�
   - `payment_intent_data.transfer_group = niho-experience-agent-payout:<予約>`
   - `custom_text`：「販売者：○○。代金は NIHO が販売者に代わって受け取ります」（日本語・英語）
 - **予約画面とメール**：決済の直前と確認メールに、販売者と代理受領を出す（`paymentCollectedBy`）。販売者情報のリンクは、ホスト自身の `/experiences/{slug}/seller`。
-- **切り替え**：今の版が代理受領なら、Direct への切り替え（`beginOwnerSwitch`）は 409（3c まで）。体験の編集のプランの表示は「サポート 15%（NIHO が代金を受け取る）」にする。
+- **切り替え**：今の版が代理受領なら、Direct への切り替え（`beginOwnerSwitch`）は 409。ただし、販売者プロフィールが自分の Stripe アカウント（`connect_account_id`）のホストが「独立 10%」へ切り替えるときだけ通す（3c-2）。体験の編集のプランの表示は「サポート 15%（NIHO が代金を受け取る）」にする。
 - **flag**：
   - `EXPERIENCE_HOST_AGENT_SALES_ENABLED`（選ぶ・受付・Checkout・販売者情報の開放）。設定は `EXPERIENCE_HOST_AGENT_SALES_AGREEMENT_VERSION`・`EXPERIENCE_HOST_AGENT_RECEIVER_NAME`・`EXPERIENCE_HOST_AGENT_PAYOUT_DELAY_DAYS`（既定 3）。
   - 受付の可否は、販売者が NIHO なら `managedSalesEnabled`、ホストならこの flag で決める。
@@ -270,7 +270,7 @@ flag `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED`（既定 OFF）。**本番で�
 
 ## 3c 独立 10% の本人の口座（Standard）
 
-2 つの PR に分ける。flag `EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED`（既定 OFF。本番は 3c-2 まで OFF）。
+2 つの PR に分ける。flag `EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED`（既定 OFF。3c-2 で本番でも ON にできるようにした）。
 
 ### 決めた既定値（オーナー「他の論点は推奨で」2026-11-28）
 
@@ -325,7 +325,7 @@ flag `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED`（既定 OFF）。**本番で�
 - **混在の修正**：受取口座の利用同意の取消は、今の版が代理受領の掲載を止めない。`reserve`（PAYOUT）は、販売者プロフィールが無い、または代理受領の同意の履歴があるときに通す。受取口座の画面は、PAYOUT の行がある、または代理受領の同意の履歴があるときも Express の段を出す。販売者プロフィールが無いホストは、この flag でも特定商取引法の表示（NATIVE）を保存できる。`agentSalesOffer` は、販売者プロフィールのあるホストでも、代理受領の商品には `choosable: false` で状態を返す。
 - **画面**：`ExperiencePayoutLoad` は `connect: { payout, direct }`（どちらかが null なら、その段は出さない）と `owner: { …, payout?, standard? }`。販売者の口座が `DIRECT` の行なら「Stripe で見る」は dashboard（`https://dashboard.stripe.com/`。Express のログインリンクは作らない）。
 - **退役**：`retire-connect-account.mjs` は `--purpose direct` で `DIRECT` の行も退役できる。販売者プロフィールが結んでいる行は拒む（販売者の変更の手順が先）。
-- **flag**：`EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED`（既定 OFF）。needs はホストの画面・DB・ホストアカウント・ホスト公開 API。**本番では ON にできない**（deploy の表の `stagingOnly: true`。本番で ON にすると deploy の検査が拒む）。3c-2 でこの属性を外し、3c-2 が足す設定 `EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION` を必須にする。
+- **flag**：`EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED`（既定 OFF）。needs はホストの画面・DB・ホストアカウント・ホスト公開 API。3c-1 では本番で ON にできなかった（deploy の表の `stagingOnly: true`）。3c-2 でこの属性を外し、設定 `EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION` を必須にした（下の 3c-2）。
 - **flag が OFF でも効く変更**：混在の修正のうち、(1) 同意の取消が代理受領の掲載を止めない、(2) `reserve(PAYOUT)` が有効な行を返し、履歴で新しい行を作れる、(3) Express の段と「Stripe で見る」の出し分け（`ownerExtras`）、(4) `agentSalesOffer` の `choosable:false`。すでに代理受領を使うホストのためで、migration `0098`・`0099` をコードより先に適用する。画面の Express の段と `reserve(PAYOUT)` の条件は、store の `payoutBlock`（有効な PAYOUT の行がある、または代理受領の同意の履歴がある）の 1 か所で決める。
 - **退役の競合**：結ばれた `DIRECT` の行の退役は、アプリの判定に加えて 0099 の trigger（`retired_at` が NULL から値になる UPDATE で、販売者プロフィールが参照していれば例外）が拒む。`register` が行を `FOR SHARE` で持っているあいだの退役は、待ってから拒まれる。
 - **「Stripe で見る」**：販売者プロフィールの `connect_account_id`（`DIRECT`）で判定し、`DIRECT` なら常に `https://dashboard.stripe.com/`（flag が OFF でも、fallback でも）。PAYOUT の行も持つホストは、ボタンの `kind`（`direct`＝自分の Stripe アカウント、`payout`＝Express）で出し分ける。
@@ -338,3 +338,14 @@ flag `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED`（既定 OFF）。**本番で�
 - 受付を始める検査：販売者が `DIRECT` のプロフィールのとき、版が無ければ `SALES_PLAN_REQUIRED`（fee settings は見ない）。`INDEPENDENT_10` の版なら fee settings を見ず、版の有効・販売者列の一致・NATIVE の名前の一致を見てから、今の readiness へ進む。今の Direct のホストの検査は変えない。
 - Checkout・返金・精算（補填の Transfer）は、今の Direct の経路のまま。
 
+#### 3c-2 の実装メモ（#726）
+
+- **選ぶ**：`POST /host/api/products/{productId}/independent-sales?providerId=`（`lib/experience/independent-sales-http.ts`。形は `agent-sales-http.ts` と同じ）。JSON は `commandId`・`expectedStateVersion`・`agreementVersion`・`accepted`。flag（3c-1 と同じ `EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED`）が OFF なら 404。同一 origin・OWNER・直近 30 分のログイン（古ければ 401 `REAUTH_REQUIRED`）。boundary は readiness（`accountUsable`・`connectReady`・受取口座の利用同意・口座の一致を満たさなければ 409 `CONNECT_NOT_READY`）。同意の版は設定 `EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION` と比べ、違えば 409 `CONSENT_OUTDATED`。NATIVE の名前が販売者プロフィールの名前と違えば 409 `SELLER_DISCLOSURE_REQUIRED`。
+- **store `chooseIndependent`**（`direct-sellers.ts`、1 つの transaction）：在庫の lock・OWNER・商品を `FOR UPDATE`。`owner_switch_command_id` で再送を判定（同じ command は同じ結果。条件が違えば 409、今の版でなければ 409）。販売者プロフィールが `DIRECT`（`connect_account_id`）で、その口座の行が有効、その口座の受取口座の利用同意を今の OWNER が与えていて、NATIVE が一致していること。状態の無い商品に、版 1（`INDEPENDENT_10`・`CONNECT_DIRECT`・1000・`OWNER_WEB`、`seller_disclosure_url` は `/experiences/{slug}/seller`、販売者の参照は `sel_…`、口座は Standard の口座）・状態・商品の販売者列（version+1）を書く。商品の販売者列が NULL でなければプロフィールと同じこと（違えば 409 `SELLER_MISMATCH`）。conflict のメッセージ：`DIRECT_SELLER_REQUIRED`・`PAYOUT_CONSENT_REQUIRED`・`SELLER_DISCLOSURE_REQUIRED`・`SELLER_MISMATCH`・`PUBLIC_PROFILE_MISSING`・`VERSION_CONFLICT`。状態がすでにある商品は、ここでは選ばない（切り替える）。
+- **代理受領から切り替える**：同じ route が、状態が代理受領（`AGENT_15`）、または同じ command の切り替えの途中なら `beginOwnerSwitch`（`plan: INDEPENDENT_10`）→ 開いている Checkout の失効 → `finalizeSwitch` を通す（`lib/experience/sales-plan-switch.ts`。`sales-plan` の route と共有。予約の snapshot が PLATFORM なら `expirePlatformCheckout`、そうでなければ `expireDirectCheckout`）。`beginOwnerSwitch` の「代理受領は Direct へ切り替えない」409 は、販売者プロフィールに `connect_account_id` があり `plan=INDEPENDENT_10` のときだけ通す。受付中でも切り替えられる。もう受けた代理受領の予約は snapshot のまま、Express へ送金される（3b-2 は変えない）。状態の版（`expectedStateVersion`）は読んだ版を渡す（状態がある商品で null は 409 `VERSION_CONFLICT`）。
+- **受付を始める検査**（`blockers`）：販売者プロフィールが `connect_account_id` を持つ（かつ代理受領・20% でない）とき、版が無ければ新しい blocker `SALES_PLAN_REQUIRED`（fee settings は見ない。ページの公開は止めない）。版が `INDEPENDENT_10`・`CONNECT_DIRECT` なら fee settings（`FEE_SETTINGS_REQUIRED`・`SUPPORT_CONSENT_REQUIRED`）を見ず、版の `phase=ACTIVE` と版・商品の販売者列の一致（`SELLER_MISMATCH`）、NATIVE の名前の一致（`SELLER_DISCLOSURE_REQUIRED`）を見て、そのあと今の Direct の readiness の検査へ進む。**`connect_account_id` の無い Direct のホスト（運営が登録した販売者）の検査は変えない。** `loadSellable` は、版があれば fee settings を見ないので変えない。
+- **画面**：体験の編集の「料金・予約」に `HostIndependentSalesSection`（`HostAgentSalesSection` の次）。商品の DTO に `independentSales: { agreementVersion, sellerName } | null`（flag が ON で販売者プロフィールが自分の Stripe アカウントのときだけ）。版が無ければ「独立 10% で売る」、今の版が代理受領なら「独立 10% に切り替える」（受付中でも）、今の版が `INDEPENDENT_10` なら現在のプランの表示。同意の文言は 販売者はあなた・代金はあなたの Stripe で直接受け取る・料率 10%（決済手数料こみ。NIHO が補う）・返金・異議申立ての損失はあなた・規約へのリンク（同意版つき）。blocker の文言と行き先（料金・予約）は `publication-stages.ts`・`publication-workflow.ts`・`HostPublicationWorkspace.tsx`。
+- **flag**：`stagingOnly` を外した。本番でも ON にできる。設定 `EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION`（変数 `HOST_INDEPENDENT_SALES_AGREEMENT_VERSION`）が必須（`resolve-config.ts`・`runtime-flags.mjs` の `settings`）。
+- **Checkout・返金・精算**：変えない。`INDEPENDENT_10`・`CONNECT_DIRECT` の予約は、今の Direct の予約と同じ経路（`createDirectCheckout`・`application_fee_amount`・精算の補填の Transfer）を通る（`packages/experience-store/test/independent-sales.integration.test.ts` で、予約の snapshot が `CONNECT_DIRECT`・1000 になることを確かめている）。
+- **決定（自分でつないだ Standard の販売者は 独立 10% だけ）**：販売者プロフィールに `connect_account_id` があるホストは、`sales-plan` の route（`EXPERIENCE_OWNER_SALES_PLAN_AGREEMENT_VERSION` の経路）で新しい切り替えを始められない（409 `PLAN_NOT_AVAILABLE`。始まった切り替えの再開は通す）。Direct 15% は使わず、独立 10% の route だけで選ぶ・切り替える。`beginOwnerSwitch` の代理受領 → Direct の 409 は、入力 `allowAgentToIndependent: true`（独立 10% の route だけが渡す）と `plan=INDEPENDENT_10` と `connect_account_id` の 3 つがそろうときだけ通す。判定は `sales-kind.ts` の `ownStripeSellerSql`／`hasOwnStripeSeller` の 1 か所。運営が登録した販売者（`connect_account_id` なし）の切り替えは変えない。
+- **止まった切り替えの再開**：代理受領 → 独立 10% の旧決済の照合が止まったら（503・結果不明）、画面は「旧決済の照合を再開」を出し、`transitionCommandId` と pending の同意の版で同じ route を呼ぶ。route は、同じ command と pending の版・同意の版が一致する再開のときは、flag の 404 と `CONSENT_OUTDATED` を見ない（flag を OFF にしたあとや同意の版の設定を変えたあとでも終えられる。同一 origin・30 分・OWNER・readiness は今どおり）。再開でない新しい選択は今どおり拒む。画面の欄の表示は flag が ON のときだけ（DTO の `independentSales`）。

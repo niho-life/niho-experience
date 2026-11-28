@@ -48,3 +48,17 @@ export const countedAgentConsentSql = (providerId: string, plan: string): string
 const AGENT_SELLER_REF_SQL = "^agt_[0-9a-f]{32}$";
 const AGENT_SELLER_REF = /^agt_[0-9a-f]{32}$/;
 export const isAgentSellerRef = (value: unknown): value is string => typeof value === "string" && AGENT_SELLER_REF.test(value);
+
+/**
+ * 自分の Stripe アカウントの販売者か (3c, #726): the provider's seller profile is its own Standard account (`connect_account_id`), not an
+ * office-registered Direct seller. The one definition: blockers, the host screen's offer, beginOwnerSwitch and the sales-plan route use it.
+ */
+export const ownStripeSellerSql = (providerId: string): string =>
+  `EXISTS (SELECT 1 FROM experience_host_seller_profiles own_seller WHERE own_seller.provider_id=${providerId} AND own_seller.connect_account_id IS NOT NULL)`;
+
+export async function hasOwnStripeSeller(
+  client: { query: (sql: string, values: unknown[]) => Promise<{ rows: readonly Record<string, unknown>[] }> },
+  providerId: string,
+): Promise<boolean> {
+  return (await client.query(`SELECT ${ownStripeSellerSql("$1")} AS own`, [providerId])).rows[0]?.own === true;
+}
