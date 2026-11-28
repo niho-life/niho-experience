@@ -1205,11 +1205,13 @@ function checkoutEventEnvelope(event: Stripe.Event): CheckoutEventEnvelope | nul
   }
 
   const session = asRecord(event.data.object, "checkout session");
+  // The mark comes first: another service's Session on a shared connected account (a subscription Checkout
+  // with no metadata, say) is not ours, whatever its mode, and must be ignored (204), never a 400 that Stripe retries.
+  const metadataValue = session.metadata;
+  if (metadataValue === null || typeof metadataValue !== "object" || Array.isArray(metadataValue) || (metadataValue as Record<string, unknown>).source !== "niho-experience") return null;
   if (session.object !== "checkout.session" || session.mode !== "payment") {
     throw new ExperiencePaymentsValidationError("The Stripe event does not contain a payment Checkout Session.");
   }
-  const metadataValue = session.metadata;
-  if (metadataValue === null || typeof metadataValue !== "object" || Array.isArray(metadataValue) || (metadataValue as Record<string, unknown>).source !== "niho-experience") return null;
 
   const metadata = asRecord(session.metadata, "checkout session metadata");
   const metadataKeys = Object.keys(metadata);

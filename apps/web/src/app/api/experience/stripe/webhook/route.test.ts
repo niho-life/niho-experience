@@ -114,6 +114,9 @@ describe("experience Stripe webhook", () => {
       event("checkout.session.expired", { metadata: { booking_id: BOOKING_ID } }),
       event("checkout.session.async_payment_failed", { metadata: {} }),
       event("charge.refunded"),
+      // A subscription Checkout of another service on the shared platform (no metadata): 204, never a 400 Stripe retries.
+      event("checkout.session.completed", { mode: "subscription", metadata: {}, status: "complete", payment_status: "paid" }),
+      event("checkout.session.expired", { mode: "subscription", metadata: {} }),
     ]) {
       expect((await POST(delivery(body))).status).toBe(204);
     }
