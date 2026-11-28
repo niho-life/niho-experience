@@ -18,6 +18,10 @@
       "types": "./src/site-sale-registration.ts",
       "default": "./src/site-sale-registration.ts"
     },
+    "./connect-account-retirement": {
+      "types": "./src/connect-account-retirement.ts",
+      "default": "./src/connect-account-retirement.ts"
+    },
     "./site-sale-script": {
       "types": "./src/site-sale-script.ts",
       "default": "./src/site-sale-script.ts"

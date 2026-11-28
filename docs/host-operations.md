@@ -36,6 +36,16 @@ Admin のセッションを毎回確認し、変更は同一 origin（CLI は pr
 | `POST /admin/api/hosts/<providerId>/clear-suspension` | 解除 |
 | `POST /admin/api/hosts/accounts/<hst_…>/suspend`・`/reactivate` | アカウントの停止・解除 |
 
+## オーナーが代わったときの受取口座の退役と作り直し（#710、[host-payouts.md](host-payouts.md)）
+
+ホストが設定 › 受取口座 から自分で登録した受取口座（Stripe Express）は、Stripe の Express ダッシュボードに、NIHO のセッションを通らない直接のログイン（`express_login`）がある。そのため、ホストの**オーナーが代わった**とき（前のオーナーが抜けた・乗っ取りが疑われる・口座を替えたい）は、口座の行を退役して、新しいオーナーが作り直す。
+
+1. 新しいオーナー（`provider_memberships` の有効な OWNER）を確かめる。前のオーナーの Stripe の口座に、まだ売上の送金（3b 以降）が残っていないかを確かめる（3a の段階では送金はない）。
+2. 行を退役する（移行の権限で。runtime には退役の権限がない）：`node scripts/experience/retire-connect-account.mjs <providerId> --by <担当者> --yes`（環境 `EXPERIENCE_DATABASE_URL`。行は消えず、`retired_at`・`retired_by` が入る。退役した行は Webhook でも無視される）。
+3. Stripe の古い口座は、Stripe のダッシュボードで、必要なら閉じる（NIHO のコードは触らない）。
+4. 新しいオーナーが、設定 › 受取口座 の「受取口座を登録する」で、新しい口座を作る（同じホストに、有効な行は 1 つだけなので、退役の前には作れない）。
+5. 口座の作成が途中で止まり（23 時間を過ぎて）事務局へ問い合わせが来たとき（画面は「口座の作成の途中で止まっています」）：Stripe で `metadata.creation_id` がその行の `id` と一致する口座を探して、見つかれば `stripe_account_ref` に入れる（1 回だけ書ける）。見つからなければ行を退役して、作り直してもらう。
+
 ## 事務局への知らせ
 
 あるホストで**初めて**ページが公開されたとき、**初めて**予約の受付が始まったときに、`EXPERIENCE_MAIL_REPLY_TO` の宛先へ日本語のメールを 1 通ずつ送る。体験の題・ホストの公開名・登録の経路・`/admin/hosts` へのリンク（予約者の情報は入れない）。

@@ -392,6 +392,14 @@ export const FLAGS = Object.freeze([
     variable: "HOST_SELF_REGISTRATION_ENABLED",
     needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_NIHO_LOGIN_ENABLED", "EXPERIENCE_HOST_MAIL_ENABLED"],
   },
+  // ホストが自分で受取口座（Stripe Express）を登録する (Epic #700 stage 3a, #710, docs/host-payouts.md): 設定 › 受取口座 の「受取口座を登録する」、
+  // その route、Connect webhook の account.updated。Stripe のキー（口座の作成と読み直し）は HOST_ACCOUNTS のものと同じ参照。Migration 0095 とその runtime grants を先に適用する。
+  // 本番では 3b（サポート 15% の送金）が入るまで OFF のまま（登録した口座でお金を受け取れないため）。
+  {
+    env: "EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED",
+    variable: "HOST_CONNECT_ONBOARDING_ENABLED",
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED"],
+  },
   // 開催回の担当 (#535 v0, docs/occurrence-assignments.md): 承認後決済の開催回に1人の内部担当。報酬の計算・送金はしない。
   {
     env: "EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED",

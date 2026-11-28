@@ -164,6 +164,12 @@ export type {
 export { HOST_MAIL_TOPICS, HOST_NOTIFICATION_ADDRESS_LIMITS, isHostEmail } from "./host-mail-shared.ts";
 export type { HostBookingMailTopic, HostMailTopic } from "./host-mail-shared.ts";
 export { HOST_MAIL_LIMITS, HOST_MAIL_NOTIFICATION_TOPICS, HostMailOutbox } from "./host-mail-outbox.ts";
+export type { ClaimedHostPayoutAccountMail, HostPayoutAccountMailClaim } from "./host-mail-outbox.ts";
+export { CONNECT_ACCOUNT_STATES, ExperienceConnectAccounts } from "./connect-accounts.ts";
+export type {
+  ConnectAccountPurpose, ConnectAccountRecord, ConnectAccountReservation, ConnectAccountSnapshot, ConnectAccountSnapshotInput,
+  ConnectAccountSnapshotSaved, ConnectAccountState, ConnectAccountWithSnapshot,
+} from "./connect-accounts.ts";
 export type { ClaimedHostAddressConfirmation, ClaimedHostBookingMail, HostAddressConfirmationClaim, HostBookingMailClaim, HostMailRetry } from "./host-mail-outbox.ts";
 export { HostNotificationAddresses } from "./host-notification-addresses.ts";
 export type { HostLoginEmailOutcome, HostNotificationAddress, HostNotificationAddressChange } from "./host-notification-addresses.ts";

@@ -26,9 +26,11 @@ export const HOST_MAIL_TOPICS = {
   dayBeforeSummary: "host.mail.day_before_summary",
   listingSuspension: "host.mail.listing_suspension",
   addressConfirmation: "host.mail.address_confirmation",
+  /** #710: the payout account needs more information from the OWNER (one row per account and need, no push). */
+  payoutAccountAttention: "host.mail.payout_account_attention",
 } as const;
 export type HostMailTopic = (typeof HOST_MAIL_TOPICS)[keyof typeof HOST_MAIL_TOPICS];
-export type HostBookingMailTopic = Exclude<HostMailTopic, typeof HOST_MAIL_TOPICS.addressConfirmation>;
+export type HostBookingMailTopic = Exclude<HostMailTopic, typeof HOST_MAIL_TOPICS.addressConfirmation | typeof HOST_MAIL_TOPICS.payoutAccountAttention>;
 
 export const HOST_NOTIFICATION_ADDRESS_LIMITS = {
   /** A confirmation link works for this long after the host asked for it, and once. */
@@ -104,7 +106,7 @@ export async function enqueueHostBookingMails(
   client: PoolClient,
   input: {
     readonly providerId: string;
-    readonly topic: HostBookingMailTopic;
+    readonly topic: HostBookingMailTopic | typeof HOST_MAIL_TOPICS.payoutAccountAttention;
     readonly aggregateType: string;
     readonly aggregateId: string;
     /** The push's key; each person's row adds a digest of their ID to it. */

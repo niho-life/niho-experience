@@ -1,16 +1,19 @@
 import { fullDateJa } from "@/host/format";
 import type { HostNotice } from "@/host/payout";
 import {
+  CONNECT_PAYOUT_STATES,
   experiencePayoutLines,
   experiencePayoutStatus,
   PAYOUT_ACCOUNT_TEXT,
   payoutAccountConsentText,
   type ExperiencePayoutLoad,
 } from "@/host/payout-account";
-import { HOST_PAYOUT_CONSENT_PATH, HOST_SETTINGS_PAYOUT_ANCHOR } from "@/lib/host/routes";
+import { hostApiPath } from "@/lib/host/api-path";
+import { HOST_PAYOUT_CONSENT_PATH, HOST_PAYOUT_ONBOARDING_PATH, HOST_SETTINGS_PAYOUT_ANCHOR } from "@/lib/host/routes";
 import { FieldRow, FieldSection } from "./fields";
 import { consoleButtonClass } from "./host-ui";
 import { HostNoticeLine } from "./HostNoticeLine";
+import { HostStripeLogin } from "./HostStripeLogin";
 
 /** "2026年11月7日" in Japan. */
 const japanDate = (at: string) => fullDateJa(new Date(Date.parse(at) + 9 * 3_600_000).toISOString().slice(0, 10));
@@ -28,9 +31,35 @@ export function HostPayoutAccountPanel({ providerId, load, notice }: { providerI
       {load.status === "not-owner" ? <p className="flex min-h-10 items-center text-ink-soft">{PAYOUT_ACCOUNT_TEXT.ownerOnly}</p>
         : load.status === "error" ? <p role="alert" className="flex min-h-10 items-center text-danger">{PAYOUT_ACCOUNT_TEXT.unreadable}</p>
         : load.status === "setup-required" ? <p className="flex min-h-10 items-center text-ink-soft">{PAYOUT_ACCOUNT_TEXT.setupRequired}</p>
+        : load.status === "connect" ? <ConnectPayout providerId={providerId} state={load.state} />
         : <OwnerPayout providerId={providerId} load={load} />}
       <HostNoticeLine notice={notice} className="pt-1" />
     </FieldSection>
+  );
+}
+
+/**
+ * A host that registers its own payout account (Epic #700 stage 3a, #710, docs/host-payouts.md): what Stripe says in one
+ * sentence, and the one button that goes with it. A plain form (no JavaScript): the POST asks for a sign-in within 30
+ * minutes, then sends the OWNER to Stripe's own pages.
+ */
+function ConnectPayout({ providerId, state }: { providerId: string; state: Extract<ExperiencePayoutLoad, { status: "connect" }>["state"] }) {
+  const text = CONNECT_PAYOUT_STATES[state];
+  return (
+    <FieldRow label="受取口座" labelId="settings-payout-connect">
+      <div className="grid gap-2 py-2">
+        <p className={state === "READY" ? "text-ink-soft" : state === "REJECTED" ? "text-danger" : "text-warn"}>{text.line}</p>
+        {text.action?.kind === "onboard" ? (
+          <form method="post" action={hostApiPath(HOST_PAYOUT_ONBOARDING_PATH, providerId)} data-niho-navigation-form>
+            <button type="submit" className={consoleButtonClass("primary", "sm")}>{text.action.label}</button>
+          </form>
+        ) : null}
+        {text.action?.kind === "dashboard" ? (
+          <HostStripeLogin providerId={providerId} label={text.action.label} className={consoleButtonClass("secondary", "sm")} />
+        ) : null}
+        {text.action?.kind === "onboard" ? <p className="text-[0.78125rem] text-muted">{PAYOUT_ACCOUNT_TEXT.recentSignInConnect}</p> : null}
+      </div>
+    </FieldRow>
   );
 }
 

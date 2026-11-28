@@ -93,6 +93,10 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_provider_operations_events: { write: I },
   // The office's suspension and reactivation of a host account (#711): append-only.
   host_account_operation_events: { write: I },
+  // 受取口座 (#710, 0095): a row is reserved before Stripe is asked and its account ID written once (a trigger refuses any other
+  // change, and DELETE); retiring is the office's act (connect-account-retirement.ts, operator-only). The last state read is replaced.
+  experience_connect_accounts: { write: I, updateColumns: ["stripe_account_ref"] },
+  experience_connect_account_snapshots: { write: IU },
   // Notices to the office's mailbox (#711): one row per host and kind, claimed and reported by the mail job.
   experience_office_notices: { write: IU },
   // 出欠 of OTA bookings (#194 PR B, 0039): one row per reservation, its mark replaced when the host corrects it.
@@ -247,4 +251,5 @@ export const OPERATOR_ONLY_SOURCES = Object.freeze([
   "packages/experience-store/src/site-sale-registration.ts",
   "packages/experience-store/src/host-seller-provisioning.ts",
   "packages/experience-store/src/legacy-guide-import.ts",
+  "packages/experience-store/src/connect-account-retirement.ts",
 ]);
