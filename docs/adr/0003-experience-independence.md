@@ -49,7 +49,7 @@ NIHO の user ID は、`provider_memberships.niho_user_id`、販売者 profile �
 - 口座が使えるか（readiness）は、Stripe へ直接照会する。checkout ではすでにそうしている（`retrieveConnectedAccount`、2026-10-31 のオーナー決定）。公開の判定も同じ照会に揃える。
 - Experience での口座の利用同意は、OWNER が Experience の画面で、版付きで記録する（掲載同意と同じ形）。NIHO 側の再利用同意（niho-app #19864）は使わない。
 - NIHO で接続済みの既存口座（初回のコミュニティディナーの受取口座など）は、Admin が事業者と口座を確認して登録する。登録は監査ログに残す。
-- 新しい販売者の口座は、Experience が Stripe の Express アカウントを作り、Stripe がホストする本人確認（Account Links）で接続する。Experience は本人確認書類を扱わない。
+- 新しい販売者の口座は、Experience が Stripe の Express アカウントを作り、Stripe がホストする本人確認（Account Links）で接続する。Experience は本人確認書類を扱わない。**改め（2026-11-28、Epic #700、#710）**：「新しい販売者の口座は Express」は、[host-payouts.md](../host-payouts.md) の 2 つの流れに改める。NIHO が受けてあとで送る「サポート 15%」の**受取口座**は Express（ホストが設定 › 受取口座 から自分で登録する。口座は `experience_connect_accounts`、Direct charge の販売者プロフィールとは別。Express の口座では決済を作らない）。本人の Stripe で直接受ける「独立 10%」の本人の口座は Standard（3c）。今の Direct charge の販売者の口座（Admin が登録）はそのまま。
 
 ### 3. Stripe のプラットフォームは共有し、キーと webhook は分ける
 

@@ -6,6 +6,7 @@ import { publishChecklist, type ChecklistRow, type ChecklistStage, type Progress
 import type { PublicationStatus } from "./publication-stages";
 import { consoleButtonClass, HOST_SURFACE, LIST_ROW_DETAIL, LIST_ROW_TITLE } from "./host-ui";
 import { SectionTitle } from "./ui";
+import { hostApiPath } from "@/lib/host/api-path";
 
 /*
  * ホームの「公開までの道のり」(#706): ① 体験のページを公開する (口座は要らない) と ② 予約の受付を始める の2段。
@@ -69,18 +70,18 @@ function Stage({ number, stage }: { number: 1 | 2; stage: ChecklistStage }) {
 }
 
 /** The card, from products already in hand (the preview's, tests) or read from the list API. Nothing while loading, on failure, or when every experience takes bookings. */
-export function HostPublishProgress({ hostName, linkProviderId, initialProducts }: { hostName: string; linkProviderId: string | null; initialProducts?: readonly ProgressProduct[] }) {
+export function HostPublishProgress({ hostName, linkProviderId, providerId, initialProducts }: { hostName: string; linkProviderId: string | null; /** The host the card is for: the list API is asked for it (#709). The URL's own `?providerId=` is only `linkProviderId`. */ providerId?: string | null; initialProducts?: readonly ProgressProduct[] }) {
   const [products, setProducts] = useState<readonly ProgressProduct[] | null>(initialProducts ?? null);
   useEffect(() => {
     if (initialProducts) return;
     let active = true;
-    const url = linkProviderId ? `/host/api/products?providerId=${encodeURIComponent(linkProviderId)}` : "/host/api/products";
+    const url = hostApiPath("/host/api/products", providerId ?? linkProviderId);
     void fetch(url, { cache: "no-store", credentials: "same-origin" })
       .then(async (response) => (response.ok ? progressProductsFrom(await response.json().catch(() => null)) : null))
       .then((read) => { if (active) setProducts(read); })
       .catch(() => { if (active) setProducts(null); });
     return () => { active = false; };
-  }, [initialProducts, linkProviderId]);
+  }, [initialProducts, linkProviderId, providerId]);
   const checklist = products ? publishChecklist(products, hostName, linkProviderId) : null;
   if (!checklist) return null;
   return (

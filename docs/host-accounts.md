@@ -98,7 +98,7 @@ preview（mock）は合成の NIHO を往復する：`/host/auth/login` → mock
 | 判定 | 出どころ |
 | --- | --- |
 | 本人 | セッションのホストアカウント（`hst_`） |
-| 販売者 | そのアカウントが有効な OWNER である提供者（1 つ。1 アカウントは 3 つまで持てるが、複数のときの選択は #709 まで未対応）と、その提供者に Admin/ops が登録したホストアカウント用の販売者 profile（`ExperiencePublicationRepository.currentHostAccountSellerProfile`）。無い → `403 FORBIDDEN`、2 つ以上 → `409 SELLER_PROFILE_AMBIGUOUS`、profile が無い（または NIHO 用の profile）→ `409 SELLER_SETUP_REQUIRED` |
+| 販売者 | そのアカウントが有効な OWNER である提供者（`?providerId=` で選んだ 1 つ。1 アカウントは 3 つまで持てる。指定が無く 2 つ以上なら `409 PROVIDER_REQUIRED`、属さない id は `403`、不正な id は `422`。画像の `previewUrl` にも `providerId` が入る）と、その提供者に Admin/ops が登録したホストアカウント用の販売者 profile（`ExperiencePublicationRepository.currentHostAccountSellerProfile`）。無い → `403 FORBIDDEN`、選んだホストを渡すので `SELLER_PROFILE_AMBIGUOUS` にはならない、profile が無い（または NIHO 用の profile）→ `409 SELLER_SETUP_REQUIRED` |
 | `accountUsable` | ホストアカウントが `ACTIVE` か |
 | `connectReady` | Stripe へ直接照会（`retrieveConnectedAccount`、プラットフォームのキー）。profile の口座で、決済・入金が有効、登録情報の提出済み、国が JP、通貨が JPY |
 | 支払いの同意 | Experience の利用同意（下）。版が `EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION` と同じで、profile の口座に対するものだけ |

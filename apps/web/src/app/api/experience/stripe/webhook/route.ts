@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
-import { verifyDirectCheckoutWebhook, ExperiencePaymentsValidationError, isEndedCheckoutEvent, isRefundEvent } from "@niho-experience/experience-payments";
+import { verifyConnectWebhook, ExperiencePaymentsValidationError, isAccountUpdatedEvent, isEndedCheckoutEvent, isRefundEvent } from "@niho-experience/experience-payments";
+import { applyAccountUpdated } from "@/lib/experience/host-connect-onboarding";
+import { payoutOnboardingDeps } from "@/lib/experience/host-connect-onboarding-server";
 import { bookingCancellations, experiencePool, experienceStore, experienceSupportRepository, guestHoldReleases } from "@/lib/experience/store-server";
 
 export const runtime = "nodejs";
@@ -13,7 +15,8 @@ function reply(status: number): Response {
  * Connect events share the NIHO platform; only events marked for this service are processed. A paid Session
  * confirms its booking; a Session that ended unpaid (expired, or a delayed payment that failed) gives the
  * guest's hold back (#285 slice 4, docs/guest-booking.md); a refund this service made moves its booking's
- * refund forward (refund.created / refund.updated / refund.failed, slice 7). Payloads are never logged.
+ * refund forward (refund.created / refund.updated / refund.failed, slice 7); account.updated of a host's own payout account
+ * (Epic #700 stage 3a, #710) reads that account again and keeps its state. Payloads are never logged.
  */
 export async function POST(request: NextRequest): Promise<Response> {
   const secret = process.env.EXPERIENCE_STRIPE_WEBHOOK_SECRET;
@@ -32,11 +35,24 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   let event;
   try {
-    event = verifyDirectCheckoutWebhook({ rawBody, stripeSignature: signature, endpointSecret: secret, platformStripeKey: platformKey });
+    event = verifyConnectWebhook({ rawBody, stripeSignature: signature, endpointSecret: secret, platformStripeKey: platformKey });
   } catch (error) {
     return reply(error instanceof ExperiencePaymentsValidationError ? 400 : 503);
   }
   if (!event) return reply(204);
+
+  // account.updated of a host's payout account (#710): read the account again, never trust the payload. Another account: 204.
+  if (isAccountUpdatedEvent(event)) {
+    const deps = payoutOnboardingDeps();
+    if (!deps) return reply(204);
+    try {
+      await applyAccountUpdated(event.connectedAccountId, deps);
+      return reply(204);
+    } catch {
+      console.error("Experience Stripe webhook could not update a payout account");
+      return reply(503);
+    }
+  }
 
   try {
     if (isRefundEvent(event)) {

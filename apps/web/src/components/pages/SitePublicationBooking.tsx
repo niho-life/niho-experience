@@ -310,6 +310,7 @@ export function SitePublicationBooking({ item, siteOrigin, consentVersion, booki
       </div>;
   const sellerAndConsent = <>
       {!sellerInformationUrl ? <p className="wrap-anywhere text-sm text-ink-soft">{ja ? `販売者：${sellerInformationName}` : `Sold by ${sellerInformationName}`}</p> : null}
+      {item.saleTerms?.paymentCollectedBy && !free ? <p className="wrap-anywhere text-sm text-ink-soft">{ja ? `代金は${item.saleTerms.paymentCollectedBy}が販売者（${sellerInformationName}）に代わって受け取ります。` : `${item.saleTerms.paymentCollectedBy} receives your payment on behalf of the seller, ${sellerInformationName}.`}</p> : null}
       <label className="flex items-start gap-3 text-sm text-ink-soft">
         <input type="checkbox" required checked={agreed} onChange={(event) => setAgreed(event.target.checked)} className="mt-1 size-4 shrink-0" />
         <span className="min-w-0 wrap-anywhere">{ja ? "上記の予約・キャンセル条件と" : "I agree to the booking and cancellation conditions shown above and the "}<a className="font-extrabold underline" href="/privacy" target="_blank" rel="noreferrer">{ja ? "プライバシーポリシー" : "Privacy Policy"}</a>{sellerInformationUrl ? <>{ja ? "、および" : ", and "}<a className="underline underline-offset-2" href={sellerInformationUrl} target="_blank" rel="noreferrer">{ja ? `${sellerInformationName}の販売者情報` : `seller information for ${sellerInformationName}`}</a></> : null}{ja ? "に同意します。" : "."}</span>

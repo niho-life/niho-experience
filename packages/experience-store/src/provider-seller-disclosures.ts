@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from "./errors.ts";
 import { sellerOwnerSql } from "./host-sellers.ts";
+import { agentPlanSql, countedAgentConsentSql } from "./sales-kind.ts";
 import { lockProviderInventory } from "./inventory.ts";
 import type { HostActor } from "./types.ts";
 import { withTransaction } from "./transaction.ts";
@@ -41,10 +42,18 @@ export type SellerDisclosureState = {
 };
 
 export type HostSellerDisclosure = {
-  /** Operator-provisioned legal seller name. The browser cannot replace it. */
+  /** Operator-provisioned legal seller name. The browser cannot replace it (empty for a host with no seller profile, below). */
   readonly sellerDisplayName: string;
   readonly disclosure: SellerDisclosureState | null;
+  /**
+   * True for a host with no seller profile (#725): it names itself, and the name is fixed once it sells with 代理受領. False
+   * (and absent from old readers' view) for a seller whose legal name the operator provisioned.
+   */
+  readonly nameEditable?: boolean;
 };
+
+/** What the OWNER's routes pass: the host with no seller profile may keep a public disclosure for 代理受領 (flag EXPERIENCE_HOST_AGENT_SALES_ENABLED). */
+export type SellerDisclosureOptions = { readonly agentSales?: boolean };
 
 export type PublicSellerDisclosure = {
   readonly method: "NATIVE";
@@ -123,13 +132,15 @@ function fingerprint(value: unknown): string {
 }
 
 type OwnerSeller = { readonly sellerDisplayName: string; readonly sellerNihoAccountRef: string; readonly stripeConnectAccountRef: string };
+/** `null` fields: the host has no seller profile and names itself (代理受領, #725). */
+type OwnerSellerOrSelf = OwnerSeller | { readonly sellerDisplayName: null; readonly sellerNihoAccountRef: null; readonly stripeConnectAccountRef: null };
 
 const CURRENT_SALES_PLAN = `
   LEFT JOIN experience_product_sales_plan_states sales ON sales.provider_id=state.provider_id AND sales.product_id=state.product_id
   LEFT JOIN experience_product_sales_plan_versions plan ON plan.provider_id=sales.provider_id AND plan.product_id=sales.product_id
     AND plan.revision=sales.current_revision`;
 
-async function ownerSeller(client: PoolClient, actor: HostActor): Promise<OwnerSeller> {
+async function ownerSeller(client: PoolClient, actor: HostActor, options: SellerDisclosureOptions = {}): Promise<OwnerSellerOrSelf> {
   assertStoreIdentifier(actor.providerId, "providerId");
   assertStoreIdentifier(actor.nihoUserId, "nihoUserId");
   const found = await client.query<DbRow>(
@@ -142,12 +153,43 @@ async function ownerSeller(client: PoolClient, actor: HostActor): Promise<OwnerS
       FOR SHARE OF membership,profile`,
     [actor.providerId, actor.nihoUserId],
   );
-  if (found.rows[0] === undefined) throw new StoreAccessDeniedError();
+  if (found.rows[0] === undefined) {
+    if (options.agentSales !== true) throw new StoreAccessDeniedError();
+    // No seller profile at all, and the actor is an active OWNER signed in with an ACTIVE host account.
+    const sellerless = await client.query(
+      `SELECT 1 FROM provider_memberships membership
+         JOIN host_accounts account ON account.id=membership.niho_user_id AND account.status='ACTIVE'
+        WHERE membership.provider_id=$1 AND membership.niho_user_id=$2 AND membership.active=true AND membership.role='OWNER'
+          AND NOT EXISTS (SELECT 1 FROM experience_host_seller_profiles profile WHERE profile.provider_id=membership.provider_id)
+        FOR SHARE OF membership,account`,
+      [actor.providerId, actor.nihoUserId],
+    );
+    if (sellerless.rows[0] === undefined) throw new StoreAccessDeniedError();
+    return { sellerDisplayName: null, sellerNihoAccountRef: null, stripeConnectAccountRef: null };
+  }
   return {
     sellerDisplayName: String(found.rows[0].seller_display_name),
     sellerNihoAccountRef: String(found.rows[0].seller_niho_account_ref),
     stripeConnectAccountRef: String(found.rows[0].stripe_connect_account_ref),
   };
+}
+
+/**
+ * 代理受領 (#725): while a product sold with 代理受領 is taking bookings, its public seller name is the name on its bookings and
+ * its sales-plan revision, so it is not changed or withdrawn. The host stops bookings first.
+ */
+async function agentSalesOpen(client: PoolClient, providerId: string): Promise<boolean> {
+  const open = await client.query(
+    `SELECT 1
+       FROM experience_product_publication_states state
+       ${CURRENT_SALES_PLAN}
+      WHERE state.provider_id=$1 AND state.booking_publication_id IS NOT NULL AND state.self_stopped_at IS NULL
+        AND state.operations_suspended_at IS NULL AND state.owner_resume_required=false
+        AND ${agentPlanSql("plan")}
+      LIMIT 1`,
+    [providerId],
+  );
+  return (open.rowCount ?? 0) > 0;
 }
 
 async function activePublicationsMatchSeller(client: PoolClient, actor: HostActor, seller: OwnerSeller): Promise<void> {
@@ -216,15 +258,20 @@ export class ProviderSellerDisclosureRepository {
   readonly #pool: Pool;
   constructor(pool: Pool) { this.#pool = pool; }
 
-  async getForOwner(actor: HostActor): Promise<HostSellerDisclosure> {
+  async getForOwner(actor: HostActor, options: SellerDisclosureOptions = {}): Promise<HostSellerDisclosure> {
     return withTransaction(this.#pool, async (client) => {
-      const seller = await ownerSeller(client, actor);
+      const seller = await ownerSeller(client, actor, options);
       const result = await client.query<DbRow>("SELECT * FROM provider_seller_disclosures WHERE provider_id=$1", [actor.providerId]);
-      return { sellerDisplayName: seller.sellerDisplayName, disclosure: result.rows[0] ? stateFromRow(result.rows[0]) : null };
+      const disclosure = result.rows[0] ? stateFromRow(result.rows[0]) : null;
+      if (seller.sellerDisplayName === null) {
+        const fixed = disclosure?.method === "NATIVE" && await agentSalesOpen(client, actor.providerId);
+        return { sellerDisplayName: disclosure?.method === "NATIVE" ? disclosure.sellerDisplayName : "", disclosure, nameEditable: !fixed };
+      }
+      return { sellerDisplayName: seller.sellerDisplayName, disclosure };
     });
   }
 
-  async save(actor: HostActor, command: SaveSellerDisclosureCommand): Promise<SellerDisclosureState> {
+  async save(actor: HostActor, command: SaveSellerDisclosureCommand, options: SellerDisclosureOptions = {}): Promise<SellerDisclosureState> {
     validCommand(command.commandId);
     if (command.expectedVersion !== null && (!Number.isSafeInteger(command.expectedVersion) || command.expectedVersion < 1)) {
       throw new StoreValidationError("expectedVersion is invalid.");
@@ -233,13 +280,21 @@ export class ProviderSellerDisclosureRepository {
     const requestFingerprint = fingerprint(["SAVE", command.expectedVersion, disclosure]);
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      const seller = await ownerSeller(client, actor);
+      const seller = await ownerSeller(client, actor, options);
       await lockProviderDisclosure(client, actor.providerId);
       const previous = await previousResult(client, actor, command.commandId, requestFingerprint);
       if (previous) return previous;
-      await activePublicationsMatchSeller(client, actor, seller);
-      if (disclosure.sellerDisplayName !== seller.sellerDisplayName) {
-        throw new StoreConflictError("The public seller name does not match the provisioned legal seller.");
+      // 代理受領 (#725): the name is fixed while an agent-sales product takes bookings, whether or not the host has a seller profile.
+      const existing = await client.query<DbRow>("SELECT seller_display_name,method FROM provider_seller_disclosures WHERE provider_id=$1 FOR SHARE", [actor.providerId]);
+      const named = existing.rows[0]?.method === "NATIVE" ? String(existing.rows[0].seller_display_name) : null;
+      if (named !== null && named !== disclosure.sellerDisplayName && await agentSalesOpen(client, actor.providerId)) {
+        throw new StoreConflictError("The seller name cannot change while an agent-sales product takes bookings.");
+      }
+      if (seller.sellerDisplayName !== null) {
+        await activePublicationsMatchSeller(client, actor, seller);
+        if (disclosure.sellerDisplayName !== seller.sellerDisplayName) {
+          throw new StoreConflictError("The public seller name does not match the provisioned legal seller.");
+        }
       }
       const locked = await client.query<DbRow>("SELECT version FROM provider_seller_disclosures WHERE provider_id=$1 FOR UPDATE", [actor.providerId]);
       const currentVersion = locked.rows[0] ? Number(locked.rows[0].version) : null;
@@ -267,16 +322,19 @@ export class ProviderSellerDisclosureRepository {
     });
   }
 
-  async withdraw(actor: HostActor, command: WithdrawSellerDisclosureCommand): Promise<SellerDisclosureState> {
+  async withdraw(actor: HostActor, command: WithdrawSellerDisclosureCommand, options: SellerDisclosureOptions = {}): Promise<SellerDisclosureState> {
     validCommand(command.commandId);
     if (!Number.isSafeInteger(command.expectedVersion) || command.expectedVersion < 1) throw new StoreValidationError("expectedVersion is invalid.");
     const requestFingerprint = fingerprint(["WITHDRAW", command.expectedVersion]);
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
-      await ownerSeller(client, actor);
+      const seller = await ownerSeller(client, actor, options);
       await lockProviderDisclosure(client, actor.providerId);
       const previous = await previousResult(client, actor, command.commandId, requestFingerprint);
       if (previous) return previous;
+      if (await agentSalesOpen(client, actor.providerId)) {
+        throw new StoreConflictError("The seller disclosure cannot be withdrawn while an agent-sales product takes bookings.");
+      }
       const result = await client.query<DbRow>(
         `UPDATE provider_seller_disclosures SET
            method='WITHDRAWN',representative_name=NULL,public_address=NULL,public_phone=NULL,public_email=NULL,external_url=NULL,
@@ -298,6 +356,8 @@ export class ProviderSellerDisclosureRepository {
    */
   async getPublicBySlug(slug: string): Promise<PublicSellerDisclosure | null> {
     if (typeof slug !== "string" || slug.length < 1 || slug.length > 160) return null;
+    const agent = await this.#publicAgentBySlug(slug);
+    if (agent !== null) return agent;
     const result = await this.#pool.query<DbRow>(
       `SELECT disclosure.*
          FROM experience_product_publication_states state
@@ -330,6 +390,38 @@ export class ProviderSellerDisclosureRepository {
     const sellerDisplayName = String(row.seller_display_name);
     return {
       method: "NATIVE", sellerKind, sellerDisplayName, representativeName: nullableText(row.representative_name),
+      publicAddress: String(row.public_address), publicPhone: String(row.public_phone), publicEmail: String(row.public_email),
+    };
+  }
+
+  /**
+   * 代理受領 (#725): the host's own disclosure for a product sold with agent sales. It shows while the product's revision is the
+   * agent plan, the OWNER's consent counts for that revision's seller, and the disclosure is the name the revision names; a withdrawn
+   * consent or another name makes it disappear. Direct charge sellers never reach it (their products have no agent revision).
+   */
+  async #publicAgentBySlug(slug: string): Promise<PublicSellerDisclosure | null> {
+    const result = await this.#pool.query<DbRow>(
+      `SELECT disclosure.*
+         FROM experience_product_publication_states state
+         JOIN experience_product_publications publication
+           ON publication.id=state.booking_publication_id
+          AND publication.provider_id=state.provider_id AND publication.product_id=state.product_id
+         ${CURRENT_SALES_PLAN}
+         JOIN provider_seller_disclosures disclosure ON disclosure.provider_id=publication.provider_id
+        WHERE publication.slug=$1
+          AND state.self_stopped_at IS NULL AND state.operations_suspended_at IS NULL AND state.owner_resume_required=false
+          AND disclosure.method='NATIVE'
+          AND ${agentPlanSql("plan")}
+          AND disclosure.seller_display_name=plan.seller_display_name
+          AND ${countedAgentConsentSql("publication.provider_id", "plan")}
+        ORDER BY publication.published_at DESC,publication.id DESC LIMIT 1`,
+      [slug],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      method: "NATIVE", sellerKind: String(row.seller_kind) as SellerKind, sellerDisplayName: String(row.seller_display_name),
+      representativeName: nullableText(row.representative_name),
       publicAddress: String(row.public_address), publicPhone: String(row.public_phone), publicEmail: String(row.public_email),
     };
   }

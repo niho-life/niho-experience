@@ -7,6 +7,7 @@ import { HostRegisterPrompt } from "@/components/host/HostRegisterPrompt";
 import { hostPageContext, loadHostExperienceEditor } from "@/host/data";
 import { experiencePath } from "@/host/home";
 import { config } from "@/lib/config";
+import { screenProviderId } from "@/lib/host/api-path";
 import { withProvider } from "@/lib/host/routes";
 
 export const metadata: Metadata = { title: "自分のサイトに貼る" };
@@ -23,7 +24,10 @@ export default async function HostExperienceEmbedPage({ params, searchParams }: 
   const siteOrigin = new URL(config.siteUrl).origin;
   if (config.experienceHostPublicationApiEnabled) {
     // As the editor (experiences/[id]/page.tsx): the client reads the product through the host API with the session.
-    return <HostEmbedWorkspace productId={id} siteOrigin={siteOrigin} backHref={`/host/experiences/${encodeURIComponent(id)}`} />;
+    const context = await hostPageContext(query);
+    if (!context) return null;
+    const providerId = screenProviderId(context);
+    return <HostEmbedWorkspace key={`${providerId ?? "none"}/${id}`} productId={id} providerId={providerId} siteOrigin={siteOrigin} backHref={withProvider(`/host/experiences/${encodeURIComponent(id)}`, providerId)} />;
   }
   const context = await hostPageContext(query);
   if (!context) return null;

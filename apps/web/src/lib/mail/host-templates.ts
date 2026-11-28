@@ -1,7 +1,7 @@
 import "server-only";
 import { otaSiteLabel } from "@/host/ota-sites";
 import { hostPushLines, whenJa, type HostPushEvent } from "@/lib/host/push/payload";
-import { HOST_INVITE_PATH, HOST_LOGIN_LINK_PATH, HOST_NOTIFICATION_EMAIL_PATH, HOST_SETTINGS_PATH, HOST_TEAM_INVITE_PATH } from "@/lib/host/routes";
+import { HOST_INVITE_PATH, HOST_LOGIN_LINK_PATH, HOST_NOTIFICATION_EMAIL_PATH, HOST_SETTINGS_PATH, HOST_TEAM_INVITE_PATH, hostPayoutSettingsPath } from "@/lib/host/routes";
 import { absolute, mail, oneLine, type MailBlock, type RenderedMail } from "./templates";
 
 /*
@@ -179,6 +179,23 @@ export function hostAddressConfirmationEmail(input: { readonly siteUrl: string; 
       href: `${absolute(input.siteUrl, HOST_NOTIFICATION_EMAIL_PATH)}#t=${encodeURIComponent(input.token)}`,
     },
     { kind: "p", text: "心当たりがなければ、このメールは無視してください。宛先は変わりません。" },
+    REPLY,
+  ], "ja");
+}
+
+/**
+ * 「受取口座に追加の情報が必要です」 (#710, docs/host-payouts.md): Stripe asks for more about the host's payout account. It says only
+ * that, and where to go (設定 › 受取口座, which opens Stripe's pages); never what Stripe asked for, and no link into Stripe.
+ */
+export function hostPayoutAccountEmail(input: { readonly siteUrl: string; readonly providerId: string }): RenderedMail {
+  return mail("受取口座に追加の情報が必要です", [
+    { kind: "p", text: "Stripe で、受取口座の追加の情報の入力が必要になりました。" },
+    {
+      kind: "link",
+      lead: "ホストの画面の「設定 › 受取口座」から、Stripe の画面で入力してください。",
+      label: "受取口座を開く",
+      href: absolute(input.siteUrl, hostPayoutSettingsPath(input.providerId)),
+    },
     REPLY,
   ], "ja");
 }

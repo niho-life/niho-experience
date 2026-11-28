@@ -368,6 +368,7 @@ describe("experienceJobsDrainResponse dependencies", () => {
       guestTranslations: { error: "unavailable" },
       guestErasure: { error: "unavailable" },
       otaGuestErasure: { error: "unavailable" },
+      officeNotices: { error: "unavailable" },
       questionErasure: { error: "unavailable" },
       bookingAccessPurge: { error: "unavailable" },
       // Host email is off here (#194); the addresses of hosts whose access ended still go.
@@ -377,8 +378,8 @@ describe("experienceJobsDrainResponse dependencies", () => {
       providerMediaCleanup: { off: true },
       meetingGuideSnapshotPurge: { error: "unavailable" },
     });
-    expect(pool.connect).toHaveBeenCalledTimes(6);
-    // The five steps that query directly, the claim of refunds to send again, and snapshot purge.
+    expect(pool.connect).toHaveBeenCalledTimes(7);
+    // The five steps that query directly, the claim of refunds to send again, and snapshot purge. The office notices (#711) claim through a connection.
     expect(pool.query).toHaveBeenCalledTimes(7);
     expect(mailer.sendMail).not.toHaveBeenCalled();
     expect(translator).not.toHaveBeenCalled();

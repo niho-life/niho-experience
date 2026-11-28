@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { hostAddressConfirmationEmail, hostBookingEmail, hostInvitationEmail, hostNotificationEmail, hostTeamInvitationEmail } from "./host-templates";
+import { hostAddressConfirmationEmail, hostBookingEmail, hostPayoutAccountEmail, hostInvitationEmail, hostNotificationEmail, hostTeamInvitationEmail } from "./host-templates";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import { HOST_NOTIFICATION_TOPICS } from "@niho-experience/experience-store";
 
@@ -127,5 +127,16 @@ describe("host invitation email (#696)", () => {
       expect(body).toContain("いつもと別の方法を選んでいませんか？");
       expect(body).toContain("「このまま接続する」を選んでください。");
     }
+  });
+});
+
+describe("payout account email (#710)", () => {
+  it("says only that more information is needed and links to 設定 › 受取口座, never into Stripe", () => {
+    const mail = hostPayoutAccountEmail({ siteUrl: SITE, providerId: "provider-a" });
+    expect(mail.subject).toBe("受取口座に追加の情報が必要です");
+    expect(mail.text).toContain("Stripe で、受取口座の追加の情報の入力が必要になりました。");
+    expect(mail.text).toContain(`${SITE}/host/settings?providerId=provider-a#settings-payout`);
+    expect(mail.text).not.toContain("stripe.com");
+    expect(mail.html).toContain('<html lang="ja">');
   });
 });

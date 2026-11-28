@@ -1,7 +1,7 @@
 import "server-only";
 import { createConnectedAccountLoginLink } from "@niho-experience/experience-payments";
 import { HOST_ACCOUNT_LIMITS } from "@niho-experience/experience-store";
-import { hostSalesRepository } from "@/lib/experience/store-server";
+import { connectAccounts, hostSalesRepository } from "@/lib/experience/store-server";
 import { config } from "@/lib/config";
 import { loadNihoIdentityStatus } from "@/lib/host/niho-identity-server";
 import { hostNihoReauthPath, hostPayoutSettingsPath } from "@/lib/host/routes";
@@ -30,9 +30,15 @@ export async function hostStripeLoginUrl(providerId: unknown): Promise<string | 
   const provider = loaded.providers.find((entry) => entry.id === id);
   if (provider?.memberRole !== "OWNER") return null;
 
+  // Which account opens is the server's choice, by purpose: the Direct charge seller's account first (as before), otherwise the
+  // payout account the host registered itself (Epic #700 stage 3a, #710; only with its flag on). Never an ID from the browser.
   const accounts = await sales.listPayoutAccountsForHost(ownerActor(provider));
-  if (accounts.length !== 1) return null;
-  return createConnectedAccountLoginLink({ accountId: accounts[0]!, platformStripeKey });
+  if (accounts.length === 1) return createConnectedAccountLoginLink({ accountId: accounts[0]!, platformStripeKey });
+  if (accounts.length > 1) return null;
+  const connect = connectAccounts();
+  const payout = connect ? await connect.currentPayout(provider.id) : null;
+  if (!payout?.account.stripeAccountRef || payout.account.purpose !== "PAYOUT") return null;
+  return createConnectedAccountLoginLink({ accountId: payout.account.stripeAccountRef, platformStripeKey });
 }
 
 /**

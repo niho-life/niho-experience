@@ -28,3 +28,11 @@ Host UIは結果不明のcommand IDと送信済みJSONをメモリ上で固定�
 この入力・表示は法的適合性を自動で保証しない。platform代理表示、「請求があれば開示」、架空の連絡先、確認済み表示は実装しない。新規公開の必須blockerにもしていないため、既存商品の公開・受付互換性は変わらず、追加runtime flagは設けない。
 
 設計時の公開資料: [消費者庁「通信販売」](https://www.no-trouble.caa.go.jp/what/mailorder/)、[Stripe「特定商取引法に基づく表記」](https://support.stripe.com/questions/how-to-create-and-display-a-commerce-disclosure-page?locale=ja-JP)。これらを根拠に適法性を断定せず、本人が入力した公開情報とExperienceの現在の取引条件を接続する。
+
+## 販売者プロフィールの無いホストと代理受領（#725）
+
+`EXPERIENCE_HOST_AGENT_SALES_ENABLED` が ON のとき、販売者プロフィール（`experience_host_seller_profiles`）の無いホストも、有効なホストアカウントの OWNER なら `NATIVE` の表示を保存できる。**販売者名は自分で決める**（運営が用意する法的販売者名との一致は要らない）。route は `sales:"seller"` をやめ、販売者プロフィールがあれば今までの照合、無ければこの扱い。Direct の挙動は変えない。
+
+- 代理受領の体験が受付中のあいだ（その版の販売者名が予約の販売者名になる）、名前の変更と撤回は 409。受付を止めれば変えられる。ほかの項目（住所・電話・メール）は変えられる。
+- `/experiences/{slug}/seller` は、代理受領の版でも出す。条件は、公開中の販売版であること、OWNER の同意（`provider_agent_sales_consents`）が版の販売者参照 `agt_…` に対して有効なこと、表示の名前が版の名前と一致することで、同意の撤回や名前の違いで消える。
+- 予約画面と確認メールの販売者の情報は、ホスト自身のこのページ。`publicBookingTerms` の `sellerDisclosureUrl` は NIHO が販売者のときだけで、代理受領は `paymentCollectedBy`（受領者の名前）を足す。

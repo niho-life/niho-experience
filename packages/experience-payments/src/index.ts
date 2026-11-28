@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import Stripe from "stripe";
+import { salesKindOf } from "@niho-experience/experience-store/sales-kind";
 import type { BookingRecord, RefundSubmission, SettlementTransferCommand, StripeRefundAnswer, StripeRefundStatus, StripeSettlementEvidence } from "@niho-experience/experience-store";
 
 const STRIPE_MINIMUM_EXPIRY_SECONDS = 30 * 60;
@@ -187,11 +188,11 @@ export interface VerifiedRefundEvent {
 export type VerifiedDirectCheckoutEvent = VerifiedDirectCheckoutPaidEvent | VerifiedDirectCheckoutEndedEvent | VerifiedRefundEvent;
 
 /** Tells the kinds apart (each kind's eventType is a union, so comparing it narrows only one way). */
-export function isEndedCheckoutEvent(event: VerifiedDirectCheckoutEvent): event is VerifiedDirectCheckoutEndedEvent {
+export function isEndedCheckoutEvent(event: VerifiedDirectCheckoutEvent | VerifiedAccountUpdatedEvent): event is VerifiedDirectCheckoutEndedEvent {
   return event.eventType === "checkout.session.expired" || event.eventType === "checkout.session.async_payment_failed";
 }
 
-export function isRefundEvent(event: VerifiedDirectCheckoutEvent): event is VerifiedRefundEvent {
+export function isRefundEvent(event: VerifiedDirectCheckoutEvent | VerifiedAccountUpdatedEvent): event is VerifiedRefundEvent {
   return REFUND_EVENTS.has(event.eventType);
 }
 
@@ -457,7 +458,10 @@ export async function createDirectCheckout(input: CreateDirectCheckoutInput): Pr
 /** PLATFORM charge: deliberately no Stripe-Account option and no application_fee_amount. */
 export async function createPlatformCheckout(input: Omit<CreateDirectCheckoutInput, "applicationFeeAmount">): Promise<DirectCheckoutResult> {
   assertBookingForCheckout(input.booking);
-  if (input.booking.sellerSnapshot.chargeMode !== "PLATFORM" || input.booking.sellerSnapshot.salesPlan !== "MANAGED_20") {
+  // MANAGED_20 (NIHO sells) and AGENT_15 (the host sells, NIHO takes the payment as its agent, #725): the same platform charge.
+  // A PLATFORM booking that is neither (sales-kind.ts) is refused.
+  const kind = input.booking.sellerSnapshot.chargeMode === "PLATFORM" ? salesKindOf(input.booking.sellerSnapshot) : null;
+  if (kind !== "MANAGED_20" && kind !== "AGENT_15") {
     throw new ExperiencePaymentsValidationError("The booking is not a managed platform charge.");
   }
   const customerEmail = checkoutEmail(input.customerEmail);
@@ -474,10 +478,30 @@ export async function createPlatformCheckout(input: Omit<CreateDirectCheckoutInp
     line_items: [{ quantity: 1, price_data: { currency: input.booking.pricingSnapshot.currency.toLowerCase(),
       unit_amount: input.booking.pricingSnapshot.totalAmount, product_data: { name: snapshotTitle(input.booking) } } }],
     metadata: { source: "niho-experience-platform", booking_id: bookingId },
-    payment_intent_data: { metadata: { source: "niho-experience-platform", booking_id: bookingId } },
+    payment_intent_data: {
+      metadata: { source: "niho-experience-platform", booking_id: bookingId },
+      // The payout (3b-2) finds the payment by this group; the prefix is not the settlement's.
+      ...(kind === "AGENT_15" ? { transfer_group: `niho-experience-agent-payout:${bookingId}` } : {}),
+    },
+    ...(kind === "AGENT_15" ? { custom_text: { submit: { message: agentSubmitMessage(input.booking, input.locale) } } } : {}),
   }, { idempotencyKey: `experience-platform-checkout:${bookingId}` });
   if (!session.id || !session.url) throw new ExperiencePaymentsValidationError("Stripe returned a Checkout Session without a redirect URL.");
   return { checkoutSessionId: session.id, checkoutUrl: platformCheckoutUrl(session.url) };
+}
+
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+const SUBMIT_MESSAGE_LIMIT = 1200;
+
+/** Stripe shows this beside the pay button: who the seller is, and who takes the payment for it (代理受領, #725). */
+function agentSubmitMessage(booking: Readonly<BookingRecord>, locale: "auto" | "ja" | undefined): string {
+  const clean = (value: string | undefined) => (value ?? "").replace(CONTROL_CHARACTERS, " ").replace(/\s+/g, " ").trim();
+  const seller = clean(booking.sellerSnapshot.displayName);
+  const agent = clean(booking.sellerSnapshot.receivingAgentName);
+  if (seller.length === 0 || agent.length === 0) throw new ExperiencePaymentsValidationError("The agent-sales booking has no seller or receiving party name.");
+  const message = locale === "ja"
+    ? `販売者：${seller}。お支払いは${agent}が販売者に代わって受け取ります。`
+    : `Seller: ${seller}. Your payment is received by ${agent} on the seller's behalf.`;
+  return message.length > SUBMIT_MESSAGE_LIMIT ? `${message.slice(0, SUBMIT_MESSAGE_LIMIT - 1)}…` : message;
 }
 
 function platformCheckoutUrl(value: string): string {
@@ -1082,7 +1106,11 @@ export function verifyDirectCheckoutWebhook(
   } catch (error) {
     throw new ExperiencePaymentsValidationError("Stripe webhook signature verification failed.", { cause: error });
   }
+  return directCheckoutEventOf(event);
+}
 
+/** The Connect events this service acts on, from an event whose signature is already verified. */
+function directCheckoutEventOf(event: Stripe.Event): VerifiedDirectCheckoutEvent | null {
   if (event.type === "refund.created" || event.type === "refund.updated" || event.type === "refund.failed") {
     return refundEvent(event, event.type);
   }
@@ -1481,4 +1509,306 @@ export async function readConnectedPayouts(input: ReadConnectedPayoutsInput): Pr
   const payouts = (Array.isArray(page?.data) ? page.data : []).map(payoutOf);
   payouts.sort((a, b) => b.arrivalDateUtc.localeCompare(a.arrivalDateUtc));
   return { kind: "read", balance: balanceOf(balance), payouts, more: page?.has_more === true };
+}
+
+/* ---------- the host's payout account (Express; Epic #700 stage 3a, #710, docs/host-payouts.md) ---------- */
+
+/**
+ * The part of Stripe the payout account uses. Deliberately its own functions, apart from the Direct charge seller's
+ * `retrieveConnectedAccount`: an Express payout account never takes this site's payments, so charges_enabled means nothing here.
+ */
+export type PayoutAccountStripeClient = Pick<Stripe, "accounts" | "accountLinks">;
+
+const PAYOUT_ACCOUNT_SOURCE = "niho-experience";
+const PAYOUT_ACCOUNT_PURPOSE = "payout";
+/** Stripe keeps an idempotency key for 24 hours; a retry with the same one is safe for this long (as submitSettlementTransfer). */
+export const PAYOUT_ACCOUNT_IDEMPOTENCY_WINDOW_MS = 23 * 60 * 60 * 1000;
+/** The day of the month the payouts leave Stripe (monthly, docs/host-payouts.md). */
+const PAYOUT_MONTHLY_ANCHOR = 1;
+const MAX_LIST_PAGES = 10;
+
+/** The exact parameters accounts.create is called with; stored with the row, so a retry sends the same ones. */
+export interface PayoutAccountCreationParams {
+  readonly country: "JP";
+  readonly controller: {
+    readonly losses: { readonly payments: "application" };
+    readonly fees: { readonly payer: "application" };
+    readonly requirement_collection: "stripe";
+    readonly stripe_dashboard: { readonly type: "express" };
+  };
+  readonly capabilities: { readonly transfers: { readonly requested: true } };
+  readonly settings: { readonly payouts: { readonly schedule: { readonly interval: "monthly"; readonly monthly_anchor: number } } };
+  readonly metadata: {
+    readonly provider_id: string;
+    readonly creation_id: string;
+    readonly source: "niho-experience";
+    readonly purpose: "payout";
+  };
+}
+
+/**
+ * Express, Japan, transfers only, monthly payouts. `business_type` is left out on purpose: whether the host is an individual
+ * or a company is chosen in Stripe's own screens, not derived from the host's kind.
+ */
+export function payoutAccountCreationParams(input: { readonly providerId: string; readonly creationId: string }): PayoutAccountCreationParams {
+  if (typeof input.providerId !== "string" || input.providerId.length < 1 || input.providerId.length > 256) {
+    throw new ExperiencePaymentsValidationError("providerId must be 1-256 characters.");
+  }
+  if (typeof input.creationId !== "string" || !UUID.test(input.creationId)) throw new ExperiencePaymentsValidationError("creationId must be a UUID.");
+  return {
+    country: "JP",
+    controller: {
+      losses: { payments: "application" },
+      fees: { payer: "application" },
+      requirement_collection: "stripe",
+      stripe_dashboard: { type: "express" },
+    },
+    capabilities: { transfers: { requested: true } },
+    settings: { payouts: { schedule: { interval: "monthly", monthly_anchor: PAYOUT_MONTHLY_ANCHOR } } },
+    metadata: { provider_id: input.providerId, creation_id: input.creationId.toLowerCase(), source: PAYOUT_ACCOUNT_SOURCE, purpose: PAYOUT_ACCOUNT_PURPOSE },
+  };
+}
+
+function payoutClient(key: string | undefined, injected: PayoutAccountStripeClient | undefined): PayoutAccountStripeClient {
+  if (injected !== undefined && key !== undefined) throw new ExperiencePaymentsValidationError("Provide either platformStripeKey or stripe, not both.");
+  if (injected !== undefined) return injected;
+  if (typeof key !== "string" || key.trim().length === 0) throw new ExperiencePaymentsValidationError("A platform Stripe key or injected Stripe client is required.");
+  return new Stripe(key);
+}
+
+/** A stored parameter set is sent only if it still says exactly what a payout account is (it comes out of the database). */
+function assertPayoutCreationParams(params: PayoutAccountCreationParams, creationId: string): void {
+  const record = params as unknown as Record<string, unknown>;
+  const allowed = ["country", "controller", "capabilities", "settings", "metadata"];
+  const ok = record !== null && typeof record === "object" && !Array.isArray(record)
+    && Object.keys(record).every((key) => allowed.includes(key))
+    && params.country === "JP"
+    && params.controller?.losses?.payments === "application"
+    && params.controller?.fees?.payer === "application"
+    && params.controller?.requirement_collection === "stripe"
+    && params.controller?.stripe_dashboard?.type === "express"
+    && JSON.stringify(params.capabilities) === JSON.stringify({ transfers: { requested: true } })
+    && params.settings?.payouts?.schedule?.interval === "monthly"
+    && params.metadata?.creation_id === creationId.toLowerCase()
+    && params.metadata?.source === PAYOUT_ACCOUNT_SOURCE
+    && params.metadata?.purpose === PAYOUT_ACCOUNT_PURPOSE
+    && typeof params.metadata?.provider_id === "string";
+  if (!ok) throw new ExperiencePaymentsValidationError("The payout account parameters are not a payout account's.");
+}
+
+export interface CreatePayoutAccountInput {
+  /** The row's id (experience_connect_accounts.id): Stripe's idempotency key and the account's metadata.creation_id. */
+  readonly creationId: string;
+  /** The stored parameters, sent as they are. */
+  readonly creationParams: PayoutAccountCreationParams;
+  readonly platformStripeKey?: string;
+  readonly stripe?: PayoutAccountStripeClient;
+}
+
+/**
+ * accounts.create with the row's id as the idempotency key. The caller must not call it more than 23 hours after the row was
+ * made (PAYOUT_ACCOUNT_IDEMPOTENCY_WINDOW_MS): later, look for the account with findPayoutAccountByCreationId instead.
+ */
+export async function createPayoutAccount(input: CreatePayoutAccountInput): Promise<{ readonly accountId: string }> {
+  if (typeof input.creationId !== "string" || !UUID.test(input.creationId)) throw new ExperiencePaymentsValidationError("creationId must be a UUID.");
+  assertPayoutCreationParams(input.creationParams, input.creationId);
+  const stripe = payoutClient(input.platformStripeKey, input.stripe);
+  const account = await stripe.accounts.create(
+    input.creationParams as unknown as Stripe.AccountCreateParams,
+    { idempotencyKey: `experience-payout-account:${input.creationId.toLowerCase()}` },
+  );
+  if (typeof account?.id !== "string" || !CONNECTED_ACCOUNT_ID.test(account.id)) throw new ExperiencePaymentsValidationError("Stripe returned an invalid account.");
+  if (account.metadata?.creation_id !== input.creationId.toLowerCase() || account.metadata?.provider_id !== input.creationParams.metadata.provider_id) {
+    throw new ExperiencePaymentsValidationError("Stripe returned another account.");
+  }
+  return { accountId: account.id };
+}
+
+export interface CreateAccountOnboardingLinkInput {
+  readonly accountId: string;
+  readonly returnUrl: string;
+  readonly refreshUrl: string;
+  readonly platformStripeKey?: string;
+  readonly stripe?: PayoutAccountStripeClient;
+}
+
+function httpsOrLocalUrl(value: string, name: string): string {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new ExperiencePaymentsValidationError(`${name} must be a URL.`); }
+  if (url.username !== "" || url.password !== "" || url.hash !== "" || (url.protocol !== "https:" && url.hostname !== "localhost")) {
+    throw new ExperiencePaymentsValidationError(`${name} must be an https URL without credentials or a fragment.`);
+  }
+  return url.href;
+}
+
+/**
+ * A one-time Account Link (type account_onboarding) to Stripe's own pages. The URL is a bearer credential: redirect to it
+ * at once, never log, store or mail it.
+ */
+export async function createAccountOnboardingLink(input: CreateAccountOnboardingLinkInput): Promise<string> {
+  if (typeof input.accountId !== "string" || !CONNECTED_ACCOUNT_ID.test(input.accountId)) throw new ExperiencePaymentsValidationError("accountId must be a Stripe connected account ID.");
+  const stripe = payoutClient(input.platformStripeKey, input.stripe);
+  const link = await stripe.accountLinks.create({
+    account: input.accountId,
+    type: "account_onboarding",
+    return_url: httpsOrLocalUrl(input.returnUrl, "returnUrl"),
+    refresh_url: httpsOrLocalUrl(input.refreshUrl, "refreshUrl"),
+  });
+  let target: URL;
+  try { target = new URL(link.url); } catch { throw new ExperiencePaymentsValidationError("Stripe returned an invalid onboarding link."); }
+  if (target.protocol !== "https:" || !["stripe.com", "connect.stripe.com"].includes(target.hostname) || target.username !== "" || target.password !== "" || target.port !== "") {
+    throw new ExperiencePaymentsValidationError("Stripe returned an unsafe onboarding link.");
+  }
+  return target.href;
+}
+
+/** The screen's states of a registered payout account (NOT_STARTED, no row yet, is the caller's). */
+export type PayoutAccountState = "IN_PROGRESS" | "VERIFYING" | "ACTION_REQUIRED" | "REJECTED" | "READY";
+
+export interface PayoutAccountFacts {
+  readonly state: PayoutAccountState;
+  /** The one fact later stages (Transfers) depend on; READY exactly when true. */
+  readonly payoutReady: boolean;
+  readonly detailsSubmitted: boolean;
+  readonly payoutsEnabled: boolean;
+  readonly transfersActive: boolean;
+  /** SHA-256 (hex) of the sorted due and past-due requirement codes and the disabled reason: the same need hashes the same. */
+  readonly requirementsHash: string;
+  /** The account is not the one this provider's payout account must be (country, currency, controller, metadata). */
+  readonly mismatch: boolean;
+}
+
+export type PayoutAccountStatus =
+  | ({ readonly kind: "read" } & PayoutAccountFacts)
+  /** Stripe would not show the account to this platform key. */
+  | { readonly kind: "unreachable" };
+
+export interface RetrievePayoutAccountStatusInput {
+  readonly accountId: string;
+  readonly providerId: string;
+  readonly platformStripeKey?: string;
+  readonly stripe?: Pick<Stripe, "accounts">;
+}
+
+const codes = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").sort() : []);
+
+/** Pure: Stripe's account as the facts of a payout account (docs/host-payouts.md「状態」). */
+export function payoutAccountFactsOf(account: Stripe.Account, providerId: string): PayoutAccountFacts {
+  const requirements = account.requirements;
+  const due = codes(requirements?.currently_due);
+  const pastDue = codes(requirements?.past_due);
+  const pending = codes(requirements?.pending_verification);
+  const disabledReason = typeof requirements?.disabled_reason === "string" ? requirements.disabled_reason : "";
+  const currency = typeof account.default_currency === "string" ? account.default_currency.toLowerCase() : null;
+  const controller = account.controller as { type?: string; losses?: { payments?: string }; fees?: { payer?: string }; requirement_collection?: string; stripe_dashboard?: { type?: string } } | undefined;
+  const mismatch = account.country !== "JP"
+    || (currency !== null && currency !== "jpy")
+    || controller?.losses?.payments !== "application"
+    // Stripe reports an Express account's fee payer as `application_express` (the SDK lists both values).
+    || (controller?.fees?.payer !== "application" && controller?.fees?.payer !== "application_express")
+    || controller?.requirement_collection !== "stripe"
+    || controller?.stripe_dashboard?.type !== "express"
+    || account.metadata?.provider_id !== providerId
+    || account.metadata?.source !== PAYOUT_ACCOUNT_SOURCE
+    || account.metadata?.purpose !== PAYOUT_ACCOUNT_PURPOSE;
+  const detailsSubmitted = account.details_submitted === true;
+  const payoutsEnabled = account.payouts_enabled === true;
+  const transfersActive = account.capabilities?.transfers === "active";
+  const requirementsHash = createHash("sha256").update(JSON.stringify([due, pastDue, disabledReason])).digest("hex");
+  const payoutReady = !mismatch && currency === "jpy" && detailsSubmitted && payoutsEnabled && transfersActive
+    && due.length === 0 && pastDue.length === 0 && pending.length === 0 && !disabledReason.startsWith("rejected.");
+  let state: PayoutAccountState;
+  if (mismatch || disabledReason.startsWith("rejected.")) state = "REJECTED";
+  else if (!detailsSubmitted) state = "IN_PROGRESS";
+  else if (due.length > 0 || pastDue.length > 0) state = "ACTION_REQUIRED";
+  else if (payoutReady) state = "READY";
+  else state = "VERIFYING";
+  return { state, payoutReady, detailsSubmitted, payoutsEnabled, transfersActive, requirementsHash, mismatch };
+}
+
+/**
+ * Reads the payout account from Stripe (never from a webhook's payload) as the host's screen and the webhook state it. Not
+ * `retrieveConnectedAccount`: that one is the Direct charge seller's, and answers about charges.
+ */
+export async function retrievePayoutAccountStatus(input: RetrievePayoutAccountStatusInput): Promise<PayoutAccountStatus> {
+  if (typeof input.accountId !== "string" || !CONNECTED_ACCOUNT_ID.test(input.accountId)) throw new ExperiencePaymentsValidationError("accountId must be a Stripe connected account ID.");
+  if (typeof input.providerId !== "string" || input.providerId.length < 1) throw new ExperiencePaymentsValidationError("providerId is required.");
+  const stripe = accountsClient(input.platformStripeKey, input.stripe as ConnectedAccountStripeClient | undefined);
+  let account: Stripe.Account;
+  try {
+    account = await stripe.accounts.retrieve(input.accountId);
+  } catch (error) {
+    if (accountOutOfReach(error)) return { kind: "unreachable" };
+    throw error;
+  }
+  if (account?.id !== input.accountId) throw new ExperiencePaymentsValidationError("Stripe returned another account.");
+  return { kind: "read", ...payoutAccountFactsOf(account, input.providerId) };
+}
+
+export interface FindPayoutAccountInput {
+  readonly creationId: string;
+  readonly providerId: string;
+  /** The row's time: accounts created from a few minutes before to 26 hours after are looked at. */
+  readonly rowCreatedAtUtc: string;
+  readonly platformStripeKey?: string;
+  readonly stripe?: Pick<Stripe, "accounts">;
+}
+
+/**
+ * After the idempotency window: the account an earlier, unfinished creation made, found by its metadata.creation_id among the
+ * accounts created around the row's time. Null when there is none (the caller asks the office; it never creates another).
+ */
+export async function findPayoutAccountByCreationId(input: FindPayoutAccountInput): Promise<string | null> {
+  if (typeof input.creationId !== "string" || !UUID.test(input.creationId)) throw new ExperiencePaymentsValidationError("creationId must be a UUID.");
+  const at = Date.parse(input.rowCreatedAtUtc);
+  if (!Number.isFinite(at)) throw new ExperiencePaymentsValidationError("rowCreatedAtUtc must be an instant.");
+  const stripe = accountsClient(input.platformStripeKey, input.stripe as ConnectedAccountStripeClient | undefined);
+  const range = { gte: Math.floor(at / 1000) - 300, lte: Math.floor(at / 1000) + 26 * 3600 };
+  const found: string[] = [];
+  let startingAfter: string | undefined;
+  for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
+    const list = await stripe.accounts.list({ created: range, limit: 100, ...(startingAfter ? { starting_after: startingAfter } : {}) });
+    for (const account of list.data) {
+      if (account.metadata?.creation_id === input.creationId.toLowerCase() && account.metadata?.provider_id === input.providerId
+        && account.metadata?.source === PAYOUT_ACCOUNT_SOURCE && CONNECTED_ACCOUNT_ID.test(account.id)) found.push(account.id);
+    }
+    if (!list.has_more || list.data.length === 0) break;
+    startingAfter = list.data[list.data.length - 1]!.id;
+    if (page === MAX_LIST_PAGES - 1) throw new ExperiencePaymentsValidationError("Too many accounts to look through.");
+  }
+  if (found.length > 1) throw new ExperiencePaymentsValidationError("More than one account carries this creation id.");
+  return found[0] ?? null;
+}
+
+/** An account.updated event of a connected account (the Connect webhook). Only which account: the state is read again. */
+export interface VerifiedAccountUpdatedEvent {
+  readonly eventId: string;
+  readonly eventType: "account.updated";
+  readonly connectedAccountId: string;
+}
+
+export function isAccountUpdatedEvent(event: VerifiedDirectCheckoutEvent | VerifiedAccountUpdatedEvent): event is VerifiedAccountUpdatedEvent {
+  return event.eventType === "account.updated";
+}
+
+/**
+ * The Connect webhook's verification: `account.updated` of a connected account (which account only), or what
+ * verifyDirectCheckoutWebhook accepts. Null for any other event.
+ */
+export function verifyConnectWebhook(input: VerifyDirectCheckoutWebhookInput): VerifiedDirectCheckoutEvent | VerifiedAccountUpdatedEvent | null {
+  if (input.rawBody.byteLength === 0) throw new ExperiencePaymentsValidationError("The raw webhook body is required.");
+  if (input.stripeSignature.length === 0 || input.endpointSecret.length === 0) throw new ExperiencePaymentsValidationError("Stripe signature and endpoint secret are required.");
+  const stripe = resolveStripeClient(input.platformStripeKey, input.stripe);
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(Buffer.from(input.rawBody), input.stripeSignature, input.endpointSecret);
+  } catch (error) {
+    throw new ExperiencePaymentsValidationError("Stripe webhook signature verification failed.", { cause: error });
+  }
+  if (event.type !== "account.updated") return directCheckoutEventOf(event);
+  if (!EVENT_ID.test(event.id)) throw new ExperiencePaymentsValidationError("The Stripe event ID is malformed.");
+  if (event.account === undefined || !CONNECTED_ACCOUNT_ID.test(event.account)) {
+    throw new ExperiencePaymentsValidationError("A valid connected account ID is required on the Stripe event.");
+  }
+  return { eventId: event.id, eventType: "account.updated", connectedAccountId: event.account };
 }

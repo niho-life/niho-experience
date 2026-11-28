@@ -363,6 +363,7 @@ const suspend: Action = {
     const productId = need(context, "product");
     const reason = context.args.flags.reason;
     if (typeof reason !== "string" || !/^[A-Z0-9_]{1,80}$/.test(reason)) throw new OpsError("usage", "--reason <CODE> is required (capital letters, digits and _).", EXIT.usage);
+    if (reason === "PROVIDER_SUSPENDED") throw new OpsError("usage", "--reason PROVIDER_SUSPENDED is reserved for `provider suspend` (a whole host).", EXIT.usage);
     const state = await readState(context, providerId, productId);
     if (state === null || !state.published) return { status: "unchanged", note: "The product was never published, so there is nothing to stop." };
     if (state.operationsSuspended) return { status: "unchanged", note: "The product is already suspended.", state };

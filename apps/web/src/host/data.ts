@@ -280,7 +280,7 @@ export async function loadHostPayout(provider: HostProvider, options: { candidat
   if (provider.memberRole !== "OWNER") return { load: { status: "not-owner" }, notice: null, redirectTo: null };
   // An Experience host account (ADR 0003 slice 3): the registered account is read from Stripe directly, never NIHO.
   const current = await readHostSession().catch(() => null);
-  if (current?.kind === "experience") return { load: hostPayoutLoadOf(await loadExperiencePayout(current, provider)), notice: null, redirectTo: null };
+  if (current?.kind === "experience") return { load: hostPayoutLoadOf(await loadExperiencePayout(current, provider, { readConnect: false })), notice: null, redirectTo: null };
   const session = await usableNihoSession();
   if (!session) return { load: { status: "error" }, notice: null, redirectTo: null };
   try {

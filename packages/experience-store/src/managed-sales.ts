@@ -9,6 +9,7 @@ import { withTransaction } from "./transaction.ts";
 import type { BookingAcceptanceMode, ExperienceChargeMode, ExperienceSalesPlan, HostActor, ManagedPaymentDuePolicy, PublicationAdminDraftActor } from "./types.ts";
 import { assertCanonicalInstant, assertStoreIdentifier } from "./validation.ts";
 import { tokyoDate } from "./guest-bookings.ts";
+import { salesKindOf } from "./sales-kind.ts";
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACCOUNT = /^acct_[A-Za-z0-9]{8,}$/;
@@ -43,6 +44,11 @@ export interface SalesPlanRevision {
   readonly pilotApproved: boolean;
   readonly activatedAtUtc: string;
   readonly acceptanceMode: BookingAcceptanceMode;
+  /** NIHO sells (MANAGED_20) or the provider does. */
+  readonly sellerParty: "NIHO" | "PROVIDER";
+  /** 代理受領 (AGENT_15) only. */
+  readonly payoutDelayDays: number | null;
+  readonly receivingAgentName: string | null;
 }
 
 export interface SalesPlanState {
@@ -152,15 +158,18 @@ function revisionFromRow(row: DbRow, prefix = ""): SalesPlanRevision {
     pilotApproved: row[key("pilot_approved")] === true,
     activatedAtUtc: isoValue(row, key("activated_at")),
     acceptanceMode: text(row[key("acceptance_mode")], key("acceptance_mode")) as BookingAcceptanceMode,
+    sellerParty: text(row[key("seller_party")], key("seller_party")) as "NIHO" | "PROVIDER",
+    payoutDelayDays: row[key("payout_delay_days")] === null ? null : integer(row[key("payout_delay_days")], key("payout_delay_days")),
+    receivingAgentName: row[key("receiving_agent_name")] === null ? null : text(row[key("receiving_agent_name")], key("receiving_agent_name")),
   };
 }
 
 const REVISION_COLUMNS = `provider_id,product_id,revision,plan,charge_mode,provider_public_profile_version,
   seller_display_name,seller_disclosure_url,seller_niho_account_ref,stripe_account_ref,fee_basis_points,agreement_version,
   agreement_confirmed_by,agreement_confirmed_at,agreement_confirmation_method,payment_due_days,payment_due_policy,pilot_approved,activated_at,
-  acceptance_mode`;
+  acceptance_mode,seller_party,payout_delay_days,receiving_agent_name`;
 
-async function readState(client: Pick<PoolClient, "query">, providerId: string, productId: string, lock = false): Promise<SalesPlanState | null> {
+export async function readSalesPlanState(client: Pick<PoolClient, "query">, providerId: string, productId: string, lock = false): Promise<SalesPlanState | null> {
   const state = await client.query<DbRow>(
     `SELECT phase,current_revision,pending_revision,transition_command_id::text AS transition_command_id,version
        FROM experience_product_sales_plan_states WHERE provider_id=$1 AND product_id=$2${lock ? " FOR UPDATE" : ""}`,
@@ -196,7 +205,7 @@ export class ManagedExperienceSalesRepository {
 
   async get(providerId: string, productId: string): Promise<SalesPlanState | null> {
     assertStoreIdentifier(providerId, "providerId"); assertStoreIdentifier(productId, "productId");
-    return readState(this.#pool, providerId, productId);
+    return readSalesPlanState(this.#pool, providerId, productId);
   }
 
   async recordDispute(input: {
@@ -258,7 +267,7 @@ export class ManagedExperienceSalesRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER"]);
-      const state = await readState(client, actor.providerId, productId, true);
+      const state = await readSalesPlanState(client, actor.providerId, productId, true);
       if (!state) throw new StoreNotFoundError("sales plan");
       const prior = await client.query<DbRow>(
         `SELECT plan,agreement_version,agreement_confirmed_by FROM experience_product_sales_plan_versions
@@ -276,6 +285,10 @@ export class ManagedExperienceSalesRepository {
       }
       if (state.version !== input.expectedVersion || state.phase !== "ACTIVE") throw new StoreConflictError("Sales plan version mismatch.");
       if (state.current.plan === input.plan) throw new StoreConflictError("The product already uses this sales plan.");
+      // 代理受領 (#725): NIHO takes this product's payments for the host and owes it a payout; moving to a Direct charge is not
+      // built until 3c.
+      if (salesKindOf({ chargeMode: state.current.chargeMode, salesPlan: state.current.plan, sellerParty: state.current.sellerParty,
+        feeBasisPoints: state.current.feeBasisPoints }) === "AGENT_15") throw new StoreConflictError("An agent-sales product cannot switch to a Direct charge.");
       const seller = await client.query<DbRow>(
         `SELECT seller_niho_account_ref,stripe_connect_account_ref,seller_display_name
            FROM experience_host_seller_profiles WHERE provider_id=$1 FOR SHARE`, [actor.providerId],
@@ -321,7 +334,7 @@ export class ManagedExperienceSalesRepository {
             AND g.checkout_session_ref IS NOT NULL AND b.seller_snapshot->>'salesPlanRevision'=$4`,
         [actor.providerId, productId, input.commandId, String(state.current.revision)],
       );
-      const nextState = (await readState(client, actor.providerId, productId))!;
+      const nextState = (await readSalesPlanState(client, actor.providerId, productId))!;
       return { state: nextState, openCheckouts: await this.#openCheckouts(client, actor.providerId, productId, input.commandId) };
     });
   }
@@ -342,7 +355,7 @@ export class ManagedExperienceSalesRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER"]);
-      const state = await readState(client, actor.providerId, productId, true);
+      const state = await readSalesPlanState(client, actor.providerId, productId, true);
       if (!state || state.transitionCommandId !== commandId || state.phase === "ACTIVE") throw new StoreConflictError("The sales-plan transition is not current.");
       const changed = await client.query(
         `UPDATE experience_sales_plan_transition_checkouts SET status=$5,checked_at=clock_timestamp()
@@ -354,7 +367,7 @@ export class ManagedExperienceSalesRepository {
         `UPDATE experience_product_sales_plan_states SET phase='RECONCILING',version=version+1,updated_at=clock_timestamp()
           WHERE provider_id=$1 AND product_id=$2 AND transition_command_id=$3::uuid`, [actor.providerId, productId, commandId],
       );
-      return (await readState(client, actor.providerId, productId))!;
+      return (await readSalesPlanState(client, actor.providerId, productId))!;
     });
   }
 
@@ -362,7 +375,7 @@ export class ManagedExperienceSalesRepository {
     return withTransaction(this.#pool, async (client) => {
       await lockProviderInventory(client, actor.providerId);
       await requireMembership(client, actor, ["OWNER"]);
-      const state = await readState(client, actor.providerId, productId, true);
+      const state = await readSalesPlanState(client, actor.providerId, productId, true);
       if (!state || state.transitionCommandId !== commandId || state.version !== expectedVersion || !state.pending) throw new StoreConflictError("Sales plan version mismatch.");
       if (state.pending.agreementConfirmedBy !== actor.nihoUserId) throw new StoreAccessDeniedError();
       const ready = await client.query(
@@ -393,7 +406,7 @@ export class ManagedExperienceSalesRepository {
             transition_command_id=NULL,version=version+1,updated_at=clock_timestamp()
           WHERE provider_id=$1 AND product_id=$2 AND version=$3`, [actor.providerId, productId, expectedVersion],
       );
-      return (await readState(client, actor.providerId, productId))!;
+      return (await readSalesPlanState(client, actor.providerId, productId))!;
     });
   }
 

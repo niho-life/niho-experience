@@ -58,6 +58,19 @@ describe("host bio HTTP boundary", () => {
     expect((await getHostBio(request("GET", undefined, "/host/api/host-bio?bio=x"))).status).toBe(400);
   });
 
+  it("names the host to the shared boundary (#709): the id is a hint, an unknown one is 422 like every host API", async () => {
+    await getHostBio(request("GET", undefined, "/host/api/host-bio?providerId=provider-b"));
+    expect(mocks.boundary).toHaveBeenLastCalledWith("OWNER", { providerId: "provider-b", sales: "none" });
+    await getHostBio(request("GET"));
+    expect(mocks.boundary).toHaveBeenLastCalledWith("OWNER", { providerId: null, sales: "none" });
+    for (const query of ["?providerId=", "?providerId=a%20b", "?providerId=-x"]) {
+      const response = await getHostBio(request("GET", undefined, `/host/api/host-bio${query}`));
+      expect([response.status, (await response.json()).error.code]).toEqual([422, "INVALID_INPUT"]);
+    }
+    expect((await getHostBio(request("GET", undefined, "/host/api/host-bio?providerId=a&x=1"))).status).toBe(400);
+    expect(mocks.boundary).toHaveBeenCalledTimes(2);
+  });
+
   it("passes the boundary's 401/403 through without touching the Store", async () => {
     for (const status of [401, 403]) {
       mocks.boundary.mockResolvedValueOnce({ ok: false, response: Response.json({ error: { code: "X" } }, { status }) });

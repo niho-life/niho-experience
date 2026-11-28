@@ -1,7 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  config: { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", siteUrl: "https://experience.example.test" },
+  config: { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", siteUrl: "https://experience.example.test" } as Record<string, unknown>,
+  managedSalesGet: vi.fn(),
+  disclosureRead: vi.fn(),
+  platformAccount: vi.fn(),
+  consentCounts: vi.fn(),
   boundary: vi.fn(),
   mutationAllowed: vi.fn(),
   mediaStorage: null as null | { write: ReturnType<typeof vi.fn>; read: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> },
@@ -9,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   coverImage: vi.fn(),
   repository: {
     refreshReadiness: vi.fn(),
+    providerHasSellerProfile: vi.fn(),
     listProducts: vi.fn(),
     getProduct: vi.fn(),
     getState: vi.fn(),
@@ -47,7 +52,14 @@ vi.mock("./publication-host-boundary", () => ({
   publicationHostBoundary: mocks.boundary,
   publicationHostMutationAllowed: mocks.mutationAllowed,
 }));
-vi.mock("./store-server", () => ({ experiencePublicationRepository: () => mocks.repository, guestMeetingGuideRepository: () => mocks.meetingGuides, managedExperienceSalesRepository: () => null }));
+vi.mock("./store-server", () => ({
+  experiencePublicationRepository: () => mocks.repository,
+  guestMeetingGuideRepository: () => mocks.meetingGuides,
+  managedExperienceSalesRepository: () => (mocks.config.hostAgentSalesEnabled === true ? { get: mocks.managedSalesGet } : null),
+  providerSellerDisclosureRepository: () => ({ getForOwner: mocks.disclosureRead }),
+  providerAgentSales: () => ({ consentCounts: mocks.consentCounts }),
+}));
+vi.mock("@niho-experience/experience-payments", () => ({ retrievePlatformAccount: mocks.platformAccount }));
 vi.mock("@/lib/translation/anthropic", () => ({ anthropicTranslator: () => mocks.translator }));
 vi.mock("./public-media-storage", () => ({ experiencePublicMediaStorage: () => mocks.mediaStorage }));
 vi.mock("@/lib/guide-cover-image", () => ({
@@ -156,7 +168,8 @@ describe("Experience owner product API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.mediaStorage = null;
-    Object.assign(mocks.config, { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", siteUrl: "https://experience.example.test" });
+    Object.assign(mocks.config, { experienceHostPublicationApiEnabled: true, experiencePublicationConsentVersion: "listing-v1", siteUrl: "https://experience.example.test",
+      hostAgentSalesEnabled: false, hostAccountsEnabled: false });
     mocks.boundary.mockResolvedValue({ ok: true, value: hostContext });
     mocks.mutationAllowed.mockReturnValue(true);
     mocks.repository.listProducts.mockResolvedValue([product]);
@@ -297,7 +310,8 @@ describe("Experience owner product API", () => {
     const dto = (await read.json()).product;
     const version = dto.version;
     expect(dto.version).toEqual(expect.any(String));
-    expect(dto.media[0].previewUrl).toContain(media[0]!.id);
+    // The image URL names the provider: an owner of two hosts would otherwise get 409 PROVIDER_REQUIRED for every image (#709).
+    expect(dto.media[0].previewUrl).toBe(`/host/api/products/${product.id}/media/${media[0]!.id}?providerId=${actor.providerId}`);
     expect(dto.offers).toEqual([expect.objectContaining({ id: "dinner-evening", localStartTime: "18:00" })]);
     expect(dto.publicationBlockers).toEqual([]);
 
@@ -369,7 +383,7 @@ describe("Experience owner product API", () => {
   it("uses seller-level profile media with explicit rights, localized alts, and version CAS", async () => {
     const read = await readProviderMedia(request("/host/api/provider-media"));
     expect(read.status).toBe(200);
-    expect(await read.json()).toMatchObject({ providerMedia: { version: 5, assets: [{ previewUrl: `/host/api/provider-media/${providerMedia.assets[0]!.id}` }] } });
+    expect(await read.json()).toMatchObject({ providerMedia: { version: 5, assets: [{ previewUrl: `/host/api/provider-media/${providerMedia.assets[0]!.id}?providerId=${actor.providerId}` }] } });
 
     const updated = await saveProviderMedia(request("/host/api/provider-media", "PUT", {
       version: 5,
@@ -634,6 +648,103 @@ describe("Experience owner product API", () => {
       expect(notReady.status).toBe(422);
       expect((await notReady.json()).error.blockers).toEqual(["CONNECT_NOT_READY"]);
       expect(mocks.repository.openBooking).toHaveBeenCalledTimes(1);
+    });
+
+    describe("with agent sales (#725)", () => {
+      const agentPlan = (over: Record<string, unknown> = {}) => ({
+        current: { revision: 1, plan: "SUPPORTED_15", chargeMode: "PLATFORM", sellerParty: "PROVIDER", feeBasisPoints: 1500, agreementVersion: "agent-sales-v1", stripeAccountRef: "acct_PlatformSample1", sellerDisplayName: "Sample Host", sellerNihoAccountRef: `agt_${"b".repeat(32)}`, ...over },
+        phase: "ACTIVE", pending: null, transitionCommandId: null, version: 1,
+      });
+      const withoutSeller = { ...hostContext, provider: null, readiness: null };
+      const open = async () => {
+        const version = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.version;
+        mocks.boundary.mockClear();
+        return { version, response: await openBooking(request(`/host/api/products/${product.id}/open-booking`, "POST", { version, consentVersion: "listing-v1", accepted: true }), context) };
+      };
+      beforeEach(() => {
+        Object.assign(mocks.config, { hostAgentSalesEnabled: true, hostAccountsEnabled: true, hostAgentSalesAgreementVersion: "agent-sales-v1", hostAgentReceiverName: "Synthetic NIHO Receiver KK", hostAgentPayoutDelayDays: 3 });
+        mocks.repository.providerHasSellerProfile.mockResolvedValue(false);
+        mocks.disclosureRead.mockResolvedValue({ sellerDisplayName: "", disclosure: { method: "NATIVE", sellerDisplayName: "Sample Host" } });
+        mocks.managedSalesGet.mockResolvedValue(agentPlan());
+        mocks.consentCounts.mockResolvedValue(true);
+        mocks.platformAccount.mockResolvedValue({ id: "acct_PlatformSample1", chargesEnabled: true, detailsSubmitted: true, country: "JP", defaultCurrency: "JPY" });
+        vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "sk_test_synthetic");
+        mocks.boundary.mockResolvedValue({ ok: true, value: withoutSeller });
+      });
+      afterEach(() => { vi.unstubAllEnvs(); });
+
+      it("opens bookings with no seller profile or readiness, reading only the platform account, and hands the store the check", async () => {
+        const { response } = await open();
+        expect(response.status).toBe(200);
+        expect(mocks.boundary).toHaveBeenLastCalledWith("OWNER", { providerId: null, sales: "optional" });
+        expect(mocks.platformAccount).toHaveBeenCalledWith({ expectedAccountId: "acct_PlatformSample1", platformStripeKey: "sk_test_synthetic" });
+        expect(mocks.repository.openBooking).toHaveBeenCalledWith(actor, product.id, expect.objectContaining({
+          agentCheck: { agreementVersion: "agent-sales-v1", accountCheck: { stripeConnectAccountRef: "acct_PlatformSample1", checkedAtUtc: expect.any(String) } },
+        }));
+      });
+
+      it("sends no account check when the platform account cannot take payments, and names Stripe's outage as unavailable", async () => {
+        mocks.platformAccount.mockResolvedValueOnce({ id: "acct_PlatformSample1", chargesEnabled: false, detailsSubmitted: true, country: "JP", defaultCurrency: "JPY" });
+        expect((await open()).response.status).toBe(200);
+        expect(mocks.repository.openBooking).toHaveBeenLastCalledWith(actor, product.id, expect.objectContaining({ agentCheck: { agreementVersion: "agent-sales-v1", accountCheck: null } }));
+        mocks.platformAccount.mockRejectedValueOnce(new Error("synthetic outage"));
+        const down = await open();
+        expect(down.response.status).toBe(502);
+        expect(mocks.repository.openBooking).toHaveBeenCalledTimes(1);
+      });
+
+      it("sends the older publish route through the same agent branch, and lets a host with no seller profile stop its page", async () => {
+        const version = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.version;
+        mocks.boundary.mockClear();
+        const published = await publishProduct(request(`/host/api/products/${product.id}/publish`, "POST", { version, consentVersion: "listing-v1", accepted: true }), context);
+        expect(published.status).toBe(200);
+        expect(mocks.boundary).toHaveBeenLastCalledWith("OWNER", { providerId: null, sales: "optional" });
+        expect(mocks.platformAccount).toHaveBeenCalledTimes(1);
+        expect(mocks.repository.publish).toHaveBeenLastCalledWith(actor, product.id, expect.objectContaining({ agentCheck: { agreementVersion: "agent-sales-v1", accountCheck: expect.any(Object) } }));
+        mocks.boundary.mockClear();
+        const stopped = await stopProduct(request(`/host/api/products/${product.id}/stop`, "POST", { version }), context);
+        expect(stopped.status).toBe(200);
+        expect(mocks.boundary).toHaveBeenLastCalledWith("OWNER", { providerId: null, sales: "optional" });
+        expect(mocks.repository.stop).toHaveBeenCalled();
+        // With the flag off both still ask for the readiness, as before.
+        mocks.config.hostAgentSalesEnabled = false;
+        mocks.boundary.mockClear();
+        await stopProduct(request(`/host/api/products/${product.id}/stop`, "POST", { version }), context);
+        expect(mocks.boundary).toHaveBeenLastCalledWith("OWNER", { providerId: null });
+      });
+
+      it("keeps today's check for a product that is not agent sales, and for the flag off", async () => {
+        mocks.managedSalesGet.mockResolvedValue(null);
+        const notAgent = await open();
+        expect(notAgent.response.status).toBe(422);
+        expect((await notAgent.response.json()).error.blockers).toEqual(["CONNECT_NOT_READY"]);
+        expect(mocks.platformAccount).not.toHaveBeenCalled();
+        expect(mocks.repository.openBooking).not.toHaveBeenCalled();
+
+        mocks.config.hostAgentSalesEnabled = false;
+        mocks.boundary.mockResolvedValue({ ok: true, value: hostContext });
+        expect((await open()).response.status).toBe(200);
+        expect(mocks.boundary).toHaveBeenLastCalledWith("OWNER", { providerId: null });
+        expect(mocks.platformAccount).not.toHaveBeenCalled();
+        expect(mocks.repository.openBooking).toHaveBeenLastCalledWith(actor, product.id, expect.not.objectContaining({ agentCheck: expect.anything() }));
+      });
+
+      it("shows the choice (and the plan's kind) to a host with no seller profile, and nothing to one that has it or with the flag off", async () => {
+        mocks.managedSalesGet.mockResolvedValue(null);
+        const dto = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product;
+        expect(dto.agentSales).toEqual({ agreementVersion: "agent-sales-v1", receiverName: "Synthetic NIHO Receiver KK", payoutDelayDays: 3, sellerName: "Sample Host" });
+        expect(dto.salesPlan).toBeNull();
+        mocks.managedSalesGet.mockResolvedValue(agentPlan());
+        const chosen = (await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product;
+        expect(chosen.salesPlan.current).toMatchObject({ plan: "SUPPORTED_15", chargeMode: "PLATFORM", sellerParty: "PROVIDER" });
+        expect(chosen.agentSales).toMatchObject({ planSellerName: "Sample Host", consentCounted: true });
+        mocks.consentCounts.mockResolvedValueOnce(false);
+        expect((await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.agentSales.consentCounted).toBe(false);
+        mocks.repository.providerHasSellerProfile.mockResolvedValue(true);
+        expect((await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.agentSales).toBeNull();
+        mocks.config.hostAgentSalesEnabled = false;
+        expect((await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.agentSales).toBeNull();
+      });
     });
 
     it("stops bookings without any payout lookup, by the state version, and refuses a stale one", async () => {

@@ -13,6 +13,14 @@ const state = vi.hoisted(() => ({
   release: null as null | ReturnType<typeof vi.fn>,
   refund: null as null | ReturnType<typeof vi.fn>,
   settlement: null as null | ReturnType<typeof vi.fn>,
+  payout: null as null | { find: ReturnType<typeof vi.fn>; save: ReturnType<typeof vi.fn>; retrieve: ReturnType<typeof vi.fn> },
+}));
+vi.mock("@/lib/experience/host-connect-onboarding-server", () => ({
+  payoutOnboardingDeps: () => (state.payout ? {
+    accounts: { findByAccountRef: state.payout.find, saveSnapshot: state.payout.save },
+    platformStripeKey: "sk_test_synthetic_platform_key_only", siteOrigin: "https://experience.example", now: () => new Date("2026-11-28T03:00:00.000Z"),
+    stripe: { accounts: { retrieve: state.payout.retrieve } },
+  } : null),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/experience/store-server", () => ({
@@ -65,6 +73,7 @@ beforeEach(() => {
   state.release = vi.fn().mockResolvedValue({ status: "EXPIRED", released: true, duplicateEvent: false });
   state.refund = vi.fn().mockResolvedValue({ status: "SUCCEEDED", duplicateEvent: false });
   state.settlement = vi.fn().mockResolvedValue({ status: "PENDING" });
+  state.payout = { find: vi.fn().mockResolvedValue(null), save: vi.fn().mockResolvedValue({ saved: true, mailQueued: false }), retrieve: vi.fn() };
   errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
@@ -162,5 +171,53 @@ describe("experience Stripe webhook", () => {
     expect(response.status).toBe(503);
     expect(errors).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(errors.mock.calls)).not.toMatch(/123e4567|cs_test|acct_|evt_|connection lost/);
+  });
+
+  describe("account.updated (#710, a host's own payout account)", () => {
+    const OURS = "acct_SamplePayout0001";
+    const own = { account: { id: "123e4567-e89b-42d3-a456-426614174000", providerId: "provider-sample", stripeAccountRef: OURS, retiredAtUtc: null }, snapshot: null };
+    const updated = (account = OURS): Record<string, unknown> => ({
+      id: "evt_SynthPayout01", object: "event", api_version: "2025-12-15.clover", created: CREATED, livemode: false, pending_webhooks: 1, request: null,
+      type: "account.updated", account, data: { object: { id: account, object: "account", details_submitted: true, payouts_enabled: true } },
+    });
+    const stripeAccount = (over: Record<string, unknown> = {}) => ({
+      id: OURS, country: "JP", default_currency: "jpy", details_submitted: true, payouts_enabled: true, capabilities: { transfers: "active" },
+      controller: { type: "application", losses: { payments: "application" }, fees: { payer: "application" }, requirement_collection: "stripe", stripe_dashboard: { type: "express" } },
+      metadata: { provider_id: "provider-sample", source: "niho-experience", purpose: "payout" },
+      requirements: { currently_due: [], past_due: [], pending_verification: [], disabled_reason: null }, ...over,
+    });
+
+    it("reads our own account again (not the event's payload), keeps it and asks the store to mail when more is needed", async () => {
+      state.payout!.find.mockResolvedValue(own);
+      state.payout!.retrieve.mockResolvedValue(stripeAccount({ requirements: { currently_due: ["external_account"], past_due: [], pending_verification: [], disabled_reason: null } }));
+      expect((await POST(delivery(updated()))).status).toBe(204);
+      expect(state.payout!.retrieve).toHaveBeenCalledWith(OURS);
+      expect(state.payout!.save).toHaveBeenCalledTimes(1);
+      expect(state.payout!.save.mock.calls[0]![1]).toMatchObject({ state: "ACTION_REQUIRED", payoutReady: false });
+      expect(state.payout!.save.mock.calls[0]![2]).toEqual({ notify: true });
+      expect(state.confirm).not.toHaveBeenCalled();
+    });
+
+    it("answers 204 and reads nothing for an account that is not ours, or one that is retired", async () => {
+      expect((await POST(delivery(updated("acct_SomeoneElse0001")))).status).toBe(204);
+      state.payout!.find.mockResolvedValue({ ...own, account: { ...own.account, retiredAtUtc: "2026-11-27T00:00:00.000Z" } });
+      expect((await POST(delivery(updated()))).status).toBe(204);
+      expect(state.payout!.retrieve).not.toHaveBeenCalled();
+      expect(state.payout!.save).not.toHaveBeenCalled();
+    });
+
+    it("answers 204 while the onboarding flag is off, and 503 (Stripe retries) when the account cannot be read", async () => {
+      state.payout = null;
+      expect((await POST(delivery(updated()))).status).toBe(204);
+      state.payout = { find: vi.fn().mockResolvedValue(own), save: vi.fn(), retrieve: vi.fn().mockRejectedValue(new Error("down acct_SamplePayout0001")) };
+      expect((await POST(delivery(updated()))).status).toBe(503);
+      expect(JSON.stringify(errors.mock.calls)).not.toMatch(/acct_|evt_|down/);
+    });
+
+    it("needs the connected account on the event", async () => {
+      const noAccount = updated();
+      delete noAccount.account;
+      expect((await POST(delivery(noAccount))).status).toBe(400);
+    });
   });
 });

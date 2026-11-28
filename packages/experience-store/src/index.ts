@@ -15,6 +15,10 @@ export type { GuestCheckoutErrorCode, GuestCheckoutErrorDetails, GuestCheckoutOc
 export { ExperienceStore } from "./repository.ts";
 export { ManagedExperienceSalesRepository, validateManagedPlatformSellerConfig } from "./managed-sales.ts";
 export type { CheckoutTransitionOutcome, ManagedCompensation, ManagedPlatformSellerConfig, SalesPlanRevision, SalesPlanState, SalesPlanTransition } from "./managed-sales.ts";
+export { ProviderAgentSales } from "./agent-sales.ts";
+export type { AgentSalesChoice, AgentSalesChoiceInput, AgentSalesConsent } from "./agent-sales.ts";
+export { agentPlanSql, countedAgentConsentSql, isAgentSellerRef, salesKindOf } from "./sales-kind.ts";
+export type { SalesKind, SalesKindInput } from "./sales-kind.ts";
 export { ProductClassificationRepository } from "./product-classifications.ts";
 export type { AdminProductClassificationRow, PublicClassificationBySlug } from "./product-classifications.ts";
 export { OccurrenceAssignmentRepository } from "./occurrence-assignments.ts";
@@ -23,7 +27,9 @@ export { ManagedBookingApprovalRepository } from "./managed-booking-approvals.ts
 export type { ApprovedManagedBookingRequest, ManagedBookingApprovalPage, ManagedBookingApprovalRequest } from "./managed-booking-approvals.ts";
 export { HOST_TEAM_CONTRACT_VERSION, HOST_TEAM_RESOLVE_LIMIT, HostTeamRepository, hostAccessFingerprint } from "./host-team.ts";
 export type { HostAccessProjection, HostTeamActor, HostTeamCandidate, HostTeamCommandReceipt, HostTeamMember, HostTeamMemberRole, HostTeamMutationResult, HostTeamOperation, HostTeamSnapshot } from "./host-team.ts";
-export { ExperiencePublicationBlockedError, ExperiencePublicationRepository, isSelling, publicationManuscriptReview } from "./experience-publication.ts";
+export { ExperiencePublicationBlockedError, ExperiencePublicationRepository, PROVIDER_SUSPENDED_CODE, isSelling, publicationManuscriptReview } from "./experience-publication.ts";
+export { OFFICE_NOTICE_KINDS, OfficeNotices } from "./office-notices.ts";
+export type { ClaimedOfficeNotice, OfficeNoticeKind, OfficeNoticeOutcome, OfficeNoticeStatus } from "./office-notices.ts";
 export { ProviderSellerDisclosureRepository, validateSellerDisclosureInput } from "./provider-seller-disclosures.ts";
 export { EMPTY_HOST_BIO_STATE, ProviderHostBioRepository, hostBioSourceFingerprint } from "./provider-host-bios.ts";
 export type { HostBioState, PublicHostBio, SaveHostBioCommand } from "./provider-host-bios.ts";
@@ -41,6 +47,7 @@ export { ProviderMediaCleanupRepository } from "./public-media-cleanup.ts";
 export type { ClaimedProviderMediaCleanup } from "./public-media-cleanup.ts";
 export type {
   HostSellerDisclosure,
+  SellerDisclosureOptions,
   NativeSellerDisclosureInput,
   PublicSellerDisclosure,
   SaveSellerDisclosureCommand,
@@ -74,6 +81,8 @@ export type {
   ExperiencePublicationManuscriptReview,
   AdminSellerConfirmationMethod,
   ExperiencePublicationBlocker,
+  AgentPublishCheck,
+  PublishInput,
   ExperiencePublicationContentChecks,
   ExperienceHostSellerProfile,
   ExperienceHostProviderMembership,
@@ -91,7 +100,10 @@ export type {
   ExperienceHostProviderMediaAsset,
   ExperienceHostProviderMediaAssetInput,
   ExperienceHostProviderMediaSelectionInput,
+  ExperienceAdminHost,
+  ExperienceAdminHostOwner,
   ExperienceProviderPublicKind,
+  ProviderOperationsSuspensionResult,
   ProviderPublicationReadiness,
   ProviderPublicationReadinessInput,
   PublicationOperationsActor,
@@ -162,6 +174,12 @@ export type {
 export { HOST_MAIL_TOPICS, HOST_NOTIFICATION_ADDRESS_LIMITS, isHostEmail } from "./host-mail-shared.ts";
 export type { HostBookingMailTopic, HostMailTopic } from "./host-mail-shared.ts";
 export { HOST_MAIL_LIMITS, HOST_MAIL_NOTIFICATION_TOPICS, HostMailOutbox } from "./host-mail-outbox.ts";
+export type { ClaimedHostPayoutAccountMail, HostPayoutAccountMailClaim } from "./host-mail-outbox.ts";
+export { CONNECT_ACCOUNT_STATES, ExperienceConnectAccounts } from "./connect-accounts.ts";
+export type {
+  ConnectAccountPurpose, ConnectAccountRecord, ConnectAccountReservation, ConnectAccountSnapshot, ConnectAccountSnapshotInput,
+  ConnectAccountSnapshotSaved, ConnectAccountState, ConnectAccountWithSnapshot,
+} from "./connect-accounts.ts";
 export type { ClaimedHostAddressConfirmation, ClaimedHostBookingMail, HostAddressConfirmationClaim, HostBookingMailClaim, HostMailRetry } from "./host-mail-outbox.ts";
 export { HostNotificationAddresses } from "./host-notification-addresses.ts";
 export type { HostLoginEmailOutcome, HostNotificationAddress, HostNotificationAddressChange } from "./host-notification-addresses.ts";

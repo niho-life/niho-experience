@@ -2,7 +2,7 @@ import "server-only";
 import { config } from "@/lib/config";
 import { parseChannelAdapters } from "./channel-adapters";
 import { Pool } from "pg";
-import { AdminSessions, OperatorCliRequests, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, BookingChanges, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GroupInquiryRepository, PeopleListingRepository, MemberProfileRepository, GuideRepository, HostAccountIdentities, HostAccounts, HostInvitations, HostTeamInvitations, NihoAccountStatusStore, TravelerAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedBookingApprovalRepository, ManagedExperienceSalesRepository, OccurrenceAssignmentRepository, ProductClassificationRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, isHostAccountId, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { AdminSessions, ExperienceConnectAccounts, OperatorCliRequests, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, BookingChanges, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GroupInquiryRepository, PeopleListingRepository, MemberProfileRepository, GuideRepository, HostAccountIdentities, HostAccounts, HostInvitations, HostTeamInvitations, NihoAccountStatusStore, TravelerAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedBookingApprovalRepository, ManagedExperienceSalesRepository, ProviderAgentSales, OccurrenceAssignmentRepository, ProductClassificationRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, isHostAccountId, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -30,6 +30,12 @@ export function experiencePublicationRepository(): ExperiencePublicationReposito
 export function managedExperienceSalesRepository(): ManagedExperienceSalesRepository | null {
   const pool = experiencePool();
   return pool ? new ManagedExperienceSalesRepository(pool) : null;
+}
+
+/** 代理受領で売る (#725): the OWNER's choice of "サポート 15%（NIHO が代金を受け取る）" and its consent. */
+export function providerAgentSales(): ProviderAgentSales | null {
+  const pool = experiencePool();
+  return pool ? new ProviderAgentSales(pool) : null;
 }
 
 export function managedBookingApprovalRepository(): ManagedBookingApprovalRepository | null {
@@ -170,6 +176,12 @@ export function hostAccounts(): HostAccounts | null {
   return pool ? new HostAccounts(pool) : null;
 }
 
+/** The office's suspension of a host account (#711): the Admin API only, whatever the host sign-in flags say. */
+export function adminHostAccounts(): HostAccounts | null {
+  const pool = experiencePool();
+  return pool ? new HostAccounts(pool) : null;
+}
+
 /**
  * NIHO アカウントとの結び付け (Epic #591, 0083): which NIHO account opens which host account's session. null until
  * EXPERIENCE_HOST_NIHO_LOGIN_ENABLED is on (which needs the host accounts and the experience DB).
@@ -245,6 +257,13 @@ export function payoutAccountConsents(): ProviderPayoutAccountConsents | null {
   if (!config.hostAccountsEnabled) return null;
   const pool = experiencePool();
   return pool ? new ProviderPayoutAccountConsents(pool) : null;
+}
+
+/** 受取口座 (Express) の行 (Epic #700 stage 3a, #710): only while EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED is on. */
+export function connectAccounts(): ExperienceConnectAccounts | null {
+  if (!config.hostConnectOnboardingEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new ExperienceConnectAccounts(pool) : null;
 }
 
 /**

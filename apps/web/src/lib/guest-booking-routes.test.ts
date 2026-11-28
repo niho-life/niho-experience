@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   publications: null as null | Record<string, ReturnType<typeof vi.fn>>,
   stripeKeys: [] as string[],
   stripeAccountRetrieve: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
+  stripeAccountCurrent: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
   stripeCreate: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
   stripeRetrieve: null as null | Mock<(...args: unknown[]) => Promise<unknown>>,
 }));
@@ -18,7 +19,7 @@ vi.mock("@/lib/experience/store-server", () => ({ guestBookingRepository: () => 
 // The real experience-payments runs against this stand-in for the Stripe SDK.
 vi.mock("stripe", () => ({
   default: class {
-    readonly accounts = { retrieve: (...args: unknown[]) => state.stripeAccountRetrieve!(...args) };
+    readonly accounts = { retrieve: (...args: unknown[]) => state.stripeAccountRetrieve!(...args), retrieveCurrent: (...args: unknown[]) => state.stripeAccountCurrent!(...args) };
     readonly checkout = { sessions: { create: (...args: unknown[]) => state.stripeCreate!(...args), retrieve: (...args: unknown[]) => state.stripeRetrieve!(...args) } };
     readonly webhooks = {};
     constructor(key: string) {
@@ -131,6 +132,7 @@ beforeEach(() => {
   state.stripeAccountRetrieve = vi.fn(async (id: unknown) => ({
     id, country: "JP", default_currency: "jpy", charges_enabled: true, payouts_enabled: true, details_submitted: true,
   }));
+  state.stripeAccountCurrent = vi.fn(async () => ({ id: "acct_PlatformSample1", country: "JP", default_currency: "jpy", charges_enabled: true, details_submitted: true }));
   state.stripeCreate = vi.fn(async () => ({ id: "cs_test_sample1", url: "https://checkout.stripe.com/c/pay/cs_test_sample1" }));
   state.stripeRetrieve = vi.fn(async () => ({ id: "cs_test_sample1", status: "open", url: "https://checkout.stripe.com/c/pay/cs_test_sample1", expires_at: 1_798_762_200, metadata: { booking_id: BOOKING_ID } }));
 });
@@ -231,6 +233,47 @@ describe("POST /api/public/experiences/[slug]/checkout", () => {
     });
     expect(options).toEqual({ stripeAccount: "acct_SampleA0001", idempotencyKey: `experience-checkout:${BOOKING_ID}` });
     expect(state.repository?.attachCheckoutSession).toHaveBeenCalledWith(BOOKING_ID, "cs_test_sample1");
+  });
+
+  it("opens agent-sales Checkout on the platform account (no account header or fee) under its own flag, apart from the 20% flag (#725)", async () => {
+    const agentStart = () => {
+      const base = started();
+      return {
+        ...base, stripeConnectAccountRef: "acct_PlatformSample1",
+        booking: {
+          ...base.booking,
+          pricingSnapshot: { ...base.booking.pricingSnapshot, platformFee: { supportEnabled: true, basisPoints: 1500, amount: 1200, salesPlan: "SUPPORTED_15" as const } },
+          sellerSnapshot: {
+            ...base.booking.sellerSnapshot, stripeConnectAccountRef: "acct_PlatformSample1", chargeMode: "PLATFORM" as const, salesPlan: "SUPPORTED_15" as const, salesPlanRevision: 1,
+            feeBasisPoints: 1500 as const, sellerParty: "PROVIDER" as const, payoutDelayDays: 3, receivingAgentName: "Synthetic NIHO Receiver KK",
+          },
+        },
+      };
+    };
+    vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET", "whsec_sample");
+    vi.stubEnv("EXPERIENCE_MANAGED_SALES_ENABLED", "false");
+    state.config = { ...state.config, hostAgentSalesEnabled: true } as typeof state.config;
+    state.repository!.startGuestBooking!.mockResolvedValueOnce(agentStart());
+    const response = await checkout(post({ ...CHECKOUT, salesPlanRevision: 1 }, { "accept-language": "ja" }), slugParams());
+    expect(response.status).toBe(201);
+    expect(state.repository?.startGuestBooking).toHaveBeenCalledWith(expect.objectContaining({ agentSalesEnabled: true, managedSalesEnabled: false }));
+    expect(state.stripeAccountCurrent).toHaveBeenCalledTimes(1);
+    expect(state.stripeAccountRetrieve).not.toHaveBeenCalled();
+    const [params, options] = state.stripeCreate!.mock.calls[0]!;
+    expect(options).toEqual({ idempotencyKey: `experience-platform-checkout:${BOOKING_ID}` });
+    expect(params).toMatchObject({
+      metadata: { source: "niho-experience-platform", booking_id: BOOKING_ID },
+      payment_intent_data: { transfer_group: `niho-experience-agent-payout:${BOOKING_ID}`, metadata: { source: "niho-experience-platform", booking_id: BOOKING_ID } },
+      custom_text: { submit: { message: "販売者：Sample Seller。お支払いはSynthetic NIHO Receiver KKが販売者に代わって受け取ります。" } },
+    });
+    expect((params as { payment_intent_data: Record<string, unknown> }).payment_intent_data).not.toHaveProperty("application_fee_amount");
+
+    // The flag off: the same request tells the store it is closed (the store answers 404), and the 20% flag does not stand in for it.
+    state.config = { ...state.config, hostAgentSalesEnabled: false } as typeof state.config;
+    vi.stubEnv("EXPERIENCE_MANAGED_SALES_ENABLED", "true");
+    state.repository!.startGuestBooking!.mockRejectedValueOnce(new StoreNotFoundError("experience for sale"));
+    expect((await checkout(post({ ...CHECKOUT, clientRequestKey: "00000000-0000-4000-8000-000000000286", salesPlanRevision: 1 }), slugParams())).status).toBe(404);
+    expect(state.repository?.startGuestBooking).toHaveBeenLastCalledWith(expect.objectContaining({ agentSalesEnabled: false, managedSalesEnabled: true }));
   });
 
   it("returns only the local request receipt for APPROVAL and makes no Stripe call", async () => {

@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
   const consents = payoutAccountConsents();
   if (!repository || !consents) return back(providerId, "unavailable");
   let resolved: Awaited<ReturnType<typeof repository.currentHostAccountSellerProfile>>;
-  try { resolved = await repository.currentHostAccountSellerProfile(session.hostAccountId); }
+  try { resolved = await repository.currentHostAccountSellerProfile(session.hostAccountId, providerId); }
   catch { return back(providerId, "unavailable"); }
   if (resolved.kind === "setup-required" && resolved.providerId === providerId) return back(providerId, "changed");
   if (resolved.kind !== "ready" || resolved.profile.providerId !== providerId) return back(providerId, "forbidden");

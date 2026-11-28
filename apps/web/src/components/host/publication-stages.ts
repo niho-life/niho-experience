@@ -14,7 +14,7 @@ export type PublicationAction = "publish-page" | "open-booking" | "stop-booking"
 /** What stops the public page. The server sends the split; this is the fallback for a server that does not. */
 export const PAGE_BLOCKER_CODES: ReadonlySet<string> = new Set([
   "MANUSCRIPT_REQUIRED", "PUBLIC_CONTENT_INVALID", "PHOTOS_REQUIRED", "PRICE_REQUIRED", "CANCELLATION_TERMS_REQUIRED",
-  "SLUG_IN_USE", "OPERATIONS_SUSPENDED", "OWNER_NOT_CURRENT", "ACCOUNT_NOT_USABLE", "NOTIFICATION_ADDRESS_REQUIRED",
+  "SLUG_IN_USE", "OPERATIONS_SUSPENDED", "PROVIDER_SUSPENDED", "OWNER_NOT_CURRENT", "ACCOUNT_NOT_USABLE", "NOTIFICATION_ADDRESS_REQUIRED",
 ]);
 
 /** A short name for what is missing, in the order a host would do it. Unknown codes are said as 「公開の条件」. */
@@ -29,10 +29,13 @@ const NAMES: readonly (readonly [string, string])[] = [
   ["OWNER_NOT_CURRENT", "ログインし直すこと"],
   ["ACCOUNT_NOT_USABLE", "アカウントの確認"],
   ["OPERATIONS_SUSPENDED", "運営の停止の解除"],
+  ["PROVIDER_SUSPENDED", "運営によるホストの停止の解除"],
   ["SUPPORT_CONSENT_REQUIRED", "売上の受け取り方（サポート・手数料）への同意"],
   ["FEE_SETTINGS_REQUIRED", "手数料の設定（運営側）"],
   ["SELLER_REQUIRED", "販売者情報"],
   ["SELLER_MISMATCH", "販売者情報と受取口座の一致"],
+  ["SELLER_DISCLOSURE_REQUIRED", "販売者表示（特定商取引法に基づく表記）"],
+  ["AGENT_CONSENT_REQUIRED", "「サポート 15%（NIHO が代金を受け取る）」への同意"],
   ["CONNECT_NOT_READY", "受取口座"],
   ["PAYMENT_REUSE_CONSENT_REQUIRED", "受取口座での売上の受け取りへの同意"],
   ["READINESS_MISSING", "受取口座の最新の確認"],

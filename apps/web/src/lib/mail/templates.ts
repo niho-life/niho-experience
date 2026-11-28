@@ -202,7 +202,9 @@ export function bookingConfirmationEmail(
         ["Time", time],
         ["Guests", party(email.adultCount, email.childCount)],
         [email.totalAmount === 0 ? "Total" : "Total paid", email.totalAmount === 0 ? "Free" : money(email.totalAmount, email.currency)],
-        ...(managed ? [["Seller", oneLine(managed.displayName)] as const, ...(provider ? [["Host", provider] as const] : [])] : [["Host", host] as const]),
+        ...(managed ? [["Seller", oneLine(managed.displayName)] as const, ...(provider ? [["Host", provider] as const] : [])] : [[email.agentSeller ? "Seller" : "Host", host] as const]),
+        // 代理受領 (#725): the host is the seller; the payment was taken for it by NIHO's receiving party.
+        ...(email.agentSeller && email.totalAmount !== 0 ? [["Payment received by", `${oneLine(email.agentSeller.receivingAgentName)} (on behalf of ${oneLine(email.agentSeller.displayName)})`] as const] : []),
         ["Booking reference", email.publicBookingId],
       ],
     },

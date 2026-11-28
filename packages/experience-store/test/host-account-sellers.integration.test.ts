@@ -229,7 +229,7 @@ describe("moving a seller mapped to NIHO onto host accounts", { skip }, () => {
       };
       // A suspended account, an EDITOR of the provider, an account already the OWNER of 3 providers: refused, the seller stays as it was.
       const suspended = await provision(pool, "suspended-owner@example.test");
-      await new HostAccounts(pool).suspendHostAccount({ hostAccountId: suspended, nowUtc: at(1) });
+      await new HostAccounts(pool).suspendHostAccount({ actorId: "test-actor", hostAccountId: suspended, nowUtc: at(1) });
       await assert.rejects(() => move(suspended), StoreConflictError);
       await unchanged();
       const editor = await hostMember(pool, "provider-blocked", "editor-blocked@example.test", "EDITOR");
@@ -284,9 +284,9 @@ describe("the seller a host account acts for", { skip }, () => {
         },
       };
       assert.deepEqual(await publications.currentHostAccountSellerProfile(owner.nihoUserId), ready);
-      await accounts.suspendHostAccount({ hostAccountId: owner.nihoUserId, nowUtc: at(1) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: owner.nihoUserId, nowUtc: at(1) });
       assert.deepEqual(await publications.currentHostAccountSellerProfile(owner.nihoUserId), { ...ready, hostAccountActive: false });
-      await accounts.reactivateHostAccount({ hostAccountId: owner.nihoUserId, nowUtc: at(2) });
+      await accounts.reactivateHostAccount({ actorId: "test-actor", hostAccountId: owner.nihoUserId, nowUtc: at(2) });
 
       // The NIHO login's lookups skip a host-account seller.
       assert.deepEqual(await publications.currentOwnerSellerProfile(owner.nihoUserId), { kind: "setup-required" });
@@ -374,9 +374,9 @@ describe("the OWNER's payout-account consent", { skip }, () => {
       }
       // A suspended OWNER is refused until reactivated.
       const accounts = new HostAccounts(pool);
-      await accounts.suspendHostAccount({ hostAccountId: owner.nihoUserId, nowUtc: at(1) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: owner.nihoUserId, nowUtc: at(1) });
       await assert.rejects(() => consents.record(owner, input), StoreAccessDeniedError);
-      await accounts.reactivateHostAccount({ hostAccountId: owner.nihoUserId, nowUtc: at(2) });
+      await accounts.reactivateHostAccount({ actorId: "test-actor", hostAccountId: owner.nihoUserId, nowUtc: at(2) });
       assert.equal((await consents.record(owner, { ...input, nowUtc: at(3) })).outcome, "RECORDED");
       // A host-account OWNER of a seller mapped to NIHO has nothing to consent to here.
       await nihoSeller(pool, "provider-niho", "niho-user-synthetic-1", OTHER_ACCOUNT);
@@ -529,10 +529,10 @@ describe("seller disclosure and host bio for a host-account seller", { skip }, (
       assert.deepEqual(await bios.getPublicBySlug("synthetic-supper-public"), { ja: "合成の紹介文です。", en: null });
       // Without an ACTIVE host-account OWNER the public seller and bio disappear (the NIHO OWNER row does not count).
       const accounts = new HostAccounts(pool);
-      await accounts.suspendHostAccount({ hostAccountId: owner.nihoUserId, nowUtc: at(1) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: owner.nihoUserId, nowUtc: at(1) });
       assert.equal(await disclosures.getPublicBySlug("synthetic-supper-public"), null);
       assert.equal(await bios.getPublicBySlug("synthetic-supper-public"), null);
-      await accounts.reactivateHostAccount({ hostAccountId: owner.nihoUserId, nowUtc: at(2) });
+      await accounts.reactivateHostAccount({ actorId: "test-actor", hostAccountId: owner.nihoUserId, nowUtc: at(2) });
       assert.notEqual(await disclosures.getPublicBySlug("synthetic-supper-public"), null);
     });
   });

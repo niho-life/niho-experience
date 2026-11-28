@@ -6,9 +6,11 @@ import {
   type ExperienceClassification, type ExperienceCompanionId, type ExperienceOccasionId,
 } from "@niho-experience/experience-domain";
 import { consoleButtonClass, HOST_SURFACE } from "./host-ui";
+import { HostErrorMessage } from "./HostProviderRequired";
+import { PROVIDER_REQUIRED_MESSAGE, hostApiPath, isProviderRequired } from "@/lib/host/api-path";
 
 /** Where the panel reads and saves: the product's OWNER (`host`), or NIHO's office for a proxy-registered product (`admin`). */
-export type ClassificationTarget = { readonly kind: "host"; readonly productId: string } | { readonly kind: "admin"; readonly providerId: string; readonly productId: string };
+export type ClassificationTarget = { readonly kind: "host"; readonly productId: string; /** The host the screen is for, sent as `?providerId=` (#709). */ readonly providerId?: string | null } | { readonly kind: "admin"; readonly providerId: string; readonly productId: string };
 
 const FIELD = "mt-1 block min-h-10 w-full rounded-[10px] border border-line-strong bg-canvas px-3 text-[1rem] text-ink md:text-[0.875rem]";
 
@@ -39,7 +41,7 @@ export function useProductClassification(target: ClassificationTarget | null): P
   const kind = target?.kind ?? null;
   const productId = target?.productId ?? null;
   const providerId = target?.kind === "admin" ? target.providerId : null;
-  const url = kind === "host" ? `/host/api/products/${encodeURIComponent(productId ?? "")}/classification`
+  const url = kind === "host" ? hostApiPath(`/host/api/products/${encodeURIComponent(productId ?? "")}/classification`, target?.kind === "host" ? target.providerId : null)
     : kind === "admin" ? `/admin/api/product-classifications?providerId=${encodeURIComponent(providerId ?? "")}&productId=${encodeURIComponent(productId ?? "")}`
       : null;
 
@@ -49,6 +51,7 @@ export function useProductClassification(target: ClassificationTarget | null): P
       const response = await fetch(url, { cache: "no-store", credentials: "same-origin" });
       if (response.status === 403 || response.status === 404) { setHidden(true); return; }
       const body = await response.json().catch(() => null) as { classification?: ExperienceClassification } | null;
+      if (isProviderRequired(response.status, body)) { setState({ tone: "alert", text: PROVIDER_REQUIRED_MESSAGE }); return; }
       if (!response.ok || !body?.classification) throw new Error("load");
       setValue(body.classification); setSaved(JSON.stringify(body.classification)); setState(null);
     } catch { setState({ tone: "alert", text: "分類を読み込めませんでした。時間をおいて、もう一度お試しください。" }); }
@@ -63,8 +66,9 @@ export function useProductClassification(target: ClassificationTarget | null): P
       const response = kind === "host"
         ? await fetch(url, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ classification: value }) })
         : await fetch("/admin/api/product-classifications", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ items: [{ providerId, productId, classification: value }] }) });
-      if (!response.ok) throw new Error("save");
       const body = await response.json().catch(() => null) as { classification?: ExperienceClassification } | null;
+      if (isProviderRequired(response.status, body)) { setState({ tone: "alert", text: PROVIDER_REQUIRED_MESSAGE }); return false; }
+      if (!response.ok) throw new Error("save");
       const next = body?.classification ?? value;
       setValue(next); setSaved(JSON.stringify(next));
       setState({ tone: "ok", text: "分類を保存しました。日本語サイトの一覧にすぐ反映されます。" });
@@ -120,7 +124,7 @@ export function ProductClassificationFields({ value, onChange, disabled = false 
 export function ProductClassificationPanel({ target }: { target: ClassificationTarget }) {
   const { value, setValue, dirty, busy, hidden, state, save } = useProductClassification(target);
   if (hidden) return null;
-  if (!value) return state ? <p role="alert" className="mb-3 text-sm font-bold text-danger">{state.text}</p> : null;
+  if (!value) return state ? <p role="alert" className="mb-3 text-sm font-bold text-danger"><HostErrorMessage text={state.text} /></p> : null;
   return (
     <section className={`${HOST_SURFACE} mb-4 space-y-3 p-4`} aria-labelledby="classification-title">
       <div>
@@ -153,7 +157,7 @@ export function ProductClassificationPanel({ target }: { target: ClassificationT
       </fieldset>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" disabled={busy || !dirty} onClick={() => void save()} className={consoleButtonClass("secondary")}>{busy ? "保存しています…" : "分類を保存"}</button>
-        {state ? <p role={state.tone === "alert" ? "alert" : "status"} className={`text-sm font-bold ${state.tone === "alert" ? "text-danger" : "text-moss"}`}>{state.text}</p> : null}
+        {state ? <p role={state.tone === "alert" ? "alert" : "status"} className={`text-sm font-bold ${state.tone === "alert" ? "text-danger" : "text-moss"}`}><HostErrorMessage text={state.text} /></p> : null}
       </div>
     </section>
   );

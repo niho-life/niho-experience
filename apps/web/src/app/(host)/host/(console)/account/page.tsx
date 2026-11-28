@@ -14,7 +14,9 @@ import { loadNotificationAddress } from "@/host/notification-address-server";
 import { config } from "@/lib/config";
 import { resolveCalendarContext } from "@/lib/experience/calendar-actor";
 import { nihoAccount } from "@/lib/host/niho-account-row-server";
-import { providerRoleLabel } from "@/lib/host/providers";
+import { addHostState, providerRoleLabel } from "@/lib/host/providers";
+import { HOST_PROVIDER_OWNER_LIMIT } from "@niho-experience/experience-store";
+import { HostAddHost } from "@/components/host/HostAddHost";
 import { HOST_HOME_PATH, withProvider } from "@/lib/host/routes";
 import { isHostMock } from "@/lib/host/server";
 
@@ -54,6 +56,9 @@ export default async function HostAccountPage({ searchParams }: { searchParams: 
     const load = await loadNotificationAddress(addressProviderId);
     address = load.status === "live" ? load.address : load.status === "error" ? "error" : null;
   }
+
+  // 「ホストを追加」: only for an Experience host account (the registration adds a host to the account in the session).
+  const addHost = addHostState(providers, { enabled: config.hostSelfRegistrationEnabled && session.kind === "experience", limit: HOST_PROVIDER_OWNER_LIMIT });
 
   return (
     <HostPageBody>
@@ -99,7 +104,7 @@ export default async function HostAccountPage({ searchParams }: { searchParams: 
           </FieldSection>
         ) : null}
 
-        {providers.length > 0 ? (
+        {providers.length > 0 || addHost !== "hidden" ? (
           <section id="account-providers" aria-labelledby="account-providers-title" className={`${HOST_SURFACE} overflow-hidden`}>
             <h2 id="account-providers-title" className="px-4 pt-4 pb-2 text-[0.78125rem] font-extrabold text-ink-soft md:px-5">所属している提供者</h2>
             <ul className="divide-y divide-line">
@@ -122,6 +127,7 @@ export default async function HostAccountPage({ searchParams }: { searchParams: 
                 );
               })}
             </ul>
+            <HostAddHost state={addHost} limit={HOST_PROVIDER_OWNER_LIMIT} />
           </section>
         ) : null}
       </div>

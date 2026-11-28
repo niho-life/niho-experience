@@ -90,7 +90,7 @@ describe("POST /host/api/payout-account-consent", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(settingsWith("consented"));
     expect(response.headers.get("cache-control")).toContain("no-store");
-    expect(publications.currentHostAccountSellerProfile).toHaveBeenCalledWith(HOST);
+    expect(publications.currentHostAccountSellerProfile).toHaveBeenCalledWith(HOST, PROVIDER);
     expect(consents.record).toHaveBeenCalledWith(
       { providerId: PROVIDER, nihoUserId: HOST },
       { stripeConnectAccountRef: ACCOUNT, consentVersion: "payout-v1", nowUtc: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/) },

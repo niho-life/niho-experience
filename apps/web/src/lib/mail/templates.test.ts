@@ -126,6 +126,17 @@ describe("bookingConfirmationEmail", () => {
     expect(mail.text).toContain("NIHO support will share the meeting details");
   });
 
+  it("shows the host as the seller and who received the payment for agent sales (#725), not the 20% copy", () => {
+    const agentSeller = { displayName: "Sample Host", receivingAgentName: "Synthetic NIHO Receiver KK" };
+    const mail = bookingConfirmationEmail({ ...confirmation, agentSeller }, { siteUrl: SITE, now: NOW });
+    expect(mail.text).toContain("Seller: Sample Host\nPayment received by: Synthetic NIHO Receiver KK (on behalf of Sample Host)");
+    expect(mail.text).toContain("Payment received by: Synthetic NIHO Receiver KK (on behalf of Sample Host)");
+    expect(mail.text).toContain("Sample Host will share the meeting details with you before the day.");
+    expect(mail.text).not.toContain("NIHO support will share the meeting details");
+    expect(bookingConfirmationEmail({ ...confirmation, totalAmount: 0, agentSeller }, { siteUrl: SITE, now: NOW }).text).not.toContain("Payment received by");
+    expect(bookingConfirmationEmail(confirmation, { siteUrl: SITE, now: NOW }).text).not.toContain("Payment received by");
+  });
+
   it("states each policy in plain words, and a deadline already passed as non-refundable", () => {
     const text = (overrides: Partial<BookingConfirmationEmail>, now = NOW) => bookingConfirmationEmail({ ...confirmation, ...overrides }, { siteUrl: SITE, now }).text;
     expect(text({ cancellationPolicy: "FREE_UNTIL_48H", cancellationWindowMinutesBeforeStart: 2_880, cancellationRefundBasisPoints: 10_000 })).toContain("Free cancellation until Thu 12 Nov, 10:00 Japan time (2 days before the start).");

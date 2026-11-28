@@ -7,7 +7,7 @@ import { productTarget } from "./product.ts";
 import { inquiryTarget } from "./inquiry.ts";
 import { assignmentTarget } from "./assignment.ts";
 import { guideTarget } from "./guide.ts";
-import { providerTarget } from "./provider.ts";
+import { hostAccountTarget, providerTarget } from "./provider.ts";
 
 /**
  * Every target the CLI knows. A stage adds its own here (classification, people, product, guide, inquiry); the
@@ -18,6 +18,7 @@ export const TARGETS: Readonly<Record<string, Target>> = Object.freeze({
   classification: classificationTarget,
   people: peopleTarget,
   provider: providerTarget,
+  "host-account": hostAccountTarget,
   product: productTarget,
   inquiry: inquiryTarget,
   assignment: assignmentTarget,

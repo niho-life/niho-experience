@@ -204,7 +204,7 @@ describe("host account invitations", () => {
     await withInvitations(async (context) => {
       const { accounts, identities, invitations, pool } = context;
       const suspended = await provision(accounts, "suspended@example.com");
-      await accounts.suspendHostAccount({ hostAccountId: suspended, nowUtc: at(MINUTE) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: suspended, nowUtc: at(MINUTE) });
       assert.deepEqual(await invitations.createInvitation({ hostAccountId: suspended, nowUtc: at(2 * MINUTE) }), { kind: "host-account-not-active" });
       assert.deepEqual(await invitations.createInvitation({ hostAccountId: `hst_${"0".repeat(32)}`, nowUtc: at(2 * MINUTE) }), { kind: "host-account-not-active" });
 
@@ -213,7 +213,7 @@ describe("host account invitations", () => {
       const bound = await provision(accounts, "bound@example.com");
       await invitations.createInvitation({ hostAccountId: late, nowUtc: at(3 * MINUTE) });
       await invitations.createInvitation({ hostAccountId: bound, nowUtc: at(3 * MINUTE) });
-      await accounts.suspendHostAccount({ hostAccountId: late, nowUtc: at(4 * MINUTE) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: late, nowUtc: at(4 * MINUTE) });
       assert.deepEqual(await identities.linkNihoIdentity({ hostAccountId: bound, nihoUserId: NIHO_A, proof: { kind: "OPS" }, nowUtc: at(4 * MINUTE) }), { kind: "linked" });
       // Neither is listed any more: the suspended account's, and the bound account's (it would be skipped for good).
       assert.deepEqual(await invitations.listPendingInvitations({ nowUtc: at(5 * MINUTE), limit: 10 }), []);

@@ -1,12 +1,13 @@
 import "server-only";
-import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type BookingRecord, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GroupInquiryRepository, type GuestReviewRepository, type HostAccounts, type HostInvitations, type HostTeamInvitations, type HostMailOutbox, type HostNotificationAddresses, type HostNotificationOutbox } from "@niho-experience/experience-store";
+import { BOOKING_ACCESS_LIMITS, GUEST_REVIEW_LIMITS, HOST_ACCOUNT_LIMITS, StoreConflictError, StoreNotFoundError, type AdminSessions, type BookingCancellations, type BookingRecord, type ExternalReservationGuests, type GuestBookingAccess, type GuestBookingRepository, type GuestMailOutbox, type GuestMeetingGuideRepository, type GuestQuestionRepository, type GuestQuestionTranslations, type GroupInquiryRepository, type GuestReviewRepository, type HostAccounts, type HostInvitations, type HostTeamInvitations, type HostMailOutbox, type HostNotificationAddresses, type HostNotificationOutbox, type OfficeNotices } from "@niho-experience/experience-store";
 import type { RetrievedPlatformCheckout } from "@niho-experience/experience-payments";
 import { sendRefunds, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { cleanupProviderMedia, type ProviderMediaCleanupCounts, type ProviderMediaCleanupDeps } from "@/lib/experience/provider-media-cleanup";
+import { officeNoticeEmail } from "@/lib/mail/office-notice-templates";
 import { groupInquiryReceiptEmail, groupInquiryStaffEmail } from "@/lib/mail/group-inquiry-templates";
 import { hostPushEventFromOutbox } from "@/lib/host/push/outbox";
 import type { HostPushKind } from "@/lib/host/push/payload";
-import { hostAddressConfirmationEmail, hostBookingEmail, hostInvitationEmail, hostLoginLinkEmail, hostNotificationEmail, hostTeamInvitationEmail } from "@/lib/mail/host-templates";
+import { hostAddressConfirmationEmail, hostBookingEmail, hostPayoutAccountEmail, hostInvitationEmail, hostLoginLinkEmail, hostNotificationEmail, hostTeamInvitationEmail } from "@/lib/mail/host-templates";
 import { bookingConfirmationEmail, bookingLinkEmail, bookingMeetingGuideEmail, bookingMessageEmail, bookingNoticeEmail, managedGuestBookingEmail, managedOperationsBookingEmail, questionReplyEmail, reviewInvitationEmail, supportBookingMessageEmail } from "@/lib/mail/templates";
 import type { Mailer } from "@/lib/mail/transport";
 import type { Translator } from "@/lib/translation/anthropic";
@@ -70,6 +71,8 @@ export const EXPERIENCE_JOB_LIMITS = {
   hostMails: 20,
   managedMails: 30,
   hostAddressConfirmations: 10,
+  /** #710: "the payout account needs more information", one per account and need. */
+  hostPayoutAccountMails: 10,
   hostMailLeaseSeconds: 120,
   /** People whose access ended, their addresses deleted per run. */
   hostAddressesPurgedPerStep: 200,
@@ -78,6 +81,8 @@ export const EXPERIENCE_JOB_LIMITS = {
   /** 団体・個別の相談 (#532): the office's notices and the senders' receipts a run sends, one claimed at a time. */
   groupInquiryMails: 20,
   groupInquiryMailLeaseSeconds: 120,
+  officeNotices: 20,
+  officeNoticeLeaseSeconds: 120,
   /** ホストのアカウント (ADR 0003): sign-in link emails a run sends (first, as the host is waiting for one). */
   hostLoginLinks: 20,
   /** ホストの招待リンク (#596): invitation emails a run sends (right after the sign-in links: the host is waiting for them too). */
@@ -196,6 +201,9 @@ export interface GroupInquiryMailCounts {
   readonly failed: number;
 }
 
+/** 事務局への知らせ (#711): counts only, never a name. */
+export type OfficeNoticeCounts = GroupInquiryMailCounts;
+
 /** A step that threw: what it did before is not reported, and the next step still runs. */
 export interface FailedStep {
   readonly error: "unavailable";
@@ -220,6 +228,8 @@ export interface ExperienceJobCounts {
   /** ホストへのメール (#194): off while EXPERIENCE_HOST_MAIL_ENABLED is (the rows wait; the pushes are unaffected). */
   readonly hostAddressConfirmations: HostMailCounts | StepOff | FailedStep;
   readonly hostBookingMails: HostMailCounts | StepOff | FailedStep;
+  /** Only while the host mail is on and the payout accounts can be registered (EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED, #710). */
+  readonly hostPayoutAccountMails?: HostMailCounts | FailedStep;
   /** The addresses of hosts with no membership or grant left (#194), deleted whatever the flag. */
   readonly hostAddressPurge: PurgeCounts | FailedStep;
   /** Off when public media storage is not configured; claims remain unfinished in that case. */
@@ -233,6 +243,7 @@ export interface ExperienceJobCounts {
   readonly hostTeamInvitations?: HostTeamInvitationCounts | FailedStep;
   /** Only with 団体・個別の相談 (EXPERIENCE_GROUP_INQUIRY_ENABLED, #532). */
   readonly groupInquiryMails?: GroupInquiryMailCounts | FailedStep;
+  readonly officeNotices?: OfficeNoticeCounts | FailedStep;
   readonly hostAccountPurge?: PurgeCounts | FailedStep;
   /** Only with the Admin's Google login (EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED): ended admin sessions. */
   readonly adminSessionPurge?: PurgeCounts | FailedStep;
@@ -286,10 +297,16 @@ export interface ExperienceJobDeps {
    * reads it: the kinds that cannot be stopped always come.
    */
   readonly hostMail: {
-    readonly outbox: Pick<HostMailOutbox, "claimBookingMails" | "completeBookingMail" | "retryBookingMail" | "claimAddressConfirmations" | "issueAddressConfirmationToken" | "completeAddressConfirmation" | "retryAddressConfirmation">;
+    readonly outbox: Pick<HostMailOutbox, "claimBookingMails" | "completeBookingMail" | "retryBookingMail" | "claimAddressConfirmations" | "issueAddressConfirmationToken" | "completeAddressConfirmation" | "retryAddressConfirmation">
+      & Partial<Pick<HostMailOutbox, "claimPayoutAccountMails" | "completePayoutAccountMail" | "retryPayoutAccountMail">>;
     readonly allowed: (providerId: string, kind: HostPushKind) => Promise<boolean>;
     readonly summaries?: Pick<HostNotificationOutbox, "enqueueDueDayBeforeSummaries">;
   } | null;
+  /**
+   * The payout-account emails (#710) are claimed only while EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED is on, so code deployed
+   * before migration 0095 never reads its tables.
+   */
+  readonly hostPayoutAccountMails?: boolean;
   /** Deletes the addresses of hosts whose access ended (#194), whatever the flag: what was kept while it was on still goes. */
   readonly hostAddresses: Pick<HostNotificationAddresses, "purge">;
   /** Present only when public media storage is configured. */
@@ -313,6 +330,8 @@ export interface ExperienceJobDeps {
    * 団体・個別の相談 (#532), present only while EXPERIENCE_GROUP_INQUIRY_ENABLED is on. `officeRecipient` is the office's
    * own address (the one the guests' replies reach), where each inquiry's notice goes.
    */
+  /** 事務局への知らせ (#711): the first page and first bookings of a host, to the same office mailbox. */
+  readonly officeNotices?: { readonly notices: Pick<OfficeNotices, "claimNotices" | "recordNotice">; readonly officeRecipient: string } | null;
   readonly groupInquiries?: { readonly mails: Pick<GroupInquiryRepository, "claimMails" | "recordMail">; readonly officeRecipient: string } | null;
   /** The Admin's Google login (ADR 0003), present only while EXPERIENCE_ADMIN_GOOGLE_LOGIN_ENABLED is on: ended sessions to delete. */
   readonly adminSessions?: Pick<AdminSessions, "purgeExpired"> | null;
@@ -768,6 +787,40 @@ async function sendHostAddressConfirmations(deps: ExperienceJobDeps, hostMail: H
 }
 
 /**
+ * 「受取口座に追加の情報が必要です」 (#710): one claimed at a time. A row whose account is retired, no longer asking, or whose
+ * recipient is no longer an OWNER with an address sends nothing. The email names no requirement and carries no Stripe link.
+ */
+async function sendHostPayoutAccountMails(deps: ExperienceJobDeps, hostMail: HostMail): Promise<HostMailCounts> {
+  const outbox = hostMail.outbox;
+  const counts = { claimed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, abandoned: 0 };
+  if (!outbox.claimPayoutAccountMails || !outbox.completePayoutAccountMail || !outbox.retryPayoutAccountMail) return counts;
+  const startedAt = deps.now().getTime();
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.hostPayoutAccountMails)) {
+    const claim = await outbox.claimPayoutAccountMails({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.hostMailLeaseSeconds });
+    counts.abandoned += claim.abandoned;
+    const [row] = claim.mails;
+    if (!row) break;
+    counts.claimed += 1;
+    if (row.to === null) {
+      await outbox.completePayoutAccountMail(row.id);
+      counts.skipped += 1;
+      continue;
+    }
+    const result = await deps.mailer.sendMail({ to: row.to, ...hostPayoutAccountEmail({ siteUrl: deps.siteUrl, providerId: row.providerId }) });
+    if (result.ok || result.failure === "permanent") {
+      await outbox.completePayoutAccountMail(row.id);
+      if (result.ok) counts.sent += 1;
+      else counts.failed += 1;
+    } else {
+      if (await outbox.retryPayoutAccountMail(row.id, row.attempts) === "FAILED") counts.failed += 1;
+      else counts.retried += 1;
+      break;
+    }
+  }
+  return counts;
+}
+
+/**
  * A host's emails about bookings (#194, owner decision 2026-11-01): this site's new and cancelled bookings to the OWNER, an OTA
  * booking that is new, cancelled or moved to the product's OWNER and operators, each to the address in use when it goes. The
  * words are the push's (the same event, with an OTA guest's kept name read now), and so are the rules: a day old, a row of
@@ -932,6 +985,30 @@ async function sendGroupInquiryMails(deps: ExperienceJobDeps, source: NonNullabl
   return counts;
 }
 
+/** 事務局への知らせ (#711): one notice claimed at a time; a transient failure ends the step, a refusal for good is final. */
+async function sendOfficeNotices(deps: ExperienceJobDeps, source: NonNullable<ExperienceJobDeps["officeNotices"]>): Promise<OfficeNoticeCounts> {
+  const startedAt = deps.now().getTime();
+  const counts = { claimed: 0, sent: 0, retried: 0, failed: 0 };
+  while (mayContinue(deps, startedAt, counts.claimed, EXPERIENCE_JOB_LIMITS.officeNotices)) {
+    const [notice] = await source.notices.claimNotices({ limit: 1, leaseSeconds: EXPERIENCE_JOB_LIMITS.officeNoticeLeaseSeconds });
+    if (!notice) break;
+    counts.claimed += 1;
+    const result = await deps.mailer.sendMail({ to: source.officeRecipient, ...officeNoticeEmail(notice, { siteUrl: deps.siteUrl }) });
+    if (result.ok) {
+      await source.notices.recordNotice(notice.providerId, notice.kind, "SENT", notice.claimToken);
+      counts.sent += 1;
+    } else if (result.failure === "permanent") {
+      await source.notices.recordNotice(notice.providerId, notice.kind, "FAILED", notice.claimToken);
+      counts.failed += 1;
+    } else {
+      if (await source.notices.recordNotice(notice.providerId, notice.kind, "RETRY", notice.claimToken) === "FAILED") counts.failed += 1;
+      else counts.retried += 1;
+      break;
+    }
+  }
+  return counts;
+}
+
 export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<ExperienceJobCounts> {
   const hostLogins = deps.hostLogins ?? null;
   // First: a host is waiting for this email.
@@ -943,6 +1020,8 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   // 団体・個別の相談 (#532): a person asking the office is waiting too, and the office should hear at once.
   const groupInquiries = deps.groupInquiries ?? null;
   const groupInquiryMails = groupInquiries ? await step(deps, "groupInquiryMails", () => sendGroupInquiryMails(deps, groupInquiries)) : undefined;
+  const officeNoticeSource = deps.officeNotices ?? null;
+  const officeNotices = officeNoticeSource ? await step(deps, "officeNotices", () => sendOfficeNotices(deps, officeNoticeSource)) : undefined;
   const questionReplies = await step(deps, "questionReplies", () => sendQuestionReplies(deps));
   const bookingConfirmations = await step(deps, "bookingConfirmations", () => sendBookingConfirmations(deps));
   const meetingGuides = deps.meetingGuides
@@ -962,6 +1041,10 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
   const hostBookingMails: ExperienceJobCounts["hostBookingMails"] = hostMail
     ? await step(deps, "hostBookingMails", () => sendHostBookingMails(deps, hostMail))
     : { off: true };
+  // Only with the onboarding flag on (and an outbox that can claim them): before migration 0095 nothing here may touch its tables.
+  const hostPayoutAccountMails = deps.hostPayoutAccountMails === true && hostMail?.outbox.claimPayoutAccountMails
+    ? await step(deps, "hostPayoutAccountMails", () => sendHostPayoutAccountMails(deps, hostMail))
+    : undefined;
   const access = deps.access;
   const bookingLinks: ExperienceJobCounts["bookingLinks"] = access
     ? await step(deps, "bookingLinks", () => sendBookingLinks(deps, access))
@@ -1027,6 +1110,7 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
     questionReplies, bookingConfirmations, bookingNotices, bookingLinks, bookingRefunds, guestTranslations, guestErasure, otaGuestErasure, questionErasure,
     bookingAccessPurge, hostAddressConfirmations, hostBookingMails, hostAddressPurge, providerMediaCleanup,
     ...(deps.settlementReconciliation ? { settlementReconciliation } : {}),
+    ...(hostPayoutAccountMails ? { hostPayoutAccountMails } : {}),
     ...(meetingGuideSnapshotPurge ? { meetingGuideSnapshotPurge } : {}),
     ...(reviewInvitations ? { reviewInvitations } : {}),
     ...(meetingGuides ? { meetingGuides } : {}),
@@ -1035,6 +1119,7 @@ export async function runExperienceJobs(deps: ExperienceJobDeps): Promise<Experi
     ...(hostInvitations ? { hostInvitations } : {}),
     ...(hostTeamInvitations ? { hostTeamInvitations } : {}),
     ...(groupInquiryMails ? { groupInquiryMails } : {}),
+    ...(officeNotices ? { officeNotices } : {}),
     ...(hostAccountPurge ? { hostAccountPurge } : {}),
     ...(adminSessionPurge ? { adminSessionPurge } : {}),
   };

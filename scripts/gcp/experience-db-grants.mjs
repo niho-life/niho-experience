@@ -90,7 +90,18 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_settlement_commands: { write: IU },
   // A host workspace is created only after the BFF verifies the current NIHO OWNER.
   // A seller mapping is operator-provisioned; the BFF binds OWNER after the current NIHO identity matches it.
-  experience_providers: { write: I, updateColumns: ["created_at"] },
+  // 運営停止 (#711): the three columns move together, by the store's suspend / clear only.
+  experience_providers: { write: I, updateColumns: ["created_at", "operations_suspended_at", "operations_suspension_code", "operations_suspended_by_niho_user_id"] },
+  // The log of those suspensions and lifts (#711): append-only.
+  experience_provider_operations_events: { write: I },
+  // The office's suspension and reactivation of a host account (#711): append-only.
+  host_account_operation_events: { write: I },
+  // 受取口座 (#710, 0095): a row is reserved before Stripe is asked and its account ID written once (a trigger refuses any other
+  // change, and DELETE); retiring is the office's act (connect-account-retirement.ts, operator-only). The last state read is replaced.
+  experience_connect_accounts: { write: I, updateColumns: ["stripe_account_ref"] },
+  experience_connect_account_snapshots: { write: IU },
+  // Notices to the office's mailbox (#711): one row per host and kind, claimed and reported by the mail job.
+  experience_office_notices: { write: IU },
   // 出欠 of OTA bookings (#194 PR B, 0039): one row per reservation, its mark replaced when the host corrects it.
   external_reservation_attendance: { write: IU },
   external_reservation_conflict_cases: { write: IU },
@@ -205,6 +216,9 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // 受取口座の利用同意 (ADR 0003, 0065): the current host-account OWNER records a consent; a withdrawal or a replacement
   // only marks the active row revoked (the rows are the consent's history: no DELETE, no other column changes).
   provider_payout_account_consents: { write: I, updateColumns: ["revoked_at", "revoked_by_niho_user_id"] },
+  // 代理受領の同意 (#725, 0096): the same shape. The OWNER's consent is inserted; a withdrawal only marks the active row revoked
+  // (a trigger refuses DELETE, any other column, and a second seller reference for the provider).
+  provider_agent_sales_consents: { write: I, updateColumns: ["revoked_at", "revoked_by_host_account_id"] },
   provider_publication_readiness: { write: IU },
   // Current OWNER writes only explicitly public seller fields. Idempotency receipts are append-only metadata
   // (actor, request fingerprint, action and applied version) and never duplicate disclosure/contact bodies.
@@ -245,4 +259,5 @@ export const OPERATOR_ONLY_SOURCES = Object.freeze([
   "packages/experience-store/src/site-sale-registration.ts",
   "packages/experience-store/src/host-seller-provisioning.ts",
   "packages/experience-store/src/legacy-guide-import.ts",
+  "packages/experience-store/src/connect-account-retirement.ts",
 ]);

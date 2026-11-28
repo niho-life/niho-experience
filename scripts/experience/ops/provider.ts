@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { EXIT, OpsError, errorCode, failureOf, operationId, sendOnce, writeOne, type Action, type Target } from "./core.ts";
+import { EXIT, OpsError, errorCode, failureOf, operationId, sendOnce, writeOne, type Action, type Context, type Target } from "./core.ts";
 
 /*
  * 提供者（事務局の代理登録）(#576 ④): the providers a product can belong to, and a new one (name, kind and the consent to a
@@ -148,7 +148,126 @@ const photoAdd: Action = {
   },
 };
 
+const HOSTS = "/admin/api/hosts";
+
+interface HostRow {
+  readonly providerId: string;
+  readonly publicDisplayName: string | null;
+  readonly publicPages: number;
+  readonly sellingPages: number;
+  readonly operationsSuspendedAtUtc: string | null;
+  readonly operationsSuspensionCode: string | null;
+}
+
+async function readHosts(context: Context, action: string): Promise<readonly HostRow[]> {
+  const response = await context.api.get(HOSTS);
+  if (response.status !== 200) throw failureOf(response, action);
+  const hosts = (response.body as { hosts?: unknown } | null)?.hosts;
+  return Array.isArray(hosts) ? hosts as HostRow[] : [];
+}
+
+async function readHost(context: Context, providerId: string, action: string): Promise<HostRow> {
+  // By its ID, not by looking through the newest 500 of the list: a host older than that is still found.
+  const response = await context.api.get(`${HOSTS}/${encodeURIComponent(providerId)}`);
+  if (response.status === 404) throw new OpsError("not_found", `No provider ${providerId}.`, EXIT.failed);
+  if (response.status !== 200) throw failureOf(response, action);
+  const host = (response.body as { host?: HostRow } | null)?.host;
+  if (!host || host.providerId !== providerId) throw new OpsError("not_found", `No provider ${providerId}.`, EXIT.failed);
+  return host;
+}
+
+const hosts: Action = {
+  tier: "read",
+  summary: "Lists the hosts (registration route, owners' accounts, public and selling pages, first publication and first bookings, suspension). Up to 500, newest first. Owners' email addresses are in the output: do not paste it outside the office.",
+  async run(context) {
+    return { hosts: await readHosts(context, "provider hosts") };
+  },
+};
+
+const suspend: Action = {
+  tier: "publish",
+  summary: "Suspends a whole host (運営停止): --provider, --reason <CODE, A-Z 0-9 _> (e.g. POLICY_VIOLATION). Every public page and every booking of the host stops, and no new page or booking can start until `provider clear-suspension`. Without --yes it shows what would stop. Production needs the requester's go-ahead.",
+  async run(context) {
+    const providerId = context.args.flags.provider;
+    const reason = context.args.flags.reason;
+    if (typeof providerId !== "string" || providerId === "") throw new OpsError("usage", "--provider <providerId> is required.", EXIT.usage);
+    if (typeof reason !== "string" || !/^[A-Z0-9_]{1,80}$/.test(reason)) throw new OpsError("usage", "--reason <CODE> is required (capital letters, digits and _).", EXIT.usage);
+    const host = await readHost(context, providerId, "provider suspend");
+    if (host.operationsSuspendedAtUtc !== null) return { status: "unchanged", note: "The host is already suspended.", host };
+    if (!context.apply) return { status: "dry_run", wouldSuspend: { providerId, publicDisplayName: host.publicDisplayName, reason, publicPages: host.publicPages, sellingPages: host.sellingPages } };
+    const url = `${HOSTS}/${encodeURIComponent(providerId)}/suspend`;
+    const sent = await sendOnce(context, ["provider-suspend", providerId, reason], (id) => context.api.send("POST", url, { reasonCode: reason }, id), async () => {
+      const after = await readHost(context, providerId, "provider suspend");
+      return after.operationsSuspendedAtUtc !== null ? after : null;
+    });
+    if ("done" in sent) return { status: "unchanged", note: "The host is suspended.", host: sent.done };
+    if (sent.response.status !== 200) throw failureOf(sent.response, "provider suspend");
+    return { status: "applied", result: sent.response.body };
+  },
+};
+
+const clearSuspension: Action = {
+  tier: "publish",
+  summary: "Lifts a host's suspension (--provider). Only the experiences the host suspension closed (PROVIDER_SUSPENDED) are lifted, and each one still waits for its owner to restart it. Without --yes it shows what would change.",
+  async run(context) {
+    const providerId = context.args.flags.provider;
+    if (typeof providerId !== "string" || providerId === "") throw new OpsError("usage", "--provider <providerId> is required.", EXIT.usage);
+    const host = await readHost(context, providerId, "provider clear-suspension");
+    if (host.operationsSuspendedAtUtc === null) return { status: "unchanged", note: "The host is not suspended.", host };
+    if (!context.apply) return { status: "dry_run", wouldClearSuspension: { providerId, publicDisplayName: host.publicDisplayName, reason: host.operationsSuspensionCode } };
+    const url = `${HOSTS}/${encodeURIComponent(providerId)}/clear-suspension`;
+    const sent = await sendOnce(context, ["provider-clear-suspension", providerId], (id) => context.api.send("POST", url, {}, id), async () => {
+      const after = await readHost(context, providerId, "provider clear-suspension");
+      return after.operationsSuspendedAtUtc === null ? after : null;
+    });
+    if ("done" in sent) return { status: "unchanged", note: "The suspension is lifted.", host: sent.done };
+    if (sent.response.status !== 200) throw failureOf(sent.response, "provider clear-suspension");
+    return { status: "applied", result: sent.response.body };
+  },
+};
+
 export const providerTarget: Target = {
-  summary: "Providers: who a product belongs to (public name and kind)",
-  actions: { list, create, profile, "photo-add": photoAdd },
+  summary: "Providers: who a product belongs to (public name and kind), the host list and host-wide suspension",
+  actions: { list, create, profile, "photo-add": photoAdd, hosts, suspend, "clear-suspension": clearSuspension },
+};
+
+interface OwnerRow { readonly hostAccountId: string; readonly status: string }
+
+async function readOwner(context: Context, accountId: string, action: string): Promise<OwnerRow | null> {
+  for (const host of await readHosts(context, action) as unknown as Array<{ owners?: OwnerRow[] }>) {
+    const found = host.owners?.find((owner) => owner.hostAccountId === accountId);
+    if (found) return found;
+  }
+  return null;
+}
+
+function accountAction(kind: "suspend" | "reactivate"): Action {
+  const wanted = kind === "suspend" ? "SUSPENDED" : "ACTIVE";
+  return {
+    tier: "publish",
+    summary: kind === "suspend"
+      ? "Suspends a host account (--account hst_…): its sessions and sign-in links stop at once and it gets no new link. Memberships and pages stay. Without --yes it shows what would change."
+      : "Lets a suspended host account (--account hst_…) ask for sign-in links again. Earlier sessions stay ended. Without --yes it shows what would change.",
+    async run(context) {
+      const accountId = context.args.flags.account;
+      if (typeof accountId !== "string" || !/^hst_[0-9a-f]{32}$/.test(accountId)) throw new OpsError("usage", "--account hst_<32 hex> is required.", EXIT.usage);
+      // The list shows the accounts that own a host; one that owns none is still acted on (the server finds it).
+      const owner = await readOwner(context, accountId, `host-account ${kind}`);
+      if (owner?.status === wanted) return { status: "unchanged", note: kind === "suspend" ? "The account is already suspended." : "The account is already active.", account: owner };
+      if (!context.apply) return { status: "dry_run", [kind === "suspend" ? "wouldSuspend" : "wouldReactivate"]: { accountId, current: owner?.status ?? "UNKNOWN" } };
+      const url = `${HOSTS}/accounts/${encodeURIComponent(accountId)}/${kind}`;
+      const sent = await sendOnce(context, [`host-account-${kind}`, accountId], (id) => context.api.send("POST", url, {}, id), async () => {
+        const after = await readOwner(context, accountId, `host-account ${kind}`);
+        return after?.status === wanted ? after : null;
+      });
+      if ("done" in sent) return { status: "unchanged", note: "The account is already in that state.", account: sent.done };
+      if (sent.response.status !== 200) throw failureOf(sent.response, `host-account ${kind}`);
+      return { status: "applied", result: sent.response.body };
+    },
+  };
+}
+
+export const hostAccountTarget: Target = {
+  summary: "Host accounts (hst_…): suspend or reactivate a host's sign-in account",
+  actions: { suspend: accountAction("suspend"), reactivate: accountAction("reactivate") },
 };

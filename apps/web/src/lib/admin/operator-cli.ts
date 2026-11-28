@@ -30,7 +30,7 @@ const WRITE_PREFIX = "/write/api/";
  * The /admin/api areas open to the CLI (the first path segment after /admin/api/). Everything else answers 403, so a
  * refund, a payout or a payout account (#576: never from a CLI) cannot be reached by adding a route. A stage adds its own area here.
  */
-export const OPERATOR_API_AREAS: readonly string[] = Object.freeze(["product-classifications", "people", "product-workspaces", "experience-publications", "inquiries", "occurrence-assignments"]);
+export const OPERATOR_API_AREAS: readonly string[] = Object.freeze(["product-classifications", "people", "product-workspaces", "experience-publications", "inquiries", "occurrence-assignments", "hosts"]);
 
 /** The /write/api areas the CLI may call: the article routes the writers use (never a host-session-only route). */
 export const OPERATOR_WRITE_AREAS: readonly string[] = Object.freeze(["guides", "categories"]);

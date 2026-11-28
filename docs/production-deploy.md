@@ -22,7 +22,7 @@
 ホストと Admin の本人確認・口座の正本は [ADR 0003](adr/0003-experience-independence.md) に従う。以下の手順では NIHO Host v1 の配備・NIHO の口座再利用同意を前提にしない。この節を、後述の旧 NIHO 認証を使う有効化手順より優先する。
 
 1. レビュー済みの main SHA を固定し、公式の `apply-experience-db-migrations.mjs` で `0064`〜`0066` と runtime grants を適用する。既存予約・販売者・公開版の件数を事前に確認する。実レコードとアドレスは公開の証跡へ書かない。
-2. Stripe は既存 NIHO プラットフォームを使い、Experience 専用の制限付きキーを Secret Manager に登録する。NIHOapp の全権限キーを Experience runtime に渡さない。現行コードに必要な権限は、接続口座の Checkout Sessions・Charges and Refunds の書込み、Payment Intents・Balance・Balance Transaction Sources・Payouts の読取り、Accounts・Application Fees の読取り、Login Links・Transfers の書込み。新規口座の作成はまだ開かないので、Accounts・Account Links の書込みは不要。
+2. Stripe は既存 NIHO プラットフォームを使い、Experience 専用の制限付きキーを Secret Manager に登録する。NIHOapp の全権限キーを Experience runtime に渡さない。現行コードに必要な権限は、接続口座の Checkout Sessions・Charges and Refunds の書込み、Payment Intents・Balance・Balance Transaction Sources・Payouts の読取り、Accounts・Application Fees の読取り、Login Links・Transfers の書込み。新規口座の作成は `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED`（下の「ホストの受取口座（3a）の前提」）を ON にするまで開かないので、それまで Accounts・Account Links の書込みは不要。
 3. 予約を開く場合は、Experience 専用の Connect webhook と署名鍵、checkout IP HMAC 鍵も用意する。webhook のイベントは [staging の予約設定](host-calendar-staging.md#旅行者の予約stripe-テストモード285) と同じ。既存 NIHOapp の webhook と署名鍵は変更しない。
 4. SMTP の host・port は NIHOapp の既存 `RECEIPT_DELIVERY_SMTP_HOST`・`RECEIPT_DELIVERY_SMTP_PORT` を再利用する。Experience の送信user/passwordは承認済みWorkspace送信アカウントと既存app-password Secret `GMAIL_APP_PASSWORD` を使い、From `info@niho.life` のverified send-asとして送る。共有 `RECEIPT_DELIVERY_SMTP_USER` / `RECEIPT_DELIVERY_SMTP_PASSWORD` は変更しない（NIHO 側の送信経路へ波及させない）。user名はExperience専用Secret `experience-prd-smtp-user` に保存し、[本番メール設定スクリプト](../scripts/gcp/setup-production-mail.sh)でruntime `experience-runtime@niho-app-prd.iam.gserviceaccount.com` に `experience-prd-smtp-user` と `GMAIL_APP_PASSWORD` のSecret単位accessorだけを付ける。スクリプトはpassword値を読み出さず、送信userは実行時の環境変数から受け取る。出力される数値versionを `PROD_SMTP_USER_REF`・`PROD_SMTP_PASSWORD_REF` に設定し、host・portは既存versionを固定する。送信者は現行値 `PROD_MAIL_FROM=NIHO <info@niho.life>`、Reply-Toは `PROD_MAIL_REPLY_TO=info@niho.life` を保持する。2026-11-18の旧SMTP実メールはSPF自体はpassしたがFromドメインとalignmentせず、Google DKIM `d=1e100.net` もalignmentせず、DMARCがfailした。切替後の実ヘッダーでDKIM `d=niho.life` とDMARC passを再確認する。Workspace DKIMは有効でDNS TXTも一致していたため、この切替でSPF/DKIM/DMARCのDNSを変更しない。
 5. Google OAuth の本番 callback と、既存管理者本人のアドレスを照合して `PROD_ADMIN_ALLOWED_EMAILS` を設定する。`PROD_PROVIDER_PAGES_API_ENABLED` など、ホストの NIHO トークンを使う競合 flag を外す。`PROD_GUEST_MAIL_ENABLED`・`PROD_HOST_ACCOUNTS_ENABLED`・`PROD_ADMIN_SUPPORT_CONSOLE_ENABLED`・`PROD_ADMIN_GOOGLE_LOGIN_ENABLED` と、承認済み `PROD_PAYOUT_ACCOUNT_CONSENT_VERSION=experience-payout-account-2026-11-07-v1` を設定する。
@@ -120,6 +120,8 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_HOST_TEAM_ENABLED` | `HOST_TEAM_ENABLED` | ホストの画面・DB・Experienceホストアカウント | — | — | — |
 | `EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED` | `HOST_TEAM_INVITATIONS_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストチーム・ホストの NIHO ログイン・ホストメール | — | — | — |
 | `EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED` | `HOST_SELF_REGISTRATION_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストの NIHO ログイン・ホストメール | — | — | — |
+| `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED` | `HOST_CONNECT_ONBOARDING_ENABLED` | ホストの画面・DB・Experienceホストアカウント（Stripe のキーは `HOST_ACCOUNTS_ENABLED` と同じ参照）。**本番では 3b（#725）が入るまで OFF**。[host-payouts.md](host-payouts.md) | — | — | — |
+| `EXPERIENCE_HOST_AGENT_SALES_ENABLED` | `HOST_AGENT_SALES_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストメール・ゲストメール・ホスト公開API・プラットフォームの Webhook（`MANAGED_SALES_WEBHOOKS_ENABLED`）・受取口座の登録。**本番はさらに送金の flag（3b-2。まだ表に無いので、それが入るまで本番では ON にできない。stg は ON にできる）**。[host-payouts.md](host-payouts.md) | `HOST_AGENT_SALES_AGREEMENT_VERSION`、`HOST_AGENT_RECEIVER_NAME`（受領者の正式名）、`HOST_AGENT_PAYOUT_DELAY_DAYS`（1〜30、省略で 3）。プラットフォームの口座は `MANAGED_PLATFORM_ACCOUNT_ID` | — | — |
 | `EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED` | `OCCURRENCE_ASSIGNMENT_ENABLED` | ホストの画面・DB・完全代行の販売 | — | — | — |
 | `EXPERIENCE_JAPANESE_SITE_ENABLED` | `JAPANESE_SITE_ENABLED` | ホストの画面・DB（配線のため。機能は公開サイト） | — | — | — |
 | `EXPERIENCE_CHANNEL_WATCHDOG_ENABLED` | `CHANNEL_WATCHDOG_ENABLED` | ホストの画面・DB | — | — | `EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE`＝サイトの URL、`EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL`＝`experience-ota-watchdog@<project>` |
@@ -266,3 +268,25 @@ Cloud Run ingress は両環境とも `internal-and-cloud-load-balancing`。`run.
 ADR 0002・0003への移行後は、成立済み予約・返金・精算をExperienceの `/host/bookings`・`/host/sales` と専用DBで追う。この運用を、上に残る旧NIHO正本の切戻し説明より優先する。個別商品の緊急停止はOWNER画面の「販売を停止」で新しい販売を止める。既存予約を自動で取り消したり、公開snapshot・口座・Stripe webhook・メール設定を削除したりしない。
 
 全サイトの受付を止める場合は `PROD_BOOKINGS_ENABLED=false` の公式候補を確認して昇格する。配備を待てない障害時は、停止設定を受け入れ済みの直前revision `niho-experience-00035-faj`（SHA `91f26401ac5583c4d16bc5689727a5b2b6cfbd85`）へtrafficを戻す。これは同じDB・Webhook・返金と通知の処理を維持し、ゲストの新規受付だけを止められる版である。停止後は100% traffic、受付OFF、公開商品の表示、成立済み予約と返金導線を読戻し、時刻・SHA・操作を #15 に記録する。再開も受付ONの候補を公式手順で再確認する。
+
+## ホストの受取口座（Stripe Express）の前提（Epic #700 段階 3a、#710）
+
+`EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED` を ON にする前に、次をそろえる。設計は [host-payouts.md](host-payouts.md)。**本番は 3b（#725）が入るまで OFF のまま**にする（登録した口座では、まだお金を受け取れない）。
+
+1. migration `0095` と、その runtime grants（**コードより先に適用する**。メール job の新しい段は flag が OFF の間は動かないので、0095 より先にコードが配備されても失敗しないが、flag を ON にする前に必ず適用する）（`experience_connect_accounts`：INSERT と `stripe_account_ref` の UPDATE だけ、DELETE なし。`experience_connect_account_snapshots`：INSERT・UPDATE）を、公式の `apply-experience-db-migrations.mjs` で先に適用する。
+2. Stripe のダッシュボード（プラットフォームは NIHO と共有）で、プラットフォームが損失を負うことの確認と同意をする。Connect の設定（Express の機能・Stripe から Express の利用者へのメール・ブランド）は niho-app にも効く。口座ごとの controller と capability は、API で口座ごとに指定する。
+3. Experience 専用キーに、Accounts・Account Links の書込み（口座の作成と Link）と、Accounts の読取り・一覧（`accounts.retrieve`・`accounts.list`。作成から 23 時間後の照合）の権限を足す。Transfers と Transfer reversal の書込みは 3b。
+4. Connect の webhook endpoint（`/api/experience/stripe/webhook`、connected account のイベントを受ける）の購読に `account.updated` を足す。署名鍵と endpoint は今のまま。
+5. **stg の test mode で、`full` の service agreement のまま `capabilities.transfers` だけを要求して日本の口座を作れるか、`transfers` が `active` になるか、登録画面で何を集めるかを確かめる**（`card_payments` も要ると分かったら、要求に足し、その口座で決済を作らないことをサーバーで縛る）。あわせて、`settings.payouts.schedule`（月 1 回、毎月 1 日）を作成時に渡せること、`business_type` を渡さなくても登録画面で選べること、`account.updated` が Connect の endpoint に届くことを確かめる。
+6. Connect の料金（口座ごとの月額・入金ごとの料金。日本の料金）を確かめる。NIHO の負担になる。
+7. Stripe が Express の利用者へ送るメールと、NIHO の「受取口座に追加の情報が必要です」のメール（`EXPERIENCE_HOST_MAIL_ENABLED` が ON のとき、メール job が送る）が重ならないか、stg で確かめる。
+8. **受入の手順：stg の test mode で、実際の `accounts.retrieve` の応答（作った直後と、登録を進めた各段階）を取り、`packages/experience-payments/test/payout-account.test.ts` の fixture と照合する。** 特に `controller`（`fees.payer` は Express で `application_express` で返ることがあり、コードは `application` と `application_express` の両方を受け入れる。`losses.payments`・`requirement_collection`・`stripe_dashboard.type` は SDK の型に同じ意味の別の値が無く、完全一致）、`default_currency`、`capabilities.transfers`、`requirements` を見る。作った直後が「入力の途中」になり、「この口座は使えません」にならないことを確かめてから ON にする。
+
+## サポート 15% の代理受領（3b-1、#725）の前提
+
+`EXPERIENCE_HOST_AGENT_SALES_ENABLED` は既定 OFF。**本番では、送金（3b-2）の flag が表に入るまで、deploy の検査が ON を拒む**（表の `prodNeeds` に `EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED` がある）。stg は ON にでき、stg の test mode で流れを確かめられる（その前に 0096 を適用する）。
+
+1. **migration `0096` は、コードより先に適用する（必須。flag が OFF でも）。** 販売の読み取り（`loadSellable`・`sellableSlugs`・受付の検査・販売プランの版の列）は flag に関係なく `seller_party` と `provider_agent_sales_consents` を読むので、0096 より先にコードが出ると、全商品の予約と一覧が 500 になる。その runtime grants（`provider_agent_sales_consents`：INSERT と `revoked_at`・`revoked_by_host_account_id` の UPDATE だけ）も同時に。0096 は版の表に列と CHECK を足すだけで、既存の行は変わらない。
+2. 20% の販売と同じく、プラットフォームの Webhook（`EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET`）・口座（`EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID`）・キーを使う。代理受領の Checkout は `payment_intent_data.transfer_group` を持つ（送金が決済を見つけるため）。
+3. 代理受領の規約（版は `EXPERIENCE_HOST_AGENT_SALES_AGREEMENT_VERSION`）と受領者の正式名は、法務の確認（host-payouts.md「本番で開く前の確認」）のあとに設定する。
+4. stg の test mode で、代理受領の予約を 1 件作り、Checkout の文言（販売者と受領者）・確認メール・返金が 20% の経路で通ることを確かめてから、3b-2 に進む。
