@@ -270,6 +270,71 @@ flag `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED`（既定 OFF）。**本番で�
 
 ## 3c 独立 10% の本人の口座（Standard）
 
-- 設定 › 受取口座 の「自分の Stripe アカウントで販売する」。サーバーが Standard の口座を作り、Account Link で Stripe の画面へ送る。
-- 準備ができたら、今の Direct charge の販売者プロフィールと、受取口座の利用同意の流れに乗せる（runtime から、その口座に限って販売者プロフィールを作れるようにする）。
-- 料率は今どおり 10%（決済手数料こみ。NIHO が Transfer で補う）。見直すかはオーナーが別に判断する。
+2 つの PR に分ける。flag `EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED`（既定 OFF。本番は 3c-2 まで OFF）。
+
+### 決めた既定値（オーナー「他の論点は推奨で」2026-11-28）
+
+- 口座は 3a の `experience_connect_accounts` を用途 `DIRECT` で使い回す（予約の行・冪等キー・状態・webhook・退役の仕組みが同じ）。有効な行は用途ごとに 1 つ。1 つの口座が両方の用途にはならない。
+- 既存の Stripe アカウントを持つ人も、OAuth ではつながず、新しく作る（本人は Stripe の画面で今のログインのまま入れる。残高と入金は別のアカウントになる）。
+- 1 つのホストで、体験ごとに代理受領 15% と独立 10% が混ざってよい。受付中の代理受領は続ける。代理受領を新しく選べるのは販売者プロフィールが無いときだけ。代理受領から独立 10% への切り替えは受付中でもできる（開いている NIHO の Checkout は閉じる。受けた代理受領の予約は今までどおり Express へ送る）。
+- 独立 10% の同意の版は新しい設定 `EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION`。文言は「販売者はあなた」「代金はあなたの Stripe で直接受け取る」「料率 10%（決済手数料こみ。NIHO が補う）」「返金・異議申立ての損失はあなた」「規約へのリンク」。
+- 受取口座の利用同意の文と版（`EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION`）は使い回す。
+- 販売者名は特定商取引法の表示（NATIVE）の名前にし、Stripe の名義との自動の照合はしない。
+- Standard の口座の要件のメールは、NIHO からは送らない（Stripe が本人に知らせる）。
+- `DIRECT` の行は、販売者プロフィールが結んでいる間は退役させない（運営の販売者変更の手順に任せる）。
+
+### 3c-1 口座をつなぐ（口座の作成と販売者の登録）
+
+- **口座の作成**（migration 0098）：`experience_connect_accounts.purpose` に `DIRECT` を足す。`UNIQUE (id, provider_id, purpose, stripe_account_ref)` を足す（販売者プロフィールからの FK 用）。状態の表に `charges_enabled` を足す。
+  - パラメータ：国 `JP`、`controller: { stripe_dashboard: { type: "full" }, losses: { payments: "stripe" }, fees: { payer: "account" }, requirement_collection: "stripe" }`、`capabilities: { card_payments, transfers }`、metadata（`provider_id`・`creation_id`・`source`・`purpose: "direct"`）。`business_type` と入金スケジュールは入れない（本人が設定する）。冪等キーは `experience-direct-account:<行 id>`。
+  - 作成の流れ（行の確保・23 時間の窓・`metadata.creation_id` の照合・口座 ID を 1 回だけ書く・Account Link）は 3a と同じ。route は `POST /host/api/direct-account/onboarding?providerId=` と `GET …/refresh`（同一 origin・オーナー・直近 30 分のログイン）。
+  - 状態：国・通貨・controller・metadata の一致、`details_submitted`・`charges_enabled`・`payouts_enabled`、`card_payments` と `transfers` が `active`（`transfers` は NIHO の補填の Transfer に要る）、要件が空、`rejected.*` でない、で READY。画面の状態と文言は 3a と同じ。
+  - webhook：`account.updated` を用途で分ける。`DIRECT` は読み直して保存するだけで、メールは出さない。
+- **販売者プロフィールを runtime から作る**（migration 0099）：
+  - `experience_host_seller_profiles` に `connect_account_id`・`connect_account_purpose`（`DIRECT`）を足す。`experience_connect_accounts (id, provider_id, purpose, stripe_account_ref)` への FK と CHECK（あれば `legacy_provider_id` は NULL、`seller_niho_account_ref` は `sel_`）を足す。
+  - BEFORE INSERT の trigger：表の持ち主の role でないとき（runtime のとき）、`connect_account_id` があり、その行が `DIRECT` で退役しておらず、ホストと口座 ID が同じでなければ拒む。運営の script（移行の identity）は今のまま書ける。
+  - runtime の権限は INSERT だけ（UPDATE は `updated_at` だけ、DELETE なし）。
+  - store `ProviderDirectSellers.register`（1 つの transaction）：
+    1. 在庫の lock と同意の lock、オーナーであること、販売者プロフィールが無いこと（あれば `SELLER_EXISTS`）を確かめる。
+    2. 有効な `DIRECT` の行で口座 ID が一致し、状態が READY で 5 分以内に読んだものかを確かめる。
+    3. NATIVE の名前を確かめる（無ければ `SELLER_DISCLOSURE_REQUIRED`）。
+    4. 販売者プロフィールを作る（新しい `sel_`・NATIVE の名前・公開名・legacy は NULL）。
+    5. 受取口座の利用同意（`recordPayoutConsentIn` に切り出す）。
+    6. `attachSellerToSellerlessProducts`（運営専用のファイルから共有のファイルへ移す。代理受領の版を除く条件は今のまま）。
+  - route `POST /host/api/direct-account/seller?providerId=`：直前に Stripe を読んで READY を確かめる。
+  - ホストの手順は、Stripe に登録 → READY → 特定商取引法の表示を保存 → 同意する（ここで販売者プロフィールができる）。
+- **混在の修正**：
+  - 受取口座の利用同意の取消は、今の版が代理受領の掲載は止めない。
+  - 受取口座の画面で、Express の段を出す条件を変える。今は「販売者プロフィールが無い」とき。これを「PAYOUT の行がある、または代理受領の同意の履歴がある」ときも出す（そうしないと送金が登録待ちで止まる）。
+  - 販売者プロフィールができたあとの特定商取引法の表示は、今どおりプロフィールの名前に固定する。
+  - 販売者プロフィールの無いホストが NATIVE を保存できる条件に、この flag を足す。
+- **stripe-login**：販売者の口座が `DIRECT` の行の口座なら、Express のログインリンクを作らず、Stripe のダッシュボード（`https://dashboard.stripe.com/`）を開く。
+- **設定 › 受取口座 の出し分け**（各段は 1 行の説明と 1 つのボタン）：
+  - 販売者プロフィールが無いとき：
+    - 「サポート 15% の受取口座」（3a）。
+    - 「独立 10%：自分の Stripe アカウント」。未登録なら「自分の Stripe アカウントで販売する」、途中の状態は 3a と同じ文言。READY なら同意の文と「同意する」（NATIVE が無いときは特定商取引法の画面へのリンクだけ）。
+  - 販売者プロフィールがあるとき：今の画面。Standard の口座なら「Stripe で見る」はダッシュボードへのリンク。条件を満たせば、その下に Express の段。
+
+#### 3c-1 の実装メモ（#726）
+
+- **migration**：`0098`（`experience_connect_accounts.purpose` に `DIRECT`、`UNIQUE (id, provider_id, purpose, stripe_account_ref)`、状態の表に `charges_enabled`）と `0099`（`experience_host_seller_profiles` に `connect_account_id`・`connect_account_purpose`、CHECK、FK、BEFORE INSERT の trigger）。**どちらもコードより先に適用する。**
+- **trigger と権限**：表の持ち主の role（移行の権限。運営の script）は今までどおり書ける。ほかの role（runtime）は、`connect_account_id` があり、その行が `DIRECT` で退役しておらず、ホストと Stripe の口座が同じときだけ INSERT できる。runtime の権限は `INSERT` と `updated_at` の UPDATE だけ（`DELETE` なし）。
+- **口座の作成**：`packages/experience-payments` の `directAccountCreationParams`・`createDirectAccount`（冪等キー `experience-direct-account:<行 id>`）・`directAccountFactsOf`・`retrieveDirectAccountStatus`。`findPayoutAccountByCreationId` は `purpose`（metadata）で絞る。READY は、不一致なし・`details_submitted`・`charges_enabled`・`payouts_enabled`・`card_payments` と `transfers` が `active`・要件が空・`rejected.*` でない。
+- **web**：`lib/experience/host-direct-account.ts`（`startDirectOnboarding`・`refreshDirectOnboardingLink`・`loadDirectScreenState`・`registerDirectSeller`）と `host-direct-account-http.ts`。route は `POST /host/api/direct-account/onboarding`・`GET …/onboarding/refresh`・`POST …/seller`（すべて `?providerId=`・OWNER・直近 30 分のログイン。seller は同一 origin の form で `accountLast4`・`consentVersion`・`accepted`）。`account.updated` は用途で分け、`DIRECT` は読み直して保存するだけでメールは出さない。`connectAccounts()` は 3a と 3c-1 のどちらかの flag が ON なら返す。
+- **販売者の登録**：store `ProviderDirectSellers.register`（`packages/experience-store/src/direct-sellers.ts`、1 つの transaction。途中で失敗したら何も残らない）。`recordPayoutConsentIn`（同意）と `attachSellerToSellerlessProducts`（`seller-attachment.ts`。運営の `site-sale-registration.ts` と共有）を同じ transaction で呼ぶ。Stripe の読み取りは直前（5 分以内の READY）。
+- **混在の修正**：受取口座の利用同意の取消は、今の版が代理受領の掲載を止めない。`reserve`（PAYOUT）は、販売者プロフィールが無い、または代理受領の同意の履歴があるときに通す。受取口座の画面は、PAYOUT の行がある、または代理受領の同意の履歴があるときも Express の段を出す。販売者プロフィールが無いホストは、この flag でも特定商取引法の表示（NATIVE）を保存できる。`agentSalesOffer` は、販売者プロフィールのあるホストでも、代理受領の商品には `choosable: false` で状態を返す。
+- **画面**：`ExperiencePayoutLoad` は `connect: { payout, direct }`（どちらかが null なら、その段は出さない）と `owner: { …, payout?, standard? }`。販売者の口座が `DIRECT` の行なら「Stripe で見る」は dashboard（`https://dashboard.stripe.com/`。Express のログインリンクは作らない）。
+- **退役**：`retire-connect-account.mjs` は `--purpose direct` で `DIRECT` の行も退役できる。販売者プロフィールが結んでいる行は拒む（販売者の変更の手順が先）。
+- **flag**：`EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED`（既定 OFF）。needs はホストの画面・DB・ホストアカウント・ホスト公開 API。**本番では ON にできない**（deploy の表の `stagingOnly: true`。本番で ON にすると deploy の検査が拒む）。3c-2 でこの属性を外し、3c-2 が足す設定 `EXPERIENCE_HOST_INDEPENDENT_SALES_AGREEMENT_VERSION` を必須にする。
+- **flag が OFF でも効く変更**：混在の修正のうち、(1) 同意の取消が代理受領の掲載を止めない、(2) `reserve(PAYOUT)` が有効な行を返し、履歴で新しい行を作れる、(3) Express の段と「Stripe で見る」の出し分け（`ownerExtras`）、(4) `agentSalesOffer` の `choosable:false`。すでに代理受領を使うホストのためで、migration `0098`・`0099` をコードより先に適用する。画面の Express の段と `reserve(PAYOUT)` の条件は、store の `payoutBlock`（有効な PAYOUT の行がある、または代理受領の同意の履歴がある）の 1 か所で決める。
+- **退役の競合**：結ばれた `DIRECT` の行の退役は、アプリの判定に加えて 0099 の trigger（`retired_at` が NULL から値になる UPDATE で、販売者プロフィールが参照していれば例外）が拒む。`register` が行を `FOR SHARE` で持っているあいだの退役は、待ってから拒まれる。
+- **「Stripe で見る」**：販売者プロフィールの `connect_account_id`（`DIRECT`）で判定し、`DIRECT` なら常に `https://dashboard.stripe.com/`（flag が OFF でも、fallback でも）。PAYOUT の行も持つホストは、ボタンの `kind`（`direct`＝自分の Stripe アカウント、`payout`＝Express）で出し分ける。
+
+### 3c-2 独立 10% で売る
+
+- 体験の編集の「料金・予約」で「独立 10%」を選ぶ（`POST /host/api/products/{id}/independent-sales?providerId=`）。
+  - 条件：直近 30 分のログイン、readiness（口座が使える・同意・口座の一致）、同意の版、NATIVE の名前が販売者プロフィールの名前と同じ。
+  - store `chooseIndependent`：状態が無い商品は、版 1（`INDEPENDENT_10`・`CONNECT_DIRECT`・1000・`OWNER_WEB`）・状態・商品の販売者列を作る。代理受領の版からは、今の切り替え（`beginOwnerSwitch`・Checkout の失効・`finalizeSwitch`）を通す。
+- 受付を始める検査：販売者が `DIRECT` のプロフィールのとき、版が無ければ `SALES_PLAN_REQUIRED`（fee settings は見ない）。`INDEPENDENT_10` の版なら fee settings を見ず、版の有効・販売者列の一致・NATIVE の名前の一致を見てから、今の readiness へ進む。今の Direct のホストの検査は変えない。
+- Checkout・返金・精算（補填の Transfer）は、今の Direct の経路のまま。
+

@@ -237,9 +237,10 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_provider_member_profile_publications: { write: IU },
   experience_provider_member_proxy_permissions: { write: IU },
   // Explicit Connect lookup mappings and host-account sellers (0065) are written by the operator registration scripts
-  // only. The BFF's FOR SHARE needs UPDATE on a non-identity timestamp column to lock the matched row; no runtime path
-  // changes it.
-  experience_host_seller_profiles: { write: [], updateColumns: ["updated_at"] },
+  // (the migration identity). The runtime inserts one profile only, for the host's own Stripe account (0099, #726: a trigger
+  // refuses any other insert from a role that is not the table's owner). The BFF's FOR SHARE needs UPDATE on a non-identity
+  // timestamp column to lock the matched row; no runtime path changes it.
+  experience_host_seller_profiles: { write: I, updateColumns: ["updated_at"] },
   provider_sale_settings: { write: IU },
   resource_google_busy_intervals: { write: ID },
   resource_google_calendars: { write: IU },

@@ -1721,6 +1721,7 @@ export type PayoutAccountStripeClient = Pick<Stripe, "accounts" | "accountLinks"
 
 const PAYOUT_ACCOUNT_SOURCE = "niho-experience";
 const PAYOUT_ACCOUNT_PURPOSE = "payout";
+const DIRECT_ACCOUNT_PURPOSE = "direct";
 /** Stripe keeps an idempotency key for 24 hours; a retry with the same one is safe for this long (as submitSettlementTransfer). */
 export const PAYOUT_ACCOUNT_IDEMPOTENCY_WINDOW_MS = 23 * 60 * 60 * 1000;
 /** The day of the month the payouts leave Stripe (monthly, docs/host-payouts.md). */
@@ -1950,6 +1951,8 @@ export interface FindPayoutAccountInput {
   readonly providerId: string;
   /** The row's time: accounts created from a few minutes before to 26 hours after are looked at. */
   readonly rowCreatedAtUtc: string;
+  /** Which kind of account the row is (metadata.purpose); `payout` (the Express payout account) when left out. */
+  readonly purpose?: "payout" | "direct";
   readonly platformStripeKey?: string;
   readonly stripe?: Pick<Stripe, "accounts">;
 }
@@ -1970,7 +1973,8 @@ export async function findPayoutAccountByCreationId(input: FindPayoutAccountInpu
     const list = await stripe.accounts.list({ created: range, limit: 100, ...(startingAfter ? { starting_after: startingAfter } : {}) });
     for (const account of list.data) {
       if (account.metadata?.creation_id === input.creationId.toLowerCase() && account.metadata?.provider_id === input.providerId
-        && account.metadata?.source === PAYOUT_ACCOUNT_SOURCE && CONNECTED_ACCOUNT_ID.test(account.id)) found.push(account.id);
+        && account.metadata?.source === PAYOUT_ACCOUNT_SOURCE && account.metadata?.purpose === (input.purpose === "direct" ? DIRECT_ACCOUNT_PURPOSE : PAYOUT_ACCOUNT_PURPOSE)
+        && CONNECTED_ACCOUNT_ID.test(account.id)) found.push(account.id);
     }
     if (!list.has_more || list.data.length === 0) break;
     startingAfter = list.data[list.data.length - 1]!.id;
@@ -1978,6 +1982,153 @@ export async function findPayoutAccountByCreationId(input: FindPayoutAccountInpu
   }
   if (found.length > 1) throw new ExperiencePaymentsValidationError("More than one account carries this creation id.");
   return found[0] ?? null;
+}
+
+/* ---------- the host's own Stripe account (Standard; Epic #700 stage 3c-1, #726, docs/host-payouts.md「3c」) ---------- */
+
+/**
+ * The parameters accounts.create is called with for a host's own Stripe account: the host takes the payments (the Direct charge
+ * seller). Japan, the full Stripe Dashboard (what "Standard" is), Stripe takes the losses and the host pays Stripe's fees,
+ * card payments and transfers (NIHO's make-good Transfer needs it). `business_type` and the payout schedule are the host's own to set.
+ */
+export interface DirectAccountCreationParams {
+  readonly country: "JP";
+  readonly controller: {
+    readonly losses: { readonly payments: "stripe" };
+    readonly fees: { readonly payer: "account" };
+    readonly requirement_collection: "stripe";
+    readonly stripe_dashboard: { readonly type: "full" };
+  };
+  readonly capabilities: { readonly card_payments: { readonly requested: true }; readonly transfers: { readonly requested: true } };
+  readonly metadata: {
+    readonly provider_id: string;
+    readonly creation_id: string;
+    readonly source: "niho-experience";
+    readonly purpose: "direct";
+  };
+}
+
+export function directAccountCreationParams(input: { readonly providerId: string; readonly creationId: string }): DirectAccountCreationParams {
+  if (typeof input.providerId !== "string" || input.providerId.length < 1 || input.providerId.length > 256) {
+    throw new ExperiencePaymentsValidationError("providerId must be 1-256 characters.");
+  }
+  if (typeof input.creationId !== "string" || !UUID.test(input.creationId)) throw new ExperiencePaymentsValidationError("creationId must be a UUID.");
+  return {
+    country: "JP",
+    controller: {
+      losses: { payments: "stripe" },
+      fees: { payer: "account" },
+      requirement_collection: "stripe",
+      stripe_dashboard: { type: "full" },
+    },
+    capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
+    metadata: { provider_id: input.providerId, creation_id: input.creationId.toLowerCase(), source: PAYOUT_ACCOUNT_SOURCE, purpose: DIRECT_ACCOUNT_PURPOSE },
+  };
+}
+
+/** A stored parameter set is sent only if it still says exactly what a host's own account is (it comes out of the database). */
+function assertDirectCreationParams(params: DirectAccountCreationParams, creationId: string): void {
+  const record = params as unknown as Record<string, unknown>;
+  const allowed = ["country", "controller", "capabilities", "metadata"];
+  const ok = record !== null && typeof record === "object" && !Array.isArray(record)
+    && Object.keys(record).every((key) => allowed.includes(key))
+    && params.country === "JP"
+    && params.controller?.losses?.payments === "stripe"
+    && params.controller?.fees?.payer === "account"
+    && params.controller?.requirement_collection === "stripe"
+    && params.controller?.stripe_dashboard?.type === "full"
+    && JSON.stringify(params.capabilities) === JSON.stringify({ card_payments: { requested: true }, transfers: { requested: true } })
+    && params.metadata?.creation_id === creationId.toLowerCase()
+    && params.metadata?.source === PAYOUT_ACCOUNT_SOURCE
+    && params.metadata?.purpose === DIRECT_ACCOUNT_PURPOSE
+    && typeof params.metadata?.provider_id === "string";
+  if (!ok) throw new ExperiencePaymentsValidationError("The account parameters are not a host's own account's.");
+}
+
+export interface CreateDirectAccountInput {
+  readonly creationId: string;
+  readonly creationParams: DirectAccountCreationParams;
+  readonly platformStripeKey?: string;
+  readonly stripe?: PayoutAccountStripeClient;
+}
+
+/** accounts.create for a host's own account, with the row's id as the idempotency key (the same 23-hour rule as createPayoutAccount). */
+export async function createDirectAccount(input: CreateDirectAccountInput): Promise<{ readonly accountId: string }> {
+  if (typeof input.creationId !== "string" || !UUID.test(input.creationId)) throw new ExperiencePaymentsValidationError("creationId must be a UUID.");
+  assertDirectCreationParams(input.creationParams, input.creationId);
+  const stripe = payoutClient(input.platformStripeKey, input.stripe);
+  const account = await stripe.accounts.create(
+    input.creationParams as unknown as Stripe.AccountCreateParams,
+    { idempotencyKey: `experience-direct-account:${input.creationId.toLowerCase()}` },
+  );
+  if (typeof account?.id !== "string" || !CONNECTED_ACCOUNT_ID.test(account.id)) throw new ExperiencePaymentsValidationError("Stripe returned an invalid account.");
+  if (account.metadata?.creation_id !== input.creationId.toLowerCase() || account.metadata?.provider_id !== input.creationParams.metadata.provider_id) {
+    throw new ExperiencePaymentsValidationError("Stripe returned another account.");
+  }
+  return { accountId: account.id };
+}
+
+export interface DirectAccountFacts extends PayoutAccountFacts {
+  readonly chargesEnabled: boolean;
+  /** card_payments is active (the host can take this site's payments). */
+  readonly cardPaymentsActive: boolean;
+}
+
+export type DirectAccountStatus = ({ readonly kind: "read" } & DirectAccountFacts) | { readonly kind: "unreachable" };
+
+/**
+ * Pure: Stripe's account as the facts of a host's own account. The screen's states are the payout account's (REJECTED for a
+ * mismatch or a rejection, IN_PROGRESS until details are submitted, ACTION_REQUIRED for due requirements, READY when nothing is
+ * left, VERIFYING otherwise). `payoutReady` here means the account can take payments and receive transfers.
+ */
+export function directAccountFactsOf(account: Stripe.Account, providerId: string): DirectAccountFacts {
+  const requirements = account.requirements;
+  const due = codes(requirements?.currently_due);
+  const pastDue = codes(requirements?.past_due);
+  const pending = codes(requirements?.pending_verification);
+  const disabledReason = typeof requirements?.disabled_reason === "string" ? requirements.disabled_reason : "";
+  const currency = typeof account.default_currency === "string" ? account.default_currency.toLowerCase() : null;
+  const controller = account.controller as { type?: string; losses?: { payments?: string }; fees?: { payer?: string }; requirement_collection?: string; stripe_dashboard?: { type?: string } } | undefined;
+  const mismatch = account.country !== "JP"
+    || (currency !== null && currency !== "jpy")
+    || controller?.losses?.payments !== "stripe"
+    || controller?.fees?.payer !== "account"
+    || controller?.requirement_collection !== "stripe"
+    || controller?.stripe_dashboard?.type !== "full"
+    || account.metadata?.provider_id !== providerId
+    || account.metadata?.source !== PAYOUT_ACCOUNT_SOURCE
+    || account.metadata?.purpose !== DIRECT_ACCOUNT_PURPOSE;
+  const detailsSubmitted = account.details_submitted === true;
+  const chargesEnabled = account.charges_enabled === true;
+  const payoutsEnabled = account.payouts_enabled === true;
+  const cardPaymentsActive = account.capabilities?.card_payments === "active";
+  const transfersActive = account.capabilities?.transfers === "active";
+  const requirementsHash = createHash("sha256").update(JSON.stringify([due, pastDue, disabledReason])).digest("hex");
+  const ready = !mismatch && currency === "jpy" && detailsSubmitted && chargesEnabled && payoutsEnabled && cardPaymentsActive && transfersActive
+    && due.length === 0 && pastDue.length === 0 && pending.length === 0 && !disabledReason.startsWith("rejected.");
+  let state: PayoutAccountState;
+  if (mismatch || disabledReason.startsWith("rejected.")) state = "REJECTED";
+  else if (!detailsSubmitted) state = "IN_PROGRESS";
+  else if (due.length > 0 || pastDue.length > 0) state = "ACTION_REQUIRED";
+  else if (ready) state = "READY";
+  else state = "VERIFYING";
+  return { state, payoutReady: ready, detailsSubmitted, payoutsEnabled, transfersActive, requirementsHash, mismatch, chargesEnabled, cardPaymentsActive };
+}
+
+/** Reads a host's own account from Stripe (never from a webhook's payload). */
+export async function retrieveDirectAccountStatus(input: RetrievePayoutAccountStatusInput): Promise<DirectAccountStatus> {
+  if (typeof input.accountId !== "string" || !CONNECTED_ACCOUNT_ID.test(input.accountId)) throw new ExperiencePaymentsValidationError("accountId must be a Stripe connected account ID.");
+  if (typeof input.providerId !== "string" || input.providerId.length < 1) throw new ExperiencePaymentsValidationError("providerId is required.");
+  const stripe = accountsClient(input.platformStripeKey, input.stripe as ConnectedAccountStripeClient | undefined);
+  let account: Stripe.Account;
+  try {
+    account = await stripe.accounts.retrieve(input.accountId);
+  } catch (error) {
+    if (accountOutOfReach(error)) return { kind: "unreachable" };
+    throw error;
+  }
+  if (account?.id !== input.accountId) throw new ExperiencePaymentsValidationError("Stripe returned another account.");
+  return { kind: "read", ...directAccountFactsOf(account, input.providerId) };
 }
 
 /** An account.updated event of a connected account (the Connect webhook). Only which account: the state is read again. */

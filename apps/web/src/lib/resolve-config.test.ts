@@ -562,6 +562,15 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED: "true" }).hostConnectOnboardingEnabled).toBe(false);
     expect(() => resolveConfig({ ...connect, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "" })).toThrow("EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY");
     expect(() => resolveConfig({ ...connect, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
+    // 自分の Stripe アカウント (#726, 3c-1): off by default; http needs the accounts, the publication API, the DB and the platform Stripe key; the preview never has it.
+    const standard = { ...on, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_synthetic", EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true", EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED: "true" };
+    expect(resolveConfig(connect).hostStandardOnboardingEnabled).toBe(false);
+    expect(resolveConfig(standard).hostStandardOnboardingEnabled).toBe(true);
+    expect(resolveConfig({ ...standard, EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED: "1" }).hostStandardOnboardingEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED: "true" }).hostStandardOnboardingEnabled).toBe(false);
+    expect(() => resolveConfig({ ...standard, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "" })).toThrow("EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY");
+    expect(() => resolveConfig({ ...standard, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
+    expect(() => resolveConfig({ ...standard, EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED=true needs EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true");
     // 代理受領 (#725): off by default and in the preview; http needs the platform sale's pieces, the publication API, the host mail and its three settings.
     const agent = {
       ...on, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_synthetic", EXPERIENCE_HOST_MAIL_ENABLED: "true", EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED: "true", EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true", EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID: "acct_PlatformSynthetic1",

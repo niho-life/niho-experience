@@ -27,6 +27,7 @@ interface Flag {
   defaults?: Partial<Record<Target, boolean>>;
   needs?: string[];
   prodNeeds?: string[];
+  stagingOnly?: boolean;
   conflicts?: string[];
   secrets?: Item[];
   settings?: Item[];
@@ -125,6 +126,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "hostTeamInvitationsEnabled",
   EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "hostSelfRegistrationEnabled",
   EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED: "hostConnectOnboardingEnabled",
+  EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED: "hostStandardOnboardingEnabled",
   EXPERIENCE_HOST_AGENT_SALES_ENABLED: "hostAgentSalesEnabled",
   EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED: "hostAgentPayoutsEnabled",
   EXPERIENCE_HOST_AGENT_PAYOUTS_PAUSED: "hostAgentPayoutsPaused",
@@ -461,6 +463,8 @@ describe("the deploy workflows' feature flags", () => {
   for (const target of ["stg", "prod"] as const) {
     it(`${target}: each flag with what it needs starts the server and turns on in resolve-config`, () => {
       for (const flag of FLAGS) {
+        // A staging-only flag is refused in production (its own test).
+        if (flag.stagingOnly && target === "prod") continue;
         const id = flagId(flag);
         const resolved = resolve(target, closure(target, id));
         expect(resolved.problems, id).toEqual([]);
@@ -473,7 +477,7 @@ describe("the deploy workflows' feature flags", () => {
     it(`${target}: every compatible flag starts the server and turns on in resolve-config`, () => {
       // Experience host accounts refuse the NIHO-token flags (its own test below), so it is left out here.
       // A flag that needs one that was left out (the travelers' LINE needs the travelers' accounts, which need host accounts) is left out too.
-      let compatible = FLAGS.filter((flag) => (flag.conflicts ?? []).length === 0);
+      let compatible = FLAGS.filter((flag) => (flag.conflicts ?? []).length === 0 && !(flag.stagingOnly && target === "prod"));
       for (;;) {
         const compatibleIds = new Set(compatible.map(flagId));
         const next = compatible.filter((flag) => (flag.needs ?? []).every((need) => need.split("|").some((dependency) => compatibleIds.has(dependency) || CAPABILITIES.includes(dependency))));
@@ -544,6 +548,24 @@ describe("the deploy workflows' feature flags", () => {
       const off = resolve(target, {});
       expect(Object.keys(off.env).some((name) => name.startsWith("EXPERIENCE_HOST_AGENT_"))).toBe(false);
     }
+  });
+
+  it("opens the host's own Stripe account in staging only; production refuses it until 3c-2", () => {
+    const id = "EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED";
+    const flag = byId.get(id)!;
+    expect(flag.needs).toEqual(["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_PUBLICATION_API_ENABLED"]);
+    expect(flag.stagingOnly).toBe(true);
+    expect(flag.settings ?? []).toEqual([]);
+    const stg = resolve("stg", closure("stg", id));
+    expect(stg.problems).toEqual([]);
+    expect(resolveConfig(revision("stg", stg)).hostStandardOnboardingEnabled).toBe(true);
+    // Production refuses it even with everything it needs, and only it (the flags it needs are allowed).
+    expect(resolve("prod", closure("prod", id)).problems).toEqual([`${id} (PROD_HOST_STANDARD_ONBOARDING_ENABLED) is not allowed in production yet`]);
+    for (const target of ["stg", "prod"] as const) {
+      expect(resolveConfig(revision(target, resolve(target, {}))).hostStandardOnboardingEnabled).toBe(false);
+    }
+    // Nothing else is staging-only.
+    expect(FLAGS.filter((other) => other.stagingOnly).map(flagId)).toEqual([id]);
   });
 
   it("every need and prodNeed is a capability or a flag of the table (a misspelling fails)", () => {

@@ -13,6 +13,10 @@ import type { PaymentReadinessReason } from "./types";
  * accounts. NIHO's host contract has no per-account login link yet.
  */
 export const STRIPE_DASHBOARD_URL = "https://connect.stripe.com/express_login";
+/** Where the host of its OWN (full-dashboard) Stripe account signs in: a public page, no one-time link (3c-1). */
+export const STRIPE_FULL_DASHBOARD_URL = "https://dashboard.stripe.com/";
+/** Which account a 「Stripe で見る」 button opens when the host has both: `direct` its own Stripe account, `payout` the Express payout account. */
+export type StripeLoginKind = "direct" | "payout";
 
 /** NIHO's consent for sharing a spot's seller account (its version goes back with the choice). */
 export interface PayoutReuseConsent {

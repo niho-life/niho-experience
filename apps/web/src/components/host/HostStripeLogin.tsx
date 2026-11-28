@@ -8,11 +8,14 @@ export function HostStripeLogin({
   label,
   className,
   formClassName,
+  kind,
 }: {
   providerId?: string | null;
   label: string;
   className: string;
   formClassName?: string;
+  /** The host has both an Express payout account and its own Stripe account: which one this button opens. */
+  kind?: "direct" | "payout";
 }) {
   const children = (
     <>
@@ -33,6 +36,7 @@ export function HostStripeLogin({
   return (
     <form action={HOST_STRIPE_LOGIN_PATH} method="post" target="_blank" rel="noopener" className={formClassName}>
       <input type="hidden" name="providerId" value={providerId} />
+      {kind ? <input type="hidden" name="kind" value={kind} /> : null}
       <button type="submit" className={className}>
         {children}
       </button>

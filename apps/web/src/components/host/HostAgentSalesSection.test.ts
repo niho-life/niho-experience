@@ -44,6 +44,12 @@ describe("the agent-sales section of 料金・予約", () => {
     expect(agentSalesChoosable(current)).toBe(false);
   });
 
+  it("never offers the choice again to a host that has its own Stripe account now (choosable: false), though the plan is still shown", () => {
+    const base = { salesPlan: plan({ agreementVersion: "old" }), agentSales: { ...offer, planSellerName: "合成 販売者", consentCounted: false, choosable: false as const } };
+    expect(agentSalesChoosable(product(base))).toBe(false);
+    expect(words(html(product(base)))).toContain("販売者はあなたです");
+  });
+
   it("offers the choice again only while bookings are stopped, and for the three reasons: a new consent version, a consent that no longer counts, another name", () => {
     const base = { salesPlan: plan(), agentSales: { ...offer, planSellerName: "合成 販売者", consentCounted: true } };
     expect(agentSalesChoosable(product(base))).toBe(false);
