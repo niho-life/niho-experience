@@ -107,6 +107,85 @@ export async function cancelBooking(
   return typeof outcome === "string" && OUTCOMES.has(outcome) ? { kind: "done", outcome: outcome as BookingCancelOutcome } : { kind: "failed" };
 }
 
+/** One date the booking may move to (予約の日時変更, #720), as the server offers it. */
+export interface BookingChangeOptionView {
+  date: string;
+  startAtUtc: string;
+  endAtUtc: string;
+  seatsLeft: number;
+  newDeadlineUtc: string;
+}
+
+export type BookingChangeOptionsResult =
+  | { kind: "options"; fromStartUtc: string; changesUsed: number; maxChanges: number; options: BookingChangeOptionView[] }
+  /** The booking can no longer be moved here: the page points to the messages with the host. */
+  | { kind: "notChangeable" }
+  /** The session no longer opens this booking: the page shows its neutral state again. */
+  | { kind: "closed" }
+  | { kind: "failed" };
+
+const CHANGE_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const CHANGE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function changeOption(value: unknown): BookingChangeOptionView | null {
+  if (typeof value !== "object" || value === null) return null;
+  const item = value as Record<string, unknown>;
+  const { date, startAtUtc, endAtUtc, seatsLeft, newDeadlineUtc } = item;
+  if (typeof date !== "string" || !CHANGE_DATE.test(date)) return null;
+  if (typeof startAtUtc !== "string" || !CHANGE_INSTANT.test(startAtUtc) || typeof endAtUtc !== "string" || !CHANGE_INSTANT.test(endAtUtc)) return null;
+  if (typeof newDeadlineUtc !== "string" || !CHANGE_INSTANT.test(newDeadlineUtc)) return null;
+  if (typeof seatsLeft !== "number" || !Number.isInteger(seatsLeft) || seatsLeft < 0) return null;
+  return { date, startAtUtc, endAtUtc, seatsLeft, newDeadlineUtc };
+}
+
+/** 予約の日時変更 (#720): the dates the booking may move to now. */
+export async function loadBookingChangeOptions(publicBookingId: string, fetchImpl: Fetch = browserFetch): Promise<BookingChangeOptionsResult> {
+  const response = await post(fetchImpl, "/api/public/bookings/change/options", { publicBookingId }, true);
+  if (!response) return { kind: "failed" };
+  if (response.status === 404) return { kind: "closed" };
+  if (response.status !== 200) return { kind: "failed" };
+  const body: unknown = await response.json().catch(() => null);
+  if (typeof body !== "object" || body === null) return { kind: "failed" };
+  const value = body as Record<string, unknown>;
+  if (value.changeable === false) return { kind: "notChangeable" };
+  const { fromStartUtc, changesUsed, maxChanges } = value;
+  if (value.changeable !== true || typeof fromStartUtc !== "string" || !CHANGE_INSTANT.test(fromStartUtc)
+    || !Number.isInteger(changesUsed) || !Number.isInteger(maxChanges) || !Array.isArray(value.options)) return { kind: "failed" };
+  const options = value.options.map(changeOption);
+  if (options.some((option) => option === null)) return { kind: "failed" };
+  return { kind: "options", fromStartUtc, changesUsed: changesUsed as number, maxChanges: maxChanges as number, options: options as BookingChangeOptionView[] };
+}
+
+export type BookingChangeOutcome = "OK" | "CHANGED" | "FULL" | "NOT_CHANGEABLE";
+export type BookingChangeResult =
+  | { kind: "done"; outcome: BookingChangeOutcome }
+  | { kind: "closed" }
+  /** The same command was refused (its input changed): the page starts over. */
+  | { kind: "conflict" }
+  /** No answer, or a server failure: whether it went through is unknown; sending the same command again is safe. */
+  | { kind: "failed" };
+
+const CHANGE_OUTCOMES: ReadonlySet<string> = new Set(["OK", "CHANGED", "FULL", "NOT_CHANGEABLE"]);
+
+/**
+ * 予約の日時変更 (#720): "Change date". `commandId` is the page's UUID for this attempt, sent again as it is after a lost
+ * answer (the same command never moves twice). The `shown*` values are what the page showed: the server refuses when they
+ * no longer hold.
+ */
+export async function changeBookingDate(
+  input: { publicBookingId: string; commandId: string; toDate: string; shownFromStartUtc: string; shownToStartUtc: string; shownNewDeadlineUtc: string },
+  fetchImpl: Fetch = browserFetch,
+): Promise<BookingChangeResult> {
+  const response = await post(fetchImpl, "/api/public/bookings/change", input, true);
+  if (!response) return { kind: "failed" };
+  if (response.status === 404) return { kind: "closed" };
+  if (response.status === 409) return { kind: "conflict" };
+  if (response.status !== 200) return { kind: "failed" };
+  const body: unknown = await response.json().catch(() => null);
+  const outcome = typeof body === "object" && body !== null ? (body as Record<string, unknown>).outcome : undefined;
+  return typeof outcome === "string" && CHANGE_OUTCOMES.has(outcome) ? { kind: "done", outcome: outcome as BookingChangeOutcome } : { kind: "failed" };
+}
+
 /** What the guest may write to the host in one message (the store's GUEST_QUESTION_LIMITS.guestMessageMaxLength). */
 export const BOOKING_MESSAGE_MAX_LENGTH = 1000;
 

@@ -85,6 +85,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_NIHO_WRITER_ENABLED: "nihoWriterEnabled",
   DATABASE_GUIDE_PUBLICATIONS: "guidePublicSource",
   EXPERIENCE_GUEST_BOOKING_ENABLED: "guestBookingEnabled",
+  EXPERIENCE_GUEST_BOOKING_CHANGE_ENABLED: "guestBookingChangeEnabled",
   EXPERIENCE_MANAGED_SALES_ENABLED: "managedSalesEnabled",
   EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED: "managedSalesWebhooksEnabled",
   EXPERIENCE_GUEST_MAIL_ENABLED: "guestMailEnabled",

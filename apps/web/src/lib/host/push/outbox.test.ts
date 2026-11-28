@@ -253,6 +253,31 @@ describe("hostPushEventFromOutbox", () => {
     expect(hostPushEventFromOutbox(row("host.notify.cancellation", { ...newBookingPayload, amount: 7500 }), NOW)).toEqual({ ok: false, reason: "invalid" });
   });
 
+  it("turns a guest's move to another date into a NEW_BOOKING push (always on) that says both times (#720)", () => {
+    const moved = { ...newBookingPayload, startsAt: "2026-11-22T01:00:00.000Z", previousStartsAt: "2026-11-20T01:00:00.000Z" };
+    const parsed = hostPushEventFromOutbox(row("host.notify.booking_changed", moved), NOW);
+    expect(parsed).toEqual({
+      ok: true,
+      event: {
+        providerId: "provider-a",
+        kind: "NEW_BOOKING",
+        experienceTitle: "Synthetic Tea Ceremony",
+        startsAt: "2026-11-22T01:00:00.000Z",
+        seats: 4,
+        moved: { previousStartsAt: "2026-11-20T01:00:00.000Z" },
+        url: `/host/bookings?booking=${BOOKING}&providerId=provider-a`,
+        tag: `booking-changed-${BOOKING}`,
+      },
+    });
+    if (parsed.ok) {
+      expect(JSON.parse(hostPushPayload(parsed.event))).toMatchObject({
+        title: "予約の日時が変わりました", body: "Synthetic Tea Ceremony · 11/20（金）10:00 → 11/22（日）10:00 · 4名",
+      });
+    }
+    expect(hostPushEventFromOutbox(row("host.notify.booking_changed", newBookingPayload), NOW)).toEqual({ ok: false, reason: "invalid" });
+    expect(hostPushEventFromOutbox(row("host.notify.booking_changed", { ...moved, guestName: "Synthetic" }), NOW)).toEqual({ ok: false, reason: "invalid" });
+  });
+
   it("turns an OTA booking into a push to the product's people naming the site and the guest, never the site's IDs (#194)", () => {
     const ref = "0b8f5a8e-2c1d-4e7f-9a3b-5c6d7e8f9a0b";
     const ota = { v: 1, change: "NEW", site: "GetYourGuide", ref, productId: "tea", experienceTitle: "Synthetic Tea Ceremony",

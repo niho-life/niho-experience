@@ -236,6 +236,37 @@ OWNER は予約の画面と同じ二重の確認（NIHO が OWNER と言い、ex
   - 異議申し立て（dispute）はまだ扱わない。
 - **配備時の作業（この PR では行わない）**：先に `0030`（7b の自動再送は `0031`。列を足すだけで、順序の制約はなく、新しい版より先でよい）を適用する（追加だけで、今の書き手は新しい列と表を読まず、今の outcome は広げた CHECK に入るので、新しい版より先に適用してよい）。体験の Connect webhook の endpoint に `refund.created`・`refund.updated`・`refund.failed` を足す（未設定なら、API が `succeeded` と答えた返金は記録されるが、`pending` の返金は `PENDING` のまま残り、7 日でサポートの一覧に出る）。runtime role に `booking_cancellation_commands` の INSERT、`booking_refunds`・`booking_cancellation_requests` の INSERT・UPDATE（`scripts/gcp/experience-db-grants.mjs`。`schedule_occurrence_sales_states` と `payment_ledger_entries` は今までの権限で足りる）。新しい設定は無い（Stripe の秘密鍵は checkout と同じ。メール job も同じ鍵を読む。無ければ自動の再送だけが止まる）。
 
+## 予約の日時変更（#720）
+
+オーナー決定（2026-11-28、[#720](https://github.com/niho-life/niho-experience/issues/720)）：予約者は予約ページ（第6段のセッション。ログイン不要）から、**同じ体験・同じ offer（`occurrence_snapshot.ruleId`）の別の回へ、同じ人数・同じ金額のまま**日時を変更できる。第1段（この節）は予約者の変更だけ。ホストの設定画面・サポートの画面・OTA は第2段（下の「後の段で足すもの」）。
+
+- **flag**：`EXPERIENCE_GUEST_BOOKING_CHANGE_ENABLED`（既定 `false`、http mode だけ）。予約ページの 2 つの flag（`EXPERIENCE_GUEST_BOOKING_ENABLED` と `EXPERIENCE_GUEST_MAIL_ENABLED`）も要る。off の間は「Change date」を出さず、2 本の経路は 404。flag が off でも、予約時に `guestChange` を snapshot に固定すること（下）は動く（後から on にしたとき、それまでの予約も変えられるように）。
+- **予約時に固定するもの**：取消条件が `FREE_UNTIL_24H` または `FREE_UNTIL_48H`（無料取消の期限があるもの）で、商品の許可が ON のとき、`pricing_snapshot.guestChange = { allowed: true, maxChanges: 2 }` を予約の作成（`startGuestBooking`）で固定する。商品の許可は `product_guest_change_settings`（`provider_id, product_id, allowed`。**行が無ければ ON**）。`guestChange` の無い予約（この版より前の予約、`NONE`・独自の取消条件、許可が OFF の商品）は変更できない（遡及しない）。許可を切り替える store の関数（`BookingChanges.setGuestChangeAllowed`、OWNER だけ）はあるが、画面と HTTP は第2段。
+- **変更できる予約**（サーバーが予約の行ロックの下で判定し、画面の表示は信用しない。満たさなければ何も変えず `NOT_CHANGEABLE`）：
+  1. 確定（`CONFIRMED`）。承認後決済（`acceptanceMode = APPROVAL`）と NIHO の完全代行（`MANAGED_20`）は除く。
+  2. `guestChange` が固定されている。
+  3. 今（DB の `clock_timestamp()`）が、今の回の無料取消の期限より前（開始前）。
+  4. 変更の回数（`booking_changes` の行数）が `maxChanges`（2）未満。
+  5. 開いている取消の依頼（`OPEN`）が無く、返金の行（`booking_refunds`）が 1 つも無い。
+  6. 共有在庫の占有（`booking_resource_occupancies`）を持たない（下の「第1段で除くもの」）。
+  7. 前日の集合案内のメール（`booking.meeting_guide_day_before`）が、送信済み・メール job が取って送信中（`attempts > 0`）・送る時刻が来ている、のどれでもない（行が無ければそのまま進める）。job は取った時点の内容で送るので、これらは旧日程の案内が出てしまう。変更の中でこの行を `FOR UPDATE` で押さえてから動かす。
+- **移し先**：同じ商品・同じ offer の別の回。日付は `YYYY-MM-DD`（日本時間。公開の残席照会と checkout の `occurrenceDate` と同じ。今日から 89 日後まで）。checkout と同じく、その日に offer の回がちょうど 1 つで重なりが無く、商品が今も販売中であること。回の materialize と評価は checkout と同じ（`materializeAndLockOccurrence`・`evaluateStoredInventory`、予約の人数で）。満席なら `FULL`、締切・休止・販売停止などは `NOT_CHANGEABLE`。今の回と同じ回は不可。**移し先でも無料取消の期限がまだ先**であること（過ぎていれば、画面が示した選択肢がもう無いので `CHANGED`）。合計 0 円の予約・埋め込み（`/embed`）で受けた予約も対象。
+- **処理**（1 トランザクション。取消と同じ形）：提供者の在庫ロック → セッションの再確認 → コマンドの冪等（`booking_change_commands`、actor は GUEST、action は `GUEST_CHANGE`）→ 予約の行ロック → 上の判定 → 移し先の評価。画面が示した値（今の開始・新しい開始・新しい無料取消の期限）を送り、サーバーが読み直した値と違えば何も変えず `CHANGED`。変えるときは：
+  - `bookings` の `occurrence_id` と `occurrence_snapshot` だけを新しい回へ（snapshot は予約作成と同じ形・同じキー。受付時刻 `acceptedAtUtc` は元のまま）。席は旧回から新回へ移る（保存済みの在庫は予約の回で数える）。`pricing_snapshot`・`seller_snapshot`・`stripe_payment_ref`・決済台帳・返金には触れない（Stripe を呼ばない）。
+  - `booking_changes` に 1 行（旧・新の回 ID と snapshot、何回目か、コマンド、`changed_by = GUEST`、時刻。個人情報は入れない）。
+  - 旧回と新回のカレンダーの再計算（cause `booking_changed`）。
+  - 予約者へのメール（`booking.changed`、重複キー `guest-mail:changed:<変更 ID>`、payload は予約番号と変更 ID だけ）。メール job の段 ②'（`claimBookingNotices`）が送る時点で予約と変更を読み、旧→新の日時、金額は変わらないこと、新しい無料取消の期限、予約ページへの新しい grant のリンクを日英で書く。後の変更で上書きされた変更・取り消された予約のメールは送らない。
+  - ホストへの push（`host.notify.booking_changed`、重複キーに変更 ID）。設定 › 通知の「新しい予約・申込」として数える（止められない種類）。中身は取消と同じ最小（体験名・新旧の開始・人数・予約番号）。タップで予約の画面のその予約。ホストへのメールは第1段では送らない。
+  - 前日の集合案内のメール（上で押さえた行）の送る時刻を、新しい開始の 24 時間前（過ぎていれば今）へ。
+  - この予約の有効なセッションの絶対期限（`absolute_expires_at`）を、新しい終了の 30 日後まで延ばす（短くはしない）。無操作 30 日で切れる期限（`idle_expires_at`）は、使うたびに延びる今までの動きのままで、開催日とは関係しない。
+  - Google の予約カレンダー（#238）は、書いた時刻と予約の snapshot の時刻を比べて書き直す設計なので、追加の作業は無い（テストで確かめた）。
+- **冪等と同時実行**：同じコマンド ID・同じ入力は最初の結果（`repeated: true`。結果 `OK`／`CHANGED`／`FULL`／`NOT_CHANGEABLE` はコマンドに保存）。同じ ID で入力が違えば拒む（経路は 409）。fingerprint は入力だけ（`GUEST_CHANGE`、予約番号、`toDate`、画面が示した 3 つの値）から作る（移したあとの再送でも同じコマンドと分かるように。#720 の設計の「旧・新の回 ID を含める」から変えた）。最後の席に 2 つの予約が同時に移ろうとしても、提供者の在庫ロックで順に評価し、1 つだけが移る。
+- **store の不変条件とトリガーの例外**（`0094`）：`bookings` の snapshot の不変トリガー（`protect_booking_snapshots`）は、変更の経路がトランザクションローカルに設定する `experience.booking_move`（その予約の行 ID）と一致する行だけ、`occurrence_id` と `occurrence_snapshot` の変更を許す（新しい snapshot が新しい回 ID を名指すこと）。ほかの列（予約番号・提供者・商品・席数・冪等キー・仮押さえの期限・`pricing_snapshot`・`seller_snapshot`・作成時刻）は今までどおり不変で、設定の無い・ほかの予約 ID の更新は今までと同じ例外。`booking_changes` と `booking_change_commands` は追記専用（更新・削除はトリガーで拒む）。`booking_inventory_snapshots`（予約時の回の時刻と予約単位）は追記専用のまま、予約時の値を残す。
+- **第1段で除くもの**：共有在庫の占有を持つ予約・商品（`booking_resource_occupancies` は予約単位の追記専用で、予約だけ移すと旧回に占有が残り新回に無くなる。allocation の revision 化は後の段）。承認後決済・`MANAGED_20`。ホストの許可の画面、ホスト・サポートによる変更、OTA。
+- **画面**（`/bookings/{id}`。日本語で申し込んだ予約は日本語）：変更できる確定の予約だけ、「Change date」の欄（取消の欄の前）。サーバーが `listChangeOptions` で変更できると判定したときだけ出す。押すと候補（同じ offer で人数分の空きがあり、新しい無料取消の期限が先の日付。日付・開始時刻・残席・新しい期限を日本時間で）を読み、1 つ選んで確認（「Your booking moves from {旧} to {新}. The price doesn't change. You can cancel for free until {新しい期限}.」）→ 送る。`OK` はページを読み直す。`CHANGED` は候補を読み直して今の候補を出す。`FULL` は「That date just filled up.」と候補を読み直す。`NOT_CHANGEABLE` はメッセージ欄でホストに相談する案内。コマンド ID は操作ごとの UUID で、答えが届かなければ同じ ID で送り直せる（二重に移らない）。
+- **経路**（取消と同じ作り：flag、same-origin、予約の cookie のセッション、ログに入力を出さない）：`POST /api/public/bookings/change/options`（`{ publicBookingId }` → 200 `{ changeable, fromStartUtc?, changesUsed?, maxChanges?, options }`）と `POST /api/public/bookings/change`（`{ publicBookingId, commandId, toDate, shownFromStartUtc, shownToStartUtc, shownNewDeadlineUtc }` → 200 `{ outcome }`）。形の違う入力は 400、セッションが無ければ 404、同じコマンドの別の入力は 409、store の失敗は 503。
+- **配備時の作業**：先に `0094` を適用する（表を足し、トリガーの関数を置き換える。今の書き手は新しい設定を使わないので、関数の置き換えは今までと同じ更新だけを拒む。新しい版より先に適用してよい）。runtime role に `booking_change_commands`・`booking_changes` の INSERT、`product_guest_change_settings` の INSERT・UPDATE（`scripts/gcp/experience-db-grants.mjs`）。そのあと flag を stg で on にして受け入れる。
+
 ## 既存NIHO商品とExperience新規商品の読み先
 
 商品ごとにサーバーが決め（`apps/web/src/lib/guest-booking-source.ts`）、画面の部品へ渡す（`BookingSource`、`apps/web/src/lib/booking-source.ts`）。
@@ -346,6 +377,7 @@ OWNERがExperience上で商品を作成し、本文・写真・開催枠・料�
 | --- | --- |
 | `EXPERIENCE_GUEST_BOOKING_ENABLED` | `true` のとき http mode で 2 本の経路が開き、OWNER の予約の画面にここで受けた予約が出る。`EXPERIENCE_GUEST_MAIL_ENABLED` も `true` なら予約者の予約ページ（第6段）も開く。既定 `false`（404）。mock mode では効かない。`HOST_CONSOLE_ENABLED=true` が要る（ホストが見られない販売をしない） |
 | `EXPERIENCE_HOST_ATTENDANCE_ENABLED` | `true` で予約の flag も `true` のとき、OWNER の「この回」で出欠を記録し、定員を出す（#107、`0033`）。既定 `false` |
+| `EXPERIENCE_GUEST_BOOKING_CHANGE_ENABLED` | `true` で予約ページの 2 つの flag も `true` のとき、予約ページの「Change date」と 2 本の経路が開く（#720、`0094`、上の「予約の日時変更（#720）」）。既定 `false`（404）。mock mode では効かない |
 | `EXPERIENCE_BOOKING_CONSENT_VERSION` | 旅行者が同意する規約の版（1〜100 字、空白なし） |
 | `EXPERIENCE_DATABASE_URL` | experience DB |
 | `EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY` / `EXPERIENCE_STRIPE_WEBHOOK_SECRET` | 体験用に絞った Stripe の秘密鍵と、体験の Connect webhook の署名鍵（Secret Manager） |
@@ -359,7 +391,7 @@ flag が `true` でこれらが欠けていると、サーバーは起動しな�
 - 第5段の残り：予約前の質問・予約者からの連絡の、提供者へのメール（予約の確定と取消は #194 で足した。上の「ホストへのメール」）。
 - 第6段の残り：サポートが予約のリンクを止める操作（`revokeBookingAccess`）の画面。予約のメッセージの件数をホームの「次にすること」に出すこと。
 - 第7段の残り：異議申し立て。
-- 予約者による日時変更（[#720](https://github.com/niho-life/niho-experience/issues/720)、オーナー決定 2026-11-28）：予約ページから、ログインせずに、同じ offer・同じ人数・同じ金額のまま別の回へ移す。設計は #720。
+- 予約者による日時変更（[#720](https://github.com/niho-life/niho-experience/issues/720)、オーナー決定 2026-11-28）：第1段（予約ページから予約者が、同じ offer・同じ人数・同じ金額のまま別の回へ移す。`EXPERIENCE_GUEST_BOOKING_CHANGE_ENABLED`、既定 off）は上の「予約の日時変更（#720）」で足した。**まだ無いもの**：ホストが商品ごとに許可を切り替える設定画面（store の関数と表はある）、ホスト・サポートによる変更とその画面、ホストへのメール、共有在庫の占有を持つ商品の変更（allocation の revision 化）、OTA の予約の変更。
 - 旅行者アカウントとの結び付け（オーナー決定 2026-11-28、[traveler-accounts.md](traveler-accounts.md) の「予約との結び付けとプロフィール」）：ログイン中の予約と、メールの確認リンクで確かめた過去の予約を、アカウントの一覧にまとめる。予約・連絡・取消・変更はログイン不要のまま。
 - 予約者の保存期間を体験の終了から 2 年にする（オーナー決定 2026-11-28。**まだ 1 年のまま**）。変える場所は、`/privacy` の「How long we keep it」と規約を先に直したうえで、メール job の `retentionDays`（予約者だけ 730 日。OTA の予約者と予約前の質問は 365 日のまま）、この文書と [ota-external-reservations.md](ota-external-reservations.md) の「1 年」の記述。
 - OWNER本人の商品作成・公開APIとHost UIの接続、NIHO本人/Connect契約の受入。

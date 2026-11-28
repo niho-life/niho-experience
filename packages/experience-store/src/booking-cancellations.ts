@@ -77,11 +77,15 @@ export const BOOKING_CANCELLATION_LIMITS = {
   refundSendLeaseSeconds: 120,
 } as const;
 
-/** The guest's emails about a cancellation; the mail job sends them (GuestMailOutbox.claimBookingNotices). */
+/**
+ * The guest's emails about a cancellation, and about a move to another date (予約の日時変更, #720, written by
+ * booking-changes.ts); the mail job sends them (GuestMailOutbox.claimBookingNotices).
+ */
 export const GUEST_NOTICE_TOPICS = {
   cancelled: "booking.cancelled",
   refunded: "booking.refunded",
   requestDeclined: "booking.cancellation_declined",
+  changed: "booking.changed",
 } as const;
 export type GuestNoticeTopic = (typeof GUEST_NOTICE_TOPICS)[keyof typeof GUEST_NOTICE_TOPICS];
 

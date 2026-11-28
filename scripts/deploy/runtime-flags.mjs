@@ -150,6 +150,8 @@ export const FLAGS = Object.freeze([
       { env: "EXPERIENCE_PRIVACY_POLICY_URL", variable: "PRIVACY_POLICY_URL", shape: "httpsUrl", optional: true },
     ],
   },
+  // 予約の日時変更 (#720): the guest's "Change date" on the booking page, which opens with booking and its mail job.
+  { env: "EXPERIENCE_GUEST_BOOKING_CHANGE_ENABLED", variable: "GUEST_BOOKING_CHANGE_ENABLED", needs: ["EXPERIENCE_GUEST_BOOKING_ENABLED", "EXPERIENCE_GUEST_MAIL_ENABLED"] },
   {
     env: "EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED",
     variable: "MANAGED_SALES_WEBHOOKS_ENABLED",

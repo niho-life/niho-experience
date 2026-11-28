@@ -132,6 +132,7 @@ export {
   enqueueBookingMessageNotification,
   enqueueGuestMessageNotification,
   enqueueGuestQuestionNotification,
+  enqueueBookingChangedNotification,
   enqueueCancellationNotification,
   enqueueGoogleCalendarAttentionNotification,
   enqueueAssignmentRequestNotification,
@@ -146,6 +147,7 @@ export {
   OTA_BOOKING_CHANGES,
   parseAssignmentRequestPayload,
   parseBookingMessagePayload,
+  parseBookingChangedPayload,
   parseCancellationPayload,
   parseGoogleCalendarAttentionPayload,
   parseGuestEmailDeliveryFailedPayload,
@@ -159,6 +161,7 @@ export {
 export type {
   AssignmentRequestPayload,
   BookingMessagePayload,
+  BookingChangedPayload,
   CancellationPayload,
   ClaimedHostNotification,
   DayBeforeSummaryPayload,
@@ -346,6 +349,9 @@ export {
   SUPPORT_CANCELLATION_REASONS,
   SUPPORT_OPERATION_ACTIONS,
 } from "./booking-cancellations.ts";
+export { BookingChanges } from "./booking-changes.ts";
+export type { BookingChangeOption, BookingChangeOptions, BookingChangeOutcome, BookingChangeResult, GuestBookingChangeInput } from "./booking-changes.ts";
+export { GUEST_CHANGE_MAX_CHANGES } from "./guest-change-terms.ts";
 export { ExperienceSupportRepository } from "./support-settlement.ts";
 export type {
   ExperienceSettlementSummary,
@@ -549,6 +555,7 @@ export type {
   CreateBookingHoldInput,
   GoogleCalendarConfiguration,
   GuestCancellationPolicy,
+  GuestChangeSnapshot,
   HostActor,
   InventoryAdminActor,
   InventoryAdminProduct,

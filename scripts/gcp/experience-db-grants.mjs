@@ -24,6 +24,9 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   // 取消と返金 (#285 slice 7): commands are append-only; refunds and requests move through their states.
   booking_cancellation_commands: { write: I },
   booking_cancellation_requests: { write: IU },
+  // 予約の日時変更 (#720): commands and the history of moves are append-only.
+  booking_change_commands: { write: I },
+  booking_changes: { write: I },
   // Short-lived, HMAC-only IP counters for public Checkout (#374); no address or guest reference is stored.
   booking_checkout_ip_buckets: { write: IUD },
   booking_guests: { write: IU },
@@ -194,6 +197,8 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   outbox_messages: { write: IU },
   // Append-only; the ledger trigger also rejects mutation.
   payment_ledger_entries: { write: I },
+  // 予約の日時変更 (#720): a product's switch for guest changes (no row: ON).
+  product_guest_change_settings: { write: IU },
   product_inventory_resources: { write: ID },
   product_inventory_settings: { write: IU },
   product_operator_audit_events: { write: I },
