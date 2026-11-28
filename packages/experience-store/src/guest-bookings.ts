@@ -71,6 +71,8 @@ import {
   requireMembership,
 } from "./repository.ts";
 import { bookingFromRow, isoValue, overrideFromRow, productFromRow, salesStateFromRow, scheduleRuleFromRow, type DbRow } from "./rows.ts";
+import { countingAgentConsent, nativeDisclosureName } from "./agent-consent.ts";
+import { agentPlanSql, countedAgentConsentSql, salesKindOf } from "./sales-kind.ts";
 import { withTransaction } from "./transaction.ts";
 import type { BookingRecord, BookingStatus, GuestCancellationPolicy, HostActor, ProductRecord, ProductSeller, StoredScheduleRule } from "./types.ts";
 import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIdentifier, chargeablePlatformFee } from "./validation.ts";
@@ -246,6 +248,8 @@ export interface PublicBookingTerms {
   readonly currency: "JPY";
   readonly sellerDisplayName: string;
   readonly sellerDisclosureUrl?: string;
+  /** 代理受領 (#725): the legal name of the party that takes the payment for the seller (the host). Absent for every other sale. */
+  readonly paymentCollectedBy?: string;
   readonly offers: readonly PublicBookingOffer[];
   readonly conditionsVersion: string | null;
   /** Required on checkout for products with explicit sales-plan versions; absent for legacy products. */
@@ -303,6 +307,8 @@ export interface StartGuestBookingInput {
   readonly salesPlanRevision?: number;
   /** An explicit false from the public runtime closes new platform bookings while settlement remains available. */
   readonly managedSalesEnabled?: boolean;
+  /** 代理受領 (#725): only an explicit true opens a booking the host sells while NIHO takes the payment. Absent or false closes it. */
+  readonly agentSalesEnabled?: boolean;
   readonly answers?: readonly GuestBookingAnswer[];
   /** consent.agreedVersion of the request. */
   readonly termsConsentVersion: string;
@@ -822,7 +828,7 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
             plan.seller_niho_account_ref AS plan_seller_niho_account_ref,
             plan.stripe_account_ref AS plan_stripe_account_ref,plan.fee_basis_points AS plan_fee_basis_points,
             plan.agreement_version AS plan_agreement_version,plan.payment_due_days,plan.payment_due_policy,
-            plan.acceptance_mode,
+            plan.acceptance_mode,plan.seller_party,plan.payout_delay_days,plan.receiving_agent_name,
             plan_state.phase AS sales_plan_phase
        FROM experience_products p
        LEFT JOIN experience_product_publication_states s ON s.provider_id=p.provider_id AND s.product_id=p.id
@@ -876,7 +882,20 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
       ...(row.payment_due_policy === "NEXT_MONTH_END" ? { paymentDuePolicy: row.payment_due_policy } : {}),
       acceptanceMode: row.acceptance_mode === "APPROVAL" ? "APPROVAL" : "INSTANT",
       feeBasisPoints: Number(row.plan_fee_basis_points) as 1000 | 1500 | 2000,
+      sellerParty: row.seller_party === "PROVIDER" ? "PROVIDER" : "NIHO",
+      ...(row.payout_delay_days === null || row.payout_delay_days === undefined ? {} : { payoutDelayDays: Number(row.payout_delay_days) }),
+      ...(row.receiving_agent_name === null || row.receiving_agent_name === undefined ? {} : { receivingAgentName: String(row.receiving_agent_name) }),
     };
+    // A PLATFORM plan that is neither NIHO's own sale nor agent sales is never sold (sales-kind.ts).
+    const kind = product.chargeMode === "PLATFORM" ? salesKindOf(product) : "DIRECT";
+    if (kind === null) return null;
+    if (kind === "AGENT_15") {
+      // 代理受領 (#725): sold only while the OWNER's consent counts for this revision's seller and the host's public seller
+      // disclosure is the name this revision names. Either one lapsing closes new bookings.
+      if (product.payoutDelayDays === undefined || product.receivingAgentName === undefined) return null;
+      if (await countingAgentConsent(client, product.providerId, product.seller.sellerNihoAccountRef, lock) === null) return null;
+      if (await nativeDisclosureName(client, product.providerId, lock) !== product.seller.sellerDisplayName) return null;
+    }
   }
   if (!sellableProduct(product)) return null;
   const terms = isPublication
@@ -917,6 +936,15 @@ async function loadSellable(client: Queryable, slug: string, lock: boolean): Pro
 }
 
 /** A JPY price Stripe can charge, and an ID that fits the guest idempotency key (loadSellable, sellableSlugs). */
+/**
+ * Whether a platform-charge sale is closed by its flag (#725): NIHO's own sale by `managedSalesEnabled` (closed only by an explicit
+ * false, as before), the host's agent sale by `agentSalesEnabled` (closed unless it is true). The two flags are independent.
+ */
+function platformSaleClosed(seller: Parameters<typeof salesKindOf>[0] & object, input: Pick<StartGuestBookingInput, "managedSalesEnabled" | "agentSalesEnabled">): boolean {
+  if (seller.chargeMode !== "PLATFORM") return false;
+  return salesKindOf(seller) === "AGENT_15" ? input.agentSalesEnabled !== true : input.managedSalesEnabled === false;
+}
+
 export function sellableProduct(product: Pick<ProductRecord, "id" | "currency" | "unitAmount">): boolean {
   return product.currency === "JPY" && (product.unitAmount === 0 || product.unitAmount >= GUEST_BOOKING_LIMITS.minimumChargeYen)
     && product.id.length <= MAX_SELLABLE_PRODUCT_ID_LENGTH;
@@ -1780,8 +1808,12 @@ export class GuestBookingRepository {
       title: sellable.product.publicTitle,
       currency: "JPY",
       sellerDisplayName: sellable.product.seller.sellerDisplayName,
-      // 外部URLは廃止。保存済み版に旧URLが残っていても、NIHO運営(PLATFORM)の商品以外では出さない。
-      ...(sellable.product.chargeMode === "PLATFORM" && sellable.product.sellerDisclosureUrl ? { sellerDisclosureUrl: sellable.product.sellerDisclosureUrl } : {}),
+      // 外部URLは廃止。保存済み版に旧URLが残っていても、NIHOが販売者のとき（完全代行 20%）以外では出さない。
+      // 代理受領は販売者がホスト自身で、販売者情報はホストの /experiences/{slug}/seller（既定の経路）に出る (#725)。
+      ...(sellable.product.chargeMode === "PLATFORM" && sellable.product.sellerParty !== "PROVIDER" && sellable.product.sellerDisclosureUrl
+        ? { sellerDisclosureUrl: sellable.product.sellerDisclosureUrl } : {}),
+      ...(sellable.product.chargeMode === "PLATFORM" && sellable.product.sellerParty === "PROVIDER" && sellable.product.receivingAgentName
+        ? { paymentCollectedBy: sellable.product.receivingAgentName } : {}),
       offers: rules.map((stored) => offerFor(sellable, stored)),
       conditionsVersion: sellable.terms.conditionsVersion,
       ...(sellable.product.salesPlanRevision === undefined ? {} : { salesPlanRevision: sellable.product.salesPlanRevision }),
@@ -1806,6 +1838,12 @@ export class GuestBookingRepository {
               s.platform_fee_basis_points, s.support_consent_version, s.support_agreement_revision,
               plan.revision AS sales_plan_revision,plan.fee_basis_points AS sales_plan_fee_basis_points,
               plan.agreement_version AS sales_plan_agreement_version,plan_state.phase AS sales_plan_phase,
+              ${agentPlanSql("plan")} AS plan_is_agent,
+              (plan.charge_mode='PLATFORM' AND NOT (plan.plan='MANAGED_20' OR ${agentPlanSql("plan")})) AS plan_is_unknown_platform,
+              ${countedAgentConsentSql("p.provider_id", "plan")} AS agent_consent_ok,
+              EXISTS (SELECT 1 FROM provider_seller_disclosures d
+                       WHERE d.provider_id=p.provider_id AND d.method='NATIVE' AND d.withdrawn_at IS NULL
+                         AND d.seller_display_name=plan.seller_display_name) AS agent_disclosure_ok,
               (SELECT array_agg(r.id ORDER BY r.id COLLATE "C") FROM schedule_rules r
                  WHERE r.provider_id=p.provider_id AND r.product_id=p.id AND (
                    r.ends_on IS NULL OR r.ends_on >= (clock_timestamp() AT TIME ZONE 'Asia/Tokyo')::date
@@ -1835,6 +1873,9 @@ export class GuestBookingRepository {
       if (rows?.length !== 1) return false;
       const row = rows[0]!;
       const explicitPlan = row.sales_plan_revision !== null && row.sales_plan_revision !== undefined;
+      // 代理受領 (#725) is listed only while its consent and public seller disclosure count, as in loadSellable.
+      if (row.plan_is_unknown_platform === true) return false;
+      if (row.plan_is_agent === true && (row.agent_consent_ok !== true || row.agent_disclosure_ok !== true)) return false;
       if (explicitPlan ? row.sales_plan_phase !== "ACTIVE"
         : (row.platform_fee_basis_points === null || row.support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
           || row.support_agreement_revision === null)) return false;
@@ -1977,7 +2018,7 @@ export class GuestBookingRepository {
         if (booking.status === "HOLD" && booking.sellerSnapshot.salesPlanRevision !== product.salesPlanRevision) {
           throw new GuestCheckoutError("CONSENT_OUTDATED", { field: "salesPlanRevision" });
         }
-        if (booking.status === "HOLD" && booking.sellerSnapshot.chargeMode === "PLATFORM" && input.managedSalesEnabled === false) {
+        if (booking.status === "HOLD" && platformSaleClosed(booking.sellerSnapshot, input)) {
           throw new StoreNotFoundError("experience for sale");
         }
         return { kind: "started", booking: startResult(
@@ -1991,7 +2032,8 @@ export class GuestBookingRepository {
         ) };
       }
 
-      if (product.chargeMode === "PLATFORM" && input.managedSalesEnabled === false) throw new StoreNotFoundError("experience for sale");
+      if (platformSaleClosed({ chargeMode: product.chargeMode, salesPlan: product.salesPlan, sellerParty: product.sellerParty,
+        feeBasisPoints: product.feeBasisPoints }, input)) throw new StoreNotFoundError("experience for sale");
       const nowUtc = await databaseNow(client);
       const ipWindow = request.checkoutIpDigest === null ? null : await lockCheckoutIpWindow(client, request.checkoutIpDigest, nowUtc);
       if (ipWindow && ipWindow.retryAfterSeconds > 0) {

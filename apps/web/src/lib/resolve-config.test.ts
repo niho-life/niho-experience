@@ -562,6 +562,24 @@ describe("admin support console settings", () => {
     expect(resolveConfig({ EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED: "true" }).hostConnectOnboardingEnabled).toBe(false);
     expect(() => resolveConfig({ ...connect, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "" })).toThrow("EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED=true needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY");
     expect(() => resolveConfig({ ...connect, EXPERIENCE_HOST_ACCOUNTS_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED=true needs EXPERIENCE_HOST_ACCOUNTS_ENABLED=true");
+    // 代理受領 (#725): off by default and in the preview; http needs the platform sale's pieces, the publication API, the host mail and its three settings.
+    const agent = {
+      ...on, EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY: "sk_test_synthetic", EXPERIENCE_HOST_MAIL_ENABLED: "true", EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED: "true", EXPERIENCE_HOST_PUBLICATION_API_ENABLED: "true", EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID: "acct_PlatformSynthetic1",
+      EXPERIENCE_HOST_AGENT_SALES_ENABLED: "true", EXPERIENCE_HOST_AGENT_SALES_AGREEMENT_VERSION: "agent-sales-v1", EXPERIENCE_HOST_AGENT_RECEIVER_NAME: "Synthetic NIHO Receiver KK",
+    };
+    expect(resolveConfig(connect).hostAgentSalesEnabled).toBe(false);
+    expect(resolveConfig({ ...agent, EXPERIENCE_HOST_AGENT_SALES_ENABLED: "1" }).hostAgentSalesEnabled).toBe(false);
+    expect(resolveConfig({ EXPERIENCE_HOST_AGENT_SALES_ENABLED: "true" }).hostAgentSalesEnabled).toBe(false);
+    expect(resolveConfig(agent)).toMatchObject({ hostAgentSalesEnabled: true, hostAgentSalesAgreementVersion: "agent-sales-v1", hostAgentReceiverName: "Synthetic NIHO Receiver KK", hostAgentPayoutDelayDays: 3 });
+    expect(resolveConfig({ ...agent, EXPERIENCE_HOST_AGENT_PAYOUT_DELAY_DAYS: "7" }).hostAgentPayoutDelayDays).toBe(7);
+    for (const days of ["0", "31", "1.5", "x"]) expect(() => resolveConfig({ ...agent, EXPERIENCE_HOST_AGENT_PAYOUT_DELAY_DAYS: days })).toThrow("between 1 and 30");
+    for (const [name, message] of [
+      ["EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED", "needs EXPERIENCE_MANAGED_SALES_WEBHOOKS_ENABLED=true"], ["EXPERIENCE_HOST_PUBLICATION_API_ENABLED", "needs EXPERIENCE_HOST_PUBLICATION_API_ENABLED=true"],
+      ["EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID", "needs EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID"], ["EXPERIENCE_HOST_AGENT_SALES_AGREEMENT_VERSION", "needs EXPERIENCE_HOST_AGENT_SALES_AGREEMENT_VERSION"],
+      ["EXPERIENCE_HOST_AGENT_RECEIVER_NAME", "needs EXPERIENCE_HOST_AGENT_RECEIVER_NAME"], ["EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "needs EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY"],
+    ] as const) {
+      expect(() => resolveConfig({ ...agent, [name]: "" }), name).toThrow(`EXPERIENCE_HOST_AGENT_SALES_ENABLED=true ${message}`);
+    }
     expect(() => resolveConfig({ ...on, HOST_CONSOLE_ENABLED: "false" })).toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs HOST_CONSOLE_ENABLED=true");
     expect(() => resolveConfig({ ...host, EXPERIENCE_API_MODE: "http", EXPERIENCE_HOST_ACCOUNTS_ENABLED: "true" }))
       .toThrow("EXPERIENCE_HOST_ACCOUNTS_ENABLED=true needs EXPERIENCE_DATABASE_URL");

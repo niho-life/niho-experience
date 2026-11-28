@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import Stripe from "stripe";
+import { salesKindOf } from "@niho-experience/experience-store/sales-kind";
 import type { BookingRecord, RefundSubmission, SettlementTransferCommand, StripeRefundAnswer, StripeRefundStatus, StripeSettlementEvidence } from "@niho-experience/experience-store";
 
 const STRIPE_MINIMUM_EXPIRY_SECONDS = 30 * 60;
@@ -457,7 +458,10 @@ export async function createDirectCheckout(input: CreateDirectCheckoutInput): Pr
 /** PLATFORM charge: deliberately no Stripe-Account option and no application_fee_amount. */
 export async function createPlatformCheckout(input: Omit<CreateDirectCheckoutInput, "applicationFeeAmount">): Promise<DirectCheckoutResult> {
   assertBookingForCheckout(input.booking);
-  if (input.booking.sellerSnapshot.chargeMode !== "PLATFORM" || input.booking.sellerSnapshot.salesPlan !== "MANAGED_20") {
+  // MANAGED_20 (NIHO sells) and AGENT_15 (the host sells, NIHO takes the payment as its agent, #725): the same platform charge.
+  // A PLATFORM booking that is neither (sales-kind.ts) is refused.
+  const kind = input.booking.sellerSnapshot.chargeMode === "PLATFORM" ? salesKindOf(input.booking.sellerSnapshot) : null;
+  if (kind !== "MANAGED_20" && kind !== "AGENT_15") {
     throw new ExperiencePaymentsValidationError("The booking is not a managed platform charge.");
   }
   const customerEmail = checkoutEmail(input.customerEmail);
@@ -474,10 +478,30 @@ export async function createPlatformCheckout(input: Omit<CreateDirectCheckoutInp
     line_items: [{ quantity: 1, price_data: { currency: input.booking.pricingSnapshot.currency.toLowerCase(),
       unit_amount: input.booking.pricingSnapshot.totalAmount, product_data: { name: snapshotTitle(input.booking) } } }],
     metadata: { source: "niho-experience-platform", booking_id: bookingId },
-    payment_intent_data: { metadata: { source: "niho-experience-platform", booking_id: bookingId } },
+    payment_intent_data: {
+      metadata: { source: "niho-experience-platform", booking_id: bookingId },
+      // The payout (3b-2) finds the payment by this group; the prefix is not the settlement's.
+      ...(kind === "AGENT_15" ? { transfer_group: `niho-experience-agent-payout:${bookingId}` } : {}),
+    },
+    ...(kind === "AGENT_15" ? { custom_text: { submit: { message: agentSubmitMessage(input.booking, input.locale) } } } : {}),
   }, { idempotencyKey: `experience-platform-checkout:${bookingId}` });
   if (!session.id || !session.url) throw new ExperiencePaymentsValidationError("Stripe returned a Checkout Session without a redirect URL.");
   return { checkoutSessionId: session.id, checkoutUrl: platformCheckoutUrl(session.url) };
+}
+
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+const SUBMIT_MESSAGE_LIMIT = 1200;
+
+/** Stripe shows this beside the pay button: who the seller is, and who takes the payment for it (代理受領, #725). */
+function agentSubmitMessage(booking: Readonly<BookingRecord>, locale: "auto" | "ja" | undefined): string {
+  const clean = (value: string | undefined) => (value ?? "").replace(CONTROL_CHARACTERS, " ").replace(/\s+/g, " ").trim();
+  const seller = clean(booking.sellerSnapshot.displayName);
+  const agent = clean(booking.sellerSnapshot.receivingAgentName);
+  if (seller.length === 0 || agent.length === 0) throw new ExperiencePaymentsValidationError("The agent-sales booking has no seller or receiving party name.");
+  const message = locale === "ja"
+    ? `販売者：${seller}。お支払いは${agent}が販売者に代わって受け取ります。`
+    : `Seller: ${seller}. Your payment is received by ${agent} on the seller's behalf.`;
+  return message.length > SUBMIT_MESSAGE_LIMIT ? `${message.slice(0, SUBMIT_MESSAGE_LIMIT - 1)}…` : message;
 }
 
 function platformCheckoutUrl(value: string): string {

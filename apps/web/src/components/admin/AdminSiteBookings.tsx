@@ -864,7 +864,8 @@ export function AdminSiteBookings({ initial, supportBookings, notifications = []
           {actions ? <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-4 py-3">{actions}</div> : null}
         </section>
         <SupportCasePanel booking={booking} operationLock={operationLock} onBeginContact={beginContact} onContactUnknown={contactUnknown} onReleaseContact={releaseContact} onSessionExpired={expireSession} />
-        {compensationFace(booking.publicBookingId)}
+        {/* 代理受領 (#725): the host's share is sent by NIHO after the experience (3b-2), not paid by the 20% manual compensation. */}
+        {booking.salesKind === "AGENT_15" ? null : compensationFace(booking.publicBookingId)}
         {settlement ? <details className={FOLD}>
           <FoldSummary>決済費用</FoldSummary>
           <div className="border-t border-line px-4 pb-4 [&>section]:mt-3 [&>section]:rounded-none [&>section]:border-0 [&>section]:p-0">

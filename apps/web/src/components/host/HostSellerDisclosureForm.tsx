@@ -13,7 +13,7 @@ import {
   type SellerKind,
 } from "./seller-disclosure-command";
 
-type Load = { seller: { sellerDisplayName: string; disclosure: SellerDisclosure | null }; consentVersion: string };
+type Load = { seller: { sellerDisplayName: string; disclosure: SellerDisclosure | null; nameEditable?: boolean }; consentVersion: string };
 
 const FIELD = "min-h-11 w-full rounded-xl border border-line-strong bg-canvas px-3 py-2 disabled:bg-sand";
 const EMPTY = { representativeName: "", publicAddress: "", publicPhone: "", publicEmail: "" };
@@ -33,6 +33,8 @@ export function HostSellerDisclosureForm({ providerId = null }: { providerId?: s
   const [loaded, setLoaded] = useState<Load | null>(null);
   const [sellerKind, setSellerKind] = useState<SellerKind>("PERSON");
   const [fields, setFields] = useState(EMPTY);
+  // 販売者プロフィールの無いホスト（代理受領, #725）は、名前を自分で決める。
+  const [selfName, setSelfName] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pendingCommand, setPendingCommand] = useState<PendingSellerCommand | null>(null);
@@ -49,6 +51,7 @@ export function HostSellerDisclosureForm({ providerId = null }: { providerId?: s
   const apply = (value: Load, status = "") => {
     setLoaded(value);
     const disclosure = value.seller.disclosure;
+    setSelfName(disclosure?.method === "NATIVE" ? disclosure.sellerDisplayName : value.seller.sellerDisplayName);
     if (disclosure && disclosure.method === "NATIVE") {
       setSellerKind(disclosure.sellerKind);
       setFields({
@@ -144,7 +147,7 @@ export function HostSellerDisclosureForm({ providerId = null }: { providerId?: s
       : {
           expectedVersion: current?.version ?? null,
           disclosure: {
-            method: "NATIVE" as const, sellerKind, sellerDisplayName: loaded.seller.sellerDisplayName,
+            method: "NATIVE" as const, sellerKind, sellerDisplayName: loaded.seller.nameEditable === undefined ? loaded.seller.sellerDisplayName : selfName,
             representativeName: sellerKind === "BUSINESS" ? fields.representativeName : null,
             publicAddress: fields.publicAddress, publicPhone: fields.publicPhone, publicEmail: fields.publicEmail,
             consentVersion: loaded.consentVersion, accepted,
@@ -168,7 +171,9 @@ export function HostSellerDisclosureForm({ providerId = null }: { providerId?: s
       <p className="mt-2 rounded-xl bg-warn-pale p-3 text-sm font-bold">ここへ入力する氏名・住所・電話番号・メールアドレスは、旅行者に公開されます。NIHOの本人情報やStripeの確認情報は自動でコピーされません。</p>
       <div className="mt-4 grid gap-4">
         <label className="grid gap-1 font-bold">販売者区分<select className={FIELD} disabled={locked} value={sellerKind} onChange={(event) => setSellerKind(event.target.value as SellerKind)}><option value="PERSON">個人</option><option value="BUSINESS">法人・事業者</option></select></label>
-        <label className="grid gap-1 font-bold">氏名・名称<input className={FIELD} value={loaded.seller.sellerDisplayName} disabled /><span className="text-xs font-normal text-muted">Experienceの法的販売者名と一致させています。この画面では変更できません。</span></label>
+        {loaded.seller.nameEditable !== undefined
+          ? <label className="grid gap-1 font-bold">氏名・名称<input className={FIELD} value={selfName} disabled={locked || !loaded.seller.nameEditable} required maxLength={300} onChange={(event) => setSelfName(event.target.value)} /><span className="text-xs font-normal text-muted">{loaded.seller.nameEditable ? "旅行者に公開される販売者の名前です。「サポート 15%（NIHO が代金を受け取る）」で売り始めると、受付をやめるまで変えられません。" : "受付中の体験があるため、受付をやめるまで変えられません。"}</span></label>
+          : <label className="grid gap-1 font-bold">氏名・名称<input className={FIELD} value={loaded.seller.sellerDisplayName} disabled /><span className="text-xs font-normal text-muted">Experienceの法的販売者名と一致させています。この画面では変更できません。</span></label>}
         {sellerKind === "BUSINESS" ? <label className="grid gap-1 font-bold">業務責任者<input className={FIELD} disabled={locked} required maxLength={200} value={fields.representativeName} onChange={(event) => setFields({ ...fields, representativeName: event.target.value })} /></label> : null}
         <label className="grid gap-1 font-bold">公開用住所<textarea className={FIELD} disabled={locked} required maxLength={500} rows={3} value={fields.publicAddress} onChange={(event) => setFields({ ...fields, publicAddress: event.target.value })} /></label>
         <label className="grid gap-1 font-bold">公開用電話番号<input className={FIELD} disabled={locked} required maxLength={40} inputMode="tel" value={fields.publicPhone} onChange={(event) => setFields({ ...fields, publicPhone: event.target.value })} /></label>

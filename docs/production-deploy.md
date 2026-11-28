@@ -120,6 +120,7 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED` | `HOST_TEAM_INVITATIONS_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストチーム・ホストの NIHO ログイン・ホストメール | — | — | — |
 | `EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED` | `HOST_SELF_REGISTRATION_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストの NIHO ログイン・ホストメール | — | — | — |
 | `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED` | `HOST_CONNECT_ONBOARDING_ENABLED` | ホストの画面・DB・Experienceホストアカウント（Stripe のキーは `HOST_ACCOUNTS_ENABLED` と同じ参照）。**本番では 3b（#725）が入るまで OFF**。[host-payouts.md](host-payouts.md) | — | — | — |
+| `EXPERIENCE_HOST_AGENT_SALES_ENABLED` | `HOST_AGENT_SALES_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストメール・ゲストメール・ホスト公開API・プラットフォームの Webhook（`MANAGED_SALES_WEBHOOKS_ENABLED`）・受取口座の登録。**本番はさらに送金の flag（3b-2。まだ表に無いので、それが入るまで本番では ON にできない。stg は ON にできる）**。[host-payouts.md](host-payouts.md) | `HOST_AGENT_SALES_AGREEMENT_VERSION`、`HOST_AGENT_RECEIVER_NAME`（受領者の正式名）、`HOST_AGENT_PAYOUT_DELAY_DAYS`（1〜30、省略で 3）。プラットフォームの口座は `MANAGED_PLATFORM_ACCOUNT_ID` | — | — |
 | `EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED` | `OCCURRENCE_ASSIGNMENT_ENABLED` | ホストの画面・DB・完全代行の販売 | — | — | — |
 | `EXPERIENCE_JAPANESE_SITE_ENABLED` | `JAPANESE_SITE_ENABLED` | ホストの画面・DB（配線のため。機能は公開サイト） | — | — | — |
 | `EXPERIENCE_CHANNEL_WATCHDOG_ENABLED` | `CHANNEL_WATCHDOG_ENABLED` | ホストの画面・DB | — | — | `EXPERIENCE_CHANNEL_WATCHDOG_AUDIENCE`＝サイトの URL、`EXPERIENCE_CHANNEL_WATCHDOG_SERVICE_ACCOUNT_EMAIL`＝`experience-ota-watchdog@<project>` |
@@ -279,3 +280,12 @@ ADR 0002・0003への移行後は、成立済み予約・返金・精算をExper
 6. Connect の料金（口座ごとの月額・入金ごとの料金。日本の料金）を確かめる。NIHO の負担になる。
 7. Stripe が Express の利用者へ送るメールと、NIHO の「受取口座に追加の情報が必要です」のメール（`EXPERIENCE_HOST_MAIL_ENABLED` が ON のとき、メール job が送る）が重ならないか、stg で確かめる。
 8. **受入の手順：stg の test mode で、実際の `accounts.retrieve` の応答（作った直後と、登録を進めた各段階）を取り、`packages/experience-payments/test/payout-account.test.ts` の fixture と照合する。** 特に `controller`（`fees.payer` は Express で `application_express` で返ることがあり、コードは `application` と `application_express` の両方を受け入れる。`losses.payments`・`requirement_collection`・`stripe_dashboard.type` は SDK の型に同じ意味の別の値が無く、完全一致）、`default_currency`、`capabilities.transfers`、`requirements` を見る。作った直後が「入力の途中」になり、「この口座は使えません」にならないことを確かめてから ON にする。
+
+## サポート 15% の代理受領（3b-1、#725）の前提
+
+`EXPERIENCE_HOST_AGENT_SALES_ENABLED` は既定 OFF。**本番では、送金（3b-2）の flag が表に入るまで、deploy の検査が ON を拒む**（表の `prodNeeds` に `EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED` がある）。stg は ON にでき、stg の test mode で流れを確かめられる（その前に 0096 を適用する）。
+
+1. **migration `0096` は、コードより先に適用する（必須。flag が OFF でも）。** 販売の読み取り（`loadSellable`・`sellableSlugs`・受付の検査・販売プランの版の列）は flag に関係なく `seller_party` と `provider_agent_sales_consents` を読むので、0096 より先にコードが出ると、全商品の予約と一覧が 500 になる。その runtime grants（`provider_agent_sales_consents`：INSERT と `revoked_at`・`revoked_by_host_account_id` の UPDATE だけ）も同時に。0096 は版の表に列と CHECK を足すだけで、既存の行は変わらない。
+2. 20% の販売と同じく、プラットフォームの Webhook（`EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET`）・口座（`EXPERIENCE_MANAGED_PLATFORM_ACCOUNT_ID`）・キーを使う。代理受領の Checkout は `payment_intent_data.transfer_group` を持つ（送金が決済を見つけるため）。
+3. 代理受領の規約（版は `EXPERIENCE_HOST_AGENT_SALES_AGREEMENT_VERSION`）と受領者の正式名は、法務の確認（host-payouts.md「本番で開く前の確認」）のあとに設定する。
+4. stg の test mode で、代理受領の予約を 1 件作り、Checkout の文言（販売者と受領者）・確認メール・返金が 20% の経路で通ることを確かめてから、3b-2 に進む。

@@ -35,6 +35,7 @@ export function projectSitePublicSaleTerms(terms: PublicBookingTerms | null): Si
     currency: terms.currency,
     sellerDisplayName: terms.sellerDisplayName,
     sellerDisclosureUrl: terms.sellerDisclosureUrl,
+    ...(terms.paymentCollectedBy === undefined ? {} : { paymentCollectedBy: terms.paymentCollectedBy }),
     ...(terms.salesPlanRevision === undefined ? {} : { salesPlanRevision: terms.salesPlanRevision }),
     offers: terms.offers,
     conditionsVersion: terms.conditionsVersion,

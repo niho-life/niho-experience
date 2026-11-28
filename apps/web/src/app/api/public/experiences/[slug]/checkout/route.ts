@@ -70,6 +70,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       currentConsentVersion: config.guestBookingConsentVersion,
       managedSalesEnabled: process.env.EXPERIENCE_MANAGED_SALES_ENABLED === "true"
         && Boolean(process.env.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET?.trim() && stripeKey?.trim()),
+      // 代理受領 (#725): its own flag, independent of the 20% sale's. The same platform webhook and key carry it.
+      agentSalesEnabled: config.hostAgentSalesEnabled
+        && Boolean(process.env.EXPERIENCE_STRIPE_PLATFORM_WEBHOOK_SECRET?.trim() && stripeKey?.trim()),
     });
   } catch (error) {
     if (error instanceof GuestCheckoutError) {

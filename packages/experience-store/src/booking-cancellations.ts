@@ -9,6 +9,7 @@ import { lockProviderInventory } from "./inventory.ts";
 import { enqueueCalendarRecalculation } from "./inventory-outbox.ts";
 import { enqueueManagedBookingCancelled } from "./managed-booking-mail.ts";
 import { isoValue, type DbRow } from "./rows.ts";
+import { salesKindOf, type SalesKind } from "./sales-kind.ts";
 import { withTransaction } from "./transaction.ts";
 import type { GuestCancellationPolicy, HostActor } from "./types.ts";
 import { assertCanonicalInstant, assertStoreIdentifier } from "./validation.ts";
@@ -233,6 +234,8 @@ export interface SupportQueueBooking {
   readonly freeCancellationUntilUtc: string | null;
   /** True only when this booking itself records current-version ON consent. */
   readonly supportEligible: boolean;
+  /** What kind of sale this booking is, from its own snapshot (sales-kind.ts): the office shows the 20% reward panel for MANAGED_20 only (#725). */
+  readonly salesKind?: SalesKind | null | undefined;
   /** The guest's mail server refused the address (#375), so the booking's emails are not sent. Only the kind; absent while mail is delivered. */
   readonly mailUndeliverable?: "NO_SUCH_ADDRESS" | "NO_SUCH_DOMAIN";
 }
@@ -956,6 +959,12 @@ function queueBookingFromRow(row: DbRow): SupportQueueBooking {
       && Number.isSafeInteger(fee.supportAgreementRevision)
       && Number(fee.supportAgreementRevision) > 0)
       || (seller.chargeMode === "PLATFORM" && seller.salesPlan === "MANAGED_20" && seller.feeBasisPoints === 2000),
+    salesKind: salesKindOf({
+      chargeMode: seller.chargeMode === "PLATFORM" ? "PLATFORM" : "CONNECT_DIRECT",
+      salesPlan: typeof seller.salesPlan === "string" ? seller.salesPlan as "MANAGED_20" | "SUPPORTED_15" | "INDEPENDENT_10" : undefined,
+      sellerParty: seller.sellerParty === "NIHO" || seller.sellerParty === "PROVIDER" ? seller.sellerParty : undefined,
+      feeBasisPoints: typeof seller.feeBasisPoints === "number" ? seller.feeBasisPoints : undefined,
+    }),
     ...(row.mail_suppression_classification === "NO_SUCH_ADDRESS" || row.mail_suppression_classification === "NO_SUCH_DOMAIN"
       ? { mailUndeliverable: row.mail_suppression_classification } : {}),
   };

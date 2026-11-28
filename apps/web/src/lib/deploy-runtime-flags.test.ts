@@ -26,6 +26,7 @@ interface Flag {
   value?: string;
   defaults?: Partial<Record<Target, boolean>>;
   needs?: string[];
+  prodNeeds?: string[];
   conflicts?: string[];
   secrets?: Item[];
   settings?: Item[];
@@ -59,6 +60,7 @@ const SETTING: Record<string, string> = {
   sellerReference: "seller_sample",
   sellerName: "試験用販売事業者",
   stripeAccount: "acct_SampleManaged1",
+  payoutDelayDays: "3",
   bucketName: "experience-test-public-media",
   mailbox: "NIHO Sample <noreply@example.com>",
   httpsUrl: "https://example.com/privacy",
@@ -122,6 +124,7 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
   EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED: "hostTeamInvitationsEnabled",
   EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED: "hostSelfRegistrationEnabled",
   EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED: "hostConnectOnboardingEnabled",
+  EXPERIENCE_HOST_AGENT_SALES_ENABLED: "hostAgentSalesEnabled",
   EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED: "occurrenceAssignmentEnabled",
   EXPERIENCE_JAPANESE_SITE_ENABLED: "japaneseSiteEnabled",
   EXPERIENCE_CHANNEL_WATCHDOG_ENABLED: "channelWatchdogEnabled",
@@ -139,6 +142,15 @@ const CONFIG_KEY: Record<string, keyof ReturnType<typeof resolveConfig>> = {
 
 const flagId = (flag: Flag) => flag.id ?? flag.env;
 const byId = new Map(FLAGS.map((flag) => [flagId(flag), flag]));
+/**
+ * Production-only needs (`prodNeeds`) that are no entry of the table yet: the payout flag of 3b-2 (#725), named here and nowhere else. A flag that
+ * needs it cannot be turned on in production until the table gets that entry; staging is not held back. Any other need or prodNeed that is no entry
+ * (a misspelling) fails "every need is a capability or a flag of the table".
+ */
+const PENDING_PROD_NEEDS = new Set(["EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED"]);
+const definedNeed = (need: string) => need.split("|").some((one) => CAPABILITIES.includes(one) || byId.has(one));
+/** The flags a target can turn on at all. */
+const reachable = (target: Target) => FLAGS.filter((flag) => (flag.prodNeeds ?? []).every((need) => target !== "prod" || !PENDING_PROD_NEEDS.has(need)));
 
 /** The flag's own variables: on, with every setting and Secret reference it takes. */
 function varsOf(target: Target, flag: Flag): Vars {
@@ -158,7 +170,7 @@ function closure(target: Target, id: string, seen = new Set<string>()): Vars {
   let vars = varsOf(target, flag);
   for (const need of flag.needs ?? []) {
     const first = need.split("|")[0]!;
-    if (!CAPABILITIES.includes(first)) vars = { ...closure(target, first, seen), ...vars };
+    if (!CAPABILITIES.includes(first) && byId.has(first)) vars = { ...closure(target, first, seen), ...vars };
   }
   return vars;
 }
@@ -453,7 +465,7 @@ describe("the deploy workflows' feature flags", () => {
 
   for (const target of ["stg", "prod"] as const) {
     it(`${target}: each flag with what it needs starts the server and turns on in resolve-config`, () => {
-      for (const flag of FLAGS) {
+      for (const flag of reachable(target)) {
         const id = flagId(flag);
         const resolved = resolve(target, closure(target, id));
         expect(resolved.problems, id).toEqual([]);
@@ -505,6 +517,30 @@ describe("the deploy workflows' feature flags", () => {
       }
     });
   }
+
+  it("opens agent sales (3b-1) in staging, and in production only with the payout flag of 3b-2, which the table does not have yet", () => {
+    const sales = byId.get("EXPERIENCE_HOST_AGENT_SALES_ENABLED")!;
+    expect(sales.prodNeeds).toEqual(["EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED"]);
+    expect(byId.has("EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED")).toBe(false);
+    expect(reachable("stg")).toContain(sales);
+    expect(reachable("prod")).not.toContain(sales);
+    const vars = (target: Target) => ({ ...closure(target, "EXPERIENCE_HOST_AGENT_SALES_ENABLED") });
+    const stg = resolve("stg", vars("stg"));
+    expect(stg.problems).toEqual([]);
+    expect(resolveConfig(revision("stg", stg)).hostAgentSalesEnabled).toBe(true);
+    expect(resolve("prod", vars("prod")).problems).toEqual(["EXPERIENCE_HOST_AGENT_SALES_ENABLED (PROD_HOST_AGENT_SALES_ENABLED) needs EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED"]);
+    for (const target of ["stg", "prod"] as const) {
+      const off = resolve(target, {});
+      expect(Object.keys(off.env).some((name) => name.startsWith("EXPERIENCE_HOST_AGENT_"))).toBe(false);
+    }
+  });
+
+  it("every need and prodNeed is a capability or a flag of the table (a misspelling fails), except the one pending production need", () => {
+    for (const flag of FLAGS) {
+      for (const need of flag.needs ?? []) expect(definedNeed(need), `${flagId(flag)} needs ${need}`).toBe(true);
+      for (const need of flag.prodNeeds ?? []) expect(definedNeed(need) || PENDING_PROD_NEEDS.has(need), `${flagId(flag)} prodNeeds ${need}`).toBe(true);
+    }
+  });
 
   it("refuses Experience host accounts with a flag that sends the NIHO host access token, as resolve-config does (ADR 0003)", () => {
     const accounts = byId.get("EXPERIENCE_HOST_ACCOUNTS_ENABLED")!;

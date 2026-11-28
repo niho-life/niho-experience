@@ -4,7 +4,9 @@ import {
   StoreConflictError,
   StoreValidationError,
   type SellerDisclosureInput,
+  type SellerDisclosureOptions,
 } from "@niho-experience/experience-store";
+import { config } from "@/lib/config";
 import { noStoreJson } from "@/lib/host/server";
 import { ResponseBodyTooLarge, readBoundedJson } from "@/lib/read-bounded-json";
 import { publicationHostBoundary, publicationHostMutationAllowed } from "./publication-host-boundary";
@@ -53,10 +55,13 @@ function storeError(caught: unknown): Response {
 
 async function prepared(operation: "READ" | "OWNER", providerId: string | null) {
   // The seller disclosure is the registered seller's: it needs the seller (SELLER_SETUP_REQUIRED without one) but no Stripe.
-  const boundary = await publicationHostBoundary(operation, { providerId, sales: "seller" });
+  // With 代理受領 (#725) a host with no seller profile also keeps a disclosure (it names itself), so the sale side is not required here: the store
+  // checks, for a host with a profile, the same seller match as before, and for one without, that it is an active OWNER signed in with a host account.
+  const options = { agentSales: config.hostAgentSalesEnabled && config.hostAccountsEnabled };
+  const boundary = options.agentSales ? await publicationHostBoundary(operation, { providerId, sales: "none" }) : await publicationHostBoundary(operation, { providerId, sales: "seller" });
   if (!boundary.ok) return boundary;
   const repository = providerSellerDisclosureRepository();
-  return repository ? { ok: true as const, actor: boundary.value.actor, repository } : { ok: false as const, response: error("UNAVAILABLE", 503) };
+  return repository ? { ok: true as const, actor: boundary.value.actor, repository, options: (options.agentSales ? [options] : []) as readonly [SellerDisclosureOptions] | readonly [] } : { ok: false as const, response: error("UNAVAILABLE", 503) };
 }
 
 export async function getSellerDisclosure(request: Request): Promise<Response> {
@@ -64,7 +69,7 @@ export async function getSellerDisclosure(request: Request): Promise<Response> {
   const context = await prepared("READ", requested.providerId);
   if (!context.ok) return context.response;
   try {
-    return noStoreJson({ seller: await context.repository.getForOwner(context.actor), consentVersion: SELLER_DISCLOSURE_CONSENT_VERSION });
+    return noStoreJson({ seller: await context.repository.getForOwner(context.actor, ...context.options), consentVersion: SELLER_DISCLOSURE_CONSENT_VERSION });
   } catch (caught) { return storeError(caught); }
 }
 
@@ -81,7 +86,7 @@ export async function putSellerDisclosure(request: Request): Promise<Response> {
   const context = await prepared("OWNER", requested.providerId);
   if (!context.ok) return context.response;
   try {
-    const saved = await context.repository.save(context.actor, { commandId: body.commandId, expectedVersion: body.expectedVersion as number | null, disclosure });
+    const saved = await context.repository.save(context.actor, { commandId: body.commandId, expectedVersion: body.expectedVersion as number | null, disclosure }, ...context.options);
     return noStoreJson({ disclosure: saved });
   } catch (caught) { return storeError(caught); }
 }
@@ -97,7 +102,7 @@ export async function deleteSellerDisclosure(request: Request): Promise<Response
   const context = await prepared("OWNER", requested.providerId);
   if (!context.ok) return context.response;
   try {
-    const withdrawn = await context.repository.withdraw(context.actor, { commandId: body.commandId, expectedVersion: Number(body.expectedVersion) });
+    const withdrawn = await context.repository.withdraw(context.actor, { commandId: body.commandId, expectedVersion: Number(body.expectedVersion) }, ...context.options);
     return noStoreJson({ disclosure: withdrawn });
   } catch (caught) { return storeError(caught); }
 }

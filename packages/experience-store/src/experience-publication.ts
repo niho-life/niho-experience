@@ -22,6 +22,8 @@ import { StoreAccessDeniedError, StoreConflictError, StoreNotFoundError, StoreVa
 import { isHostAccountId } from "./host-accounts.ts";
 import { ownerMailDestinationMissing } from "./host-mail-shared.ts";
 import { adminPayoutConsentIsCurrent, payoutConsentStillCounts } from "./payout-account-consents.ts";
+import { countingAgentConsent, nativeDisclosureName } from "./agent-consent.ts";
+import { salesKindOf } from "./sales-kind.ts";
 import { enqueueListingSuspensionNotification, type ListingSuspensionChange } from "./host-notification-outbox.ts";
 import { isHostSellerRef } from "./host-sellers.ts";
 import {
@@ -50,6 +52,8 @@ import { assertCanonicalInstant, assertMoney, assertNonEmptyText, assertStoreIde
 
 export type ExperiencePublicationBlocker =
   | "ACCOUNT_NOT_USABLE"
+  /** 代理受領 (#725): the OWNER's consent to agent sales is missing, withdrawn, given by someone who is no longer OWNER, or not at the current version. */
+  | "AGENT_CONSENT_REQUIRED"
   | "CANCELLATION_TERMS_REQUIRED"
   | "CONNECT_NOT_READY"
   | "CONSENT_OUTDATED"
@@ -70,6 +74,8 @@ export type ExperiencePublicationBlocker =
   | "READINESS_MISSING"
   | "SCHEDULE_REQUIRED"
   | "SELLER_MISMATCH"
+  /** 代理受領 (#725): the host's public seller disclosure (特定商取引法の表示) is missing, withdrawn, or no longer the name the product is sold under. */
+  | "SELLER_DISCLOSURE_REQUIRED"
   /** The product has no seller (its provider has no seller profile yet, #704): it can be edited, not sold. */
   | "SELLER_REQUIRED"
   | "SLUG_IN_USE";
@@ -82,6 +88,17 @@ export interface PublishInput {
   readonly expectedSaleTermsVersion?: number | null;
   readonly consentVersion: string;
   readonly checks: ExperiencePublicationContentChecks;
+  /**
+   * 代理受領 (#725): present on a publish that starts bookings. The platform account as Stripe showed it just now, and the agent-sales
+   * agreement version the host must have consented to. Absent (a draft preview, saveDraft, saveSaleTerms): the same checks run
+   * without the Stripe and version comparisons.
+   */
+  readonly agentCheck?: AgentPublishCheck;
+}
+
+export interface AgentPublishCheck {
+  readonly agreementVersion: string;
+  readonly accountCheck: { readonly stripeConnectAccountRef: string; readonly checkedAtUtc: string } | null;
 }
 
 export class ExperiencePublicationBlockedError extends StoreValidationError {
@@ -1048,6 +1065,9 @@ async function blockers(
   adminPayout?: AdminPayoutCheck,
   /** PAGE: only what a public page needs. ALL: the page plus what starting bookings needs (#705). */
   scope: "PAGE" | "ALL" = "ALL",
+  agentCheck?: AgentPublishCheck,
+  /** A publish that starts bookings: an agent-sales product without an `agentCheck` is not ready (fail closed). */
+  requireAgentCheck = false,
 ): Promise<ExperiencePublicationBlocker[]> {
   const page = scope === "PAGE";
   const result: ExperiencePublicationBlocker[] = [];
@@ -1109,7 +1129,7 @@ async function blockers(
   );
   const managedPlan = await client.query<DbRow>(
     `SELECT plan.plan,plan.charge_mode,plan.seller_display_name,plan.seller_niho_account_ref,
-            plan.stripe_account_ref,plan.pilot_approved,state.phase
+            plan.stripe_account_ref,plan.pilot_approved,plan.seller_party,plan.fee_basis_points,state.phase
        FROM experience_product_sales_plan_states state
        JOIN experience_product_sales_plan_versions plan
          ON plan.provider_id=state.provider_id AND plan.product_id=state.product_id AND plan.revision=state.current_revision
@@ -1117,12 +1137,17 @@ async function blockers(
     [product.providerId, product.id],
   );
   const managed = managedPlan.rows[0]?.plan === "MANAGED_20" && managedPlan.rows[0]?.charge_mode === "PLATFORM";
+  // 代理受領 (#725): no fee settings, support consent, readiness or payout account. Its own checks come below.
+  const agent = !managed && managedPlan.rows[0] !== undefined && salesKindOf({
+    chargeMode: managedPlan.rows[0].charge_mode as "PLATFORM" | "CONNECT_DIRECT", salesPlan: managedPlan.rows[0].plan as "SUPPORTED_15",
+    sellerParty: managedPlan.rows[0].seller_party as "PROVIDER", feeBasisPoints: Number(managedPlan.rows[0].fee_basis_points),
+  }) === "AGENT_15";
   // A product with no seller gets SELLER_REQUIRED in place of the fee setting, readiness and payout reasons. Its content
   // reasons (manuscript, photos, terms, schedule, price, slug) stay, since the host still has to finish them (#704).
   const seller = product.seller;
   if (page) { /* fee settings and support consent only matter for bookings */ }
-  else if (!managed && seller !== null && !feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
-  else if (!managed && seller !== null && (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
+  else if (!managed && !agent && seller !== null && !feeSettings.rows[0]) result.push("FEE_SETTINGS_REQUIRED");
+  else if (!managed && !agent && seller !== null && (feeSettings.rows[0].support_consent_version !== EXPERIENCE_SUPPORT_CONSENT_VERSION
     || feeSettings.rows[0].support_agreement_revision === null)) result.push("SUPPORT_CONSENT_REQUIRED");
   if (facts.rows[0]?.sale_terms !== true || product.cancellationTermsRef.trim() === "") result.push("CANCELLATION_TERMS_REQUIRED");
   if (!page && facts.rows[0]?.schedule !== true) result.push("SCHEDULE_REQUIRED");
@@ -1147,6 +1172,27 @@ async function blockers(
     result.push("SELLER_REQUIRED");
     result.push(...await pageOwnerBlockers(client, product.providerId));
     return [...new Set(result)];
+  }
+
+  if (agent) {
+    const plan = managedPlan.rows[0]!;
+    // The Admin proxy does not publish agent sales (the host's own agreement is the OWNER's act).
+    if (adminPayout !== undefined) result.push("SELLER_MISMATCH");
+    if (plan.phase !== "ACTIVE" || plan.seller_display_name !== seller.sellerDisplayName
+      || plan.seller_niho_account_ref !== seller.sellerNihoAccountRef
+      || plan.stripe_account_ref !== seller.stripeConnectAccountRef) result.push("SELLER_MISMATCH");
+    const consent = await countingAgentConsent(client, product.providerId, String(plan.seller_niho_account_ref), true);
+    if (consent === null || (agentCheck !== undefined && consent.consent_version !== agentCheck.agreementVersion)) result.push("AGENT_CONSENT_REQUIRED");
+    const disclosureName = await nativeDisclosureName(client, product.providerId, true);
+    if (disclosureName === null || disclosureName !== plan.seller_display_name) result.push("SELLER_DISCLOSURE_REQUIRED");
+    if (agentCheck === undefined && requireAgentCheck) result.push("CONNECT_NOT_READY");
+    if (agentCheck !== undefined) {
+      const checkedAt = agentCheck.accountCheck ? Date.parse(agentCheck.accountCheck.checkedAtUtc) : NaN;
+      const now = Date.parse(await databaseNow(client));
+      if (agentCheck.accountCheck?.stripeConnectAccountRef !== plan.stripe_account_ref
+        || !Number.isFinite(checkedAt) || checkedAt > now || now - checkedAt >= 5 * 60_000) result.push("CONNECT_NOT_READY");
+    }
+    return result;
   }
 
   if (managed) {
@@ -2998,7 +3044,8 @@ export class ExperiencePublicationRepository {
         const standing = await client.query<DbRow>("SELECT consent_version FROM experience_product_publications WHERE id=$1", [state.bookingPublicationId]);
         consentVersion = standing.rows[0] ? String(standing.rows[0].consent_version) : null;
       }
-      const blocked = await blockers(client, product, input.checks, withBooking ? consentVersion : null, state, undefined, withBooking ? "ALL" : "PAGE");
+      const blocked = await blockers(client, product, input.checks, withBooking ? consentVersion : null, state, undefined, withBooking ? "ALL" : "PAGE",
+        requested === "BOOKING" ? input.agentCheck : undefined, requested === "BOOKING");
       if (blocked.length > 0) throw new ExperiencePublicationBlockedError(blocked);
       // Read before anything is written: is this the host's first page / first bookings (#711)?
       const firsts = await readHostFirsts(client, actor.providerId);
