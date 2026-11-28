@@ -6,6 +6,7 @@ import { getReviewSummaries } from "@/lib/journey";
 import { getJapaneseCopy } from "@/lib/localized-content";
 import { pickRelatedExperiences } from "@/lib/related-experiences";
 import { withReviewLines } from "@/lib/reviews-ui";
+import { bookableFirst, saleablePublication } from "@/lib/experience-list-catalog";
 import { withoutNativeSlugs } from "./dedupe-slugs";
 import { sitePublicationCard } from "./site-card-model";
 import { listSitePublicExperiences } from "./site-publications";
@@ -25,7 +26,9 @@ export async function relatedSiteExperienceCards(currentSlug: string, locale: "e
       ja ? Promise.resolve(null) : readListedExperiences(),
       loadCategoryBySlug(),
     ]);
-    const native = catalog.experiences.filter(({ publication, saleTerms }) => saleTerms !== null && saleTerms.offers.length > 0 && (!ja || publication.japanese));
+    // A page whose bookings are not open yet is suggested too (#706), after the ones that can be booked.
+    const nativeAll = catalog.experiences.filter(({ publication }) => !ja || publication.japanese);
+    const native = bookableFirst(nativeAll.map((entry) => ({ entry, bookingAvailable: saleablePublication(entry) }))).map(({ entry }) => entry);
     // A slug sold here is never also read from the NIHO side (#643): the native card stays.
     const legacy = withoutNativeSlugs(listed ?? [], [...catalog.claimedSlugs, ...native.map(({ publication }) => publication.slug)]);
     // List-page order: NIHO first, then this site's own. Native publications carry no themes yet, so ties keep that order.
@@ -44,7 +47,7 @@ export async function relatedSiteExperienceCards(currentSlug: string, locale: "e
     let nativeCards: CardModel[];
     if (ja) {
       const { copy } = await getJapaneseCopy();
-      nativeCards = chosen.flatMap((entry) => sitePublicationCard(entry, "ja", { copy }) ?? []);
+      nativeCards = chosen.flatMap((entry) => sitePublicationCard(entry, "ja", { copy, includePageOnly: true }) ?? []);
     } else {
       nativeCards = chosen.map((entry) => sitePublicationCard(entry));
     }

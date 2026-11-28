@@ -80,9 +80,13 @@ export function ExperienceList({
     setDate(initialDate);
     setGuests(initialGuests);
   }
-  const { availability, retry } = useCardAvailability(cards, preview, bookingSources);
+  // A page whose bookings are not open yet has no dates to read (#706); it has no match on a chosen day either.
+  const bookableCards = useMemo(() => cards.filter((card) => card.bookingAvailable !== false), [cards]);
+  const { availability, retry } = useCardAvailability(bookableCards, preview, bookingSources);
 
-  const ready = availability.state === "ready" ? availability.bySlug : null;
+  // With nothing to read there is nothing to wait for: a chosen day then matches nothing.
+  const noReads = useMemo(() => new Map<string, Occurrence[]>(), []);
+  const ready = availability.state === "ready" ? availability.bySlug : bookableCards.length === 0 ? noReads : null;
   const failed = availability.state === "failed";
 
   // The English API's own date filter already narrowed the cards to the day: nothing to mark in the calendar.

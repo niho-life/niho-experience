@@ -8,7 +8,7 @@ import { config, isExperienceStaging } from "@/lib/config";
 import type { CardModel } from "@/lib/card-model";
 import { parseDateParam, parseGuestsParam, SEARCH_DAYS, upcomingDays } from "@/lib/date-filter";
 import { categoryLabel, categoryLeadJa, filterByCategory, parseCategoryParam, resolveCategories } from "@/lib/experience-categories";
-import { japaneseListPublication } from "@/lib/experience-list-catalog";
+import { bookableFirst, japaneseListPublication } from "@/lib/experience-list-catalog";
 import { loadCategoryBySlug } from "@/lib/experience-categories-server";
 import { sitePublicationCard } from "@/lib/experience/site-card-model";
 import { listSitePublicExperiences } from "@/lib/experience/site-publications";
@@ -54,9 +54,11 @@ export default async function JapaneseExperiencesPage({ searchParams }: { search
     copy = (await getJapaneseCopy()).copy;
     const catalog = await listSitePublicExperiences("ja");
     allCards = catalog.experiences.flatMap((item) => {
-      const card = sitePublicationCard(item, "ja", { copy });
+      const card = sitePublicationCard(item, "ja", { copy, includePageOnly: true });
       return card ? [card] : [];
     });
+    // Pages whose bookings are not open yet are listed after the ones that can be booked (#706).
+    allCards = bookableFirst(allCards);
   } catch { return isExperienceStaging ? <StagingUnavailableState /> : <JapaneseUnavailable />; }
 
   const searchQuery = normalizeExperienceQuery(query.q);

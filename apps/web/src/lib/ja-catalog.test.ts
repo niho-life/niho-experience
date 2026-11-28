@@ -4,7 +4,7 @@ import { jaCardOf, jaGuideLine, jaCategoryCounts, jaYen, type JaCard } from "./j
 
 /** 日本語サイトの一覧とカード (#529): the card from a publication and the category counts. Synthetic data only. */
 
-function item(over: { slug?: string; providerPublicName?: string | null; providerKind?: "PERSON" | "BUSINESS" | null; japanese?: object | null; offers?: object[] } = {}): SitePublicExperience {
+function item(over: { slug?: string; providerPublicName?: string | null; providerKind?: "PERSON" | "BUSINESS" | null; japanese?: object | null; offers?: object[]; bookingAvailable?: boolean } = {}): SitePublicExperience {
   return {
     publication: {
       slug: over.slug ?? "synthetic-walk",
@@ -15,6 +15,8 @@ function item(over: { slug?: string; providerPublicName?: string | null; provide
       providerPublicName: over.providerPublicName === undefined ? "まさと" : over.providerPublicName,
       providerKind: over.providerKind === undefined ? "PERSON" : over.providerKind,
       sellerDisplayName: "NIHO 販売",
+      bookingAvailable: over.bookingAvailable ?? true,
+      unitAmount: 4000,
     },
     saleTerms: { offers: over.offers ?? [
       { durationMinutes: 180, minimumParticipants: 2, maxPartySize: 8, weekdays: [0, 6], pricing: { adultPriceYen: 5500 } },
@@ -53,10 +55,25 @@ describe("jaCardOf", () => {
     expect(jaCardOf(item(), undefined, [])?.face).toEqual({ url: "/media/p.jpg", alt: "" });
   });
 
-  it("is not a card without Japanese text or a sale, and an unclassified product has the empty classification", () => {
+  it("is not a card without Japanese text, and an unclassified product has the empty classification", () => {
     expect(jaCardOf(item({ japanese: null }), undefined)).toBeNull();
-    expect(jaCardOf(item({ offers: [] }), undefined)).toBeNull();
     expect(jaCardOf(item(), undefined)?.classification).toEqual({ category: null, area: null, companions: [], occasions: [] });
+  });
+});
+
+describe("jaCardOf for a page whose bookings are not open yet (#706)", () => {
+  it("is still a card: not bookable, with the page's price and no duration, party size or dates", () => {
+    const value = jaCardOf(item({ offers: [], bookingAvailable: false }), { category: "walk", area: null, companions: [], occasions: [] });
+    expect(value).toMatchObject({ slug: "synthetic-walk", title: "合成の山道", bookingAvailable: false, priceFromYen: 4000, durationMinutes: null, capacity: null, offers: [] });
+    expect(value?.classification.category).toBe("walk");
+    expect(jaCardOf(item(), undefined)?.bookingAvailable).toBe(true);
+    // Open bookings without anything to book are not bookable either.
+    expect(jaCardOf(item({ offers: [] }), undefined)?.bookingAvailable).toBe(false);
+  });
+
+  it("counts toward its category, so the category stays offered", () => {
+    const value = jaCardOf(item({ offers: [], bookingAvailable: false }), { category: "walk", area: null, companions: [], occasions: [] })!;
+    expect([...jaCategoryCounts([value]).keys()]).toEqual(["walk"]);
   });
 });
 
