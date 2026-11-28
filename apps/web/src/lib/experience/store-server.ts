@@ -170,6 +170,12 @@ export function hostAccounts(): HostAccounts | null {
   return pool ? new HostAccounts(pool) : null;
 }
 
+/** The office's suspension of a host account (#711): the Admin API only, whatever the host sign-in flags say. */
+export function adminHostAccounts(): HostAccounts | null {
+  const pool = experiencePool();
+  return pool ? new HostAccounts(pool) : null;
+}
+
 /**
  * NIHO アカウントとの結び付け (Epic #591, 0083): which NIHO account opens which host account's session. null until
  * EXPERIENCE_HOST_NIHO_LOGIN_ENABLED is on (which needs the host accounts and the experience DB).

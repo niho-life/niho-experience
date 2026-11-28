@@ -87,7 +87,14 @@ export const RUNTIME_TABLE_GRANTS = Object.freeze({
   experience_settlement_commands: { write: IU },
   // A host workspace is created only after the BFF verifies the current NIHO OWNER.
   // A seller mapping is operator-provisioned; the BFF binds OWNER after the current NIHO identity matches it.
-  experience_providers: { write: I, updateColumns: ["created_at"] },
+  // 運営停止 (#711): the three columns move together, by the store's suspend / clear only.
+  experience_providers: { write: I, updateColumns: ["created_at", "operations_suspended_at", "operations_suspension_code", "operations_suspended_by_niho_user_id"] },
+  // The log of those suspensions and lifts (#711): append-only.
+  experience_provider_operations_events: { write: I },
+  // The office's suspension and reactivation of a host account (#711): append-only.
+  host_account_operation_events: { write: I },
+  // Notices to the office's mailbox (#711): one row per host and kind, claimed and reported by the mail job.
+  experience_office_notices: { write: IU },
   // 出欠 of OTA bookings (#194 PR B, 0039): one row per reservation, its mark replaced when the host corrects it.
   external_reservation_attendance: { write: IU },
   external_reservation_conflict_cases: { write: IU },

@@ -28,7 +28,9 @@ export async function POST(request: Request, context: Context): Promise<NextResp
   const input = body as Record<string, unknown>;
   if (Object.keys(input).some((key) => !["expectedStateVersion", "reasonCode"].includes(key))
     || !Number.isSafeInteger(input.expectedStateVersion) || (input.expectedStateVersion as number) < 1
-    || typeof input.reasonCode !== "string" || !REASON.test(input.reasonCode)) return json({ error: { code: "INVALID_INPUT" } }, 400);
+    || typeof input.reasonCode !== "string" || !REASON.test(input.reasonCode)
+    // Reserved for the host-wide suspension (#711): its lift removes exactly the stops that carry this code.
+    || input.reasonCode === "PROVIDER_SUSPENDED") return json({ error: { code: "INVALID_INPUT" } }, 400);
 
   const session = await loadAdminHttpSession();
   if (session.status !== "ok") {

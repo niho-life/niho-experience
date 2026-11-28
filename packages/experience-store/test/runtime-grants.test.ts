@@ -69,6 +69,12 @@ describe("Experience runtime grants", () => {
     assert.deepEqual(RUNTIME_TABLE_GRANTS.guest_mail_delivery_feedback?.updateColumns, ["created_at"]);
     // Self-registration records (#707) are written with the provider and never changed.
     assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_provider_self_registrations, { write: ["INSERT"] });
+    // The office's tools (#711): the operations log is append-only, the host's suspension columns are the only provider columns that move.
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_provider_operations_events, { write: ["INSERT"] });
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_providers?.updateColumns,
+      ["created_at", "operations_suspended_at", "operations_suspension_code", "operations_suspended_by_niho_user_id"]);
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.host_account_operation_events, { write: ["INSERT"] });
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_office_notices, { write: ["INSERT", "UPDATE"] });
     const binding = RUNTIME_TABLE_GRANTS.google_channel_output_bindings!;
     assert.equal(updateAllowed(binding, "active=true,binding_version=binding_version+1,updated_at=clock_timestamp()"), true);
     assert.equal(updateAllowed(binding, "active=true,opaque_calendar_id=$1"), false);

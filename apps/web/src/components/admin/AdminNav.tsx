@@ -26,6 +26,7 @@ const ICONS: Record<AdminSectionKey, HostIconName> = {
   inquiries: "article",
   people: "operators",
   products: "providers",
+  hosts: "providers",
   operators: "operators",
   preparations: "article",
   channels: "experiences",

@@ -1,7 +1,7 @@
 import "server-only";
 import type { Pool } from "pg";
 import { retrievePlatformCheckout } from "@niho-experience/experience-payments";
-import { AdminSessions, BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GroupInquiryRepository, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostAccounts, HostInvitations, HostMailOutbox, HostTeamInvitations, HostNotificationAddresses, HostNotificationOutbox, ProviderMediaCleanupRepository, isHostEmail } from "@niho-experience/experience-store";
+import { AdminSessions, BookingCancellations, ExperienceSupportRepository, ExternalReservationGuests, GroupInquiryRepository, GuestBookingAccess, GuestBookingRepository, GuestMailOutbox, GuestMeetingGuideRepository, GuestQuestionRepository, GuestQuestionTranslations, GuestReviewRepository, HostAccounts, HostInvitations, HostMailOutbox, HostTeamInvitations, HostNotificationAddresses, HostNotificationOutbox, OfficeNotices, ProviderMediaCleanupRepository, isHostEmail } from "@niho-experience/experience-store";
 import { config } from "@/lib/config";
 import { stripeRefundSubmitter, type RefundSendDeps } from "@/lib/experience/booking-refunds";
 import { experiencePool } from "@/lib/experience/store-server";
@@ -155,6 +155,7 @@ export async function experienceJobsDrainResponse(request: Pick<Request, "header
       hostMail: (dependencies.hostMail ?? config.hostMailEnabled) ? { outbox: new HostMailOutbox(pool), summaries: new HostNotificationOutbox(pool), allowed: (providerId, kind) => hostNotificationAllowed(providerId, kind) } : null,
       hostAddresses: new HostNotificationAddresses(pool),
       groupInquiries: (dependencies.groupInquiry ?? config.groupInquiryEnabled) ? { mails: new GroupInquiryRepository(pool), officeRecipient } : null,
+      officeNotices: { notices: new OfficeNotices(pool), officeRecipient },
       hostLogins: (dependencies.hostAccounts ?? config.hostAccountsEnabled) ? new HostAccounts(pool) : null,
       hostInvitations: (dependencies.hostNihoLogin ?? (config.hostNihoLoginEnabled && config.hostAccountsEnabled)) ? new HostInvitations(pool) : null,
       hostTeamInvitations: (dependencies.hostTeamInvitations ?? config.hostTeamInvitationsEnabled) ? new HostTeamInvitations(pool) : null,

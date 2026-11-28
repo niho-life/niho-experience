@@ -234,13 +234,13 @@ describe("host account NIHO identities", () => {
       assert.equal(after.kind, "ok");
       assert.notEqual(await accounts.readSession({ sessionToken: (after as Opened).sessionToken, nowUtc: at(5 * MINUTE) }), null);
 
-      await accounts.suspendHostAccount({ hostAccountId: host, nowUtc: at(6 * MINUTE) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: host, nowUtc: at(6 * MINUTE) });
       assert.equal(await accounts.readSession({ sessionToken: (after as Opened).sessionToken, nowUtc: at(7 * MINUTE) }), null);
       assert.deepEqual(await identities.startSessionForNihoIdentity({ nihoUserId: NIHO_A, authenticatedAtUtc: at(8 * MINUTE), nowUtc: at(8 * MINUTE) }), { kind: "account-suspended" });
       assert.equal((await pool.query("SELECT count(*)::int AS n FROM host_sessions WHERE revoked_at IS NULL")).rows[0]!.n, 0);
 
       const another = await provision(accounts, "suspend-other@example.com");
-      await accounts.suspendHostAccount({ hostAccountId: another, nowUtc: at(9 * MINUTE) });
+      await accounts.suspendHostAccount({ actorId: "test-actor", hostAccountId: another, nowUtc: at(9 * MINUTE) });
       assert.deepEqual(await identities.linkNihoIdentity({ hostAccountId: another, nihoUserId: NIHO_B, proof: { kind: "OPS" }, nowUtc: at(10 * MINUTE) }), { kind: "host-account-not-active" });
       assert.deepEqual(await identities.linkNihoIdentity({ hostAccountId: `hst_${"0".repeat(32)}`, nihoUserId: NIHO_B, proof: { kind: "OPS" }, nowUtc: at(10 * MINUTE) }), { kind: "host-account-not-active" });
     });
