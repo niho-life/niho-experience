@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   payout: null as null | { account: { stripeAccountRef: string | null; purpose: string } },
   connectOn: true,
   currentPayout: vi.fn(async () => state.payout),
+  direct: false,
+  sellerIsDirect: vi.fn(async () => state.direct),
   createLoginLink: vi.fn(async (input?: unknown) => {
     void input;
     return "https://stripe.com/express/synthetic-one-time-link";
@@ -18,6 +20,7 @@ const state = vi.hoisted(() => ({
 vi.mock("@/lib/experience/store-server", () => ({
   hostSalesRepository: () => ({ listPayoutAccountsForHost: state.listPayoutAccountsForHost }),
   connectAccounts: () => (state.connectOn ? { currentPayout: state.currentPayout } : null),
+  sellerIsDirect: (...args: unknown[]) => state.sellerIsDirect(...(args as [])),
 }));
 vi.mock("@/lib/host/server", () => ({
   readHostSession: async () => ({ accessToken: "synthetic" }),
@@ -35,7 +38,9 @@ describe("hostStripeLoginUrl", () => {
     state.accounts = ["acct_Synthetic123"];
     state.provider = { id: "provider_synthetic", nihoUserId: "user_synthetic", memberRole: "OWNER" };
     state.payout = null;
+    state.direct = false;
     state.connectOn = true;
+    state.sellerIsDirect.mockClear();
     state.currentPayout.mockClear();
     state.listPayoutAccountsForHost.mockClear();
     state.createLoginLink.mockClear();
@@ -81,5 +86,35 @@ describe("hostStripeLoginUrl", () => {
     state.connectOn = false;
     await expect(hostStripeLoginUrl("provider_synthetic")).resolves.toBeNull();
     expect(state.createLoginLink).not.toHaveBeenCalled();
+  });
+
+  it("opens Stripe's dashboard, without an API call, for a seller bound to its own Stripe account (also with both flags off)", async () => {
+    state.direct = true;
+    state.connectOn = false;
+    await expect(hostStripeLoginUrl("provider_synthetic")).resolves.toBe("https://dashboard.stripe.com/");
+    await expect(hostStripeLoginUrl("provider_synthetic", "direct")).resolves.toBe("https://dashboard.stripe.com/");
+    expect(state.sellerIsDirect).toHaveBeenCalledWith("provider_synthetic");
+    expect(state.listPayoutAccountsForHost).not.toHaveBeenCalled();
+    expect(state.createLoginLink).not.toHaveBeenCalled();
+    // Without the key too: it is a public page.
+    vi.stubEnv("EXPERIENCE_STRIPE_PLATFORM_SECRET_KEY", "");
+    await expect(hostStripeLoginUrl("provider_synthetic")).resolves.toBe("https://dashboard.stripe.com/");
+  });
+
+  it("opens the Express payout account from the Express block, even for a seller with its own account", async () => {
+    state.direct = true;
+    state.payout = { account: { stripeAccountRef: "acct_Payout123456", purpose: "PAYOUT" } };
+    await expect(hostStripeLoginUrl("provider_synthetic", "payout")).resolves.toBe("https://stripe.com/express/synthetic-one-time-link");
+    expect(state.createLoginLink).toHaveBeenCalledWith({ accountId: "acct_Payout123456", platformStripeKey: "sk_test_synthetic" });
+    expect(state.listPayoutAccountsForHost).not.toHaveBeenCalled();
+  });
+
+  it("opens nothing for the own-account button when the seller is not bound to one, and nothing for a non-OWNER", async () => {
+    await expect(hostStripeLoginUrl("provider_synthetic", "direct")).resolves.toBeNull();
+    state.direct = true;
+    state.sellerIsDirect.mockClear();
+    state.provider = { ...state.provider, memberRole: "EDITOR" };
+    await expect(hostStripeLoginUrl("provider_synthetic")).resolves.toBeNull();
+    expect(state.sellerIsDirect).not.toHaveBeenCalled();
   });
 });

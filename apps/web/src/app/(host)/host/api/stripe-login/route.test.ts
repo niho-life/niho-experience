@@ -44,7 +44,7 @@ describe("POST /host/api/stripe-login", () => {
     expect(response.headers.get("location")).toBe("https://stripe.com/express/synthetic-one-time-link");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-    expect(state.hostStripeLoginUrl).toHaveBeenCalledWith("provider_synthetic");
+    expect(state.hostStripeLoginUrl).toHaveBeenCalledWith("provider_synthetic", undefined);
   });
 
   it("rejects cross-origin, malformed, repeated, and query-bearing requests before issuing a link", async () => {
@@ -62,5 +62,16 @@ describe("POST /host/api/stripe-login", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("https://connect.stripe.com/express_login");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("takes an optional kind, passes it on, and falls back to the dashboard of the account the button is for", async () => {
+    state.url = null;
+    const direct = await POST(formRequest("providerId=provider_synthetic&kind=direct"));
+    expect(direct.headers.get("location")).toBe("https://dashboard.stripe.com/");
+    expect(state.hostStripeLoginUrl).toHaveBeenLastCalledWith("provider_synthetic", "direct");
+    const payout = await POST(formRequest("providerId=provider_synthetic&kind=payout"));
+    expect(payout.headers.get("location")).toBe("https://connect.stripe.com/express_login");
+    expect((await POST(formRequest("providerId=provider_synthetic&kind=other"))).status).toBe(400);
+    expect((await POST(formRequest("providerId=provider_synthetic&kind=direct&kind=payout"))).status).toBe(400);
   });
 });

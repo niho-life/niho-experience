@@ -294,11 +294,13 @@ async function productDto(repository: NonNullable<ReturnType<typeof experiencePu
  */
 async function agentSalesOffer(repository: NonNullable<ReturnType<typeof experiencePublicationRepository>>, actor: PublicationHostContext["actor"], salesPlan: Awaited<ReturnType<NonNullable<ReturnType<typeof managedExperienceSalesRepository>>["get"]>> | null) {
   if (!config.hostAgentSalesEnabled || !config.hostAccountsEnabled) return null;
-  if (await repository.providerHasSellerProfile(actor.providerId)) return null;
-  const disclosures = providerSellerDisclosureRepository();
-  const disclosure = disclosures ? (await disclosures.getForOwner(actor, { agentSales: true }).catch(() => null))?.disclosure ?? null : null;
+  // A host that has since registered its own Stripe account (3c-1) keeps the state of a product that is still sold with 代理受領 (it is shown, not offered again).
+  const hasSeller = await repository.providerHasSellerProfile(actor.providerId);
   const isAgentPlan = salesPlan !== null && salesKindOf({ chargeMode: salesPlan.current.chargeMode, salesPlan: salesPlan.current.plan,
     sellerParty: salesPlan.current.sellerParty, feeBasisPoints: salesPlan.current.feeBasisPoints }) === "AGENT_15";
+  if (hasSeller && !isAgentPlan) return null;
+  const disclosures = providerSellerDisclosureRepository();
+  const disclosure = disclosures ? (await disclosures.getForOwner(actor, { agentSales: true }).catch(() => null))?.disclosure ?? null : null;
   // For an agent plan: does the OWNER's consent still count, and which name does the plan sell under (the screen offers a new choice when either differs)?
   const consentCounted = isAgentPlan ? await providerAgentSales()?.consentCounts(actor.providerId, salesPlan.current.sellerNihoAccountRef).catch(() => undefined) : undefined;
   return {
@@ -306,6 +308,7 @@ async function agentSalesOffer(repository: NonNullable<ReturnType<typeof experie
     receiverName: config.hostAgentReceiverName,
     payoutDelayDays: config.hostAgentPayoutDelayDays,
     sellerName: disclosure?.method === "NATIVE" ? disclosure.sellerDisplayName : null,
+    ...(hasSeller ? { choosable: false as const } : {}),
     ...(isAgentPlan ? { planSellerName: salesPlan.current.sellerDisplayName } : {}),
     ...(consentCounted === undefined ? {} : { consentCounted }),
   };

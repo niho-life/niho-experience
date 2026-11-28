@@ -17,6 +17,7 @@ import {
   type HostActor,
 } from "@niho-experience/experience-store";
 import { randomUUID } from "node:crypto";
+import { syncDirectAccount } from "./host-direct-account";
 
 /*
  * ホストが自分で受取口座（Stripe Express）を登録する (Epic #700 stage 3a, #710, docs/host-payouts.md): the flow, with its
@@ -24,7 +25,7 @@ import { randomUUID } from "node:crypto";
  * logs, stores or returns an Account Link URL except to the caller that redirects to it at once.
  */
 
-export type PayoutOnboardingStore = Pick<ExperienceConnectAccounts, "reserve" | "recordAccountRef" | "currentPayout" | "findByAccountRef" | "saveSnapshot" | "sellerExists">;
+export type PayoutOnboardingStore = Pick<ExperienceConnectAccounts, "reserve" | "recordAccountRef" | "currentPayout" | "currentDirect" | "agentSalesHistoryExists" | "payoutBlock" | "findByAccountRef" | "saveSnapshot" | "sellerExists">;
 
 export interface PayoutOnboardingDeps {
   readonly accounts: PayoutOnboardingStore;
@@ -146,6 +147,11 @@ async function syncPayoutAccount(account: ConnectAccountRecord, ref: string, dep
 export async function applyAccountUpdated(connectedAccountId: string, deps: PayoutOnboardingDeps): Promise<"ignored" | "updated"> {
   const found = await deps.accounts.findByAccountRef(connectedAccountId);
   if (!found || found.account.retiredAtUtc !== null) return "ignored";
+  // The host's own Stripe account (3c-1): read again and kept, with no email (Stripe tells the host itself).
+  if (found.account.purpose === "DIRECT") {
+    await syncDirectAccount(found.account, connectedAccountId, deps);
+    return "updated";
+  }
   await syncPayoutAccount(found.account, connectedAccountId, deps, { notify: true });
   return "updated";
 }

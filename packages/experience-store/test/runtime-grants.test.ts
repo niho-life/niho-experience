@@ -77,6 +77,8 @@ describe("Experience runtime grants", () => {
     assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_office_notices, { write: ["INSERT", "UPDATE"] });
     // The host's payout account (#710): the runtime inserts a row and writes its Stripe account ID once; it neither deletes nor retires.
     assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_connect_accounts, { write: ["INSERT"], updateColumns: ["stripe_account_ref"] });
+    // The runtime inserts a seller profile only for the host's own Stripe account (#726, 0099: a trigger refuses any other insert); nothing else moves.
+    assert.deepEqual(RUNTIME_TABLE_GRANTS.experience_host_seller_profiles, { write: ["INSERT"], updateColumns: ["updated_at"] });
     // 代理受領の同意 (#725): inserted; a withdrawal marks the active row revoked, and nothing else moves.
     assert.deepEqual(RUNTIME_TABLE_GRANTS.provider_agent_sales_consents, { write: ["INSERT"], updateColumns: ["revoked_at", "revoked_by_host_account_id"] });
     // 代理受領の送金 (#725, 3b-2): the ledger and its taking-backs move; the offsets and the events are append-only.

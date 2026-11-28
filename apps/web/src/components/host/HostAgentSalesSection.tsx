@@ -15,6 +15,8 @@ export interface AgentSalesOffer {
   readonly planSellerName?: string | null;
   /** 代理受領の版があるとき：OWNER の同意が今も数えられるか（撤回・OWNER の交代で false）。 */
   readonly consentCounted?: boolean;
+  /** false: the host has a seller profile now (its own Stripe account), so a product still sold with 代理受領 is shown but cannot be chosen again. */
+  readonly choosable?: boolean;
 }
 
 export interface AgentSalesProduct {
@@ -34,7 +36,7 @@ export const isAgentSalesPlan = (product: Pick<AgentSalesProduct, "salesPlan">):
  */
 export function agentSalesChoosable(product: AgentSalesProduct): boolean {
   const offer = product.agentSales;
-  if (!offer || product.bookingOpen === true) return false;
+  if (!offer || offer.choosable === false || product.bookingOpen === true) return false;
   if (product.salesPlan === null) return true;
   if (!isAgentSalesPlan(product)) return false;
   return product.salesPlan.current.agreementVersion !== offer.agreementVersion

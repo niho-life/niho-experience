@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import type { Pool } from "pg";
 import { addLocalDays, type ScheduleRule } from "@niho-experience/experience-domain";
-import { attachSellerToSellerlessProducts } from "../src/site-sale-registration.ts";
+import { attachSellerToSellerlessProducts } from "../src/seller-attachment.ts";
 import { ProviderAgentSales, type AgentSalesChoiceInput } from "../src/agent-sales.ts";
 import { BookingCancellations } from "../src/booking-cancellations.ts";
 import { StoreAccessDeniedError, StoreConflictError } from "../src/errors.ts";

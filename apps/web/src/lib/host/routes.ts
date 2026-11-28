@@ -168,6 +168,9 @@ export function hostSupportPath(kind?: "SPOT" | "EXPERIENCE_PROVIDER" | null, id
 export const HOST_PAYOUT_CONSENT_PATH = "/host/api/payout-account-consent";
 /** 受取口座の登録 (Epic #700 stage 3a, #710): the form's POST, and Stripe's refresh_url beneath it. */
 export const HOST_PAYOUT_ONBOARDING_PATH = "/host/api/payout-account/onboarding";
+/** 自分の Stripe アカウントの登録と、READY のあとの販売者の登録 (Epic #700 stage 3c-1, #726): the forms' POSTs. */
+export const HOST_DIRECT_ONBOARDING_PATH = "/host/api/direct-account/onboarding";
+export const HOST_DIRECT_SELLER_PATH = "/host/api/direct-account/seller";
 export const HOST_SETTINGS_PAYOUT_ANCHOR = "settings-payout";
 
 /**

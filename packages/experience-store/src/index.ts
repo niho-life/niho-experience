@@ -181,7 +181,7 @@ export { HOST_MAIL_TOPICS, HOST_NOTIFICATION_ADDRESS_LIMITS, isHostEmail } from 
 export type { HostBookingMailTopic, HostMailTopic } from "./host-mail-shared.ts";
 export { HOST_MAIL_LIMITS, HOST_MAIL_NOTIFICATION_TOPICS, HostMailOutbox } from "./host-mail-outbox.ts";
 export type { ClaimedHostAgentPayoutMail, ClaimedHostPayoutAccountMail, HostAgentPayoutMailClaim, HostPayoutAccountMailClaim } from "./host-mail-outbox.ts";
-export { CONNECT_ACCOUNT_STATES, ExperienceConnectAccounts } from "./connect-accounts.ts";
+export { CONNECT_ACCOUNT_PURPOSES, CONNECT_ACCOUNT_STATES, ExperienceConnectAccounts } from "./connect-accounts.ts";
 export type {
   ConnectAccountPurpose, ConnectAccountRecord, ConnectAccountReservation, ConnectAccountSnapshot, ConnectAccountSnapshotInput,
   ConnectAccountSnapshotSaved, ConnectAccountState, ConnectAccountWithSnapshot,
@@ -326,6 +326,8 @@ export { OPERATOR_AI_KINDS, OPERATOR_WRITE_METHODS, OperatorCliRequests } from "
 export type { OperatorAiKind, OperatorCliRequestInput, OperatorWriteMethod } from "./operator-cli-requests.ts";
 export { isHostSellerRef } from "./host-sellers.ts";
 export { ProviderPayoutAccountConsents } from "./payout-account-consents.ts";
+export { DIRECT_ACCOUNT_READ_MAX_AGE_MS, ProviderDirectSellers } from "./direct-sellers.ts";
+export type { DirectSellerRegistration } from "./direct-sellers.ts";
 export type { PayoutAccountConsent, PayoutAccountConsentRecord, PayoutAccountConsentWithdrawal } from "./payout-account-consents.ts";
 export type {
   GrantProviderOwnerResult,

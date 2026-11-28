@@ -75,7 +75,7 @@ const siteUrl = ({ siteUrl: url }) => url;
  * The table. `id` identifies a flag when multiple mutually-exclusive choices write the same runtime env; otherwise
  * `env` is also the id. `env`: the Cloud Run variable set to "true". `variable`: the GitHub variable after the prefix.
  * `defaults`: on when its variable is unset (only staging's PWA, which it always had). `needs`: CAPABILITIES or other
- * flags' `env`, "A|B" for either (`prodNeeds`: more of them, for production only). `conflicts`: flags that may not be on at the same time. `secrets`: Secret Manager
+ * flags' `env`, "A|B" for either (`prodNeeds`: more of them, for production only). `stagingOnly`: refused in production (until the feature is complete). `conflicts`: flags that may not be on at the same time. `secrets`: Secret Manager
  * references (`name:version`), with staging's fixed Secret name. `optional` permits an unset reference.
  * `settings`: plain values with their shape. `fixed`: values the workflow derives (job audiences and callers).
  */
@@ -435,6 +435,15 @@ export const FLAGS = Object.freeze([
       { env: "EXPERIENCE_HOST_AGENT_PAYOUT_DELAY_DAYS", variable: "HOST_AGENT_PAYOUT_DELAY_DAYS", shape: "payoutDelayDays", optional: true },
     ],
   },
+  // ホストが自分の Stripe アカウントをつなぐ・3c-1 (Epic #700, #726, docs/host-payouts.md「3c」): 設定 › 受取口座 の「自分の Stripe アカウントで販売する」、その route、
+  // Connect webhook の account.updated、READY のあとの販売者プロフィールの登録。Migration 0098 と 0099 とその runtime grants を先に適用する（コードより先）。
+  // `stagingOnly`: **本番では ON にできない**（deploy の検査が拒む）。3c-2（独立 10% で売る）が入るまで、本番で口座をつなげても売れないため。3c-2 でこの属性を外す。
+  {
+    env: "EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED",
+    variable: "HOST_STANDARD_ONBOARDING_ENABLED",
+    stagingOnly: true,
+    needs: ["HOST_CONSOLE", "DATABASE", "EXPERIENCE_HOST_ACCOUNTS_ENABLED", "EXPERIENCE_HOST_PUBLICATION_API_ENABLED"],
+  },
   // 開催回の担当 (#535 v0, docs/occurrence-assignments.md): 承認後決済の開催回に1人の内部担当。報酬の計算・送金はしない。
   {
     env: "EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED",
@@ -557,6 +566,7 @@ export function resolveDeployFlags({ target, vars, hostConsole, siteUrl: url }) 
   for (const flag of FLAGS) {
     if (!on.has(flagId(flag))) continue;
     const by = `${flagId(flag)} (${name(flag.variable)})`;
+    if (flag.stagingOnly && target === "prod") problems.push(`${by} is not allowed in production yet`);
     for (const need of [...(flag.needs ?? []), ...(target === "prod" ? flag.prodNeeds ?? [] : [])]) {
       if (!has(need)) {
         const words = need.split("|").map((one) => (one === "HOST_CONSOLE" || one === "DATABASE" ? (target === "prod" ? "enable_host_calendar=true" : "the host console") : one)).join(" or ");

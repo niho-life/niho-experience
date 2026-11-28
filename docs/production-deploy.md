@@ -121,6 +121,7 @@ mock で出している機能を http mode で開くフラグを、repository va
 | `EXPERIENCE_HOST_TEAM_INVITATIONS_ENABLED` | `HOST_TEAM_INVITATIONS_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストチーム・ホストの NIHO ログイン・ホストメール | — | — | — |
 | `EXPERIENCE_HOST_SELF_REGISTRATION_ENABLED` | `HOST_SELF_REGISTRATION_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストの NIHO ログイン・ホストメール | — | — | — |
 | `EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED` | `HOST_CONNECT_ONBOARDING_ENABLED` | ホストの画面・DB・Experienceホストアカウント（Stripe のキーは `HOST_ACCOUNTS_ENABLED` と同じ参照）。**本番では 3b（#725）が入るまで OFF**。[host-payouts.md](host-payouts.md) | — | — | — |
+| `EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED` | `HOST_STANDARD_ONBOARDING_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホスト公開API（Stripe のキーは `HOST_ACCOUNTS_ENABLED` と同じ参照）。**本番では ON にできない（`stagingOnly`。deploy の検査が拒む。3c-2 で外す）**。**migration `0098` と `0099` とその runtime grants を先に適用**。[host-payouts.md](host-payouts.md) | — | — | — |
 | `EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED` | `HOST_AGENT_PAYOUTS_ENABLED` | ホストの画面・DB・Experienceホストアカウント・受取口座の登録・ホストメール。送金の job・ホストの売上の「NIHO からの送金」・事務局の操作。販売の flag とは独立で、送金だけを止める非常停止になる。**migration `0097` とその runtime grants を先に適用**。[host-payouts.md](host-payouts.md) | — | — | — |
 | `EXPERIENCE_HOST_AGENT_SALES_ENABLED` | `HOST_AGENT_SALES_ENABLED` | ホストの画面・DB・Experienceホストアカウント・ホストメール・ゲストメール・ホスト公開API・プラットフォームの Webhook（`MANAGED_SALES_WEBHOOKS_ENABLED`）・受取口座の登録。**本番はさらに送金の flag `EXPERIENCE_HOST_AGENT_PAYOUTS_ENABLED`**。[host-payouts.md](host-payouts.md) | `HOST_AGENT_SALES_AGREEMENT_VERSION`、`HOST_AGENT_RECEIVER_NAME`（受領者の正式名）、`HOST_AGENT_PAYOUT_DELAY_DAYS`（1〜30、省略で 3）。プラットフォームの口座は `MANAGED_PLATFORM_ACCOUNT_ID` | — | — |
 | `EXPERIENCE_OCCURRENCE_ASSIGNMENT_ENABLED` | `OCCURRENCE_ASSIGNMENT_ENABLED` | ホストの画面・DB・完全代行の販売 | — | — | — |
@@ -282,6 +283,26 @@ ADR 0002・0003への移行後は、成立済み予約・返金・精算をExper
 6. Connect の料金（口座ごとの月額・入金ごとの料金。日本の料金）を確かめる。NIHO の負担になる。
 7. Stripe が Express の利用者へ送るメールと、NIHO の「受取口座に追加の情報が必要です」のメール（`EXPERIENCE_HOST_MAIL_ENABLED` が ON のとき、メール job が送る）が重ならないか、stg で確かめる。
 8. **受入の手順：stg の test mode で、実際の `accounts.retrieve` の応答（作った直後と、登録を進めた各段階）を取り、`packages/experience-payments/test/payout-account.test.ts` の fixture と照合する。** 特に `controller`（`fees.payer` は Express で `application_express` で返ることがあり、コードは `application` と `application_express` の両方を受け入れる。`losses.payments`・`requirement_collection`・`stripe_dashboard.type` は SDK の型に同じ意味の別の値が無く、完全一致）、`default_currency`、`capabilities.transfers`、`requirements` を見る。作った直後が「入力の途中」になり、「この口座は使えません」にならないことを確かめてから ON にする。
+
+## ホストの自分の Stripe アカウント（Standard、3c-1、#726）の前提
+
+`EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED` は既定 OFF。**本番は 3c-2 が入るまで ON にできない**（deploy の検査が拒む。表の `stagingOnly`。3c-2 で外す）。
+
+**flag が OFF でも効く変更**（混在の修正。すでに代理受領を使うホストのため、flag の裏に置かない）：(1) 受取口座の利用同意の取消が、今の版が代理受領の掲載を止めない、(2) `reserve(PAYOUT)` が有効な PAYOUT の行をそのまま返し、新しい行は「販売者プロフィールが無い、または代理受領の同意の履歴がある」ときに作る、(3) 設定 › 受取口座の Express の段と「Stripe で見る」の出し分け（販売者プロフィールがあるホストでも、PAYOUT の行か代理受領の履歴があれば Express の段）、(4) `agentSalesOffer` の `choosable:false`（販売者プロフィールがあるホストの、代理受領の商品）。migration `0098` と `0099` は、コードより先に適用する（0099 の `connect_account_id` 列を (3) が読む）。
+
+OFF のときも、`stripe-login` は、販売者プロフィールが `DIRECT` の口座に結ばれているホストには Express のログインリンクを作らず、`https://dashboard.stripe.com/` を開く。設計は [host-payouts.md](host-payouts.md)「3c」。
+
+1. **migration `0098` と `0099`、その runtime grants（`experience_host_seller_profiles` は INSERT と `updated_at` の UPDATE）を、コードより先に適用する（必須）。** 0099 の trigger は、移行の権限（表の持ち主）以外の INSERT を、`DIRECT` の有効な行に結んだものだけに限る（関数は `search_path` を固定し、参照を修飾してある）。結ばれた `DIRECT` の行の退役は、DB の trigger も拒む。適用のあとで、移行の権限で運営の script（`provision-host-seller.mjs` など）が今までどおり書けることを確かめる。
+2. Experience 専用キーの権限は 3a のまま（Accounts・Account Links の書込み、Accounts の読取り・一覧）。
+3. Connect の webhook の購読は `account.updated`（3a と同じ。`DIRECT` の口座のイベントも同じ endpoint に来る）。
+4. **stg の test mode で次を確かめる**（確かめるまで本番に進まない）：
+   - JP の口座を `controller`（`stripe_dashboard.type=full`・`losses.payments=stripe`・`fees.payer=account`・`requirement_collection=stripe`）の指定で作れるか。`capabilities` に `card_payments` と `transfers` を要求できるか、どちらも `active` になるか。
+   - `default_currency` が JPY になるか。作った直後と登録を進めた各段階の `accounts.retrieve` の `controller` の応答の形（`fees.payer` は `account`、`losses.payments` は `stripe` で返るか）を取り、`packages/experience-payments/test/direct-account.test.ts` の fixture と照合する。
+   - `details_submitted` のあとに、`account_onboarding` の Account Link をもう一度作れるか（`ACTION_REQUIRED` の「Stripe で入力する」）。
+   - 補填の Transfer（platform から Standard の口座へ）が通るか（`transfers` が `active` なこと）。
+   - `account.updated` が届き、`DIRECT` の行が読み直されて、メールが出ないこと。
+   - 残高と入金の読み取り（売上の「Stripe で入金の明細を見る」は Express のログインリンクを作らず `https://dashboard.stripe.com/` を開く）。
+5. 同意の文と版（`EXPERIENCE_PAYOUT_ACCOUNT_CONSENT_VERSION`）は受取口座の利用同意のものを使い回す。法務の確認は host-payouts.md の「本番で開く前の確認」。
 
 ## サポート 15% の代理受領（3b-1、#725）の前提
 

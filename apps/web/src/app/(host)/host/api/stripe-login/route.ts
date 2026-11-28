@@ -1,4 +1,4 @@
-import { STRIPE_DASHBOARD_URL } from "@/host/payout";
+import { STRIPE_DASHBOARD_URL, STRIPE_FULL_DASHBOARD_URL, type StripeLoginKind } from "@/host/payout";
 import { hostStripeLoginUrl, hostStripeReauthHref } from "@/host/stripe-login-server";
 import { config } from "@/lib/config";
 import { mutationFromSameOrigin } from "@/lib/host/relay";
@@ -70,18 +70,24 @@ export async function POST(request: Request): Promise<Response> {
     return noStoreJson({ error: error instanceof FormBodyTooLarge ? "payload_too_large" : "invalid_input" }, error instanceof FormBodyTooLarge ? 413 : 400);
   }
   const fields = [...new URLSearchParams(text).entries()];
-  const providerId = fields.length === 1 && fields[0]?.[0] === "providerId" ? nihoIdOrNull(fields[0][1]) : null;
+  // `providerId`, and optionally `kind` (direct: the host's own Stripe account, payout: the Express payout account).
+  const names = fields.map(([name]) => name);
+  const kindValue = fields.find(([name]) => name === "kind")?.[1];
+  const shape = names.length === 1 && names[0] === "providerId" || names.length === 2 && names.includes("providerId") && names.includes("kind") && (kindValue === "direct" || kindValue === "payout");
+  const providerId = shape ? nihoIdOrNull(fields.find(([name]) => name === "providerId")?.[1]) : null;
   if (!providerId) return noStoreJson({ error: "invalid_input" }, 400);
+  const kind = kindValue as StripeLoginKind | undefined;
+  const fallback = kind === "direct" ? STRIPE_FULL_DASHBOARD_URL : STRIPE_DASHBOARD_URL;
 
   try {
     // A host signed in with a bound NIHO account, whose sign-in is too old: NIHO again, then back to 受取口座.
     const reauth = await hostStripeReauthHref(providerId);
     if (reauth) return redirectToStripe(reauth);
-    const url = await hostStripeLoginUrl(providerId);
-    return redirectToStripe(url ?? STRIPE_DASHBOARD_URL);
+    const url = await hostStripeLoginUrl(providerId, kind);
+    return redirectToStripe(url ?? fallback);
   } catch (error) {
     // The Stripe URL and response text are bearer material and must never be logged.
     console.error("Experience host Stripe login link failed", { error: errorClass(error) });
-    return redirectToStripe(STRIPE_DASHBOARD_URL);
+    return redirectToStripe(fallback);
   }
 }

@@ -740,7 +740,10 @@ describe("Experience owner product API", () => {
         expect(chosen.agentSales).toMatchObject({ planSellerName: "Sample Host", consentCounted: true });
         mocks.consentCounts.mockResolvedValueOnce(false);
         expect((await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.agentSales.consentCounted).toBe(false);
+        // A host with a seller profile now (its own Stripe account, 3c-1): a product still sold with 代理受領 keeps its state, not offered again; any other product shows nothing.
         mocks.repository.providerHasSellerProfile.mockResolvedValue(true);
+        expect((await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.agentSales).toMatchObject({ choosable: false, planSellerName: "Sample Host" });
+        mocks.managedSalesGet.mockResolvedValue(null);
         expect((await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.agentSales).toBeNull();
         mocks.config.hostAgentSalesEnabled = false;
         expect((await (await readProduct(request(`/host/api/products/${product.id}`), context)).json()).product.agentSales).toBeNull();

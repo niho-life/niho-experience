@@ -2,7 +2,7 @@ import "server-only";
 import { config } from "@/lib/config";
 import { parseChannelAdapters } from "./channel-adapters";
 import { Pool } from "pg";
-import { AdminSessions, AgentPayoutRepository, ExperienceConnectAccounts, OperatorCliRequests, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, BookingChanges, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GroupInquiryRepository, PeopleListingRepository, MemberProfileRepository, GuideRepository, HostAccountIdentities, HostAccounts, HostInvitations, HostTeamInvitations, NihoAccountStatusStore, TravelerAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedBookingApprovalRepository, ManagedExperienceSalesRepository, ProviderAgentSales, OccurrenceAssignmentRepository, ProductClassificationRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, isHostAccountId, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
+import { AdminSessions, AgentPayoutRepository, ExperienceConnectAccounts, OperatorCliRequests, ArticleAuthorityRepository, BookingAttendance, BookingCancellations, BookingChanges, ChannelRuntime, ExperiencePublicationRepository, ExperienceStore, ExperienceSupportRepository, GuestBookingAccess, GuestBookingMessages, GuestBookingRepository, GuestMeetingGuideRepository, GuestQuestionRepository, GuestReviewRatings, GuestReviewRepository, GuideAdminRepository, GroupInquiryRepository, PeopleListingRepository, MemberProfileRepository, GuideRepository, HostAccountIdentities, HostAccounts, HostInvitations, HostTeamInvitations, NihoAccountStatusStore, TravelerAccounts, HostCalendarSettings, HostNotificationAddresses, HostOtaBookings, HostTeamRepository, ManagedBookingApprovalRepository, ManagedExperienceSalesRepository, ProviderAgentSales, OccurrenceAssignmentRepository, ProductClassificationRepository, ProductOperatorRepository, ProviderHostBioRepository, ProviderNotificationSettings, ProviderDirectSellers, ProviderPayoutAccountConsents, ProviderSellerDisclosureRepository, isHostAccountId, type ChannelCapabilities, type GuestThreadKind } from "@niho-experience/experience-store";
 
 const globalPool = globalThis as typeof globalThis & { __nihoExperiencePool?: Pool };
 
@@ -259,9 +259,25 @@ export function payoutAccountConsents(): ProviderPayoutAccountConsents | null {
   return pool ? new ProviderPayoutAccountConsents(pool) : null;
 }
 
-/** 受取口座 (Express) の行 (Epic #700 stage 3a, #710): only while EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED is on. */
+/** Whether the provider's seller is its own Stripe account (read from the seller profile, with no flag: the dashboard link must never fall back to Express for it). */
+export async function sellerIsDirect(providerId: string): Promise<boolean> {
+  const pool = experiencePool();
+  return pool ? new ExperienceConnectAccounts(pool).sellerIsDirect(providerId) : false;
+}
+
+/** 自分の Stripe アカウントの販売者の登録 (Epic #700 stage 3c-1, #726): only while EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED is on. */
+export function directSellers(): ProviderDirectSellers | null {
+  if (!config.hostStandardOnboardingEnabled) return null;
+  const pool = experiencePool();
+  return pool ? new ProviderDirectSellers(pool) : null;
+}
+
+/**
+ * 受取口座 (Express) と自分の Stripe アカウント (DIRECT) の行 (Epic #700 stage 3a, #710 / 3c-1, #726): while
+ * EXPERIENCE_HOST_CONNECT_ONBOARDING_ENABLED or EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED is on (each route checks its own flag).
+ */
 export function connectAccounts(): ExperienceConnectAccounts | null {
-  if (!config.hostConnectOnboardingEnabled) return null;
+  if (!config.hostConnectOnboardingEnabled && !config.hostStandardOnboardingEnabled) return null;
   const pool = experiencePool();
   return pool ? new ExperienceConnectAccounts(pool) : null;
 }

@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   boundary: vi.fn(),
   mutationAllowed: vi.fn(),
   repository: { getForOwner: vi.fn(), save: vi.fn(), withdraw: vi.fn() },
-  config: { hostAgentSalesEnabled: false, hostAccountsEnabled: false },
+  config: { hostAgentSalesEnabled: false, hostStandardOnboardingEnabled: false, hostAccountsEnabled: false },
 }));
 
 vi.mock("server-only", () => ({}));
@@ -40,7 +40,7 @@ function request(method: string, body?: unknown) {
 describe("host seller disclosure HTTP boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.assign(mocks.config, { hostAgentSalesEnabled: false, hostAccountsEnabled: false });
+    Object.assign(mocks.config, { hostAgentSalesEnabled: false, hostStandardOnboardingEnabled: false, hostAccountsEnabled: false });
     mocks.boundary.mockResolvedValue({ ok: true, value: { actor } });
     mocks.mutationAllowed.mockReturnValue(true);
     mocks.repository.getForOwner.mockResolvedValue({ sellerDisplayName: "Synthetic Legal Seller", disclosure: null });
@@ -71,6 +71,16 @@ describe("host seller disclosure HTTP boundary", () => {
     expect(mocks.repository.save).toHaveBeenLastCalledWith(actor, { commandId, expectedVersion: null, disclosure: native }, { agentSales: true });
     expect((await deleteSellerDisclosure(request("DELETE", { commandId, expectedVersion: 1 }))).status).toBe(200);
     expect(mocks.repository.withdraw).toHaveBeenLastCalledWith(actor, { commandId, expectedVersion: 1 }, { agentSales: true });
+  });
+
+  it("lets a host with no seller profile save its disclosure when it is about to register its own Stripe account (3c-1), with agent sales off", async () => {
+    Object.assign(mocks.config, { hostAgentSalesEnabled: false, hostStandardOnboardingEnabled: true, hostAccountsEnabled: true });
+    await getSellerDisclosure(request("GET"));
+    expect(mocks.boundary).toHaveBeenLastCalledWith("READ", { providerId: null, sales: "none" });
+    expect(mocks.repository.getForOwner).toHaveBeenLastCalledWith(actor, { agentSales: true });
+    Object.assign(mocks.config, { hostAccountsEnabled: false });
+    await getSellerDisclosure(request("GET"));
+    expect(mocks.boundary).toHaveBeenLastCalledWith("READ", { providerId: null, sales: "seller" });
   });
 
   it("accepts one exact native command and rejects unknown JSON fields", async () => {

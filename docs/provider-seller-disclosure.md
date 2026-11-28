@@ -36,3 +36,9 @@ Host UIは結果不明のcommand IDと送信済みJSONをメモリ上で固定�
 - 代理受領の体験が受付中のあいだ（その版の販売者名が予約の販売者名になる）、名前の変更と撤回は 409。受付を止めれば変えられる。ほかの項目（住所・電話・メール）は変えられる。
 - `/experiences/{slug}/seller` は、代理受領の版でも出す。条件は、公開中の販売版であること、OWNER の同意（`provider_agent_sales_consents`）が版の販売者参照 `agt_…` に対して有効なこと、表示の名前が版の名前と一致することで、同意の撤回や名前の違いで消える。
 - 予約画面と確認メールの販売者の情報は、ホスト自身のこのページ。`publicBookingTerms` の `sellerDisclosureUrl` は NIHO が販売者のときだけで、代理受領は `paymentCollectedBy`（受領者の名前）を足す。
+
+## 自分の Stripe アカウントをつなぐホスト（3c-1、#726）
+
+- 販売者プロフィールの無いホストは、`EXPERIENCE_HOST_STANDARD_ONBOARDING_ENABLED` が ON でも、この表示（NATIVE）を保存できる（代理受領の flag と同じ扱い）。
+- 自分の Stripe アカウントが READY になったあとの「同意する」で作る販売者プロフィールの名前は、この表示（NATIVE）の名前。Stripe の名義とは自動で照合しない。表示が無いと、`SELLER_DISCLOSURE_REQUIRED` で作れない（画面は先にこの画面へ案内する）。
+- 販売者プロフィールができたあとは、表示の名前はプロフィールの名前に固定される（今までのとおり）。

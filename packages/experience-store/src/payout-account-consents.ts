@@ -5,6 +5,7 @@ import { StoreAccessDeniedError, StoreConflictError, StoreValidationError } from
 import { isHostAccountId } from "./host-accounts.ts";
 import { HOST_SELLER_REF_SQL } from "./host-sellers.ts";
 import { lockProviderInventory } from "./inventory.ts";
+import { agentPlanSql } from "./sales-kind.ts";
 import { isoValue, type DbRow } from "./rows.ts";
 import { withTransaction } from "./transaction.ts";
 import type { HostActor } from "./types.ts";
@@ -82,6 +83,10 @@ function consentVersion(value: unknown): string {
   return value;
 }
 
+/** The same checks `record` makes of a version and an instant, for a caller that calls `recordPayoutConsentIn`. */
+export const validPayoutConsentVersion = consentVersion;
+export const validPayoutConsentInstant = now;
+
 /** Takes turns with the provider's other consent changes. */
 async function lockConsents(client: PoolClient, providerId: string): Promise<void> {
   await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, ${CONSENT_LOCK_SEED}))`, [`provider-payout-consent:${providerId}`]);
@@ -151,6 +156,49 @@ export async function payoutConsentStillCounts(
   return consent.consentVersion === input.consentVersion && consent.consentedAtUtc === input.consentedAtUtc;
 }
 
+/**
+ * `record`'s transaction body, for a caller that records the consent in its own transaction (the host's own Stripe account
+ * registration, direct-sellers.ts, which has just created the profile): validates nothing itself (the caller passes a valid
+ * actor, account, version and instant), takes the consent lock, checks the OWNER and the registered account, and writes.
+ */
+export async function recordPayoutConsentIn(
+  client: PoolClient,
+  actor: HostActor,
+  input: { readonly stripeConnectAccountRef: string; readonly consentVersion: string; readonly nowUtc: string },
+): Promise<PayoutAccountConsentRecord> {
+  const { consentVersion: version, nowUtc: at } = input;
+  await lockConsents(client, actor.providerId);
+  await requireHostAccountOwner(client, actor);
+  const account = await hostAccountSellerAccount(client, actor.providerId);
+  if (account === null) throw new StoreConflictError("The provider has no seller registered for Experience host accounts.");
+  if (account !== input.stripeConnectAccountRef) throw new StoreConflictError("The provider's payout account changed; read it again.");
+  const active = await client.query<DbRow>(
+    `SELECT id,${CONSENT_COLUMNS} FROM provider_payout_account_consents
+      WHERE provider_id=$1 AND revoked_at IS NULL FOR UPDATE`,
+    [actor.providerId],
+  );
+  const row = active.rows[0];
+  if (row && row.stripe_connect_account_ref === account && row.consent_version === version && row.consented_by_niho_user_id === actor.nihoUserId) {
+    return { outcome: "UNCHANGED", consent: consentFromRow(row) };
+  }
+  if (row) {
+    await client.query(
+      `UPDATE provider_payout_account_consents
+          SET revoked_at=GREATEST($2::timestamptz,consented_at),revoked_by_niho_user_id=$3
+        WHERE id=$1 AND revoked_at IS NULL`,
+      [row.id, at, actor.nihoUserId],
+    );
+  }
+  const inserted = await client.query<DbRow>(
+    `INSERT INTO provider_payout_account_consents
+       (id,provider_id,stripe_connect_account_ref,consent_version,consented_by_niho_user_id,consented_at)
+     VALUES ($1::uuid,$2,$3,$4,$5,$6::timestamptz)
+     RETURNING ${CONSENT_COLUMNS}`,
+    [randomUUID(), actor.providerId, account, version, actor.nihoUserId, at],
+  );
+  return { outcome: "RECORDED", consent: consentFromRow(inserted.rows[0]!) };
+}
+
 export class ProviderPayoutAccountConsents {
   readonly #pool: Pool;
 
@@ -186,38 +234,7 @@ export class ProviderPayoutAccountConsents {
     }
     const version = consentVersion(input.consentVersion);
     const at = now(input.nowUtc);
-    return withTransaction(this.#pool, async (client) => {
-      await lockConsents(client, actor.providerId);
-      await requireHostAccountOwner(client, actor);
-      const account = await hostAccountSellerAccount(client, actor.providerId);
-      if (account === null) throw new StoreConflictError("The provider has no seller registered for Experience host accounts.");
-      if (account !== input.stripeConnectAccountRef) throw new StoreConflictError("The provider's payout account changed; read it again.");
-      const active = await client.query<DbRow>(
-        `SELECT id,${CONSENT_COLUMNS} FROM provider_payout_account_consents
-          WHERE provider_id=$1 AND revoked_at IS NULL FOR UPDATE`,
-        [actor.providerId],
-      );
-      const row = active.rows[0];
-      if (row && row.stripe_connect_account_ref === account && row.consent_version === version && row.consented_by_niho_user_id === actor.nihoUserId) {
-        return { outcome: "UNCHANGED", consent: consentFromRow(row) };
-      }
-      if (row) {
-        await client.query(
-          `UPDATE provider_payout_account_consents
-              SET revoked_at=GREATEST($2::timestamptz,consented_at),revoked_by_niho_user_id=$3
-            WHERE id=$1 AND revoked_at IS NULL`,
-          [row.id, at, actor.nihoUserId],
-        );
-      }
-      const inserted = await client.query<DbRow>(
-        `INSERT INTO provider_payout_account_consents
-           (id,provider_id,stripe_connect_account_ref,consent_version,consented_by_niho_user_id,consented_at)
-         VALUES ($1::uuid,$2,$3,$4,$5,$6::timestamptz)
-         RETURNING ${CONSENT_COLUMNS}`,
-        [randomUUID(), actor.providerId, account, version, actor.nihoUserId, at],
-      );
-      return { outcome: "RECORDED", consent: consentFromRow(inserted.rows[0]!) };
-    });
+    return withTransaction(this.#pool, async (client) => recordPayoutConsentIn(client, actor, { stripeConnectAccountRef: input.stripeConnectAccountRef, consentVersion: version, nowUtc: at }));
   }
 
   /**
@@ -240,9 +257,14 @@ export class ProviderPayoutAccountConsents {
       );
       if ((revoked.rowCount ?? 0) === 0) return { outcome: "NONE", stoppedPublications: 0 };
       const stopped = await client.query<{ product_id: string; booking_publication_id: string | number; version: string | number; selling: boolean }>(
-        `UPDATE experience_product_publication_states
-            SET self_stopped_at=COALESCE(self_stopped_at,clock_timestamp()),version=version+1,updated_at=clock_timestamp()
-          WHERE provider_id=$1 AND booking_publication_id IS NOT NULL AND self_stopped_at IS NULL
+        `UPDATE experience_product_publication_states state
+            SET self_stopped_at=COALESCE(state.self_stopped_at,clock_timestamp()),version=state.version+1,updated_at=clock_timestamp()
+          WHERE state.provider_id=$1 AND state.booking_publication_id IS NOT NULL AND state.self_stopped_at IS NULL
+            -- 代理受領 (#725): a product sold with agent sales is paid to NIHO's account, not to this payout account, so this consent does not stop it.
+            AND NOT EXISTS (
+              SELECT 1 FROM experience_product_sales_plan_states sales
+                JOIN experience_product_sales_plan_versions plan ON plan.provider_id=sales.provider_id AND plan.product_id=sales.product_id AND plan.revision=sales.current_revision
+               WHERE sales.provider_id=state.provider_id AND sales.product_id=state.product_id AND ${agentPlanSql("plan")})
           RETURNING product_id,booking_publication_id,version,
                     (operations_suspended_at IS NULL AND owner_resume_required=false) AS selling`,
         [actor.providerId],

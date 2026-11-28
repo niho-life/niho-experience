@@ -19,7 +19,7 @@ export type ExperiencePayoutLoad =
    * The provider has no Direct charge seller and registers its own payout account (Epic #700 stage 3a, #710, docs/host-payouts.md).
    * `unknown`: Stripe could not be read now and no earlier state is kept.
    */
-  | { readonly status: "connect"; readonly state: ConnectPayoutState }
+  | { readonly status: "connect"; readonly payout: ConnectPayoutState | null; readonly direct: DirectPayoutSection | null }
   | {
     readonly status: "owner";
     readonly providerName: string;
@@ -33,7 +33,26 @@ export type ExperiencePayoutLoad =
       | { readonly state: "outdated" | "none" | "unknown" };
     /** The version the OWNER agrees to now; empty while none is configured (the consent cannot be given then). */
     readonly consentVersion: string;
+    /**
+     * 代理受領の送金を受ける Express の受取口座 (3b): shown while the host has a row or has agreed to agent sales, even after it has its own
+     * Stripe account (3c-1). Absent: nothing to show.
+     */
+    readonly payout?: ConnectPayoutState;
+    /** The registered account is the host's OWN full-dashboard Stripe account (3c-1): 「Stripe で見る」 opens its dashboard. */
+    readonly standard?: boolean;
   };
+
+/**
+ * The host's own Stripe account's block in 設定 › 受取口座 (Epic #700 stage 3c-1, #726): its state, and, at READY, what the consent form
+ * needs (the account's last 4, the version, the host's name) and whether the public seller disclosure (特定商取引法の表示) exists to sell under.
+ */
+export interface DirectPayoutSection {
+  readonly state: ConnectPayoutState;
+  readonly providerName: string;
+  readonly accountLast4: string | null;
+  readonly consentVersion: string;
+  readonly disclosure: "ready" | "missing";
+}
 
 /** 設定 › 受取口座 for a host that registers its own account: `NOT_STARTED` before the first press, then what Stripe says. */
 export type ConnectPayoutState = "NOT_STARTED" | "IN_PROGRESS" | "VERIFYING" | "ACTION_REQUIRED" | "REJECTED" | "READY" | "unknown";
@@ -48,6 +67,20 @@ export const CONNECT_PAYOUT_STATES: Readonly<Record<ConnectPayoutState, { readon
   // 3b が入るまでは、売上を受け取れるとは書かない。銀行口座の末尾は出さない。
   READY: { pill: { label: "登録済み", tone: "ok" }, line: "売上を受け取れます。", action: { kind: "dashboard", label: "Stripe で見る" } },
   unknown: { pill: { label: "確認が必要", tone: "wait" }, line: "Stripe から口座の状態を読み込めませんでした。時間をおいて、ページを読み込み直してください。", action: null },
+};
+
+/**
+ * The host's own Stripe account (独立 10%): one sentence and one button per state. At READY the button is the consent form (the panel
+ * draws it) or, with no seller disclosure yet, the link to 販売者表示.
+ */
+export const DIRECT_PAYOUT_STATES: Readonly<Record<ConnectPayoutState, { readonly pill: StatusLabel; readonly line: string; readonly action: { readonly kind: "onboard"; readonly label: string } | null }>> = {
+  NOT_STARTED: { pill: { label: "未登録", tone: "wait" }, line: "自分の Stripe アカウントを作って、代金を直接受け取って販売します。", action: { kind: "onboard", label: "自分の Stripe アカウントで販売する" } },
+  IN_PROGRESS: { pill: { label: "入力の途中", tone: "wait" }, line: CONNECT_PAYOUT_STATES.IN_PROGRESS.line, action: { kind: "onboard", label: "Stripe で続きを入力する" } },
+  VERIFYING: { pill: CONNECT_PAYOUT_STATES.VERIFYING.pill, line: CONNECT_PAYOUT_STATES.VERIFYING.line, action: null },
+  ACTION_REQUIRED: { pill: CONNECT_PAYOUT_STATES.ACTION_REQUIRED.pill, line: CONNECT_PAYOUT_STATES.ACTION_REQUIRED.line, action: { kind: "onboard", label: "Stripe で入力する" } },
+  REJECTED: { pill: CONNECT_PAYOUT_STATES.REJECTED.pill, line: CONNECT_PAYOUT_STATES.REJECTED.line, action: null },
+  READY: { pill: { label: "同意が必要", tone: "wait" }, line: "Stripe の準備ができました。同意すると、この口座で販売できます。", action: null },
+  unknown: { pill: CONNECT_PAYOUT_STATES.unknown.pill, line: CONNECT_PAYOUT_STATES.unknown.line, action: null },
 };
 
 /** Stripe's reasons in plain words, in the order they are listed. */
@@ -72,7 +105,8 @@ export const PAYOUT_ACCOUNT_TEXT = {
   consentUnavailable: "同意の受付は準備中です。",
   recentSignIn: "同意と取り消しには、30 分以内のログインが必要です。古いときは、ログインし直してから戻ります。",
   recentSignInConnect: "登録には、30 分以内のログインが必要です。古いときは、ログインし直してから戻ります。",
-  withdrawWarning: "取り消すと、公開中の体験はすべて止まり、新しい公開と販売はできなくなります。すでに入った予約はそのままです。",
+  directDisclosureFirst: "同意の前に、特定商取引法に基づく表記（販売者表示）を保存してください。",
+  withdrawWarning: "取り消すと、この口座で売上を受け取る公開中の体験は止まり、新しい公開と販売はできなくなります。サポート 15%（NIHO が代金を受け取る）の体験は止まりません。すでに入った予約はそのままです。",
 } as const;
 
 /**
@@ -88,7 +122,7 @@ export function payoutAccountConsentText(input: { readonly providerName: string;
 
 /** The pill beside 受取口座. */
 export function experiencePayoutStatus(load: ExperiencePayoutLoad): StatusLabel | null {
-  if (load.status === "connect") return CONNECT_PAYOUT_STATES[load.state].pill;
+  if (load.status === "connect") return load.payout !== null ? CONNECT_PAYOUT_STATES[load.payout].pill : load.direct ? DIRECT_PAYOUT_STATES[load.direct.state].pill : { label: "未登録", tone: "wait" };
   if (load.status === "setup-required") return { label: "未登録", tone: "wait" };
   if (load.status !== "owner") return null;
   if (load.stripe !== "ready") return { label: "確認が必要", tone: "wait" };
@@ -140,6 +174,18 @@ export const PAYOUT_CONSENT_OUTCOMES = {
   connectUnavailable: { tone: "error", message: "Stripe につながりませんでした。時間をおいて、もう一度お試しください。" },
   connectReview: { tone: "error", message: "口座の作成の途中で止まっています。事務局にお問い合わせください。" },
   connectNotStarted: { tone: "error", message: "受取口座の登録を、もう一度はじめからお試しください。" },
+  // 自分の Stripe アカウント (#726)
+  directRegistered: { tone: "success", message: "同意を記録しました。この口座で販売できます。" },
+  directForbidden: { tone: "error", message: "自分の Stripe アカウントの登録は、ホストのオーナーだけができます。" },
+  directSeller: { tone: "error", message: "このホストには、すでに販売者の登録があります。" },
+  directUnavailable: { tone: "error", message: "Stripe につながりませんでした。時間をおいて、もう一度お試しください。" },
+  directReview: { tone: "error", message: "アカウントの作成の途中で止まっています。事務局にお問い合わせください。" },
+  directNotStarted: { tone: "error", message: "登録を、もう一度はじめからお試しください。" },
+  directNotReady: { tone: "error", message: "Stripe の準備が、まだ終わっていません。終わってから、もう一度お試しください。" },
+  directDisclosure: { tone: "error", message: "先に、特定商取引法に基づく表記（販売者表示）を保存してください。" },
+  directProfile: { tone: "error", message: "ホストの公開名を先に設定してください。" },
+  directChanged: { tone: "error", message: "口座または同意の内容が変わりました。表示し直した内容を確認してください。" },
+  directUnchecked: { tone: "error", message: "同意の内容を確認して、チェックを入れてから押してください。" },
 } as const satisfies Record<string, { tone: "success" | "error"; message: string }>;
 
 export type PayoutConsentOutcome = keyof typeof PAYOUT_CONSENT_OUTCOMES;

@@ -57,7 +57,8 @@ async function prepared(operation: "READ" | "OWNER", providerId: string | null) 
   // The seller disclosure is the registered seller's: it needs the seller (SELLER_SETUP_REQUIRED without one) but no Stripe.
   // With 代理受領 (#725) a host with no seller profile also keeps a disclosure (it names itself), so the sale side is not required here: the store
   // checks, for a host with a profile, the same seller match as before, and for one without, that it is an active OWNER signed in with a host account.
-  const options = { agentSales: config.hostAgentSalesEnabled && config.hostAccountsEnabled };
+  // A host with no seller profile also saves one when it is about to register its own Stripe account (3c-1: the seller name comes from this disclosure).
+  const options = { agentSales: (config.hostAgentSalesEnabled || config.hostStandardOnboardingEnabled) && config.hostAccountsEnabled };
   const boundary = options.agentSales ? await publicationHostBoundary(operation, { providerId, sales: "none" }) : await publicationHostBoundary(operation, { providerId, sales: "seller" });
   if (!boundary.ok) return boundary;
   const repository = providerSellerDisclosureRepository();

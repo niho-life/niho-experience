@@ -28,7 +28,7 @@ function fakeStore(initial: ConnectAccountRecord | null = null, options: { selle
       if (options.seller) throw new StoreConflictError("SELLER_EXISTS");
       if (actor.nihoUserId !== ACTOR.nihoUserId) throw new StoreAccessDeniedError();
       if (row) return { account: row, created: false };
-      row = { id: input.id!, providerId: actor.providerId, purpose: "PAYOUT", stripeAccountRef: null, creationParams: input.creationParams, createdByHostAccountId: actor.nihoUserId, createdAtUtc: NOW.toISOString(), retiredAtUtc: null };
+      row = { id: input.id!, providerId: actor.providerId, purpose: input.purpose ?? "PAYOUT", stripeAccountRef: null, creationParams: input.creationParams, createdByHostAccountId: actor.nihoUserId, createdAtUtc: NOW.toISOString(), retiredAtUtc: null };
       return { account: row, created: true };
     }),
     recordAccountRef: vi.fn(async (_actor, id, ref) => {
@@ -37,7 +37,10 @@ function fakeStore(initial: ConnectAccountRecord | null = null, options: { selle
       row = { ...row, stripeAccountRef: ref };
       return row;
     }),
-    currentPayout: vi.fn(async () => (row ? { account: row, snapshot } : null)),
+    currentPayout: vi.fn(async () => (row && row.purpose === "PAYOUT" ? { account: row, snapshot } : null)),
+    currentDirect: vi.fn(async () => (row && row.purpose === "DIRECT" ? { account: row, snapshot } : null)),
+    agentSalesHistoryExists: vi.fn(async () => false),
+    payoutBlock: vi.fn(async () => null),
     findByAccountRef: vi.fn(async (ref: string) => (row?.stripeAccountRef === ref ? { account: row, snapshot } : null)),
     saveSnapshot: vi.fn(async (_id, input, opts) => { saved.push({ input, opts }); snapshot = input; return { saved: true, mailQueued: false }; }),
     sellerExists: vi.fn(async () => options.seller === true),
